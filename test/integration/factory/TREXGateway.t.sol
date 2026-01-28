@@ -14,8 +14,8 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
-import { TestERC20 } from "test/integration/mocks/TestERC20.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
+import { TestERC20 } from "../mocks/TestERC20.sol";
 
 contract TREXGatewayTest is TREXSuiteTest {
 

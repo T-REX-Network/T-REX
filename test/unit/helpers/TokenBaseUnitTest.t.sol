@@ -13,7 +13,7 @@ import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 
-import { AccessManagerHelper } from "../helpers/AccessManagerHelper.sol";
+import { AccessManagerHelper } from "../../helpers/AccessManagerHelper.sol";
 
 abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
 
@@ -26,6 +26,8 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
     address compliance = makeAddr("ComplianceMock");
     address onchainId = makeAddr("OnchainIdMock");
 
+    address feeCollector = makeAddr("FeeCollectorMock");
+
     address user1 = makeAddr("User1");
     address user2 = makeAddr("User2");
 
@@ -37,6 +39,7 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
     constructor() {
         tokenImplementation = new Token();
 
+        _mockFeeCollector();
         _mockImplementationAuthority();
         _mockCompliance();
         _mockIdentityRegistry();
@@ -100,6 +103,10 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
             abi.encodeWithSelector(IERC3643IdentityRegistry.identity.selector, user),
             abi.encode(identity)
         );
+    }
+
+     function _mockFeeCollector() internal {
+        vm.mockCall(feeCollector, abi.encodeWithSignature("collectFee(address,uint8,uint16)"), "");
     }
 
 }

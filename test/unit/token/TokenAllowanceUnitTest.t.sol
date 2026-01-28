@@ -111,7 +111,7 @@ contract TokenAllowanceUnitTest is TokenBaseUnitTest {
     }
 
     /// @notice Test no default allowance, different identities, no explicit approval
-    function testAllowanceNoDefaultAllowanceDifferentIdentitiesNoApproval() public {
+    function testAllowanceNoDefaultAllowanceDifferentIdentitiesNoApproval() public view {
         // Should return 0 (no default allowance, no explicit approval)
         assertEq(token.allowance(owner, spender), 0);
     }

@@ -6,7 +6,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { TokenRoles } from "contracts/token/TokenStructs.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 
 contract TokenRecoveryTest is TREXSuiteTest {
 

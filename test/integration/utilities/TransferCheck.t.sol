@@ -9,9 +9,9 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 
+import { Countries } from "../helpers/Countries.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { TestModule } from "../mocks/TestModule.sol";
-import { Countries } from "test/integration/helpers/Countries.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TransferCheckTest is TREXSuiteTest {
 

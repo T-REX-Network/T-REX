@@ -18,10 +18,10 @@ import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImple
 import { Token } from "contracts/token/Token.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { ModuleNotPnP } from "../mocks/ModuleNotPnP.sol";
 import { TestModule } from "../mocks/TestModule.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract ComplianceTest is TREXSuiteTest {
 
