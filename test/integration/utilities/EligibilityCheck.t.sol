@@ -12,9 +12,9 @@ import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643Trust
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 
+import { Countries } from "../helpers/Countries.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { ClaimIssuerTrick } from "../mocks/ClaimIssuerTrick.sol";
-import { Countries } from "test/integration/helpers/Countries.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract EligibilityCheckTest is TREXSuiteTest {
 

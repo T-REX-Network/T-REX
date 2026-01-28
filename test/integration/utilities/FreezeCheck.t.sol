@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 
 contract FreezeCheckTest is TREXSuiteTest {
 

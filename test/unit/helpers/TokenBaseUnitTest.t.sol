@@ -13,7 +13,7 @@ import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 
-import { AccessManagerHelper } from "../helpers/AccessManagerHelper.sol";
+import { AccessManagerHelper } from "../../helpers/AccessManagerHelper.sol";
 
 abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
 

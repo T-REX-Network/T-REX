@@ -13,8 +13,8 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
-import { TestModule } from "test/integration/mocks/TestModule.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
+import { TestModule } from "../mocks/TestModule.sol";
 
 contract TREXFactoryTest is TREXSuiteTest {
 

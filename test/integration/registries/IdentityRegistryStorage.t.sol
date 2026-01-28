@@ -20,13 +20,12 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
+import { Countries } from "../helpers/Countries.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { MockContract } from "../mocks/MockContract.sol";
-import { Countries } from "test/integration/helpers/Countries.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract IdentityRegistryStorageTest is TREXSuiteTest {
 
-    // Contracts
     IdentityRegistryStorage public identityRegistryStorage;
 
     /// @notice Sets up IdentityRegistryStorage via proxy
@@ -34,13 +33,6 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         super.setUp();
 
         identityRegistryStorage = IdentityRegistryStorage(address(token.identityRegistry().identityStorage()));
-
-        // TODO
-        //        vm.prank(deployer);
-        //        identityRegistryStorage.addAgent(agent);
-
-        // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
-        // For Foundry, we start with 0 bound registries (tests will bind as needed)
     }
 
     // ============ init() Tests ============

@@ -14,8 +14,8 @@ import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImple
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { MockContract } from "../mocks/MockContract.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TrustedIssuersRegistryTest is TREXSuiteTest {
 

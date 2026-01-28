@@ -18,7 +18,7 @@ import {
 } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 
 contract TREXImplementationAuthorityTest is TREXSuiteTest {
 

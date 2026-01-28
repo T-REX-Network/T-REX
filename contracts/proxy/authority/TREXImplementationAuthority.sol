@@ -193,8 +193,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, A
         );
 
         if (newImplementationAuthority == address(0)) {
-            IAccessManager accessManager = IAccessManager(authority());
-            newImplementationAuthority = IIAFactory(_iaFactory).deployIA(token, address(accessManager));
+            newImplementationAuthority = IIAFactory(_iaFactory).deployIA(token, authority());
         } else {
             require(
                 _versionToBytes(ITREXImplementationAuthority(newImplementationAuthority).getCurrentVersion())

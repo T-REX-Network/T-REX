@@ -22,9 +22,9 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { ClaimIssuerTrick } from "../mocks/ClaimIssuerTrick.sol";
 import { MockContract } from "../mocks/MockContract.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract IdentityRegistryTest is TREXSuiteTest {
 

@@ -6,7 +6,7 @@ import {
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 
 contract TokenPermitTest is TREXSuiteTest {
 

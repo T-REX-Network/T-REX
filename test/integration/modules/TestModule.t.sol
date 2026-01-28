@@ -10,8 +10,8 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IERC173 } from "contracts/roles/IERC173.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { TestModule } from "../mocks/TestModule.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 /// @notice tests for TestModule multicall functionality
 contract TestModuleTest is TREXSuiteTest {

@@ -25,14 +25,12 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
-import { Countries } from "test/integration/helpers/Countries.sol";
+import { AccessManagerHelper } from "../../helpers/AccessManagerHelper.sol";
+import { Countries } from "./Countries.sol";
 
-contract TREXSuiteTest is Test {
+contract TREXSuiteTest is Test, AccessManagerHelper {
 
     uint256 public constant CLAIM_TOPIC_1 = uint256(keccak256(abi.encode("CLAIM_TOPIC_1")));
-    uint32 public constant NO_DELAY = 0;
-
-    AccessManager public accessManager;
 
     // OnchainID
     Identity public identityImplementation;
@@ -57,7 +55,6 @@ contract TREXSuiteTest is Test {
     ClaimIssuer public claimIssuer;
 
     // Admin roles
-    address public accessManagerAdmin = makeAddr("accessManagerAdmin");
     address public deployer = makeAddr("deployer");
     address public agent = makeAddr("agent");
 
@@ -103,23 +100,7 @@ contract TREXSuiteTest is Test {
 
         token = _deployToken("salt", "Token", "TKN");
 
-        vm.startPrank(accessManagerAdmin);
-        accessManager.grantRole(RolesLib.OWNER, address(this), 0);
-
-        accessManager.grantRole(RolesLib.AGENT, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_MINTER, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_BURNER, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_PARTIAL_FREEZER, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_ADDRESS_FREEZER, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_RECOVERY_ADDRESS, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_FORCED_TRANSFER, agent, 0);
-        accessManager.grantRole(RolesLib.AGENT_PAUSER, agent, 0);
-
-        accessManager.grantRole(RolesLib.TOKEN_ADMIN, address(this), 0);
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(this), 0);
-        accessManager.grantRole(RolesLib.INFRA_ADMIN, address(this), 0);
-        accessManager.grantRole(RolesLib.SPENDING_ADMIN, address(this), 0);
-        vm.stopPrank();
+        _setRoles(address(this), agent);
 
         _deployIdentities();
         _registerIdentities(token);

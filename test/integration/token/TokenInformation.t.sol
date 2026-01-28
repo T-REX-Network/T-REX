@@ -19,8 +19,8 @@ import { PausableUpgradeable, Token } from "contracts/token/Token.sol";
 import { TokenRoles } from "contracts/token/TokenStructs.sol";
 import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { MockContract } from "../mocks/MockContract.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenInformationTest is TREXSuiteTest {
 

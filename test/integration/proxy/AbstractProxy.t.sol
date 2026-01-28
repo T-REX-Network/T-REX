@@ -7,7 +7,7 @@ import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.s
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { IProxy } from "contracts/proxy/interface/IProxy.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 
 contract AbstractProxyTest is TREXSuiteTest {
 

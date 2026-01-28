@@ -5,9 +5,9 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract ComplianceCheckTest is TREXSuiteTest {
 
