@@ -26,6 +26,7 @@ import { TrustedIssuersRegistry } from "contracts/registry/implementation/Truste
 import { Token } from "contracts/token/Token.sol";
 
 import { AccessManagerHelper } from "../../helpers/AccessManagerHelper.sol";
+import { FeeCollectorMock } from "../mocks/FeeCollectorMock.sol";
 import { Countries } from "./Countries.sol";
 
 contract TREXSuiteTest is Test, AccessManagerHelper {
@@ -73,8 +74,10 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
     Account public aliceSigner = makeAccount("aliceSigner");
     Account public bobSigner = makeAccount("bobSigner");
 
+    FeeCollectorMock public feeCollector;
+
     function setUp() public virtual {
-        accessManager = new AccessManager(accessManagerAdmin);
+        feeCollector = new FeeCollectorMock();
 
         vm.startPrank(accessManagerAdmin);
         accessManager.grantRole(RolesLib.OWNER, deployer, 0);

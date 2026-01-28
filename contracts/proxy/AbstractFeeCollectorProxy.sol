@@ -62,67 +62,94 @@
 
 pragma solidity ^0.8.30;
 
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
-import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
-import { IProxy } from "./interface/IProxy.sol";
+import { AbstractProxy } from "./AbstractProxy.sol";
 
-abstract contract AbstractProxy is IProxy, Initializable {
+interface IFeeCollector {
 
-    constructor(address implementationAuthority) {
-        require(implementationAuthority != address(0), ErrorsLib.ZeroAddress());
-        _storeImplementationAuthority(implementationAuthority);
-        emit EventsLib.ImplementationAuthoritySet(implementationAuthority);
+    function collectFee(address feePayer, uint8 multiplier, uint16 referralCode) external;
+
+}
+
+/// @title AbstractFeeCollectorProxy
+/// @notice Abstract contract to allow for fee collection from function calls
+/// @dev Contracts inheriting from AbstractFeeCollectorProxy must implements AccesManaged and initialize the AccessManger
+/// @dev THE CONTRACT MUST BE WHITELISTED ON FEECOLLECTOR SIDE
+abstract contract AbstractFeeCollectorProxy is AbstractProxy {
+
+    struct FeeDetails {
+        uint8 multiplier;
+        bool hasFees;
     }
 
-    /**
-     *  @dev See {IProxy-setImplementationAuthority}.
-     */
-    function setImplementationAuthority(address _newImplementationAuthority) external override {
-        require(msg.sender == getImplementationAuthority(), ErrorsLib.OnlyCurrentImplementationAuthorityCanCall());
-        require(_newImplementationAuthority != address(0), ErrorsLib.ZeroAddress());
-        require(
-            (ITREXImplementationAuthority(_newImplementationAuthority)).getTokenImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getCTRImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getIRImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getIRSImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getMCImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getTIRImplementation() != address(0),
-            ErrorsLib.InvalidImplementationAuthority()
-        );
-        _storeImplementationAuthority(_newImplementationAuthority);
-        emit EventsLib.ImplementationAuthoritySet(_newImplementationAuthority);
+    /// @custom:storage-location erc7201:feeCollectorProxy.storage.main
+    struct FeeCollectorProxyStorage {
+        address feeCollector;
+        mapping(bytes4 selector => FeeDetails) functionFees;
+    }
+    // keccak256(abi.encode(uint256(keccak256("feeCollectorProxy.storage.main")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant FEE_COLLECTOR_PROXY_STORAGE_LOCATION =
+        0xfc1edd06193cb51fe588be932e27464ab102fd2e478bca59288a1ee436b98e00;
+
+    uint16 transient referralCode;
+
+    constructor(address implementationAuthority, address feeCollector) AbstractProxy(implementationAuthority) {
+        require(feeCollector != address(0), ErrorsLib.ZeroAddress());
+
+        _feeCollectorProxyStorage().feeCollector = feeCollector;
     }
 
-    /**
-     *  @dev See {IProxy-getImplementationAuthority}.
-     */
-    function getImplementationAuthority() public view override returns (address) {
-        address implemAuth;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            implemAuth := sload(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc)
-        }
-        return implemAuth;
-    }
+    /// @notice Calls a function with a referral code
+    /// @param _referralCode The referral code to use
+    /// @param _data The function and data to call (abi.encodeCall(...))
+    function callWithReferralCode(uint16 _referralCode, bytes calldata _data) external payable {
+        referralCode = _referralCode;
 
-    /**
-     *  @dev store the implementationAuthority contract address using the ERC-3643 implementation slot in storage
-     *  the slot storage is the result of `keccak256("ERC-3643.proxy.beacon")`
-     */
-    function _storeImplementationAuthority(address implementationAuthority) internal {
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            sstore(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc, implementationAuthority)
+        (bool success, bytes memory returnData) = address(this).delegatecall(_data);
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(32, returnData), mload(returnData))
+            }
         }
     }
 
-    function getLogic() internal view virtual returns (address);
+    /// @dev Must be overridden to restrict access
+    function setFeeCollector(address _feeCollector) external virtual {
+        _updateFeeCollector(_feeCollector);
+    }
+
+    function _updateFeeCollector(address _feeCollector) internal {
+        FeeCollectorProxyStorage storage s = _feeCollectorProxyStorage();
+
+        address oldFeeCollector = s.feeCollector;
+        s.feeCollector = _feeCollector;
+        emit EventsLib.FeeCollectorUpdated(oldFeeCollector, _feeCollector, msg.sender);
+    }
+
+    /// @dev Must be overridden to restrict access
+    /// @notice Sets the fees for multiple functions
+    /// @notice Set multiplier to 0 to disable fees for a function
+    /// @param _selectors The selectors of the functions to set the fees for
+    /// @param _multipliers The multipliers to set for the functions
+    function setFunctionsFees(bytes4[] calldata _selectors, uint8[] calldata _multipliers) external virtual {
+        _updateFunctionsFees(_selectors, _multipliers);
+    }
+
+    function _updateFunctionsFees(bytes4[] calldata _selectors, uint8[] calldata _multipliers) internal {
+        FeeCollectorProxyStorage storage s = _feeCollectorProxyStorage();
+        for (uint256 i = 0; i < _selectors.length; i++) {
+            s.functionFees[_selectors[i]] = FeeDetails({ multiplier: _multipliers[i], hasFees: _multipliers[i] > 0 });
+        }
+    }
 
     // solhint-disable-next-line no-complex-fallback
-    fallback() external payable virtual {
+    fallback() external payable override {
+        FeeCollectorProxyStorage storage s = _feeCollectorProxyStorage();
+        if (s.functionFees[msg.sig].hasFees) {
+            IFeeCollector(s.feeCollector).collectFee(msg.sender, s.functionFees[msg.sig].multiplier, referralCode);
+        }
+
         address logic = getLogic();
 
         // solhint-disable-next-line no-inline-assembly
@@ -141,6 +168,10 @@ abstract contract AbstractProxy is IProxy, Initializable {
         }
     }
 
-    receive() external payable { }
+    function _feeCollectorProxyStorage() private pure returns (FeeCollectorProxyStorage storage $) {
+        assembly {
+            $.slot := FEE_COLLECTOR_PROXY_STORAGE_LOCATION
+        }
+    }
 
 }

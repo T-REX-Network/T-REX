@@ -399,7 +399,17 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_TokenProxy_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TokenProxy(address(0), randomAddress, randomAddress, "Test", "TST", 18, address(0), address(accessManager));
+        new TokenProxy(
+            address(0),
+            randomAddress,
+            randomAddress,
+            "Test",
+            "TST",
+            18,
+            address(0),
+            address(accessManager),
+            address(feeCollector)
+        );
     }
 
     /// @notice Should revert when identity registry is zero address
@@ -414,7 +424,8 @@ contract TokenInformationTest is TREXSuiteTest {
             "TST",
             18,
             address(0),
-            address(accessManager)
+            address(accessManager),
+            address(feeCollector)
         );
     }
 
@@ -430,7 +441,8 @@ contract TokenInformationTest is TREXSuiteTest {
             "TST",
             18,
             address(0),
-            address(accessManager)
+            address(accessManager),
+            address(feeCollector)
         );
     }
 
@@ -448,7 +460,8 @@ contract TokenInformationTest is TREXSuiteTest {
             "TST",
             18,
             address(0),
-            address(accessManager)
+            address(accessManager),
+            address(feeCollector)
         );
     }
 
@@ -466,7 +479,8 @@ contract TokenInformationTest is TREXSuiteTest {
             "",
             18,
             address(0),
-            address(accessManager)
+            address(accessManager),
+            address(feeCollector)
         );
     }
 
@@ -484,7 +498,8 @@ contract TokenInformationTest is TREXSuiteTest {
             "TST",
             19,
             address(0),
-            address(accessManager)
+            address(accessManager),
+            address(feeCollector)
         );
     }
 
@@ -530,7 +545,8 @@ contract TokenInformationTest is TREXSuiteTest {
             "TST",
             18,
             address(0),
-            address(accessManager)
+            address(accessManager),
+            address(feeCollector)
         );
     }
 

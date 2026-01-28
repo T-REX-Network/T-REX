@@ -144,4 +144,10 @@ library EventsLib {
 
     event ImplementationAuthorityDeployed(address indexed ia);
 
+    // AbstractFeeCollectorProxy Events
+
+    event FeeCollectorUpdated(
+        address indexed oldFeeCollector, address indexed newFeeCollector, address indexed updater
+    );
+
 }

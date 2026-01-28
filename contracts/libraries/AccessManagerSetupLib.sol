@@ -68,6 +68,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TREXGateway } from "../factory/TREXGateway.sol";
+import { TokenProxy } from "../proxy/TokenProxy.sol";
 import { TREXImplementationAuthority } from "../proxy/authority/TREXImplementationAuthority.sol";
 import { ClaimTopicsRegistry } from "../registry/implementation/ClaimTopicsRegistry.sol";
 import { IdentityRegistry } from "../registry/implementation/IdentityRegistry.sol";
@@ -82,9 +83,11 @@ library AccessManagerSetupLib {
 
     function setupTokenRoles(IAccessManager accessManager, address token) internal {
         // ------ TOKEN_ADMIN role ------
-        bytes4[] memory functions = new bytes4[](2);
+        bytes4[] memory functions = new bytes4[](4);
         functions[0] = Token.setName.selector;
         functions[1] = Token.setSymbol.selector;
+        functions[2] = TokenProxy.setFeeCollector.selector;
+        functions[3] = TokenProxy.setFunctionsFees.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_ADMIN);
 
         // ------ IDENTITY_ADMIN role ------

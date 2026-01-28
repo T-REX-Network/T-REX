@@ -62,12 +62,15 @@
 
 pragma solidity ^0.8.30;
 
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { Token } from "../token/Token.sol";
-import { AbstractProxy } from "./AbstractProxy.sol";
+import { AbstractFeeCollectorProxy } from "./AbstractFeeCollectorProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
 
-contract TokenProxy is AbstractProxy {
+contract TokenProxy is AbstractFeeCollectorProxy {
 
     constructor(
         address implementationAuthority,
@@ -77,8 +80,9 @@ contract TokenProxy is AbstractProxy {
         string memory symbol,
         uint8 decimals,
         address onchainID,
-        address accessManager
-    ) AbstractProxy(implementationAuthority) {
+        address accessManager,
+        address feeCollector
+    ) AbstractFeeCollectorProxy(implementationAuthority, feeCollector) {
         (bool success,) = getLogic()
             .delegatecall(
                 abi.encodeCall(
@@ -90,6 +94,24 @@ contract TokenProxy is AbstractProxy {
 
     function getLogic() internal view override returns (address) {
         return (ITREXImplementationAuthority(getImplementationAuthority())).getTokenImplementation();
+    }
+
+    /// @dev Overridden to restrict access
+    function setFeeCollector(address _feeCollector) external override {
+        _checkCanAccess();
+        _updateFeeCollector(_feeCollector);
+    }
+
+    /// @dev Overridden to restrict access
+    function setFunctionsFees(bytes4[] calldata selectors, uint8[] calldata multipliers) external override {
+        _checkCanAccess();
+        _updateFunctionsFees(selectors, multipliers);
+    }
+
+    function _checkCanAccess() internal view {
+        IAccessManager accessManager = IAccessManager(IAccessManaged(address(this)).authority());
+        (bool allowed,) = accessManager.canCall(msg.sender, address(this), msg.sig);
+        require(allowed, IAccessManaged.AccessManagedUnauthorized(msg.sender));
     }
 
 }

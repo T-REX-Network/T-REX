@@ -33,9 +33,6 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
 
     address agent = makeAddr("Agent");
 
-    address user1Identity = makeAddr("User1Identity");
-    address user2Identity = makeAddr("User2Identity");
-
     constructor() {
         tokenImplementation = new Token();
 
@@ -56,7 +53,8 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
                     "TKN",
                     18,
                     address(onchainId),
-                    address(accessManager)
+                    address(accessManager),
+                    feeCollector
                 )
             )
         );
@@ -106,6 +104,10 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
     }
 
      function _mockFeeCollector() internal {
+        vm.mockCall(feeCollector, abi.encodeWithSignature("collectFee(address,uint8,uint16)"), "");
+    }
+
+    function mockFeeCollector() internal {
         vm.mockCall(feeCollector, abi.encodeWithSignature("collectFee(address,uint8,uint16)"), "");
     }
 
