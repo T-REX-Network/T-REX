@@ -176,7 +176,7 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
         for (uint256 i = 0; i < (_claimDetails.issuers).length; i++) {
             tir.addTrustedIssuer(IClaimIssuer((_claimDetails).issuers[i]), _claimDetails.issuerClaims[i]);
         }
-        irs.bindIdentityRegistry(address(ir));        
+        irs.bindIdentityRegistry(address(ir));
 
         for (uint256 i = 0; i < (_tokenDetails.irAgents).length; i++) {
             accessManager.grantRole(RolesLib.AGENT, _tokenDetails.irAgents[i], 0);

@@ -88,7 +88,7 @@ contract TREXSuiteTest is Test {
         accessManager.grantRole(RolesLib.OWNER_ROLE_ADMIN, accessManagerAdmin, 0);
         accessManager.grantRole(RolesLib.AGENT_ROLE_ADMIN, accessManagerAdmin, 0);
 
-        AccessManagerSetupLib.setupRolesAdmin(accessManager);        
+        AccessManagerSetupLib.setupRolesAdmin(accessManager);
         vm.stopPrank();
 
         _deployOnchainId(deployer);

@@ -67,7 +67,7 @@ library RolesLib {
 
     uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
     uint64 constant ROLE_ADMIN_PREFIX = ROLE_PREFIX & 0x100;
-    
+
     uint64 constant OWNER = ROLE_PREFIX + 1;
 
     uint64 constant AGENT = ROLE_PREFIX + 2;
