@@ -10,6 +10,8 @@ gas-report.txt
 node_modules/
 
 # IDEs
+.claude
+CLAUDE.md
 .idea/
 .vscode/
 

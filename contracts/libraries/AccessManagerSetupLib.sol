@@ -260,8 +260,10 @@ library AccessManagerSetupLib {
 
     function setupLabels(IAccessManager accessManager) internal {
         accessManager.labelRole(RolesLib.OWNER, "TREX-Suite Owner");
+        accessManager.labelRole(RolesLib.OWNER_ROLE_ADMIN, "TREX-Suite Owner Role Admin");
 
         accessManager.labelRole(RolesLib.AGENT, "TREX-Suite Agent");
+        accessManager.labelRole(RolesLib.AGENT_ROLE_ADMIN, "TREX-Suite Agent RoleAdmin");
         accessManager.labelRole(RolesLib.AGENT_MINTER, "TREX-Suite Agent: Minter");
         accessManager.labelRole(RolesLib.AGENT_BURNER, "TREX-Suite Agent: Burner");
         accessManager.labelRole(RolesLib.AGENT_PARTIAL_FREEZER, "TREX-Suite Agent: Partial Freezer");
@@ -274,6 +276,11 @@ library AccessManagerSetupLib {
         accessManager.labelRole(RolesLib.IDENTITY_ADMIN, "TREX-Suite Admin: Identity");
         accessManager.labelRole(RolesLib.INFRA_ADMIN, "TREX-Suite Admin: Infra");
         accessManager.labelRole(RolesLib.SPENDING_ADMIN, "TREX-Suite Admin: Spending");
+    }
+
+    function setupRolesAdmin(IAccessManager accessManager) internal {
+        accessManager.setRoleAdmin(RolesLib.OWNER, RolesLib.OWNER_ROLE_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT, RolesLib.AGENT_ROLE_ADMIN);
     }
 
 }

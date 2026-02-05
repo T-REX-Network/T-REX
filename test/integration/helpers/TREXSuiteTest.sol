@@ -84,6 +84,11 @@ contract TREXSuiteTest is Test {
         accessManager.grantRole(RolesLib.TOKEN_ADMIN, deployer, 0);
         accessManager.grantRole(RolesLib.SPENDING_ADMIN, deployer, 0);
         accessManager.grantRole(RolesLib.IDENTITY_ADMIN, deployer, 0);
+
+        accessManager.grantRole(RolesLib.OWNER_ROLE_ADMIN, accessManagerAdmin, 0);
+        accessManager.grantRole(RolesLib.AGENT_ROLE_ADMIN, accessManagerAdmin, 0);
+
+        AccessManagerSetupLib.setupRolesAdmin(accessManager);        
         vm.stopPrank();
 
         _deployOnchainId(deployer);
@@ -97,6 +102,7 @@ contract TREXSuiteTest is Test {
         accessManager.grantRole(0, address(trexFactory), 0);
         accessManager.grantRole(RolesLib.OWNER, address(trexFactory), 0);
         accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(trexFactory), 0);
+        accessManager.grantRole(RolesLib.AGENT_ROLE_ADMIN, address(trexFactory), 0);
 
         accessManager.grantRole(RolesLib.OWNER, address(trexGateway), 0);
         vm.stopPrank();
