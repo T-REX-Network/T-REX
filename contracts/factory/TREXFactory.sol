@@ -153,7 +153,8 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
             irs = IIdentityRegistryStorage(_tokenDetails.irs);
         }
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs));
-        accessManager.grantRole(0, address(irs), 0);
+        accessManager.grantRole(RolesLib.AGENT_ROLE_ADMIN, address(irs), 0);
+        accessManager.grantRole(RolesLib.AGENT, address(irs), 0);
 
         IIdentityRegistry ir = IIdentityRegistry(
             _deployIR(_salt, _implementationAuthority, address(tir), address(ctr), address(irs), accessManager)
@@ -176,7 +177,6 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
             tir.addTrustedIssuer(IClaimIssuer((_claimDetails).issuers[i]), _claimDetails.issuerClaims[i]);
         }
         irs.bindIdentityRegistry(address(ir));
-        accessManager.grantRole(RolesLib.AGENT, address(irs), 0);
 
         for (uint256 i = 0; i < (_tokenDetails.irAgents).length; i++) {
             accessManager.grantRole(RolesLib.AGENT, _tokenDetails.irAgents[i], 0);
