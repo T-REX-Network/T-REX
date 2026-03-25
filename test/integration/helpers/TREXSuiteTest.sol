@@ -22,6 +22,7 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
+import { CreateX } from "test/external/CreateX.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 
 contract TREXSuiteTest is Test {
@@ -43,6 +44,7 @@ contract TREXSuiteTest is Test {
     ModularCompliance modularComplianceImplementation;
 
     // Factories
+    CreateX public createX;
     TREXFactory public trexFactory;
     TREXGateway public trexGateway;
     TREXImplementationAuthority public trexImplementationAuthority;
@@ -103,9 +105,10 @@ contract TREXSuiteTest is Test {
     function _deployFactories() internal {
         vm.startPrank(deployer);
 
+        createX = new CreateX();
         trexImplementationAuthority = _deployTREXImplementationAuthority(true);
 
-        trexFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
+        trexFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(createX));
         idFactory.addTokenFactory(address(trexFactory));
 
         trexGateway = new TREXGateway(address(trexFactory), false);

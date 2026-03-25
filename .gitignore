@@ -1,5 +1,6 @@
 # Foundry
 dependencies/
+deployments/
 out/
 cache/
 coverage/
@@ -15,3 +16,7 @@ node_modules/
 
 .storage_delta_cache
 storage_delta
+
+# Environment variables
+.env
+.env.local
