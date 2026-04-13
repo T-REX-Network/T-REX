@@ -83,6 +83,7 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -430,10 +431,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         }
     }
 
-    /// @dev Moves the on-chain identity from the lost wallet to the new wallet (registering the new wallet only
-    ///      when it is not already known to the identity registry).
+    /// @dev Moves the on-chain identity from the lost wallet to the new wallet. The new wallet is registered
+    ///      whenever it has no *local* entry, since resolving through the global identity registry fallback
+    ///      leaves nothing to delete and no investor country recorded on this IRS.
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
         TokenStorage storage s = _tokenStorage();
+        ITREXRegistry registry = ITREXRegistry(address(s.identityRegistry));
 
         require(
             !s.identityRegistry.contains(newWallet)
@@ -441,13 +444,13 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             ErrorsLib.RecoveryNotPossible()
         );
 
-        if (s.identityRegistry.contains(lostWallet)) {
-            if (!s.identityRegistry.contains(newWallet)) {
-                s.identityRegistry
-                    .registerIdentity(
-                        newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
-                    );
-            }
+        if (!registry.isLocallyRegistered(newWallet)) {
+            s.identityRegistry
+                .registerIdentity(
+                    newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
+                );
+        }
+        if (registry.isLocallyRegistered(lostWallet)) {
             s.identityRegistry.deleteIdentity(lostWallet);
         }
     }

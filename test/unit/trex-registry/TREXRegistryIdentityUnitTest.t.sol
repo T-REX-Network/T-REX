@@ -89,7 +89,10 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         emit ERC3643EventsLib.IdentityRemoved(bob, old);
         registry.deleteIdentity(bob);
 
-        assertFalse(registry.contains(bob));
+        // The local entry is gone; `contains` still resolves bob through the global IdFactory
+        // fallback, so the local view is the one that moves.
+        assertFalse(registry.isLocallyRegistered(bob));
+        assertTrue(registry.contains(bob));
     }
 
     // ============ batchRegisterIdentity() ============

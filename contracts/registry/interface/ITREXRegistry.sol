@@ -93,4 +93,8 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// Emits an `EligibilityChecksEnabled` event upon successful execution.
     function enableEligibilityChecks() external;
 
+    /// @notice Returns true when the wallet has an identity stored locally in this registry,
+    /// ignoring the global identity registry fallback.
+    function isLocallyRegistered(address userAddress) external view returns (bool);
+
 }

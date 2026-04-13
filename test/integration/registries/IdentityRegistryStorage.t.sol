@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -46,7 +47,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     function test_init_RevertWhen_AlreadyInitialized() public {
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        identityRegistryStorage.init(deployer, address(0));
+        identityRegistryStorage.init(deployer, address(0), address(idFactory));
     }
 
     // ============ addIdentityToStorage() Tests ============
@@ -269,6 +270,64 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
     }
 
+    // ============ storedIdentity() / storedInvestorCountry() Fallback Tests ============
+
+    /// @notice storedIdentity returns the local identity when present (no fallback to global)
+    function test_storedIdentity_UsesLocal_WhenPresent() public view {
+        assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(bobIdentity));
+    }
+
+    /// @notice storedIdentity falls back to the global identity registry when no local identity is stored
+    function test_storedIdentity_FallsBackToGlobal_WhenLocalMissing() public {
+        // `another` is a fresh wallet that has never been added to the local IRS.
+        // Create its identity directly in the global IdFactory and check the fallback.
+        vm.prank(deployer);
+        address globalIdentity = idFactory.createIdentity(another, "another");
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), globalIdentity);
+    }
+
+    /// @notice storedIdentity returns address(0) when the wallet is unknown to both local and global
+    function test_storedIdentity_ReturnsZero_WhenUnknownEverywhere() public view {
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
+    }
+
+    /// @notice storedInvestorCountry returns 0 for wallets only present in the global registry
+    function test_storedInvestorCountry_ReturnsZero_ForGlobalOnlyWallet() public {
+        vm.prank(deployer);
+        idFactory.createIdentity(another, "another");
+        assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
+    }
+
+    // ============ setIdFactory() Tests ============
+
+    /// @notice Should revert when sender is not authorized
+    function test_setIdFactory_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+        identityRegistryStorage.setIdFactory(address(idFactory));
+    }
+
+    /// @notice Should revert when the new idFactory is the zero address
+    function test_setIdFactory_RevertWhen_ZeroAddress() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.setIdFactory(address(0));
+    }
+
+    /// @notice Should update the idFactory and affect subsequent fallbacks
+    function test_setIdFactory_Success() public {
+        // Deploy a fresh IdFactory and register `another` only in it.
+        IdFactory newIdFactory = new IdFactory(address(implementationAuthority));
+        address newGlobalIdentity = newIdFactory.createIdentity(another, "another");
+
+        vm.prank(deployer);
+        identityRegistryStorage.setIdFactory(address(newIdFactory));
+
+        assertEq(identityRegistryStorage.idFactory(), address(newIdFactory));
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), newGlobalIdentity);
+    }
+
     // ============ supportsInterface() Tests ============
 
     /// @notice Should return false for unsupported interfaces
@@ -297,7 +356,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when the beacon is the zero address
     function test_constructor_RevertWhen_BeaconIsZeroAddress() public {
         vm.expectRevert();
-        new BeaconProxy(address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
+        new BeaconProxy(
+            address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0), address(idFactory)))
+        );
     }
 
     /// @notice Should revert when initialization fails (implementation without init())
@@ -307,7 +368,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
         vm.expectRevert();
-        new BeaconProxy(beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
+        new BeaconProxy(
+            beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0), address(idFactory)))
+        );
     }
 
 }
