@@ -33,6 +33,8 @@ forge-std = { version = "v1.14.0", git = "https://github.com/foundry-rs/forge-st
 "@openzeppelin-contracts-upgradeable" = "5.5.0"
 onchain-id = { version = "custom", git = "https://github.com/onchain-id/solidity.git", branch = "bt-1372-factory-create3" }
 createx = { version = "main", git = "https://github.com/TokenySolutions/createx.git", branch = "main" }
+chainlink-ccip = { version = "1.6.4", git = "https://github.com/smartcontractkit/chainlink-ccip.git", rev = "contracts-ccip-v1.6.4" }
+chainlink = { version = "1.5", git = "https://github.com/smartcontractkit/chainlink-evm.git", rev = "contracts-v1.5.0" }
 
 [rpc_endpoints]
 baseSepolia = "https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}"

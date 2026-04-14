@@ -13,6 +13,18 @@ checksum = "6360df12918b82436dfd68a4a7d9b962aa4d4b0b6bf323ecbd400b9eca5e5974"
 integrity = "ede37ded73bb7dff1325cdfcc124d83afff3d92e646a9418d79ac0d6a9721b05"
 
 [[dependencies]]
+name = "chainlink"
+version = "1.5"
+git = "https://github.com/smartcontractkit/chainlink-evm.git"
+rev = "86aa5a1d34b20eda8d18fe6eb0e4882948e545ba"
+
+[[dependencies]]
+name = "chainlink-ccip"
+version = "1.6.4"
+git = "https://github.com/smartcontractkit/chainlink-ccip.git"
+rev = "bccdd15b734ea6c0e6d1b3d36c482e64ced2d441"
+
+[[dependencies]]
 name = "createx"
 version = "main"
 git = "https://github.com/TokenySolutions/createx.git"
