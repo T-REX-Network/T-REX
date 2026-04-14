@@ -55,9 +55,7 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
             )
         );
 
-        vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupTokenRoles(accessManager, address(token));
-        vm.stopPrank();
 
         _setRoles(address(this), agent);
     }

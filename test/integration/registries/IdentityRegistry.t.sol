@@ -141,7 +141,6 @@ contract IdentityRegistryTest is TREXSuiteTest {
         // Deploy an IA and manually set an invalid IR implementation
         TREXImplementationAuthority incompleteIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(incompleteIA));
 
         // Create a version with invalid IR implementation (mock contract without init())

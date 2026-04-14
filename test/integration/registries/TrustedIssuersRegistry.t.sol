@@ -365,7 +365,6 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         // Deploy an IA and manually set an invalid TIR implementation
         TREXImplementationAuthority incompleteIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(incompleteIA));
 
         // Create a version with invalid TIR implementation (mock contract without init())

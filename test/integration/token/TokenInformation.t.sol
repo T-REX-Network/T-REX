@@ -496,7 +496,6 @@ contract TokenInformationTest is TREXSuiteTest {
         // Deploy an IA and manually set an invalid Token implementation
         TREXImplementationAuthority incompleteIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(incompleteIA));
 
         // Create a version with invalid Token implementation (mock contract without init())

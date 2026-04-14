@@ -13,6 +13,12 @@ checksum = "6360df12918b82436dfd68a4a7d9b962aa4d4b0b6bf323ecbd400b9eca5e5974"
 integrity = "ede37ded73bb7dff1325cdfcc124d83afff3d92e646a9418d79ac0d6a9721b05"
 
 [[dependencies]]
+name = "createx"
+version = "main"
+git = "https://github.com/TokenySolutions/createx.git"
+rev = "829450f70a9119413911877eae695bec95e49ba1"
+
+[[dependencies]]
 name = "forge-std"
 version = "v1.14.0"
 git = "https://github.com/foundry-rs/forge-std.git"
@@ -20,6 +26,6 @@ rev = "v1.14.0"
 
 [[dependencies]]
 name = "onchain-id"
-version = "2.2.2-beta3"
+version = "custom"
 git = "https://github.com/onchain-id/solidity.git"
-rev = "0e681fbf40f7982be5f76f3bbb1f2995e28e40f8"
+rev = "a235b5337d9a00c7cd32c10e80c36511b9399aed"

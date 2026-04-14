@@ -145,7 +145,6 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
         // Deploy an IA and manually set an invalid CTR implementation
         TREXImplementationAuthority incompleteIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(incompleteIA));
 
         // Create a version with invalid CTR implementation (mock contract without init())

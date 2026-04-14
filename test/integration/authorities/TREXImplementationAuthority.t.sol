@@ -85,11 +85,9 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     function test_setIAFactory_RevertWhen_FactoryReferencesDifferentIA() public {
         // Deploy another reference IA and factory using it
         TREXImplementationAuthority otherIA = _deployTREXImplementationAuthority(true);
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(otherIA));
 
         TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, address(otherFactory));
 
         // Create a new reference IA with the other factory in constructor
@@ -101,7 +99,6 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
             address(0), // no IAFactory
             address(accessManager)
         );
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(newIA));
 
         // Now try to set IAFactory - should revert because otherFactory.getImplementationAuthority() != address(newIA)
@@ -276,7 +273,6 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         ModularComplianceProxy complianceProxy =
             new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager));
         ModularCompliance newCompliance = ModularCompliance(address(complianceProxy));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(newCompliance));
         vm.prank(deployer);
         token.setCompliance(address(newCompliance));
@@ -307,7 +303,6 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         TREXImplementationAuthority otherIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(otherIA));
 
         ITREXImplementationAuthority.Version memory version =
@@ -504,13 +499,11 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         returns (TREXFactory factory, TREXImplementationAuthority otherIA)
     {
         factory = new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, address(factory));
 
         otherIA = new TREXImplementationAuthority(
             false, address(factory), address(trexImplementationAuthority), address(accessManager)
         );
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(otherIA));
     }
 

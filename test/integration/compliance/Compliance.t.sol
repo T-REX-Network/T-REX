@@ -92,7 +92,6 @@ contract ComplianceTest is TREXSuiteTest {
         // Deploy an IA and manually set an invalid MC implementation
         TREXImplementationAuthority incompleteIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(incompleteIA));
 
         // Create a version with invalid MC implementation (mock contract without init())

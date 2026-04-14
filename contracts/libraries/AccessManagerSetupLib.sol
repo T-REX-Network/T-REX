@@ -64,6 +64,7 @@
 pragma solidity ^0.8.30;
 
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+import { Multicall } from "@openzeppelin/contracts/utils/Multicall.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
@@ -80,7 +81,7 @@ import { RolesLib } from "./RolesLib.sol";
 /// @notice Library for setting up roles and functions in AccessManager for the TREX suite contracts
 library AccessManagerSetupLib {
 
-    function setupTokenRoles(IAccessManager accessManager, address token) internal {
+    function setupTokenRoles(IAccessManager accessManager, address token) external {
         // ------ TOKEN_ADMIN role ------
         bytes4[] memory functions = new bytes4[](2);
         functions[0] = Token.setName.selector;
@@ -148,7 +149,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);
     }
 
-    function setupClaimTopicsRegistryRoles(IAccessManager accessManager, address claimTopicsRegistry) internal {
+    function setupClaimTopicsRegistryRoles(IAccessManager accessManager, address claimTopicsRegistry) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](2);
         functions[0] = ClaimTopicsRegistry.addClaimTopic.selector;
@@ -156,7 +157,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(claimTopicsRegistry, functions, RolesLib.OWNER);
     }
 
-    function setupIdentityRegistryRoles(IAccessManager accessManager, address identityRegistry) internal {
+    function setupIdentityRegistryRoles(IAccessManager accessManager, address identityRegistry) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](5);
         functions[0] = IdentityRegistry.setIdentityRegistryStorage.selector;
@@ -175,7 +176,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(identityRegistry, functions, RolesLib.AGENT);
     }
 
-    function setupIdentityRegistryStorageRoles(IAccessManager accessManager, address identityRegistryStorage) internal {
+    function setupIdentityRegistryStorageRoles(IAccessManager accessManager, address identityRegistryStorage) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](2);
         functions[0] = IdentityRegistryStorage.bindIdentityRegistry.selector;
@@ -191,7 +192,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.AGENT);
     }
 
-    function setupTrustedIssuersRegistryRoles(IAccessManager accessManager, address trustedIssuersRegistry) internal {
+    function setupTrustedIssuersRegistryRoles(IAccessManager accessManager, address trustedIssuersRegistry) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](3);
         functions[0] = TrustedIssuersRegistry.addTrustedIssuer.selector;
@@ -200,7 +201,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trustedIssuersRegistry, functions, RolesLib.OWNER);
     }
 
-    function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance) internal {
+    function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](4);
         functions[0] = ModularCompliance.removeModule.selector;
@@ -210,7 +211,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.OWNER);
     }
 
-    function setupTREXGatewayRoles(IAccessManager accessManager, address trexGateway) internal {
+    function setupTREXGatewayRoles(IAccessManager accessManager, address trexGateway) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](10);
         functions[0] = TREXGateway.setFactory.selector;
@@ -236,7 +237,7 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trexGateway, functions, RolesLib.AGENT);
     }
 
-    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
+    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) external {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](3);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
@@ -246,7 +247,7 @@ library AccessManagerSetupLib {
     }
 
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
-        internal
+        external
     {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](5);
@@ -258,22 +259,33 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
     }
 
-    function setupLabels(IAccessManager accessManager) internal {
-        accessManager.labelRole(RolesLib.OWNER, "TREX-Suite Owner");
+    struct RoleLabel {
+        uint64 roleId;
+        string label;
+    }
 
-        accessManager.labelRole(RolesLib.AGENT, "TREX-Suite Agent");
-        accessManager.labelRole(RolesLib.AGENT_MINTER, "TREX-Suite Agent: Minter");
-        accessManager.labelRole(RolesLib.AGENT_BURNER, "TREX-Suite Agent: Burner");
-        accessManager.labelRole(RolesLib.AGENT_PARTIAL_FREEZER, "TREX-Suite Agent: Partial Freezer");
-        accessManager.labelRole(RolesLib.AGENT_ADDRESS_FREEZER, "TREX-Suite Agent: Address Freezer");
-        accessManager.labelRole(RolesLib.AGENT_RECOVERY_ADDRESS, "TREX-Suite Agent: Recovery Address");
-        accessManager.labelRole(RolesLib.AGENT_FORCED_TRANSFER, "TREX-Suite Agent: Forced Transfer");
-        accessManager.labelRole(RolesLib.AGENT_PAUSER, "TREX-Suite Agent: Pauser");
+    function setupLabels(IAccessManager accessManager) external {
+        RoleLabel[13] memory labels = [
+            RoleLabel({ roleId: RolesLib.OWNER, label: "TREX-Suite Owner" }),
+            RoleLabel({ roleId: RolesLib.AGENT, label: "TREX-Suite Agent" }),
+            RoleLabel({ roleId: RolesLib.AGENT_MINTER, label: "TREX-Suite Agent: Minter" }),
+            RoleLabel({ roleId: RolesLib.AGENT_BURNER, label: "TREX-Suite Agent: Burner" }),
+            RoleLabel({ roleId: RolesLib.AGENT_PARTIAL_FREEZER, label: "TREX-Suite Agent: Partial Freezer" }),
+            RoleLabel({ roleId: RolesLib.AGENT_ADDRESS_FREEZER, label: "TREX-Suite Agent: Address Freezer" }),
+            RoleLabel({ roleId: RolesLib.AGENT_RECOVERY_ADDRESS, label: "TREX-Suite Agent: Recovery Address" }),
+            RoleLabel({ roleId: RolesLib.AGENT_FORCED_TRANSFER, label: "TREX-Suite Agent: Forced Transfer" }),
+            RoleLabel({ roleId: RolesLib.AGENT_PAUSER, label: "TREX-Suite Agent: Pauser" }),
+            RoleLabel({ roleId: RolesLib.TOKEN_ADMIN, label: "TREX-Suite Admin: Token" }),
+            RoleLabel({ roleId: RolesLib.IDENTITY_ADMIN, label: "TREX-Suite Admin: Identity" }),
+            RoleLabel({ roleId: RolesLib.INFRA_ADMIN, label: "TREX-Suite Admin: Infra" }),
+            RoleLabel({ roleId: RolesLib.SPENDING_ADMIN, label: "TREX-Suite Admin: Spending" })
+        ];
 
-        accessManager.labelRole(RolesLib.TOKEN_ADMIN, "TREX-Suite Admin: Token");
-        accessManager.labelRole(RolesLib.IDENTITY_ADMIN, "TREX-Suite Admin: Identity");
-        accessManager.labelRole(RolesLib.INFRA_ADMIN, "TREX-Suite Admin: Infra");
-        accessManager.labelRole(RolesLib.SPENDING_ADMIN, "TREX-Suite Admin: Spending");
+        bytes[] memory calls = new bytes[](labels.length);
+        for (uint256 i = 0; i < labels.length; i++) {
+            calls[i] = abi.encodeCall(IAccessManager.labelRole, (labels[i].roleId, labels[i].label));
+        }
+        Multicall(address(accessManager)).multicall(calls);
     }
 
 }

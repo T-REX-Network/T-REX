@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.30;
 
+import { CreateX } from "@createx/CreateX.sol";
 import { Test } from "@forge-std/Test.sol";
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { IIdentity, Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
 import { ImplementationAuthority } from "@onchain-id/solidity/contracts/proxy/ImplementationAuthority.sol";
-import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
@@ -33,6 +33,7 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
     uint256 public constant CLAIM_TOPIC_1 = uint256(keccak256(abi.encode("CLAIM_TOPIC_1")));
 
     // OnchainID
+    CreateX public createX;
     Identity public identityImplementation;
     ImplementationAuthority public implementationAuthority;
     IdFactory public idFactory;
@@ -77,6 +78,8 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
         accessManager = new AccessManager(accessManagerAdmin);
 
         vm.startPrank(accessManagerAdmin);
+        // Grant admin role to test contract so external library calls (DELEGATECALL) can reach AccessManager
+        accessManager.grantRole(0, address(this), 0);
         accessManager.grantRole(RolesLib.OWNER, deployer, 0);
         accessManager.grantRole(RolesLib.TOKEN_ADMIN, deployer, 0);
         accessManager.grantRole(RolesLib.SPENDING_ADMIN, deployer, 0);
@@ -87,10 +90,10 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
         _deployImplementations();
         _deployFactories();
 
-        vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXGatewayRoles(accessManager, address(trexGateway));
         AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, address(trexFactory));
 
+        vm.startPrank(accessManagerAdmin);
         accessManager.grantRole(0, address(trexFactory), 0);
         accessManager.grantRole(RolesLib.OWNER, address(trexFactory), 0);
         accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(trexFactory), 0);
@@ -107,10 +110,12 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
     }
 
     function _deployOnchainId(address initialManagementKey) internal {
+        createX = new CreateX();
+
         vm.startPrank(deployer);
         identityImplementation = new Identity(initialManagementKey, true);
-        implementationAuthority = new ImplementationAuthority(address(identityImplementation));
-        idFactory = new IdFactory(address(implementationAuthority));
+        implementationAuthority = new ImplementationAuthority(address(identityImplementation), deployer);
+        idFactory = new IdFactory(address(implementationAuthority), address(createX), deployer);
 
         claimIssuer = new ClaimIssuer(claimIssuerSigner.addr);
         vm.stopPrank();
@@ -143,7 +148,6 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
         TREXImplementationAuthority ia =
             new TREXImplementationAuthority(isReference, address(0), address(0), address(accessManager));
 
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(ia));
 
         vm.prank(deployer);

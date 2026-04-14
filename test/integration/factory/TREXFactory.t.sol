@@ -238,7 +238,6 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Deploy a new IA but don't add any version (incomplete)
         TREXImplementationAuthority incompleteIA =
             new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(incompleteIA));
 
         vm.prank(deployer);
@@ -266,7 +265,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_setIdFactory_Success() public {
         // Deploy a new IdFactory using the helper
-        IdFactory newIdFactory = new IdFactory(address(trexImplementationAuthority));
+        IdFactory newIdFactory = new IdFactory(address(trexImplementationAuthority), address(createX), deployer);
 
         vm.prank(deployer);
         trexFactory.setIdFactory(address(newIdFactory));

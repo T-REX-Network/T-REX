@@ -16,6 +16,10 @@ contract AccessManagerHelper is Test {
 
     constructor() {
         accessManager = new AccessManager(accessManagerAdmin);
+
+        // Grant admin role to test contract so external library calls (via DELEGATECALL) can reach AccessManager
+        vm.prank(accessManagerAdmin);
+        accessManager.grantRole(0, address(this), NO_DELAY);
     }
 
     function _setRoles(address owner, address agent) internal {

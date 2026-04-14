@@ -28,10 +28,10 @@ contract TREXGatewayTest is TREXSuiteTest {
         publicGateway = new TREXGateway(address(trexFactory), true, address(accessManager));
         privateGateway = new TREXGateway(address(trexFactory), false, address(accessManager));
 
-        vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXGatewayRoles(accessManager, address(publicGateway));
         AccessManagerSetupLib.setupTREXGatewayRoles(accessManager, address(privateGateway));
 
+        vm.startPrank(accessManagerAdmin);
         accessManager.grantRole(RolesLib.OWNER, address(publicGateway), 0);
         accessManager.grantRole(RolesLib.OWNER, address(privateGateway), 0);
 
