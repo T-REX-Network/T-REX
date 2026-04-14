@@ -90,6 +90,18 @@ library EventsLib {
     event DefaultAllowanceUpdated(address to, bool allowance, address updater);
     event DefaultAllowanceOptOutUpdated(address user, bool optOut);
     event TrustedForwarderSet(address indexed trustedForwarder);
+    event TransferRequested(
+        bytes32 indexed hash,
+        uint64 dstChainId,
+        address indexed from,
+        address indexed to,
+        uint256 value,
+        uint256 nonce,
+        uint64 expiry
+    );
+    event TransferSettled(bytes32 indexed hash);
+    event HookSet(address indexed hook);
+    event BridgedHookConfigured(uint64 indexed dstChainId, bytes32 bridgedHookAddress);
 
     // ModularCompliance Events
 

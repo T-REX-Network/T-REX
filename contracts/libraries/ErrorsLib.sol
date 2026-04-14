@@ -163,4 +163,10 @@ library ErrorsLib {
     // IAFactory Errors
     error OnlyReferenceIACanDeploy();
 
+    // Cross-chain hook errors
+    error HookNotSet();
+    error RequestAlreadyPending(bytes32 hash);
+    error UnauthorizedHookCaller();
+    error DestinationChainNotConfigured(uint64 dstChainId);
+
 }

@@ -82,5 +82,8 @@ library RolesLib {
     uint64 constant IDENTITY_ADMIN = ROLE_PREFIX + 11;
     uint64 constant INFRA_ADMIN = ROLE_PREFIX + 12;
     uint64 constant SPENDING_ADMIN = ROLE_PREFIX + 13;
+    uint64 constant HOOK_MANAGER = ROLE_PREFIX + 14;
+    uint64 constant HOOK = ROLE_PREFIX + 15;
+    uint64 constant TOKEN = ROLE_PREFIX + 16;
 
 }
