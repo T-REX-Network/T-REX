@@ -92,8 +92,20 @@ import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { AgentRole } from "../roles/AgentRole.sol";
 import { IERC173 } from "../roles/IERC173.sol";
+import { HashLib } from "../libraries/HashLib.sol";
 import { IToken } from "./IToken.sol";
 import { TokenRoles } from "./TokenStructs.sol";
+
+interface ITokenCrossChainHook {
+    function sendAuthorization(
+        uint64 dstChainId,
+        bytes32 hash,
+        uint64 expiry,
+        address from,
+        address to,
+        uint256 value
+    ) external;
+}
 
 contract Token is
     ERC20PermitUpgradeable,
@@ -107,6 +119,7 @@ contract Token is
 {
 
     string internal constant VERSION = "5.0.0";
+    uint64 internal constant AUTHORIZATION_TTL = 5 minutes;
 
     struct FrozenStatus {
         bool addressFrozen;
@@ -126,6 +139,11 @@ contract Token is
         mapping(address user => bool) defaultAllowanceOptOuts;
 
         mapping(address agent => TokenRoles) agentsRestrictions;
+
+        // Cross-chain hook fields (appended; do not reorder)
+        address hook;
+        mapping(address from => uint256) nextNonce;
+        mapping(bytes32 hash => bool) pendingRequests;
     }
 
     // keccak256(abi.encode(uint256(keccak256("token.storage.main")) - 1)) & ~bytes32(uint256(0xff));
@@ -630,6 +648,66 @@ contract Token is
 
     function _emitUpdatedTokenInformation() internal {
         emit ERC3643EventsLib.UpdatedTokenInformation(name(), symbol(), decimals(), VERSION, _tokenStorage().onchainId);
+    }
+
+    /* ----- Cross-Chain Authorization ----- */
+
+    /// @inheritdoc IToken
+    function requestTransfer(uint64 dstChainId, address from, address to, uint256 value)
+        external
+        override
+        whenNotPaused
+        returns (bytes32 hash)
+    {
+        TokenStorage storage s = _tokenStorage();
+
+        require(s.hook != address(0), ErrorsLib.HookNotSet());
+        require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
+        require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
+        require(s.identityRegistry.isVerified(to), ErrorsLib.TransferNotPossible());
+        require(s.compliance.canTransfer(from, to, value), ErrorsLib.TransferNotPossible());
+
+        uint256 nonce = s.nextNonce[from]++;
+        uint64 expiry = uint64(block.timestamp) + AUTHORIZATION_TTL;
+        hash = HashLib.hash(dstChainId, from, to, value, nonce, expiry);
+
+        require(!s.pendingRequests[hash], ErrorsLib.RequestAlreadyPending(hash));
+        s.pendingRequests[hash] = true;
+
+        ITokenCrossChainHook(s.hook).sendAuthorization(dstChainId, hash, expiry, from, to, value);
+
+        emit EventsLib.TransferRequested(hash, dstChainId, from, to, value, nonce, expiry);
+    }
+
+    /// @inheritdoc IToken
+    function onTransferSettled(bytes32 hash) external override restricted {
+        TokenStorage storage s = _tokenStorage();
+        if (s.pendingRequests[hash]) {
+            s.pendingRequests[hash] = false;
+            emit EventsLib.TransferSettled(hash);
+        }
+    }
+
+    /// @inheritdoc IToken
+    function setHook(address newHook) external override restricted {
+        require(newHook != address(0), ErrorsLib.ZeroAddress());
+        _tokenStorage().hook = newHook;
+        emit EventsLib.HookSet(newHook);
+    }
+
+    /// @inheritdoc IToken
+    function hook() external view override returns (address) {
+        return _tokenStorage().hook;
+    }
+
+    /// @inheritdoc IToken
+    function nextNonce(address from) external view override returns (uint256) {
+        return _tokenStorage().nextNonce[from];
+    }
+
+    /// @inheritdoc IToken
+    function isPending(bytes32 hash) external view override returns (bool) {
+        return _tokenStorage().pendingRequests[hash];
     }
 
 }

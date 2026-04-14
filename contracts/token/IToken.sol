@@ -80,4 +80,29 @@ interface IToken is IERC3643 {
     /// @param trustedForwarder The address of the trusted forwarder.
     function setTrustedForwarder(address trustedForwarder) external;
 
+    /// @notice Requests a cross-chain transfer authorization.
+    /// @dev Anyone can call. Performs the same compliance/identity checks as `transfer`,
+    /// allocates a per-`from` nonce, computes a 5-minute-TTL expiry, and ships the
+    /// authorization to the bridged chain via the configured hook.
+    /// @param dstChainId The bridged chain id on which the transfer will execute.
+    /// @return hash The authorization hash.
+    function requestTransfer(uint64 dstChainId, address from, address to, uint256 value)
+        external
+        returns (bytes32 hash);
+
+    /// @notice Called by the configured hook when a settlement notification is received.
+    function onTransferSettled(bytes32 hash) external;
+
+    /// @notice Updates the cross-chain hook address.
+    function setHook(address hook) external;
+
+    /// @notice Returns the configured cross-chain hook.
+    function hook() external view returns (address);
+
+    /// @notice Returns the next nonce that will be allocated for `from`.
+    function nextNonce(address from) external view returns (uint256);
+
+    /// @notice Returns true if `hash` corresponds to an outstanding transfer request.
+    function isPending(bytes32 hash) external view returns (bool);
+
 }
