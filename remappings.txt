@@ -1,5 +1,6 @@
 @chainlink/contracts-ccip/=dependencies/chainlink-ccip-1.6.4/chains/evm/
 @chainlink/contracts/=dependencies/chainlink-1.5/contracts/
+@openzeppelin/contracts@5.0.2/=dependencies/@openzeppelin-contracts-5.5.0/
 @createx/=dependencies/createx-main/src/
 @forge-std/=dependencies/forge-std-v1.14.0/src/
 @onchain-id/solidity/=dependencies/onchain-id-custom/

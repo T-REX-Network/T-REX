@@ -147,6 +147,16 @@ library AccessManagerSetupLib {
         functions[0] = Token.pause.selector;
         functions[1] = Token.unpause.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);
+
+        // ------ HOOK_MANAGER role ------
+        functions = new bytes4[](1);
+        functions[0] = Token.setHook.selector;
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.HOOK_MANAGER);
+
+        // ------ HOOK role ------
+        functions = new bytes4[](1);
+        functions[0] = Token.onTransferSettled.selector;
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.HOOK);
     }
 
     function setupClaimTopicsRegistryRoles(IAccessManager accessManager, address claimTopicsRegistry) external {
@@ -259,13 +269,31 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
     }
 
+    function setupReferenceHookRoles(IAccessManager accessManager, address hook, address token) external {
+        // ------ TOKEN role on hook (token calls sendAuthorization) ------
+        bytes4[] memory functions = new bytes4[](1);
+        functions[0] = bytes4(keccak256("sendAuthorization(uint64,bytes32,uint64,address,address,uint256)"));
+        accessManager.setTargetFunctionRole(hook, functions, RolesLib.TOKEN);
+
+        // ------ HOOK_MANAGER role on hook (admin configures bridged peers) ------
+        bytes4[] memory adminFns = new bytes4[](2);
+        adminFns[0] = bytes4(keccak256("configureBridgedHook(uint64,bytes32)"));
+        adminFns[1] = bytes4(keccak256("setGasLimit(uint200)"));
+        accessManager.setTargetFunctionRole(hook, adminFns, RolesLib.HOOK_MANAGER);
+
+        // The hook contract must hold the HOOK role so it can call Token.onTransferSettled.
+        accessManager.grantRole(RolesLib.HOOK, hook, 0);
+        // The token contract must hold the TOKEN role so it can call hook.sendAuthorization.
+        accessManager.grantRole(RolesLib.TOKEN, token, 0);
+    }
+
     struct RoleLabel {
         uint64 roleId;
         string label;
     }
 
     function setupLabels(IAccessManager accessManager) external {
-        RoleLabel[13] memory labels = [
+        RoleLabel[16] memory labels = [
             RoleLabel({ roleId: RolesLib.OWNER, label: "TREX-Suite Owner" }),
             RoleLabel({ roleId: RolesLib.AGENT, label: "TREX-Suite Agent" }),
             RoleLabel({ roleId: RolesLib.AGENT_MINTER, label: "TREX-Suite Agent: Minter" }),
@@ -278,7 +306,10 @@ library AccessManagerSetupLib {
             RoleLabel({ roleId: RolesLib.TOKEN_ADMIN, label: "TREX-Suite Admin: Token" }),
             RoleLabel({ roleId: RolesLib.IDENTITY_ADMIN, label: "TREX-Suite Admin: Identity" }),
             RoleLabel({ roleId: RolesLib.INFRA_ADMIN, label: "TREX-Suite Admin: Infra" }),
-            RoleLabel({ roleId: RolesLib.SPENDING_ADMIN, label: "TREX-Suite Admin: Spending" })
+            RoleLabel({ roleId: RolesLib.SPENDING_ADMIN, label: "TREX-Suite Admin: Spending" }),
+            RoleLabel({ roleId: RolesLib.HOOK_MANAGER, label: "TREX-Suite Hook Manager" }),
+            RoleLabel({ roleId: RolesLib.HOOK, label: "TREX-Suite Hook" }),
+            RoleLabel({ roleId: RolesLib.TOKEN, label: "TREX-Suite Token" })
         ];
 
         bytes[] memory calls = new bytes[](labels.length);
