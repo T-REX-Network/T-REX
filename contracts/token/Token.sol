@@ -93,19 +93,9 @@ import { EventsLib } from "../libraries/EventsLib.sol";
 import { AgentRole } from "../roles/AgentRole.sol";
 import { IERC173 } from "../roles/IERC173.sol";
 import { HashLib } from "../libraries/HashLib.sol";
+import { IReferenceCrossChainHook } from "../hooks/IReferenceCrossChainHook.sol";
 import { IToken } from "./IToken.sol";
 import { TokenRoles } from "./TokenStructs.sol";
-
-interface ITokenCrossChainHook {
-    function sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) external;
-}
 
 contract Token is
     ERC20PermitUpgradeable,
@@ -674,7 +664,7 @@ contract Token is
         require(!s.pendingRequests[hash], ErrorsLib.RequestAlreadyPending(hash));
         s.pendingRequests[hash] = true;
 
-        ITokenCrossChainHook(s.hook).sendAuthorization(dstChainId, hash, expiry, from, to, value);
+        IReferenceCrossChainHook(s.hook).sendAuthorization(dstChainId, hash, expiry, from, to, value);
 
         emit EventsLib.TransferRequested(hash, dstChainId, from, to, value, nonce, expiry);
     }
