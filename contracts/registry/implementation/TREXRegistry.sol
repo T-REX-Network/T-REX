@@ -110,6 +110,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXRegistry")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0x5fe6836edad2306552d236f378d4a0a2ef1c78da81818168b2b776323acb4300;
 
+    // TODO: claim topic value to be specified
+    uint256 public constant COUNTRY_CLAIM_TOPIC = 2_000_008;
+
     constructor() {
         _disableInitializers();
     }
@@ -172,9 +175,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    function updateCountry(address _userAddress, uint16 _country) external override restricted {
-        _getStorage().tokenIdentityStorage.modifyStoredInvestorCountry(_userAddress, _country);
-        emit ERC3643EventsLib.CountryUpdated(_userAddress, _country);
+    /// @dev DEPRECATED: the investor country now lives in a claim on the identity; always reverts.
+    function updateCountry(address, uint16) external override restricted {
+        revert ErrorsLib.Deprecated();
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -277,8 +280,19 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev Reads the country from a claim on the wallet's identity contract.
+    // TODO: no issuer validation — trusts whatever country claim is on the identity
     function investorCountry(address _userAddress) external view override returns (uint16) {
-        return _getStorage().tokenIdentityStorage.storedInvestorCountry(_userAddress);
+        IIdentity id = identity(_userAddress);
+        if (address(id) == address(0)) return 0;
+
+        bytes32[] memory claimIds = id.getClaimIdsByTopic(COUNTRY_CLAIM_TOPIC);
+        if (claimIds.length == 0) return 0;
+
+        (,,,, bytes memory data,) = id.getClaim(claimIds[0]);
+        if (data.length == 0) return 0;
+
+        return abi.decode(data, (uint16));
     }
 
     /// @inheritdoc IERC3643IdentityRegistry

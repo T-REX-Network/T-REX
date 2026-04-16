@@ -445,10 +445,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         );
 
         if (!registry.isLocallyRegistered(newWallet)) {
-            s.identityRegistry
-                .registerIdentity(
-                    newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
-                );
+            s.identityRegistry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
         }
         if (registry.isLocallyRegistered(lostWallet)) {
             s.identityRegistry.deleteIdentity(lostWallet);

@@ -58,19 +58,19 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
     // ============ updateCountry() ============
 
-    function test_updateCountry_RevertWhen_NotAgent() public {
+    /// @notice `updateCountry` is no longer wired to AGENT, so an agent is stopped by the
+    ///         AccessManager before reaching the deprecated body.
+    function test_updateCountry_RevertWhen_NotAdmin() public {
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         registry.updateCountry(bob, 999);
     }
 
-    function test_updateCountry_Success() public {
-        vm.prank(agent);
-        vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.CountryUpdated(bob, 999);
+    /// @notice The investor country now lives in a claim on the identity, so `updateCountry` is
+    ///         deprecated. The selector defaults to ADMIN_ROLE, which this contract holds.
+    function test_updateCountry_RevertWhen_Deprecated() public {
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.updateCountry(bob, 999);
-
-        assertEq(registry.investorCountry(bob), 999);
     }
 
     // ============ deleteIdentity() ============
@@ -142,8 +142,10 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         assertEq(address(registry.identity(another)), address(firstIdentity));
         assertEq(address(registry.identity(second)), address(secondIdentity));
-        assertEq(registry.investorCountry(another), 250);
-        assertEq(registry.investorCountry(second), 840);
+        // The country passed to register is vestigial: `investorCountry` reads the identity's
+        // country claim, and neither of these freshly deployed identities carries one.
+        assertEq(registry.investorCountry(another), 0);
+        assertEq(registry.investorCountry(second), 0);
     }
 
     // ============ setIdentityRegistryStorage() ============

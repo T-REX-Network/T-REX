@@ -76,10 +76,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @dev struct containing the identity contract and the country of the user
+    /// @dev struct containing the identity contract
     struct Identity {
         IIdentity identityContract;
-        uint16 investorCountry;
     }
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistryStorage
@@ -129,7 +128,6 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) == address(0), ErrorsLib.AddressAlreadyStored());
         s.identities[_userAddress].identityContract = _identity;
-        s.identities[_userAddress].investorCountry = _country;
         emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
     }
 
@@ -148,12 +146,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
      */
-    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external restricted {
-        require(_userAddress != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        s.identities[_userAddress].investorCountry = _country;
-        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
+    function modifyStoredInvestorCountry(address, uint16) external override restricted {
+        revert ErrorsLib.Deprecated();
     }
 
     /**
@@ -235,8 +229,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
      *  @dev Returns 0 for wallets that only exist in the global identity registry fallback, because the
      *  global registry does not track investor country.
      */
-    function storedInvestorCountry(address _userAddress) external view returns (uint16) {
-        return _getStorage().identities[_userAddress].investorCountry;
+    function storedInvestorCountry(address) external pure override returns (uint16) {
+        return 0;
     }
 
     /**

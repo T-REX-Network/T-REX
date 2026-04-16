@@ -78,6 +78,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
+import { Countries } from "../helpers/Countries.sol";
 import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { ClaimIssuerTrick } from "../mocks/ClaimIssuerTrick.sol";
 
@@ -191,6 +192,35 @@ contract TREXRegistryTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.setTrustedIssuersRegistry(address(0));
+    }
+
+    /// @notice `updateCountry` is deprecated: the investor country now lives in a claim on the
+    ///         identity. The selector is no longer wired to AGENT, so it defaults to ADMIN_ROLE,
+    ///         which the test contract holds -- the call reaches the body and hits `Deprecated()`.
+    function test_deprecation_updateCountry_RevertWhen_Admin() public {
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
+        registry.updateCountry(alice, Countries.SPAIN);
+    }
+
+    /// @notice A non-admin caller is stopped by the AccessManager before reaching the body.
+    function test_deprecation_updateCountry_RevertWhen_NotAdmin() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+        registry.updateCountry(alice, Countries.SPAIN);
+    }
+
+    // =============================================================================================
+    // investorCountry
+    // =============================================================================================
+
+    /// @notice The country is read from the identity's country claim.
+    function test_identity_investorCountry_ReturnsCountryFromClaim() public view {
+        assertEq(registry.investorCountry(alice), Countries.FRANCE);
+    }
+
+    /// @notice A wallet with no identity (and so no country claim) reports 0.
+    function test_identity_investorCountry_ReturnsZero_WhenNoCountryClaim() public view {
+        assertEq(registry.investorCountry(another), 0);
     }
 
     /// @notice The registry reports itself for both sibling registries.
