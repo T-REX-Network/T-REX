@@ -223,6 +223,35 @@ contract TREXRegistryTest is TREXSuiteTest {
         assertEq(registry.investorCountry(another), 0);
     }
 
+    /// @notice A registered identity carrying no country claim reports 0.
+    function test_identity_investorCountry_ReturnsZero_WhenIdentityHasNoCountryClaim() public {
+        // david has no identity yet -- give him one without a country claim
+        vm.prank(deployer);
+        IIdentity davidIdentity = IIdentity(idFactory.createIdentity(david, "david"));
+
+        vm.prank(agent);
+        registry.registerIdentity(david, davidIdentity, 0);
+
+        assertEq(registry.investorCountry(david), 0);
+    }
+
+    /// @notice A country claim whose payload is empty reports 0 rather than reverting on decode.
+    function test_identity_investorCountry_ReturnsZero_WhenCountryClaimDataIsEmpty() public {
+        vm.prank(deployer);
+        IIdentity davidIdentity = IIdentity(idFactory.createIdentity(david, "david"));
+
+        vm.prank(agent);
+        registry.registerIdentity(david, davidIdentity, 0);
+
+        // Add a country claim with empty data bytes (signed by claimIssuer).
+        bytes memory emptyData = "";
+        _addClaim(
+            davidIdentity, registry.COUNTRY_CLAIM_TOPIC(), emptyData, claimIssuerSigner.key, address(claimIssuer), david
+        );
+
+        assertEq(registry.investorCountry(david), 0);
+    }
+
     /// @notice The registry reports itself for both sibling registries.
     function test_identity_topicsAndIssuersReturnSelf() public view {
         assertEq(address(registry.topicsRegistry()), address(registry));

@@ -1134,6 +1134,22 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
     }
 
+    /// @notice Should revert when the CREATE3 target address already contains code
+    function test_deployTREXSuite_RevertWhen_Create3AddressCollides() public {
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        string memory salt = "collision-salt";
+
+        // The first contract deployed by deployTREXSuite is the TIR. Pre-populating code at its
+        // predicted CREATE3 address makes the inner CREATE return zero, so the deploy reverts.
+        vm.etch(_predictSuiteAddress(salt, "TIR"), hex"60006000");
+
+        vm.prank(deployer);
+        vm.expectRevert();
+        trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
+    }
+
     /// @notice Should deploy TREX suite when irs is provided (not address(0))
     function test_deployTREXSuite_Success_WithProvidedIRS() public {
         // First deploy a TREX suite to get an IRS that's already properly set up

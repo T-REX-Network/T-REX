@@ -142,6 +142,8 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         assertEq(address(registry.identity(another)), address(firstIdentity));
         assertEq(address(registry.identity(second)), address(secondIdentity));
+        assertTrue(registry.isLocallyRegistered(another));
+        assertTrue(registry.isLocallyRegistered(second));
         // The country passed to register is vestigial: `investorCountry` reads the identity's
         // country claim, and neither of these freshly deployed identities carries one.
         assertEq(registry.investorCountry(another), 0);

@@ -50,6 +50,17 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.init(deployer, address(0), address(idFactory));
     }
 
+    /// @notice Should revert when idFactory is the zero address. The proxy bubbles init's revert,
+    ///         so the ZeroAddress error surfaces as-is.
+    function test_init_RevertWhen_IdFactoryZeroAddress() public {
+        address irsBeacon = trexImplementationAuthority.beacons().irsBeacon;
+
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new BeaconProxy(
+            irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), address(0)))
+        );
+    }
+
     // ============ addIdentityToStorage() Tests ============
 
     /// @notice Should revert when sender is not agent
@@ -251,6 +262,54 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         emit ERC3643EventsLib.IdentityRegistryUnbound(identityRegistry);
         vm.prank(deployer);
         identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
+    }
+
+    /// @notice Should unbind a registry located past index 0 (exercises the loop increment)
+    function test_unbindIdentityRegistry_Success_WhenNotFirst() public {
+        address firstIR = address(token.identityRegistry());
+        address secondIR = makeAddr("secondIR");
+
+        // bindIdentityRegistry is gated by onlySharedAuthority: the bound address must report the
+        // storage's AccessManager as its authority.
+        vm.mockCall(
+            secondIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(secondIR);
+
+        // Unbind the second one — match is at index 1, so the loop increments past index 0
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(secondIR);
+
+        address[] memory linked = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(linked.length, 1);
+        assertEq(linked[0], firstIR);
+    }
+
+    // ============ linkedIdentityRegistries() Tests ============
+
+    /// @notice Should return the list of bound identity registries
+    function test_linkedIdentityRegistries_ReturnsBoundRegistries() public {
+        address existingIR = address(token.identityRegistry());
+
+        // Initially only the suite's IR is bound
+        address[] memory initial = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(initial.length, 1);
+        assertEq(initial[0], existingIR);
+
+        // Bind another registry and verify it appears. It must share the storage's authority to pass
+        // the onlySharedAuthority guard.
+        address extraIR = makeAddr("extraIR");
+        vm.mockCall(
+            extraIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(extraIR);
+
+        address[] memory updated = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(updated.length, 2);
+        assertEq(updated[0], existingIR);
+        assertEq(updated[1], extraIR);
     }
 
     // ============ storedIdentity() Fallback Tests ============
