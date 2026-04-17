@@ -122,7 +122,11 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
      */
-    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 /*_country*/ )
+    function addIdentityToStorage(
+        address _userAddress,
+        IIdentity _identity,
+        uint16 /*_country*/
+    )
         external
         restricted
     {

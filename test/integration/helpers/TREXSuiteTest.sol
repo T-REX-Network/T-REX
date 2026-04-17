@@ -477,5 +477,4 @@ contract TREXSuiteTest is AccessManagerHelper {
         _addClaim(_identity, 2_000_008, claimData, claimIssuerSigner.key, address(claimIssuer), _wallet);
     }
 
-
 }
