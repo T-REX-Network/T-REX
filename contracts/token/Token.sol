@@ -664,6 +664,8 @@ contract Token is
         require(!s.pendingRequests[hash], ErrorsLib.RequestAlreadyPending(hash));
         s.pendingRequests[hash] = true;
 
+        // TODO tx provisionning ?
+
         IReferenceCrossChainHook(s.hook).sendAuthorization(dstChainId, hash, expiry, from, to, value);
 
         emit EventsLib.TransferRequested(hash, dstChainId, from, to, value, nonce, expiry);
@@ -675,6 +677,8 @@ contract Token is
         if (s.pendingRequests[hash]) {
             s.pendingRequests[hash] = false;
             emit EventsLib.TransferSettled(hash);
+
+            // TODO settlement
         }
     }
 
