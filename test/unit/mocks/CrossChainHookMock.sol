@@ -14,14 +14,9 @@ contract CrossChainHookMock {
 
     Sent[] public sent;
 
-    function sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) external {
+    function sendAuthorization(uint64 dstChainId, bytes32 hash, uint64 expiry, address from, address to, uint256 value)
+        external
+    {
         sent.push(Sent({ dstChainId: dstChainId, hash: hash, expiry: expiry, from: from, to: to, value: value }));
     }
 

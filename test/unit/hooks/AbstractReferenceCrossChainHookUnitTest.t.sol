@@ -24,14 +24,10 @@ contract HookSpy is AbstractReferenceCrossChainHook {
 
     constructor(address accessManager_, address token_) AbstractReferenceCrossChainHook(accessManager_, token_) { }
 
-    function _sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) internal override {
+    function _sendAuthorization(uint64 dstChainId, bytes32 hash, uint64 expiry, address from, address to, uint256 value)
+        internal
+        override
+    {
         calls.push(Call(dstChainId, hash, expiry, from, to, value));
     }
 
@@ -43,11 +39,17 @@ contract HookSpy is AbstractReferenceCrossChainHook {
     function callsLength() external view returns (uint256) {
         return calls.length;
     }
+
 }
 
 contract TokenSpy {
+
     bytes32 public lastSettled;
-    function onTransferSettled(bytes32 hash) external { lastSettled = hash; }
+
+    function onTransferSettled(bytes32 hash) external {
+        lastSettled = hash;
+    }
+
 }
 
 contract AbstractReferenceCrossChainHookUnitTest is Test {
@@ -74,7 +76,9 @@ contract AbstractReferenceCrossChainHookUnitTest is Test {
 
     function test_sendAuthorization_callsTemplate() public {
         vm.prank(tokenCaller);
-        hook.sendAuthorization(11_155_111, bytes32(uint256(1)), uint64(block.timestamp + 1), address(0x1), address(0x2), 100);
+        hook.sendAuthorization(
+            11_155_111, bytes32(uint256(1)), uint64(block.timestamp + 1), address(0x1), address(0x2), 100
+        );
 
         assertEq(hook.callsLength(), 1);
         (uint64 dst, bytes32 h, uint64 exp, address from, address to, uint256 value) = hook.calls(0);

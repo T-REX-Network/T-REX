@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.30;
 
+import { IRouterClient } from "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
+import { Client } from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
+import { LinkTokenInterface } from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 import { Test } from "@forge-std/Test.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
-import { Client } from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
-import { IRouterClient } from "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
-import { LinkTokenInterface } from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 
 import { ChainlinkReferenceCrossChainHook } from "contracts/hooks/ChainlinkReferenceCrossChainHook.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -13,8 +13,13 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 contract TokenStub {
+
     bytes32 public lastSettled;
-    function onTransferSettled(bytes32 hash) external { lastSettled = hash; }
+
+    function onTransferSettled(bytes32 hash) external {
+        lastSettled = hash;
+    }
+
 }
 
 contract ChainlinkReferenceCrossChainHookUnitTest is Test {
@@ -40,7 +45,9 @@ contract ChainlinkReferenceCrossChainHookUnitTest is Test {
         // CCIPReceiver constructor calls router.getRouter via no-op — actually it just stores router address.
         // But the receiver also tries to call router methods sometimes. Mock common methods up front.
         vm.mockCall(router, abi.encodeWithSelector(IRouterClient.getFee.selector), abi.encode(uint256(123)));
-        vm.mockCall(router, abi.encodeWithSelector(IRouterClient.ccipSend.selector), abi.encode(bytes32(uint256(0xCAFE))));
+        vm.mockCall(
+            router, abi.encodeWithSelector(IRouterClient.ccipSend.selector), abi.encode(bytes32(uint256(0xCAFE)))
+        );
         vm.mockCall(link, abi.encodeWithSelector(LinkTokenInterface.approve.selector), abi.encode(true));
 
         hook = new ChainlinkReferenceCrossChainHook(router, link, address(accessManager), address(tokenStub));

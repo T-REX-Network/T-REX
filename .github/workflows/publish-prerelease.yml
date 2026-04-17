@@ -16,6 +16,8 @@ jobs:
           version: stable
       - name: Install dependencies
         run: forge soldeer install
+      - name: Apply local patches to dependencies
+        run: cp patched-deps/onchain-id/contracts/ClaimIssuer.sol dependencies/onchain-id-custom/contracts/ClaimIssuer.sol
       - name: Build contracts
         run: forge build
       - name: Run test coverage

@@ -8,13 +8,7 @@ pragma solidity ^0.8.30;
 /// not part of this interface.
 interface IReferenceCrossChainHook {
 
-    function sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) external;
+    function sendAuthorization(uint64 dstChainId, bytes32 hash, uint64 expiry, address from, address to, uint256 value)
+        external;
 
 }

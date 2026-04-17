@@ -22,26 +22,17 @@ abstract contract AbstractReferenceCrossChainHook is IReferenceCrossChainHook, A
     }
 
     /// @inheritdoc IReferenceCrossChainHook
-    function sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) external restricted {
+    function sendAuthorization(uint64 dstChainId, bytes32 hash, uint64 expiry, address from, address to, uint256 value)
+        external
+        restricted
+    {
         _sendAuthorization(dstChainId, hash, expiry, from, to, value);
     }
 
     /// @dev Subclasses ship the message via their transport.
-    function _sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) internal virtual;
+    function _sendAuthorization(uint64 dstChainId, bytes32 hash, uint64 expiry, address from, address to, uint256 value)
+        internal
+        virtual;
 
     /// @dev Subclasses call this from their receive path to dispatch a settlement to the token.
     function _onSettlement(bytes32 hash) internal {

@@ -45,14 +45,10 @@ contract ChainlinkReferenceCrossChainHook is AbstractReferenceCrossChainHook, CC
 
     // ----- Outbound -----
 
-    function _sendAuthorization(
-        uint64 dstChainId,
-        bytes32 hash,
-        uint64 expiry,
-        address from,
-        address to,
-        uint256 value
-    ) internal override {
+    function _sendAuthorization(uint64 dstChainId, bytes32 hash, uint64 expiry, address from, address to, uint256 value)
+        internal
+        override
+    {
         bytes32 peer = _bridgedHooks[dstChainId];
         require(peer != bytes32(0), ErrorsLib.DestinationChainNotConfigured(dstChainId));
 

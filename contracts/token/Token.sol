@@ -88,12 +88,12 @@ import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { IReferenceCrossChainHook } from "../hooks/IReferenceCrossChainHook.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
+import { HashLib } from "../libraries/HashLib.sol";
 import { AgentRole } from "../roles/AgentRole.sol";
 import { IERC173 } from "../roles/IERC173.sol";
-import { HashLib } from "../libraries/HashLib.sol";
-import { IReferenceCrossChainHook } from "../hooks/IReferenceCrossChainHook.sol";
 import { IToken } from "./IToken.sol";
 import { TokenRoles } from "./TokenStructs.sol";
 

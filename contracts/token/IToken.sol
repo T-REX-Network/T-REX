@@ -86,9 +86,7 @@ interface IToken is IERC3643 {
     /// authorization to the bridged chain via the configured hook.
     /// @param dstChainId The bridged chain id on which the transfer will execute.
     /// @return hash The authorization hash.
-    function requestTransfer(uint64 dstChainId, address from, address to, uint256 value)
-        external
-        returns (bytes32 hash);
+    function requestTransfer(uint64 dstChainId, address from, address to, uint256 value) external returns (bytes32 hash);
 
     /// @notice Called by the configured hook when a settlement notification is received.
     function onTransferSettled(bytes32 hash) external;
