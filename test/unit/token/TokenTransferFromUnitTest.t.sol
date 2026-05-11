@@ -10,7 +10,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { TokenBaseUnitTest } from "../helpers/TokenBaseUnitTest.t.sol";
 
-contract TokenTransferUnitTest is TokenBaseUnitTest {
+contract TokenTransferFromUnitTest is TokenBaseUnitTest {
 
     address from = makeAddr("From");
     address to = makeAddr("To");
@@ -24,6 +24,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
 
         _mockIdentity(from, user1Identity);
         _mockIdentity(to, user2Identity);
+        _mockIdentity(spender, makeAddr("SpenderIdentity"));
 
         vm.startPrank(agent);
         token.unpause();
@@ -31,34 +32,44 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         vm.stopPrank();
     }
 
-    function testTokenTransferRevertsWhenPaused() public {
+    function testTokenTransferFromRevertsWhenTokenPaused() public {
         vm.prank(agent);
         token.pause();
 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        vm.prank(from);
-        token.transfer(to, transferAmount);
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
     }
 
-    function testTokenTransferRevertsWhenSenderFrozen() public {
-        vm.prank(agent);
-        token.setAddressFrozen(from, true);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.FrozenWallet.selector, from));
+    function testTokenTransferFromRevertsWhenReceiverFrozen() public {
         vm.prank(from);
-        token.transfer(to, transferAmount);
-    }
+        token.approve(spender, transferAmount);
 
-    function testTokenTransferRevertsWhenReceiverFrozen() public {
         vm.prank(agent);
         token.setAddressFrozen(to, true);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.FrozenWallet.selector, to));
-        vm.prank(from);
-        token.transfer(to, transferAmount);
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
     }
 
-    function testTokenTransferRevertsWhenInsufficientBalance() public {
+    function testTokenTransferFromRevertsWhenSenderFrozen() public {
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
+        vm.prank(agent);
+        token.setAddressFrozen(from, true);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.FrozenWallet.selector, from));
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
+    }
+
+    function testTokenTransferFromRevertsWhenInsufficientBalance() public {
+        // Approve spender
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
         uint256 excessiveAmount = mintAmount - frozenAmount + 1;
 
         // Freeze some tokens
@@ -70,11 +81,15 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
                 IERC20Errors.ERC20InsufficientBalance.selector, from, mintAmount - frozenAmount, excessiveAmount
             )
         );
-        vm.prank(from);
-        token.transfer(to, excessiveAmount);
+        vm.prank(spender);
+        token.transferFrom(from, to, excessiveAmount);
     }
 
-    function testTokenTransferRevertsWhenReceiverNotVerified() public {
+    function testTokenTransferFromRevertsWhenReceiverNotVerified() public {
+        // Approve spender
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
         vm.mockCall(
             identityRegistry,
             abi.encodeWithSelector(IERC3643IdentityRegistry.isVerified.selector, to),
@@ -82,11 +97,15 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         );
 
         vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
-        vm.prank(from);
-        token.transfer(to, transferAmount);
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
     }
 
-    function testTokenTransferRevertsWhenComplianceNotFollowed() public {
+    function testTokenTransferFromRevertsWhenComplianceNotFollowed() public {
+        // Approve spender
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
         vm.mockCall(
             compliance,
             abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector, from, to, transferAmount),
@@ -94,17 +113,22 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         );
 
         vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
-        vm.prank(from);
-        token.transfer(to, transferAmount);
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
     }
 
-    function testTokenTransferNominal() public {
+    function testTokenTransferFromNominal() public {
+        // Approve spender
         vm.prank(from);
-        bool success = token.transfer(to, transferAmount);
+        token.approve(spender, transferAmount);
+
+        vm.prank(spender);
+        bool success = token.transferFrom(from, to, transferAmount);
 
         assertTrue(success);
         assertEq(token.balanceOf(from), mintAmount - transferAmount);
         assertEq(token.balanceOf(to), transferAmount);
+        assertEq(token.allowance(from, spender), 0);
     }
 
 }

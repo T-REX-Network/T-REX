@@ -55,6 +55,9 @@ contract TokenERC2771UnitTest is TokenBaseUnitTest {
     /* ----- Tests for transferFrom() - uses _msgSender() ----- */
 
     function testTransferFromViaForwarder() public {
+        _mockIdentity(account1.addr, user1Identity);
+        _mockIdentity(account2.addr, user2Identity);
+
         // account1 approves account2 to spend
         vm.prank(account1.addr);
         token.approve(account2.addr, 200);

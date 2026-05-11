@@ -31,12 +31,15 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
 
     address agent = makeAddr("Agent");
 
+    address user1Identity = makeAddr("User1Identity");
+    address user2Identity = makeAddr("User2Identity");
+
     constructor() {
         tokenImplementation = new Token();
 
-        mockImplementationAuthority();
-        mockCompliance();
-        mockIdentityRegistry();
+        _mockImplementationAuthority();
+        _mockCompliance();
+        _mockIdentityRegistry();
     }
 
     function setUp() public virtual {
@@ -62,7 +65,7 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
         _setRoles(address(this), agent);
     }
 
-    function mockImplementationAuthority() internal {
+    function _mockImplementationAuthority() internal {
         vm.mockCall(
             implementationAuthority,
             abi.encodeWithSelector(ITREXImplementationAuthority.getTokenImplementation.selector),
@@ -70,7 +73,7 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
         );
     }
 
-    function mockCompliance() internal {
+    function _mockCompliance() internal {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.unbindToken.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector), abi.encode(true));
@@ -80,12 +83,23 @@ abstract contract TokenBaseUnitTest is Test, AccessManagerHelper {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.transferred.selector), "");
     }
 
-    function mockIdentityRegistry() internal {
+    function _mockIdentityRegistry() internal {
         vm.mockCall(
             identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.isVerified.selector), abi.encode(true)
         );
 
         vm.mockCall(identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.deleteIdentity.selector), "");
+
+        _mockIdentity(user1, user1Identity);
+        _mockIdentity(user2, user2Identity);
+    }
+
+    function _mockIdentity(address user, address identity) internal {
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(IERC3643IdentityRegistry.identity.selector, user),
+            abi.encode(identity)
+        );
     }
 
 }

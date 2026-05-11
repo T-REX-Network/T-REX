@@ -505,7 +505,7 @@ contract TokenTransferTest is TREXSuiteTest {
         address[] memory targets = new address[](1);
         targets[0] = bob;
 
-        vm.prank(alice);
+        vm.prank(bob);
         vm.expectRevert();
         token.transferFrom(alice, bob, 100);
 

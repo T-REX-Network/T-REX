@@ -8,10 +8,17 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { TokenBaseUnitTest } from "../helpers/TokenBaseUnitTest.t.sol";
 
-contract TokenDefaultAllowanceUnitTest is TokenBaseUnitTest {
+contract TokenSetDefaultAllowanceUnitTest is TokenBaseUnitTest {
 
     address spender1 = makeAddr("Spender1");
     address spender2 = makeAddr("Spender2");
+
+    function setUp() public override {
+        super.setUp();
+
+        _mockIdentity(spender1, makeAddr("Spender1Identity"));
+        _mockIdentity(spender2, makeAddr("Spender2Identity"));
+    }
 
     function testTokenSetDefaultAllowanceRevertsWhenAlreadySet() public {
         vm.prank(user1);

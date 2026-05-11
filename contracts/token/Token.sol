@@ -556,18 +556,26 @@ contract Token is
     }
 
     /// @inheritdoc IERC20
-    function allowance(address _owner, address _spender)
+    function allowance(address owner, address spender)
         public
         view
         override(ERC20Upgradeable, IERC20)
         returns (uint256)
     {
         TokenStorage storage s = _tokenStorage();
-        if (s.defaultAllowances[_spender] && !s.defaultAllowanceOptOuts[_owner]) {
+
+        // If spender has default allowance and owner has not opted out, return max allowance
+        if (s.defaultAllowances[spender] && !s.defaultAllowanceOptOuts[owner]) {
             return type(uint256).max;
         }
 
-        return super.allowance(_owner, _spender);
+        // If wallets are linked to the same identity, return max allowance
+        address ownerIdentity = address(s.identityRegistry.identity(owner));
+        if (ownerIdentity != address(0) && ownerIdentity == address(s.identityRegistry.identity(spender))) {
+            return type(uint256).max;
+        }
+
+        return super.allowance(owner, spender);
     }
 
     /* ----- ERC2771 Context Functions ----- */
