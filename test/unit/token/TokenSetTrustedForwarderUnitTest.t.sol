@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin-contracts-upgradeable-5.5.0/access/OwnableUpgradeable.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 

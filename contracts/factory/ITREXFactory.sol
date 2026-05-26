@@ -134,8 +134,9 @@ interface ITREXFactory {
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
      *  TIR : deploy TIR contract (proxy), set trusted issuers, set owner
      *  Compliance: deploy modular compliance, bind with token, add modules, set modules parameters, set owner
-     *  All contracts are deployed using CREATE3 via CreateX, and therefore are deployed at a predetermined address
-     *  The address can be the same on all EVM blockchains as long as the CreateX address is the same as well
+     *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
+     *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
+     *  same address on each chain
      *  Only owner can call.
      *  emits `TREXSuiteDeployed` event
      *  @param _salt the salt used to make the contracts deployments with CREATE2
@@ -169,11 +170,6 @@ interface ITREXFactory {
      *  @dev getter for identity factory address
      */
     function getIdFactory() external view returns (address);
-
-    /**
-     *  @dev getter for create3 factory address
-     */
-    function getCreate3Factory() external view returns (address);
 
     /**
      *  @dev getter for token address corresponding to salt string
