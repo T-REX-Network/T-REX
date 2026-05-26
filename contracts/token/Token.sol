@@ -204,12 +204,16 @@ contract Token is
 
     /// @inheritdoc IERC3643
     function setIdentityRegistry(address _identityRegistry) public override onlyOwner {
+        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
+
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryAdded(_identityRegistry);
     }
 
     /// @inheritdoc IERC3643
     function setCompliance(address _compliance) public override onlyOwner {
+        require(_compliance != address(0), ErrorsLib.ZeroAddress());
+
         TokenStorage storage s = _tokenStorage();
         if (address(s.compliance) != address(0)) {
             s.compliance.unbindToken(address(this));
