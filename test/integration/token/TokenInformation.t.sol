@@ -141,7 +141,8 @@ contract TokenInformationTest is TREXSuiteTest {
     /// @notice Should return the compliance address
     function test_compliance_ReturnsComplianceAddress() public {
         // Deploy ModularCompliance proxy (similar to deploySuiteWithModularCompliancesFixture)
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         // Transfer ownership to deployer (compliance is owned by test contract after deployment)
         Ownable(address(complianceProxy)).transferOwnership(deployer);
 
@@ -155,11 +156,13 @@ contract TokenInformationTest is TREXSuiteTest {
     /// @notice Should unbind existing compliance when setting new compliance
     function test_setCompliance_UnbindsExistingCompliance() public {
         // Deploy first compliance
-        ModularComplianceProxy complianceProxy1 = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy1 =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy1)).transferOwnership(deployer);
 
         // Deploy second compliance
-        ModularComplianceProxy complianceProxy2 = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy2 =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy2)).transferOwnership(deployer);
 
         // Set first compliance
@@ -470,12 +473,13 @@ contract TokenInformationTest is TREXSuiteTest {
         Token tokenImplementation = new Token();
         assertTrue(address(tokenImplementation) != address(0));
 
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy)).transferOwnership(deployer);
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         tokenImplementation.init(
-            "Test Token", "TEST", 18, address(identityRegistry), address(complianceProxy), address(0)
+            "Test Token", "TEST", 18, address(identityRegistry), address(complianceProxy), address(0), deployer
         );
     }
 
@@ -483,50 +487,78 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_TokenProxy_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TokenProxy(address(0), randomAddress, randomAddress, "Test", "TST", 18, address(0));
+        new TokenProxy(address(0), randomAddress, randomAddress, "Test", "TST", 18, address(0), deployer);
     }
 
     /// @notice Should revert when identity registry is zero address
     function test_TokenProxy_constructor_RevertWhen_IdentityRegistryZeroAddress() public {
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new TokenProxy(address(trexImplementationAuthority), address(0), randomAddress, "Test", "TST", 18, address(0));
+        new TokenProxy(
+            address(trexImplementationAuthority), address(0), randomAddress, "Test", "TST", 18, address(0), deployer
+        );
     }
 
     /// @notice Should revert when compliance is zero address
     function test_TokenProxy_constructor_RevertWhen_ComplianceZeroAddress() public {
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new TokenProxy(address(trexImplementationAuthority), randomAddress, address(0), "Test", "TST", 18, address(0));
+        new TokenProxy(
+            address(trexImplementationAuthority), randomAddress, address(0), "Test", "TST", 18, address(0), deployer
+        );
     }
 
     /// @notice Should revert when name is empty string
     function test_TokenProxy_constructor_RevertWhen_NameEmpty() public {
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
         new TokenProxy(
-            address(trexImplementationAuthority), randomAddress, address(complianceProxy), "", "TST", 18, address(0)
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(complianceProxy),
+            "",
+            "TST",
+            18,
+            address(0),
+            deployer
         );
     }
 
     /// @notice Should revert when symbol is empty string
     function test_TokenProxy_constructor_RevertWhen_SymbolEmpty() public {
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
         new TokenProxy(
-            address(trexImplementationAuthority), randomAddress, address(complianceProxy), "Test", "", 18, address(0)
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(complianceProxy),
+            "Test",
+            "",
+            18,
+            address(0),
+            deployer
         );
     }
 
     /// @notice Should revert when decimals is greater than 18
     function test_TokenProxy_constructor_RevertWhen_DecimalsGreaterThan18() public {
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
         new TokenProxy(
-            address(trexImplementationAuthority), randomAddress, address(complianceProxy), "Test", "TST", 19, address(0)
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(complianceProxy),
+            "Test",
+            "TST",
+            19,
+            address(0),
+            deployer
         );
     }
 
@@ -558,10 +590,13 @@ contract TokenInformationTest is TREXSuiteTest {
 
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
         // because MockContract doesn't have init() function, causing InitializationFailed() revert
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new TokenProxy(address(incompleteIA), randomAddress, address(complianceProxy), "Test", "TST", 18, address(0));
+        new TokenProxy(
+            address(incompleteIA), randomAddress, address(complianceProxy), "Test", "TST", 18, address(0), deployer
+        );
     }
 
     // ============ Token.init() Tests ============
@@ -569,7 +604,8 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_init_RevertWhen_IdentityRegistryZeroAddress_DirectCall() public {
         // Deploy new implementation
         Token implementation = new Token();
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy)).transferOwnership(deployer);
 
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
@@ -582,7 +618,8 @@ contract TokenInformationTest is TREXSuiteTest {
                 18,
                 address(0), // Zero address for Identity Registry
                 address(complianceProxy),
-                address(0)
+                address(0),
+                deployer
             )
         );
     }
@@ -602,7 +639,8 @@ contract TokenInformationTest is TREXSuiteTest {
                 18,
                 randomAddress,
                 address(0), // Zero address for Compliance
-                address(0)
+                address(0),
+                deployer
             )
         );
     }
@@ -610,7 +648,8 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_init_RevertWhen_NameEmpty_DirectCall() public {
         // Deploy new implementation
         Token implementation = new Token();
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy)).transferOwnership(deployer);
         address randomAddress = vm.addr(999);
 
@@ -624,7 +663,8 @@ contract TokenInformationTest is TREXSuiteTest {
                 18,
                 randomAddress,
                 address(complianceProxy),
-                address(0)
+                address(0),
+                deployer
             )
         );
     }
@@ -632,7 +672,8 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_init_RevertWhen_SymbolEmpty_DirectCall() public {
         // Deploy new implementation
         Token implementation = new Token();
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy)).transferOwnership(deployer);
         address randomAddress = vm.addr(999);
 
@@ -646,7 +687,8 @@ contract TokenInformationTest is TREXSuiteTest {
                 18,
                 randomAddress,
                 address(complianceProxy),
-                address(0)
+                address(0),
+                deployer
             )
         );
     }
@@ -654,7 +696,8 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_init_RevertWhen_DecimalsGreaterThan18_DirectCall() public {
         // Deploy new implementation
         Token implementation = new Token();
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(complianceProxy)).transferOwnership(deployer);
         address randomAddress = vm.addr(999);
 
@@ -668,7 +711,8 @@ contract TokenInformationTest is TREXSuiteTest {
                 19, // Decimals > 18
                 randomAddress,
                 address(complianceProxy),
-                address(0)
+                address(0),
+                deployer
             )
         );
     }

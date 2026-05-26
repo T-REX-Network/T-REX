@@ -69,8 +69,8 @@ import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAut
 
 contract ClaimTopicsRegistryProxy is AbstractProxy {
 
-    constructor(address implementationAuthority) AbstractProxy(implementationAuthority) {
-        (bool success,) = getLogic().delegatecall(abi.encodeCall(ClaimTopicsRegistry.init, ()));
+    constructor(address implementationAuthority, address _owner) AbstractProxy(implementationAuthority) {
+        (bool success,) = getLogic().delegatecall(abi.encodeCall(ClaimTopicsRegistry.init, (_owner)));
         require(success, ErrorsLib.InitializationFailed());
     }
 

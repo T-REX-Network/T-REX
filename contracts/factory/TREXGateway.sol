@@ -69,10 +69,13 @@ import { ITREXFactory } from "./ITREXFactory.sol";
 import { ITREXGateway } from "./ITREXGateway.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
+
+    using SafeERC20 for IERC20;
 
     /// address of the TREX Factory that is managed by the Gateway
     address private _factory;
@@ -297,7 +300,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
         if (_deploymentFeeEnabled) {
             if (_deploymentFee.fee > 0 && _feeDiscount[msg.sender] < 10000) {
                 feeApplied = calculateFee(msg.sender);
-                IERC20(_deploymentFee.feeToken).transferFrom(msg.sender, _deploymentFee.feeCollector, feeApplied);
+                IERC20(_deploymentFee.feeToken).safeTransferFrom(msg.sender, _deploymentFee.feeCollector, feeApplied);
             }
         }
         string memory _salt = string(abi.encodePacked(Strings.toHexString(_tokenDetails.owner), _tokenDetails.name));

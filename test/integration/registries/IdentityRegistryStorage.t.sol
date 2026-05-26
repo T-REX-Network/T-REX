@@ -47,7 +47,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     function test_init_RevertWhen_AlreadyInitialized() public {
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        identityRegistryStorage.init();
+        identityRegistryStorage.init(deployer);
     }
 
     // ============ addIdentityToStorage() Tests ============
@@ -275,7 +275,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when implementation authority is zero address
     function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new IdentityRegistryStorageProxy(address(0));
+        new IdentityRegistryStorageProxy(address(0), deployer);
     }
 
     /// @notice Should revert when initialization fails (invalid implementation)
@@ -307,7 +307,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
         // because MockContract doesn't have init() function, causing InitializationFailed() revert
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new IdentityRegistryStorageProxy(address(incompleteIA));
+        new IdentityRegistryStorageProxy(address(incompleteIA), deployer);
     }
 
 }

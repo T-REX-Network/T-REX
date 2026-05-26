@@ -44,7 +44,7 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Helper to deploy ModularCompliance with proxy
     function _deployModularComplianceWithProxy(address implementationAuthority) internal returns (ModularCompliance) {
-        ModularComplianceProxy proxy = new ModularComplianceProxy(implementationAuthority);
+        ModularComplianceProxy proxy = new ModularComplianceProxy(implementationAuthority, address(this));
         ModularCompliance newCompliance = ModularCompliance(address(proxy));
 
         newCompliance.transferOwnership(deployer);
@@ -73,7 +73,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should prevent calling init twice
     function test_init_RevertWhen_CalledTwice() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        compliance.init();
+        compliance.init(deployer);
     }
 
     // ============================================
@@ -83,7 +83,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should revert when implementation authority is zero address
     function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new ModularComplianceProxy(address(0));
+        new ModularComplianceProxy(address(0), deployer);
     }
 
     /// @notice Should revert when initialization fails (invalid implementation)
@@ -115,7 +115,7 @@ contract ComplianceTest is TREXSuiteTest {
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
         // because MockContract doesn't have init() function, causing InitializationFailed() revert
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new ModularComplianceProxy(address(incompleteIA));
+        new ModularComplianceProxy(address(incompleteIA), deployer);
     }
 
     // ============================================

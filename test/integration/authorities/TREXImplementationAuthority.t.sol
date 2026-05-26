@@ -286,7 +286,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         vm.prank(deployer);
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
-        ModularComplianceProxy complianceProxy = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy complianceProxy =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         ModularCompliance newCompliance = ModularCompliance(address(complianceProxy));
         newCompliance.transferOwnership(deployer);
         vm.prank(deployer);
@@ -311,7 +312,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy compliance =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
         ModularCompliance(address(compliance)).acceptOwnership();
@@ -351,7 +353,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy compliance =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
         ModularCompliance(address(compliance)).acceptOwnership();
@@ -380,7 +383,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy compliance =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
         ModularCompliance(address(compliance)).acceptOwnership();
@@ -420,7 +424,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance = new ModularComplianceProxy(address(trexImplementationAuthority));
+        ModularComplianceProxy compliance =
+            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
         ModularCompliance(address(compliance)).acceptOwnership();

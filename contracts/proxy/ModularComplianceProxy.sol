@@ -69,8 +69,8 @@ import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAut
 
 contract ModularComplianceProxy is AbstractProxy {
 
-    constructor(address implementationAuthority) AbstractProxy(implementationAuthority) {
-        (bool success,) = getLogic().delegatecall(abi.encodeCall(ModularCompliance.init, ()));
+    constructor(address implementationAuthority, address _owner) AbstractProxy(implementationAuthority) {
+        (bool success,) = getLogic().delegatecall(abi.encodeCall(ModularCompliance.init, (_owner)));
         require(success, ErrorsLib.InitializationFailed());
     }
 

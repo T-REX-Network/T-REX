@@ -109,7 +109,8 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     function init(
         address trustedIssuersRegistryAddress,
         address claimTopicsRegistryAddress,
-        address identityStorageAddress
+        address identityStorageAddress,
+        address _owner
     ) external initializer {
         require(
             trustedIssuersRegistryAddress != address(0) && claimTopicsRegistryAddress != address(0)
@@ -127,7 +128,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
         emit ERC3643EventsLib.IdentityStorageSet(identityStorageAddress);
         emit EventsLib.EligibilityChecksEnabled();
 
-        __Ownable_init(msg.sender);
+        __Ownable_init(_owner);
     }
 
     /**

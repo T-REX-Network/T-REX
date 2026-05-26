@@ -70,8 +70,8 @@ import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAut
 
 contract TrustedIssuersRegistryProxy is AbstractProxy {
 
-    constructor(address implementationAuthority) AbstractProxy(implementationAuthority) {
-        (bool success,) = getLogic().delegatecall(abi.encodeCall(TrustedIssuersRegistry.init, ()));
+    constructor(address implementationAuthority, address _owner) AbstractProxy(implementationAuthority) {
+        (bool success,) = getLogic().delegatecall(abi.encodeCall(TrustedIssuersRegistry.init, (_owner)));
         require(success, ErrorsLib.InitializationFailed());
     }
 

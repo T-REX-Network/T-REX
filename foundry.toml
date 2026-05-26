@@ -17,7 +17,7 @@ bracket_spacing = true
 
 [profile.default.lint]
 lint_on_build = true
-ignore = [ "test/**/*" ]
+ignore = ["test/**/*.sol"]
 exclude_lints = [ "mixed-case-function", "mixed-case-variable", "pascal-case-struct" ]
 
 [soldeer]

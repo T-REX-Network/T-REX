@@ -350,7 +350,7 @@ contract TestModuleTest is TREXSuiteTest {
     function test_unbindCompliance_RevertWhen_ComplianceMismatch() public {
         // Deploy a second compliance and bind it
         ModularCompliance compliance2Implementation = new ModularCompliance();
-        bytes memory initData2 = abi.encodeWithSelector(ModularCompliance.init.selector);
+        bytes memory initData2 = abi.encodeWithSelector(ModularCompliance.init.selector, deployer);
         ERC1967Proxy compliance2Proxy = new ERC1967Proxy(address(compliance2Implementation), initData2);
         ModularCompliance compliance2 = ModularCompliance(address(compliance2Proxy));
 

@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
+import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -20,9 +21,12 @@ contract FreezeCheckTest is TREXSuiteTest {
         token.unpause();
         vm.stopPrank();
 
-        // Deploy UtilityChecker
-        utilityChecker = new UtilityChecker();
-        utilityChecker.initialize();
+        // Deploy UtilityChecker via proxy
+        UtilityChecker utilityCheckerImpl = new UtilityChecker();
+        bytes memory utilityCheckerInitData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        UtilityCheckerProxy utilityCheckerProxy =
+            new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
+        utilityChecker = UtilityChecker(address(utilityCheckerProxy));
     }
 
     // ============ getFreezeStatus() Tests ============

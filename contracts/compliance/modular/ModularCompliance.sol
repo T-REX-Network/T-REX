@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
@@ -75,14 +76,14 @@ import { IModule } from "./modules/IModule.sol";
 
 contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC165 {
 
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
     struct Storage {
         /// token linked to the compliance contract
         address tokenBound;
-        /// Array of modules bound to the compliance
-        address[] modules;
-        /// Mapping of module binding status
-        mapping(address => bool) moduleBound;
+        /// Set of modules bound to the compliance
+        EnumerableSet.AddressSet modules;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
@@ -101,8 +102,8 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         _disableInitializers();
     }
 
-    function init() external initializer {
-        __Ownable_init(msg.sender);
+    function init(address _owner) external initializer {
+        __Ownable_init(_owner);
     }
 
     /**
@@ -139,18 +140,10 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
-        require(s.moduleBound[_module], ErrorsLib.ModuleNotBound());
-        uint256 length = s.modules.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (s.modules[i] == _module) {
-                IModule(_module).unbindCompliance(address(this));
-                s.modules[i] = s.modules[length - 1];
-                s.modules.pop();
-                s.moduleBound[_module] = false;
-                emit EventsLib.ModuleRemoved(_module);
-                break;
-            }
-        }
+        require(s.modules.contains(_module), ErrorsLib.ModuleNotBound());
+        IModule(_module).unbindCompliance(address(this));
+        s.modules.remove(_module);
+        emit EventsLib.ModuleRemoved(_module);
     }
 
     /**
@@ -160,9 +153,9 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         require(_from != address(0) && _to != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules[i]).moduleTransferAction(_from, _to, _value);
+            IModule(s.modules.at(i)).moduleTransferAction(_from, _to, _value);
         }
     }
 
@@ -173,9 +166,9 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         require(_to != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules[i]).moduleMintAction(_to, _value);
+            IModule(s.modules.at(i)).moduleMintAction(_to, _value);
         }
     }
 
@@ -186,9 +179,9 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         require(_from != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules[i]).moduleBurnAction(_from, _value);
+            IModule(s.modules.at(i)).moduleBurnAction(_from, _value);
         }
     }
 
@@ -207,14 +200,14 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      *  @dev See {IModularCompliance-isModuleBound}.
      */
     function isModuleBound(address _module) external view override returns (bool) {
-        return _getStorage().moduleBound[_module];
+        return _getStorage().modules.contains(_module);
     }
 
     /**
      *  @dev See {IModularCompliance-getModules}.
      */
     function getModules() external view override returns (address[] memory) {
-        return _getStorage().modules;
+        return _getStorage().modules.values();
     }
 
     /**
@@ -236,9 +229,9 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      */
     function canTransfer(address _from, address _to, uint256 _value) external view override returns (bool) {
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(s.modules[i]).moduleCheck(_from, _to, _value, address(this))) {
+            if (!IModule(s.modules.at(i)).moduleCheck(_from, _to, _value, address(this))) {
                 return false;
             }
         }
@@ -252,8 +245,8 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     function addModule(address _module) public override onlyOwner {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(!s.moduleBound[_module], ErrorsLib.ModuleAlreadyBound());
-        require(s.modules.length <= 24, ErrorsLib.MaxModulesReached(25));
+        require(!s.modules.contains(_module), ErrorsLib.ModuleAlreadyBound());
+        require(s.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
         IModule module = IModule(_module);
         require(
             module.isPlugAndPlay() || module.canComplianceBind(address(this)),
@@ -261,8 +254,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         );
 
         module.bindCompliance(address(this));
-        s.modules.push(_module);
-        s.moduleBound[_module] = true;
+        s.modules.add(_module);
         emit EventsLib.ModuleAdded(_module);
     }
 
@@ -270,7 +262,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      *  @dev see {IModularCompliance-callModuleFunction}.
      */
     function callModuleFunction(bytes calldata callData, address _module) public override onlyOwner {
-        require(_getStorage().moduleBound[_module], ErrorsLib.ModuleNotBound());
+        require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
         // NOTE: Use assembly to call the interaction instead of a low level
         // call for two reasons:
         // - We don't want to copy the return data, since we discard it for

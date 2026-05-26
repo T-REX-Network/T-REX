@@ -37,7 +37,14 @@ abstract contract TokenBaseUnitTest is Test {
         token = Token(
             address(
                 new TokenProxy(
-                    implementationAuthority, identityRegistry, compliance, "Token", "TKN", 18, address(onchainId)
+                    implementationAuthority,
+                    identityRegistry,
+                    compliance,
+                    "Token",
+                    "TKN",
+                    18,
+                    address(onchainId),
+                    address(this)
                 )
             )
         );

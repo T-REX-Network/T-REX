@@ -153,7 +153,8 @@ contract Token is
         uint8 tokenDecimals,
         address identityRegistryAddress,
         address complianceAddress,
-        address onchainIdAddress
+        address onchainIdAddress,
+        address owner
     ) external initializer {
         require(identityRegistryAddress != address(0) && complianceAddress != address(0), ErrorsLib.ZeroAddress());
         require(bytes(name).length > 0 && bytes(symbol).length > 0, ErrorsLib.EmptyString());
@@ -162,14 +163,15 @@ contract Token is
         __ERC20_init(name, symbol);
         __ERC20Permit_init(name);
         __Pausable_init();
-        __Ownable_init(_msgSender());
+        __Ownable_init(owner);
 
         TokenStorage storage s = _tokenStorage();
         s.decimals = tokenDecimals;
         s.onchainId = onchainIdAddress;
 
-        setIdentityRegistry(identityRegistryAddress);
-        setCompliance(complianceAddress);
+        s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        s.compliance = IERC3643Compliance(complianceAddress);
+        s.compliance.bindToken(address(this));
         _emitUpdatedTokenInformation();
 
         _pause();

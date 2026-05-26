@@ -8,6 +8,7 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
+import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
 import { TestModule } from "../mocks/TestModule.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
@@ -59,9 +60,12 @@ contract TransferCheckTest is TREXSuiteTest {
         token.unpause();
         vm.stopPrank();
 
-        // Deploy UtilityChecker
-        utilityChecker = new UtilityChecker();
-        utilityChecker.initialize();
+        // Deploy UtilityChecker via proxy
+        UtilityChecker utilityCheckerImpl = new UtilityChecker();
+        bytes memory utilityCheckerInitData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        UtilityCheckerProxy utilityCheckerProxy =
+            new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
+        utilityChecker = UtilityChecker(address(utilityCheckerProxy));
     }
 
     // ============ getTransferStatus() Tests ============

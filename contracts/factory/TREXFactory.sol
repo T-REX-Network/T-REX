@@ -141,18 +141,7 @@ contract TREXFactory is ITREXFactory, Ownable {
         }
         IIdentityRegistry ir =
             IIdentityRegistry(_deployIR(_salt, _implementationAuthority, address(tir), address(ctr), address(irs)));
-        IToken token = IToken(
-            _deployToken(
-                _salt,
-                _implementationAuthority,
-                address(ir),
-                address(mc),
-                _tokenDetails.name,
-                _tokenDetails.symbol,
-                _tokenDetails.decimals,
-                _tokenDetails.ONCHAINID
-            )
-        );
+        IToken token = IToken(_deployToken(_salt, _implementationAuthority, address(ir), address(mc), _tokenDetails));
         if (_tokenDetails.ONCHAINID == address(0)) {
             address _tokenID = IIdFactory(_idFactory).createTokenIdentity(address(token), _tokenDetails.owner, _salt);
             token.setOnchainID(_tokenID);
@@ -275,10 +264,10 @@ contract TREXFactory is ITREXFactory, Ownable {
         );
 
         // Prepare postInit call to transfer ownership from CREATE3 proxy to this contract
-        bytes memory postInitData = abi.encodeWithSignature("postInit(address)", address(this));
+        //bytes memory postInitData = abi.encodeWithSignature("postInit(address)", address(this));
         ICreateX.Values memory values = ICreateX.Values({ constructorAmount: 0, initCallAmount: 0 });
 
-        address addr = ICreateX(_create3Factory).deployCreate3AndInit(saltBytes, bytecode, postInitData, values);
+        address addr = ICreateX(_create3Factory).deployCreate3AndInit(saltBytes, bytecode, hex"", values);
         emit EventsLib.Deployed(addr);
         return addr;
     }
@@ -286,7 +275,7 @@ contract TREXFactory is ITREXFactory, Ownable {
     /// function used to deploy a trusted issuers registry using CREATE3
     function _deployTIR(string memory _salt, address implementationAuthority_) private returns (address) {
         bytes memory _code = type(TrustedIssuersRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_);
+        bytes memory _constructData = abi.encode(implementationAuthority_, address(this));
         bytes memory bytecode = abi.encodePacked(_code, _constructData);
         return _deploy(_salt, "TIR", bytecode);
     }
@@ -294,7 +283,7 @@ contract TREXFactory is ITREXFactory, Ownable {
     /// function used to deploy a claim topics registry using CREATE3
     function _deployCTR(string memory _salt, address implementationAuthority_) private returns (address) {
         bytes memory _code = type(ClaimTopicsRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_);
+        bytes memory _constructData = abi.encode(implementationAuthority_, address(this));
         bytes memory bytecode = abi.encodePacked(_code, _constructData);
         return _deploy(_salt, "CTR", bytecode);
     }
@@ -302,7 +291,7 @@ contract TREXFactory is ITREXFactory, Ownable {
     /// function used to deploy modular compliance contract using CREATE3
     function _deployMC(string memory _salt, address implementationAuthority_) private returns (address) {
         bytes memory _code = type(ModularComplianceProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_);
+        bytes memory _constructData = abi.encode(implementationAuthority_, address(this));
         bytes memory bytecode = abi.encodePacked(_code, _constructData);
         return _deploy(_salt, "MC", bytecode);
     }
@@ -310,7 +299,7 @@ contract TREXFactory is ITREXFactory, Ownable {
     /// function used to deploy an identity registry storage using CREATE3
     function _deployIRS(string memory _salt, address implementationAuthority_) private returns (address) {
         bytes memory _code = type(IdentityRegistryStorageProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_);
+        bytes memory _constructData = abi.encode(implementationAuthority_, address(this));
         bytes memory bytecode = abi.encodePacked(_code, _constructData);
         return _deploy(_salt, "IRS", bytecode);
     }
@@ -324,8 +313,9 @@ contract TREXFactory is ITREXFactory, Ownable {
         address _identityStorage
     ) private returns (address) {
         bytes memory _code = type(IdentityRegistryProxy).creationCode;
-        bytes memory _constructData =
-            abi.encode(implementationAuthority_, _trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage);
+        bytes memory _constructData = abi.encode(
+            implementationAuthority_, _trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage, address(this)
+        );
         bytes memory bytecode = abi.encodePacked(_code, _constructData);
         return _deploy(_salt, "IR", bytecode);
     }
@@ -336,14 +326,18 @@ contract TREXFactory is ITREXFactory, Ownable {
         address implementationAuthority_,
         address _identityRegistry,
         address _compliance,
-        string memory _name,
-        string memory _symbol,
-        uint8 _decimals,
-        address _onchainId
+        TokenDetails memory _tokenDetails
     ) private returns (address) {
         bytes memory _code = type(TokenProxy).creationCode;
         bytes memory _constructData = abi.encode(
-            implementationAuthority_, _identityRegistry, _compliance, _name, _symbol, _decimals, _onchainId
+            implementationAuthority_,
+            _identityRegistry,
+            _compliance,
+            _tokenDetails.name,
+            _tokenDetails.symbol,
+            _tokenDetails.decimals,
+            _tokenDetails.ONCHAINID,
+            address(this)
         );
         bytes memory bytecode = abi.encodePacked(_code, _constructData);
         return _deploy(_salt, "Token", bytecode);

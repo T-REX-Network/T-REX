@@ -57,7 +57,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     function test_init_RevertWhen_AlreadyInitialized() public {
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        identityRegistry.init(address(0), address(0), address(0));
+        identityRegistry.init(address(0), address(0), address(0), deployer);
     }
 
     /// @notice Should reject zero address for all parameters when calling init directly
@@ -72,7 +72,8 @@ contract IdentityRegistryTest is TREXSuiteTest {
                 IdentityRegistry.init.selector,
                 address(0), // Zero address for Trusted Issuers Registry
                 address(claimTopicsRegistry),
-                address(identityRegistryStorage)
+                address(identityRegistryStorage),
+                deployer
             )
         );
 
@@ -83,7 +84,8 @@ contract IdentityRegistryTest is TREXSuiteTest {
                 IdentityRegistry.init.selector,
                 address(trustedIssuersRegistry),
                 address(0), // Zero address for Claim Topics Registry
-                address(identityRegistryStorage)
+                address(identityRegistryStorage),
+                deployer
             )
         );
 
@@ -94,7 +96,8 @@ contract IdentityRegistryTest is TREXSuiteTest {
                 IdentityRegistry.init.selector,
                 address(trustedIssuersRegistry),
                 address(claimTopicsRegistry),
-                address(0) // Zero address for Identity Storage
+                address(0), // Zero address for Identity Storage
+                deployer
             )
         );
     }
@@ -107,7 +110,9 @@ contract IdentityRegistryTest is TREXSuiteTest {
         // Deploy proxy with zero address for Trusted Issuers Registry
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new IdentityRegistryProxy(address(trexImplementationAuthority), randomAddress, address(0), randomAddress);
+        new IdentityRegistryProxy(
+            address(trexImplementationAuthority), randomAddress, address(0), randomAddress, deployer
+        );
     }
 
     /// @notice Should reject zero address for Claim Topics Registry
@@ -118,7 +123,9 @@ contract IdentityRegistryTest is TREXSuiteTest {
         // Deploy proxy with zero address for Claim Topics Registry
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new IdentityRegistryProxy(address(trexImplementationAuthority), randomAddress, randomAddress, address(0));
+        new IdentityRegistryProxy(
+            address(trexImplementationAuthority), randomAddress, randomAddress, address(0), deployer
+        );
     }
 
     /// @notice Should reject zero address for Identity Storage
@@ -129,7 +136,9 @@ contract IdentityRegistryTest is TREXSuiteTest {
         // Deploy proxy with zero address for Identity Storage
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new IdentityRegistryProxy(address(trexImplementationAuthority), address(0), randomAddress, randomAddress);
+        new IdentityRegistryProxy(
+            address(trexImplementationAuthority), address(0), randomAddress, randomAddress, deployer
+        );
     }
 
     /// @notice Should revert when initialization fails (invalid implementation)
@@ -162,7 +171,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
         // because MockContract doesn't have init() function, causing InitializationFailed() revert
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new IdentityRegistryProxy(address(incompleteIA), randomAddress, randomAddress, randomAddress);
+        new IdentityRegistryProxy(address(incompleteIA), randomAddress, randomAddress, randomAddress, deployer);
     }
 
     // ============ updateIdentity() Tests ============

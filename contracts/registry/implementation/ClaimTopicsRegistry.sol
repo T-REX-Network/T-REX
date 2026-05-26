@@ -85,8 +85,8 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
         _disableInitializers();
     }
 
-    function init() external initializer {
-        __Ownable_init(msg.sender);
+    function init(address _owner) external initializer {
+        __Ownable_init(_owner);
     }
 
     /**

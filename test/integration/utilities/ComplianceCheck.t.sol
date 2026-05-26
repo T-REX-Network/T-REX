@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
+import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
@@ -43,9 +44,12 @@ contract ComplianceCheckTest is TREXSuiteTest {
         // Set compliance on mock contract
         mockContract.setCompliance(address(compliance));
 
-        // Deploy UtilityChecker
-        utilityChecker = new UtilityChecker();
-        utilityChecker.initialize();
+        // Deploy UtilityChecker via proxy
+        UtilityChecker utilityCheckerImpl = new UtilityChecker();
+        bytes memory utilityCheckerInitData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        UtilityCheckerProxy utilityCheckerProxy =
+            new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
+        utilityChecker = UtilityChecker(address(utilityCheckerProxy));
     }
 
     // ============ getTransferDetails() Tests ============

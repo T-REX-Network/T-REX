@@ -92,7 +92,8 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
                 new ERC1967Proxy(
                     address(tokenImplementation),
                     abi.encodeCall(
-                        Token.init, (pName, pSymbol, pTokenDecimals, pIdentityRegistry, pCompliance, pOnchainId)
+                        Token.init,
+                        (pName, pSymbol, pTokenDecimals, pIdentityRegistry, pCompliance, pOnchainId, address(this))
                     )
                 )
             )
