@@ -112,7 +112,6 @@ library ErrorsLib {
     error PublicDeploymentsNotAllowed();
     error PublicCannotDeployOnBehalf();
     error DiscountOutOfRange();
-    error BatchMaxLengthExceeded(uint16 lengthLimit);
 
     // TREXFactory Errors
     error InvalidClaimPattern();

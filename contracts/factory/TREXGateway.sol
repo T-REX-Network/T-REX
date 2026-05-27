@@ -164,21 +164,6 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     }
 
     /**
-     *  @dev See {ITREXGateway-batchAddDeployer}.
-     */
-    function batchAddDeployer(address[] calldata deployers) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
-        require(deployers.length <= 500, ErrorsLib.BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(!isDeployer(deployers[i]), ErrorsLib.DeployerAlreadyExists(deployers[i]));
-
-            _deployers[deployers[i]] = true;
-            emit EventsLib.DeployerAdded(deployers[i]);
-        }
-    }
-
-    /**
      *  @dev See {ITREXGateway-addDeployer}.
      */
     function addDeployer(address deployer) external override {
@@ -187,21 +172,6 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
 
         _deployers[deployer] = true;
         emit EventsLib.DeployerAdded(deployer);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchRemoveDeployer}.
-     */
-    function batchRemoveDeployer(address[] calldata deployers) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
-        require(deployers.length <= 500, ErrorsLib.BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(isDeployer(deployers[i]), ErrorsLib.DeployerDoesNotExist(deployers[i]));
-
-            delete _deployers[deployers[i]];
-            emit EventsLib.DeployerRemoved(deployers[i]);
-        }
     }
 
     /**
@@ -216,21 +186,6 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     }
 
     /**
-     *  @dev See {ITREXGateway-batchApplyFeeDiscount}.
-     */
-    function batchApplyFeeDiscount(address[] calldata deployers, uint16[] calldata discounts) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
-        require(deployers.length <= 500, ErrorsLib.BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(discounts[i] <= 10000, ErrorsLib.DiscountOutOfRange());
-
-            _feeDiscount[deployers[i]] = discounts[i];
-            emit EventsLib.FeeDiscountApplied(deployers[i], discounts[i]);
-        }
-    }
-
-    /**
      *  @dev See {ITREXGateway-applyFeeDiscount}.
      */
     function applyFeeDiscount(address deployer, uint16 discount) external override {
@@ -239,20 +194,6 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
 
         _feeDiscount[deployer] = discount;
         emit EventsLib.FeeDiscountApplied(deployer, discount);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchDeployTREXSuite}.
-     */
-    function batchDeployTREXSuite(
-        ITREXFactory.TokenDetails[] memory _tokenDetails,
-        ITREXFactory.ClaimDetails[] memory _claimDetails
-    ) external override {
-        require(_tokenDetails.length <= 5, ErrorsLib.BatchMaxLengthExceeded(5));
-
-        for (uint256 i = 0; i < _tokenDetails.length; i++) {
-            deployTREXSuite(_tokenDetails[i], _claimDetails[i]);
-        }
     }
 
     /**
