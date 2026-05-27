@@ -104,9 +104,6 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
     /// @notice Should reject zero address for Trusted Issuers Registry
     function test_init_RevertWhen_TrustedIssuersRegistryZeroAddress() public {
-        // Deploy new implementation
-        IdentityRegistry implementation = new IdentityRegistry();
-
         // Deploy proxy with zero address for Trusted Issuers Registry
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
@@ -117,9 +114,6 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
     /// @notice Should reject zero address for Claim Topics Registry
     function test_init_RevertWhen_ClaimTopicsRegistryZeroAddress() public {
-        // Deploy new implementation
-        IdentityRegistry implementation = new IdentityRegistry();
-
         // Deploy proxy with zero address for Claim Topics Registry
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
@@ -130,9 +124,6 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
     /// @notice Should reject zero address for Identity Storage
     function test_init_RevertWhen_IdentityStorageZeroAddress() public {
-        // Deploy new implementation
-        IdentityRegistry implementation = new IdentityRegistry();
-
         // Deploy proxy with zero address for Identity Storage
         address randomAddress = vm.addr(999);
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
@@ -365,7 +356,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
         bytes32[] memory claimIds = aliceIdentity.getClaimIdsByTopic(topics[0]);
 
         // claimIds[0] is already issued by ClaimIssuer in the setup
-        (, uint256 scheme, address issuer, bytes memory sig, bytes memory data,) = aliceIdentity.getClaim(claimIds[0]);
+        (,,, bytes memory sig,,) = aliceIdentity.getClaim(claimIds[0]);
 
         vm.prank(claimIssuerSigner.addr);
         claimIssuer.revokeClaimBySignature(sig);

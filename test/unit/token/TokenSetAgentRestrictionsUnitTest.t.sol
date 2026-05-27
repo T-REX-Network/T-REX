@@ -187,7 +187,7 @@ contract TokenSetAgentRestrictionsUnitTest is TokenBaseUnitTest {
         assertFalse(retrieved.disablePause);
     }
 
-    function testGetAgentRestrictionsReturnsZeroForNonAgent() public {
+    function testGetAgentRestrictionsReturnsZeroForNonAgent() public view {
         TokenRoles memory retrieved = token.getAgentRestrictions(nonAgent);
         assertFalse(retrieved.disableMint);
         assertFalse(retrieved.disableBurn);

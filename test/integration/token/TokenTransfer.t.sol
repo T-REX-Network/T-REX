@@ -391,7 +391,6 @@ contract TokenTransferTest is TREXSuiteTest {
         token.freezePartialTokens(alice, balance - 100);
 
         uint256 transferAmount = balance - 50;
-        uint256 unfreezeAmount = balance - 150;
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(token));
         emit IERC20.Transfer(alice, bob, transferAmount);

@@ -14,7 +14,7 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(expectedLocation, actualLocation, "TOKEN_STORAGE_LOCATION does not match computed value");
     }
 
-    function testTokenStorageLocationDecimals() public {
+    function testTokenStorageLocationDecimals() public view {
         bytes32 storageSlot = Utils.erc7201("token.storage.main");
 
         bytes32 slotValue = vm.load(address(token), storageSlot);
@@ -23,7 +23,7 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(storedDecimals, token.decimals(), "Decimals read from storage should match token.decimals()");
     }
 
-    function testTokenStorageLocationOnchainId() public {
+    function testTokenStorageLocationOnchainId() public view {
         bytes32 storageSlot = Utils.erc7201("token.storage.main");
 
         bytes32 slotValue = vm.load(address(token), storageSlot);
@@ -39,7 +39,7 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(expectedLocation, actualLocation, "ERC20_STORAGE_LOCATION does not match computed value");
     }
 
-    function testTokenStorageLocationERC20StorageLocation() public {
+    function testTokenStorageLocationERC20StorageLocation() public view {
         bytes32 erc20StorageLocation = Utils.erc7201("openzeppelin.storage.ERC20");
 
         // According to ERC20Storage struct:

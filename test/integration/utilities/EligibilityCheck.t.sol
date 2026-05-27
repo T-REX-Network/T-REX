@@ -94,7 +94,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
     }
 
     /// @notice Should return true because alice has claims
-    function test_getVerifiedDetails_ReturnsTrue_AfterFixture() public {
+    function test_getVerifiedDetails_ReturnsTrue_AfterFixture() public view {
         UtilityChecker.EligibilityCheckDetails[] memory results =
             utilityChecker.getVerifiedDetails(address(token), alice);
 

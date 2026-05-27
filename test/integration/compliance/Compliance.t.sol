@@ -265,7 +265,6 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.bindToken(address(token));
 
         address moduleAddress = _deployModuleNotPnPWithProxy();
-        ModuleNotPnP module = ModuleNotPnP(moduleAddress);
 
         vm.prank(deployer);
         vm.expectRevert(
@@ -679,7 +678,7 @@ contract ComplianceTest is TREXSuiteTest {
     // ============================================
 
     /// @notice Should return false for unsupported interfaces
-    function test_supportsInterface_ReturnsFalse_ForUnsupportedInterface() public {
+    function test_supportsInterface_ReturnsFalse_ForUnsupportedInterface() public view {
         bytes4 unsupportedInterfaceId = 0x12345678;
         assertFalse(compliance.supportsInterface(unsupportedInterfaceId));
     }

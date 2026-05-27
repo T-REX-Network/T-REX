@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
@@ -13,8 +12,6 @@ contract FreezeCheckTest is TREXSuiteTest {
 
     function setUp() public override {
         super.setUp();
-
-        IdentityRegistry identityRegistry = IdentityRegistry(address(token.identityRegistry()));
 
         vm.startPrank(agent);
         token.mint(alice, 1000);
@@ -63,7 +60,7 @@ contract FreezeCheckTest is TREXSuiteTest {
     }
 
     /// @notice Should return false in normal case
-    function test_getFreezeStatus_ReturnsFalse_WhenNormalCase() public {
+    function test_getFreezeStatus_ReturnsFalse_WhenNormalCase() public view {
         uint256 initialBalance = token.balanceOf(alice);
 
         (bool success, uint256 balance) = utilityChecker.getFreezeStatus(address(token), alice, bob, 100);

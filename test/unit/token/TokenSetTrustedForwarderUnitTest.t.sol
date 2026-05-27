@@ -39,7 +39,7 @@ contract TokenSetTrustedForwarderUnitTest is TokenBaseUnitTest {
         assertEq(token.trustedForwarder(), zeroAddress);
     }
 
-    function testTokenTrustedForwarderInitialValue() public {
+    function testTokenTrustedForwarderInitialValue() public view {
         // Initially should be zero address (set in constructor)
         assertEq(token.trustedForwarder(), address(0));
     }

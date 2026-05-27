@@ -53,10 +53,6 @@ contract TokenInformationTest is TREXSuiteTest {
     /// @notice Should set the name
     function test_setName_Success() public {
         string memory newName = "Updated Test Token";
-        string memory currentSymbol = token.symbol();
-        uint8 currentDecimals = token.decimals();
-        string memory currentVersion = token.version();
-        address currentOnchainID = token.onchainID();
 
         vm.prank(deployer);
         token.setName(newName);

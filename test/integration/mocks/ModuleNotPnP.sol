@@ -121,7 +121,7 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
         address
     )
         external
-        view
+        pure
         override
         returns (bool)
     {

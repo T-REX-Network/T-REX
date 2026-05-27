@@ -55,7 +55,7 @@ contract ComplianceCheckTest is TREXSuiteTest {
     // ============ getTransferDetails() Tests ============
 
     /// @notice Should return pass for single module
-    function test_getTransferDetails_ReturnsPass_ForSingleModule() public {
+    function test_getTransferDetails_ReturnsPass_ForSingleModule() public view {
         UtilityChecker.ComplianceCheckDetails[] memory results =
             utilityChecker.getTransferDetails(address(mockContract), alice, bob, 100);
 

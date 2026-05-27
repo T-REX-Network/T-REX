@@ -386,7 +386,7 @@ contract TokenERC2771UnitTest is TokenBaseUnitTest {
         uint256 gas,
         uint48 deadline,
         bytes memory data
-    ) internal returns (ERC2771Forwarder.ForwardRequestData memory request) {
+    ) internal view returns (ERC2771Forwarder.ForwardRequestData memory request) {
         uint256 nonce = forwarder.nonces(from.addr);
 
         request = ERC2771Forwarder.ForwardRequestData({
