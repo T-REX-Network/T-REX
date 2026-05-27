@@ -84,7 +84,6 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error NoTokenToRecover();
     error RecoveryNotPossible();
-    error TransferNotPossible();
     error UnverifiedIdentity();
 
     // ModularCompliance Errors

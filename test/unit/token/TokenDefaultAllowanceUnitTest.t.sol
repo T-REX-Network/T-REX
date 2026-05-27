@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -157,6 +158,26 @@ contract TokenDefaultAllowanceUnitTest is TokenBaseUnitTest {
 
         // User should have 1000 allowance
         assertEq(token.allowance(user1, spender1), 1000);
+    }
+
+    function testTokenTransferFromRevertsWhenAllowanceTooLow() public {
+        uint256 allowanceVal = 50;
+        uint256 neededVal = 100;
+
+        vm.prank(agent);
+        token.unpause();
+        vm.prank(agent);
+        token.mint(user1, 1000);
+
+        // spender1 is NOT in defaultAllowances; user1 grants only allowanceVal
+        vm.prank(user1);
+        token.approve(spender1, allowanceVal);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, spender1, allowanceVal, neededVal)
+        );
+        vm.prank(spender1);
+        token.transferFrom(user1, user2, neededVal);
     }
 
 }

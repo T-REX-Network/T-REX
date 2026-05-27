@@ -60,7 +60,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
             abi.encode(false)
         );
 
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         vm.prank(agent);
         token.forcedTransfer(from, to, transferAmount);
     }

@@ -294,13 +294,7 @@ contract Token is
         require(
             !getAgentRestrictions(_msgSender()).disableMint, ErrorsLib.AgentNotAuthorized(_msgSender(), "mint disabled")
         );
-
-        TokenStorage storage s = _tokenStorage();
-        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
-        require(s.compliance.canTransfer(address(0), to, amount), ErrorsLib.ComplianceNotFollowed());
-
         _mint(to, amount);
-        s.compliance.created(to, amount);
     }
 
     /// @inheritdoc IERC3643
@@ -308,20 +302,7 @@ contract Token is
         require(
             !getAgentRestrictions(_msgSender()).disableBurn, ErrorsLib.AgentNotAuthorized(_msgSender(), "burn disabled")
         );
-
-        uint256 balance = balanceOf(from);
-        require(balance >= amount, ERC20InsufficientBalance(from, balance, amount));
-
-        TokenStorage storage s = _tokenStorage();
-
-        uint256 freeBalance = balance - s.frozenStatus[from].amount;
-        if (amount > freeBalance) {
-            uint256 tokensToUnfreeze = amount - freeBalance;
-            s.frozenStatus[from].amount -= tokensToUnfreeze;
-            emit ERC3643EventsLib.TokensUnfrozen(from, tokensToUnfreeze);
-        }
         _burn(from, amount);
-        s.compliance.destroyed(from, amount);
     }
 
     /// @inheritdoc IERC3643
@@ -440,12 +421,10 @@ contract Token is
             ErrorsLib.RecoveryNotPossible()
         );
 
-        _transfer(lostWallet, newWallet, investorTokens);
-
         uint256 frozenTokens = s.frozenStatus[lostWallet].amount;
+        _forceUpdate(lostWallet, newWallet, investorTokens);
+
         if (frozenTokens > 0) {
-            s.frozenStatus[lostWallet].amount = 0;
-            emit ERC3643EventsLib.TokensUnfrozen(lostWallet, frozenTokens);
             s.frozenStatus[newWallet].amount += frozenTokens;
             emit ERC3643EventsLib.TokensFrozen(newWallet, frozenTokens);
         }
@@ -476,91 +455,17 @@ contract Token is
 
     /* ----- Transfer Functions ----- */
 
-    /// @inheritdoc IERC20
-    /// @notice ERC-20 overridden function that include logic to check for trade validity.
-    /// Require that the msg.sender and to addresses are not frozen.
-    /// Require that the value should not exceed available balance .
-    /// Require that the to address is a verified address
-    function transfer(address to, uint256 amount)
-        public
-        override(ERC20Upgradeable, IERC20)
-        whenNotPaused
-        returns (bool)
-    {
-        TokenStorage storage s = _tokenStorage();
-        address sender = _msgSender();
-
-        require(!s.frozenStatus[sender].addressFrozen, ErrorsLib.FrozenWallet(sender));
-        require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
-
-        uint256 balance = balanceOf(sender) - s.frozenStatus[sender].amount;
-        require(amount <= balance, IERC20Errors.ERC20InsufficientBalance(sender, balance, amount));
-
-        if (s.identityRegistry.isVerified(to) && s.compliance.canTransfer(sender, to, amount)) {
-            _transfer(sender, to, amount);
-            s.compliance.transferred(sender, to, amount);
-            return true;
-        }
-
-        revert ErrorsLib.TransferNotPossible();
-    }
-
     /// @inheritdoc IERC3643
     function forcedTransfer(address from, address to, uint256 amount) public override onlyAgent returns (bool) {
         require(
             !getAgentRestrictions(_msgSender()).disableForceTransfer,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "force transfer disabled")
         );
-
-        uint256 balance = balanceOf(from);
-        require(amount <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, amount));
-
         TokenStorage storage s = _tokenStorage();
-        uint256 freeBalance = balance - s.frozenStatus[from].amount;
-        if (amount > freeBalance) {
-            uint256 tokensToUnfreeze = amount - freeBalance;
-            s.frozenStatus[from].amount -= tokensToUnfreeze;
-            emit ERC3643EventsLib.TokensUnfrozen(from, tokensToUnfreeze);
-        }
-
-        if (s.identityRegistry.isVerified(to)) {
-            _transfer(from, to, amount);
-            s.compliance.transferred(from, to, amount);
-            return true;
-        }
-
-        revert ErrorsLib.TransferNotPossible();
-    }
-
-    /// @inheritdoc IERC20
-    /// @notice ERC-20 overridden function that include logic to check for trade validity.
-    /// Require that the from and to addresses are not frozen.
-    /// Require that the value should not exceed available balance .
-    /// Require that the to address is a verified address
-    function transferFrom(address from, address to, uint256 amount)
-        public
-        override(ERC20Upgradeable, IERC20)
-        whenNotPaused
-        returns (bool)
-    {
-        TokenStorage storage s = _tokenStorage();
-        require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
-        require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
-
-        uint256 balance = balanceOf(from) - s.frozenStatus[from].amount;
-        require(amount <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, amount));
-
-        if (s.identityRegistry.isVerified(to) && s.compliance.canTransfer(from, to, amount)) {
-            address sender = _msgSender();
-            if (!s.defaultAllowances[sender] || s.defaultAllowanceOptOuts[from]) {
-                _approve(from, sender, allowance(from, sender) - amount);
-            }
-            _transfer(from, to, amount);
-            s.compliance.transferred(from, to, amount);
-            return true;
-        }
-
-        revert ErrorsLib.TransferNotPossible();
+        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+        _forceUpdate(from, to, amount);
+        s.compliance.transferred(from, to, amount);
+        return true;
     }
 
     /// @inheritdoc IERC3643
@@ -692,6 +597,50 @@ contract Token is
     function _tokenStorage() private pure returns (TokenStorage storage $) {
         assembly {
             $.slot := TOKEN_STORAGE_LOCATION
+        }
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        TokenStorage storage s = _tokenStorage();
+        bool isMint = from == address(0);
+        bool isBurn = to == address(0);
+
+        if (!isMint && !isBurn) {
+            _requireNotPaused();
+            require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
+            require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
+            uint256 freeBalance = balanceOf(from) - s.frozenStatus[from].amount;
+            require(value <= freeBalance, IERC20Errors.ERC20InsufficientBalance(from, freeBalance, value));
+        } else if (isBurn) {
+            _autoUnfreezeFor(from, value);
+        }
+
+        if (!isBurn) {
+            require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+            require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());
+        }
+
+        super._update(from, to, value);
+
+        if (isMint) s.compliance.created(to, value);
+        else if (isBurn) s.compliance.destroyed(from, value);
+        else s.compliance.transferred(from, to, value);
+    }
+
+    function _forceUpdate(address from, address to, uint256 value) private {
+        _autoUnfreezeFor(from, value);
+        super._update(from, to, value);
+    }
+
+    function _autoUnfreezeFor(address from, uint256 value) private {
+        TokenStorage storage s = _tokenStorage();
+        uint256 balance = balanceOf(from);
+        require(value <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, value));
+        uint256 freeBalance = balance - s.frozenStatus[from].amount;
+        if (value > freeBalance) {
+            uint256 toUnfreeze = value - freeBalance;
+            s.frozenStatus[from].amount -= toUnfreeze;
+            emit ERC3643EventsLib.TokensUnfrozen(from, toUnfreeze);
         }
     }
 
