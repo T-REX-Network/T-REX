@@ -137,11 +137,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
 
         uint256[] storage claimTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
 
-        for (
-            uint256 claimTopicIndex = 0;
-            claimTopicIndex < claimTopics.length;
-            claimTopicIndex++
-        ) {
+        for (uint256 claimTopicIndex = 0; claimTopicIndex < claimTopics.length; claimTopicIndex++) {
             uint256 claimTopic = claimTopics[claimTopicIndex];
             uint256 topicsLength = s.claimTopicsToTrustedIssuers[claimTopic].length;
             for (uint256 i = 0; i < topicsLength; i++) {

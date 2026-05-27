@@ -72,11 +72,7 @@ library ERC3643EventsLib {
     // ============================================
 
     event UpdatedTokenInformation(
-        string _newName,
-        string _newSymbol,
-        uint8 _newDecimals,
-        string _newVersion,
-        address indexed _newOnchainID
+        string _newName, string _newSymbol, uint8 _newDecimals, string _newVersion, address indexed _newOnchainID
     );
 
     event IdentityRegistryAdded(address indexed _identityRegistry);

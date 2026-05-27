@@ -78,6 +78,7 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
@@ -109,6 +110,8 @@ contract Token is
 
     /// @custom:storage-location erc7201:token.storage.main
     struct TokenStorage {
+        string name;
+        string symbol;
         uint8 decimals;
         address onchainId;
         IERC3643Compliance compliance;
@@ -126,19 +129,14 @@ contract Token is
     bytes32 private constant TOKEN_STORAGE_LOCATION =
         0x3eb201768b0b55c18fa93955aeb38c6bf0f381d8227d53e1b0e5b066883d4e00;
 
-    bytes32 private constant ERC20_STORAGE_LOCATION =
-        0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00;
-    bytes32 private constant EIP712_STORAGE_LOCATION =
-        0xa16a46d94261c7517cc8ff89f61c0ce93598e3c849801011dee649a6a557d100;
-
     constructor() ERC2771ContextUpgradeable(address(0)) {
         _disableInitializers();
     }
 
     /// @dev the constructor initiates the token contract
     /// msg.sender is set automatically as the owner of the smart contract
-    /// @param name the name of the token
-    /// @param symbol the symbol of the token
+    /// @param tokenName the name of the token
+    /// @param tokenSymbol the symbol of the token
     /// @param tokenDecimals the decimals of the token
     /// @param identityRegistryAddress the address of the Identity registry linked to the token
     /// @param complianceAddress the address of the compliance contract linked to the token
@@ -148,8 +146,8 @@ contract Token is
     /// emits an `IdentityRegistryAdded` event
     /// emits a `ComplianceAdded` event
     function init(
-        string memory name,
-        string memory symbol,
+        string memory tokenName,
+        string memory tokenSymbol,
         uint8 tokenDecimals,
         address identityRegistryAddress,
         address complianceAddress,
@@ -157,15 +155,17 @@ contract Token is
         address owner
     ) external initializer {
         require(identityRegistryAddress != address(0) && complianceAddress != address(0), ErrorsLib.ZeroAddress());
-        require(bytes(name).length > 0 && bytes(symbol).length > 0, ErrorsLib.EmptyString());
+        require(bytes(tokenName).length > 0 && bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         require(tokenDecimals <= 18, ErrorsLib.DecimalsOutOfRange(tokenDecimals));
 
-        __ERC20_init(name, symbol);
-        __ERC20Permit_init(name);
+        __ERC20_init(tokenName, tokenSymbol);
+        __ERC20Permit_init(tokenName);
         __Pausable_init();
         __Ownable_init(owner);
 
         TokenStorage storage s = _tokenStorage();
+        s.name = tokenName;
+        s.symbol = tokenSymbol;
         s.decimals = tokenDecimals;
         s.onchainId = onchainIdAddress;
 
@@ -180,18 +180,16 @@ contract Token is
     /* ----- Main token properties ----- */
 
     /// @inheritdoc IERC3643
-    function setName(string calldata name) external override onlyOwner {
-        require(bytes(name).length > 0, ErrorsLib.EmptyString());
-        _erc20Storage()._name = name;
-        _eip712Storage()._name = name;
-        _eip712Storage()._hashedName = 0;
+    function setName(string calldata tokenName) external override onlyOwner {
+        require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
+        _tokenStorage().name = tokenName;
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setSymbol(string calldata symbol) external override onlyOwner {
-        require(bytes(symbol).length > 0, ErrorsLib.EmptyString());
-        _erc20Storage()._symbol = symbol;
+    function setSymbol(string calldata tokenSymbol) external override onlyOwner {
+        require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
+        _tokenStorage().symbol = tokenSymbol;
         _emitUpdatedTokenInformation();
     }
 
@@ -223,6 +221,21 @@ contract Token is
         emit ERC3643EventsLib.ComplianceAdded(_compliance);
     }
 
+    /// @inheritdoc IERC20Metadata
+    function name() public view override(ERC20Upgradeable, IERC20Metadata) returns (string memory) {
+        return _tokenStorage().name;
+    }
+
+    /// @inheritdoc IERC20Metadata
+    function symbol() public view override(ERC20Upgradeable, IERC20Metadata) returns (string memory) {
+        return _tokenStorage().symbol;
+    }
+
+    /// @inheritdoc IERC20Metadata
+    function decimals() public view override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
+        return _tokenStorage().decimals;
+    }
+
     /// @inheritdoc IERC3643
     function onchainID() external view override returns (address) {
         return _tokenStorage().onchainId;
@@ -241,6 +254,10 @@ contract Token is
     /// @inheritdoc IERC3643
     function version() public pure override returns (string memory) {
         return VERSION;
+    }
+
+    function _EIP712Name() internal view override returns (string memory) {
+        return name();
     }
 
     /* ----- Pause Functions ----- */
@@ -675,18 +692,6 @@ contract Token is
     function _tokenStorage() private pure returns (TokenStorage storage $) {
         assembly {
             $.slot := TOKEN_STORAGE_LOCATION
-        }
-    }
-
-    function _erc20Storage() private pure returns (ERC20Upgradeable.ERC20Storage storage $) {
-        assembly {
-            $.slot := ERC20_STORAGE_LOCATION
-        }
-    }
-
-    function _eip712Storage() private pure returns (EIP712Upgradeable.EIP712Storage storage $) {
-        assembly {
-            $.slot := EIP712_STORAGE_LOCATION
         }
     }
 
