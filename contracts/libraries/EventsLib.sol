@@ -112,7 +112,7 @@ library EventsLib {
     event Deployed(address indexed addr);
     event IdFactorySet(address idFactory);
     event TREXSuiteDeployed(
-        address indexed token, address ir, address irs, address tir, address ctr, address mc, string indexed salt
+        address indexed token, address ir, address irs, address tir, address ctr, address mc, string salt
     );
 
     // TREXGateway Events

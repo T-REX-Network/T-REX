@@ -72,8 +72,8 @@ library ERC3643EventsLib {
     // ============================================
 
     event UpdatedTokenInformation(
-        string indexed _newName,
-        string indexed _newSymbol,
+        string _newName,
+        string _newSymbol,
         uint8 _newDecimals,
         string _newVersion,
         address indexed _newOnchainID

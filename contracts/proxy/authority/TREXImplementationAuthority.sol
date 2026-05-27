@@ -147,7 +147,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     }
 
     /**
-     *  @dev See {ITREXImplementationAuthority-fetchVersionList}.
+     *  @dev See {ITREXImplementationAuthority-fetchVersion}.
      */
     function fetchVersion(Version calldata _version) external override {
         require(!isReferenceContract(), ErrorsLib.CannotCallOnReferenceContract());
