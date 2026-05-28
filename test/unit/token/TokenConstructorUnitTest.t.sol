@@ -15,7 +15,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
         Token newToken = new Token();
 
         vm.expectRevert(abi.encodeWithSelector(Initializable.InvalidInitialization.selector));
-        newToken.init("", "", 0, address(0), address(0), address(0), address(0));
+        newToken.init("", "", 0, address(0), address(0), address(0), address(0), new address[](0));
     }
 
 }

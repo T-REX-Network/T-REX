@@ -114,6 +114,7 @@ library ErrorsLib {
     error DiscountOutOfRange();
 
     // TREXFactory Errors
+    error AddressPredictionMismatch();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);

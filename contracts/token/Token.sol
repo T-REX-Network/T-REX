@@ -134,17 +134,22 @@ contract Token is
     }
 
     /// @dev the constructor initiates the token contract
-    /// msg.sender is set automatically as the owner of the smart contract
     /// @param tokenName the name of the token
     /// @param tokenSymbol the symbol of the token
     /// @param tokenDecimals the decimals of the token
     /// @param identityRegistryAddress the address of the Identity registry linked to the token
     /// @param complianceAddress the address of the compliance contract linked to the token
+    ///     The factory pre-binds the predicted Token CREATE3 address in MC.init, so Token.init does NOT
+    ///     call `bindToken` itself — the wiring is already in place by the time this code runs.
     /// @param onchainIdAddress the address of the onchainID of the token
     ///     onchainID can be zero address if not set, can be set later by the owner
+    /// @param owner final owner of the token, applied directly via `__Ownable_init(owner)` — no transient
+    ///     factory ownership
+    /// @param tokenAgents addresses to grant the agent role at init time; capped at 5
     /// emits an `UpdatedTokenInformation` event
     /// emits an `IdentityRegistryAdded` event
     /// emits a `ComplianceAdded` event
+    /// emits an `AgentAdded` event for each entry in `tokenAgents`
     function init(
         string memory tokenName,
         string memory tokenSymbol,
@@ -152,11 +157,16 @@ contract Token is
         address identityRegistryAddress,
         address complianceAddress,
         address onchainIdAddress,
-        address owner
+        address owner,
+        address[] calldata tokenAgents
     ) external initializer {
-        require(identityRegistryAddress != address(0) && complianceAddress != address(0), ErrorsLib.ZeroAddress());
+        require(
+            identityRegistryAddress != address(0) && complianceAddress != address(0) && owner != address(0),
+            ErrorsLib.ZeroAddress()
+        );
         require(bytes(tokenName).length > 0 && bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         require(tokenDecimals <= 18, ErrorsLib.DecimalsOutOfRange(tokenDecimals));
+        require(tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5));
 
         __ERC20_init(tokenName, tokenSymbol);
         __ERC20Permit_init(tokenName);
@@ -171,8 +181,11 @@ contract Token is
 
         s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
         s.compliance = IERC3643Compliance(complianceAddress);
-        s.compliance.bindToken(address(this));
         _emitUpdatedTokenInformation();
+
+        for (uint256 i = 0; i < tokenAgents.length; i++) {
+            _addAgent(tokenAgents[i]);
+        }
 
         _pause();
     }

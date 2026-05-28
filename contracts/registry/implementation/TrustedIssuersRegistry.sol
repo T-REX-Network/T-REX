@@ -99,8 +99,16 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
 
     /// Functions
 
-    function init(address _owner) external initializer {
+    function init(address _owner, address[] calldata _issuers, uint256[][] calldata _issuerClaims)
+        external
+        initializer
+    {
+        require(_issuers.length == _issuerClaims.length, ErrorsLib.InvalidClaimPattern());
+        require(_issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
         __Ownable_init(_owner);
+        for (uint256 i = 0; i < _issuers.length; i++) {
+            _addTrustedIssuer(IClaimIssuer(_issuers[i]), _issuerClaims[i]);
+        }
     }
 
     /**
@@ -111,19 +119,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
         override
         onlyOwner
     {
-        require(address(_trustedIssuer) != address(0), ErrorsLib.ZeroAddress());
-
-        Storage storage s = _getStorage();
-        require(!s.trustedIssuers.contains(address(_trustedIssuer)), ErrorsLib.TrustedIssuerAlreadyExists());
-        require(_claimTopics.length > 0, ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
-        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
-        require(s.trustedIssuers.length() < 50, ErrorsLib.MaxTrustedIssuersReached(50));
-        s.trustedIssuers.add(address(_trustedIssuer));
-        s.trustedIssuerClaimTopics[address(_trustedIssuer)] = _claimTopics;
-        for (uint256 i = 0; i < _claimTopics.length; i++) {
-            s.claimTopicsToTrustedIssuers[_claimTopics[i]].push(_trustedIssuer);
-        }
-        emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
+        _addTrustedIssuer(_trustedIssuer, _claimTopics);
     }
 
     /**
@@ -248,6 +244,22 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
         return interfaceId == type(IERC3643TrustedIssuersRegistry).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function _addTrustedIssuer(IClaimIssuer _trustedIssuer, uint256[] memory _claimTopics) internal {
+        require(address(_trustedIssuer) != address(0), ErrorsLib.ZeroAddress());
+
+        Storage storage s = _getStorage();
+        require(!s.trustedIssuers.contains(address(_trustedIssuer)), ErrorsLib.TrustedIssuerAlreadyExists());
+        require(_claimTopics.length > 0, ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(s.trustedIssuers.length() < 50, ErrorsLib.MaxTrustedIssuersReached(50));
+        s.trustedIssuers.add(address(_trustedIssuer));
+        s.trustedIssuerClaimTopics[address(_trustedIssuer)] = _claimTopics;
+        for (uint256 i = 0; i < _claimTopics.length; i++) {
+            s.claimTopicsToTrustedIssuers[_claimTopics[i]].push(_trustedIssuer);
+        }
+        emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

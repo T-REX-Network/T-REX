@@ -98,8 +98,11 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
         _disableInitializers();
     }
 
-    function init(address _owner) external initializer {
+    function init(address _owner, address _initialIR) external initializer {
         __Ownable_init(_owner);
+        if (_initialIR != address(0)) {
+            _bindIdentityRegistry(_initialIR);
+        }
     }
 
     /**
@@ -158,12 +161,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
      *  @dev See {IIdentityRegistryStorage-bindIdentityRegistry}.
      */
     function bindIdentityRegistry(address _identityRegistry) external override onlyOwner {
-        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(s.identityRegistries.length() < 300, ErrorsLib.MaxIRByIRSReached(300));
-        addAgent(_identityRegistry);
-        s.identityRegistries.add(_identityRegistry);
-        emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
+        _bindIdentityRegistry(_identityRegistry);
     }
 
     /**
@@ -206,6 +204,17 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    /// @dev Internal helper shared between the public `bindIdentityRegistry` (gated by `onlyOwner`) and the
+    ///      `init` flow where the factory pre-binds the identity registry it predicted via CREATE3.
+    function _bindIdentityRegistry(address _identityRegistry) internal {
+        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
+        Storage storage s = _getStorage();
+        require(s.identityRegistries.length() < 300, ErrorsLib.MaxIRByIRSReached(300));
+        _addAgent(_identityRegistry);
+        s.identityRegistries.add(_identityRegistry);
+        emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

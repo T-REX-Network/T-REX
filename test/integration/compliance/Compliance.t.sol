@@ -42,10 +42,9 @@ contract ComplianceTest is TREXSuiteTest {
         moduleAddress = address(moduleProxy);
     }
 
-    /// @notice Helper to deploy ModularCompliance with proxy
+    /// @notice Helper to deploy ModularCompliance with proxy in a fresh, unbound state owned by `deployer`.
     function _deployModularComplianceWithProxy(address implementationAuthority) internal returns (ModularCompliance) {
-        ModularComplianceProxy proxy = new ModularComplianceProxy(implementationAuthority, address(this));
-        ModularCompliance newCompliance = ModularCompliance(address(proxy));
+        ModularCompliance newCompliance = _newUnboundComplianceProxy(implementationAuthority);
 
         newCompliance.transferOwnership(deployer);
         vm.prank(deployer);
@@ -73,7 +72,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should prevent calling init twice
     function test_init_RevertWhen_CalledTwice() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        compliance.init(deployer);
+        compliance.init(address(token), deployer, new address[](0), new bytes[](0));
     }
 
     // ============================================
@@ -83,7 +82,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should revert when implementation authority is zero address
     function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new ModularComplianceProxy(address(0), deployer);
+        new ModularComplianceProxy(address(0), address(token), deployer, new address[](0), new bytes[](0));
     }
 
     /// @notice Should revert when initialization fails (invalid implementation)
@@ -115,7 +114,7 @@ contract ComplianceTest is TREXSuiteTest {
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
         // because MockContract doesn't have init() function, causing InitializationFailed() revert
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new ModularComplianceProxy(address(incompleteIA), deployer);
+        new ModularComplianceProxy(address(incompleteIA), address(token), deployer, new address[](0), new bytes[](0));
     }
 
     // ============================================

@@ -34,6 +34,8 @@ abstract contract TokenBaseUnitTest is Test {
     }
 
     function setUp() public virtual {
+        address[] memory initialAgents = new address[](1);
+        initialAgents[0] = agent;
         token = Token(
             address(
                 new TokenProxy(
@@ -44,12 +46,11 @@ abstract contract TokenBaseUnitTest is Test {
                     "TKN",
                     18,
                     address(onchainId),
-                    address(this)
+                    address(this),
+                    initialAgents
                 )
             )
         );
-
-        token.addAgent(agent);
     }
 
     function mockImplementationAuthority() internal {

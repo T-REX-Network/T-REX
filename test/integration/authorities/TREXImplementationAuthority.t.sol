@@ -3,10 +3,10 @@ pragma solidity 0.8.30;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
+import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
-import { ModularCompliance, ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import { IAFactory } from "contracts/proxy/authority/IAFactory.sol";
 import {
     ITREXImplementationAuthority,
@@ -281,9 +281,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         vm.prank(deployer);
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
-        ModularComplianceProxy complianceProxy =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
-        ModularCompliance newCompliance = ModularCompliance(address(complianceProxy));
+        ModularCompliance newCompliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         newCompliance.transferOwnership(deployer);
         vm.prank(deployer);
         newCompliance.acceptOwnership();
@@ -307,11 +305,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
-        ModularCompliance(address(compliance)).acceptOwnership();
+        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -348,11 +345,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
-        ModularCompliance(address(compliance)).acceptOwnership();
+        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -378,11 +374,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
-        ModularCompliance(address(compliance)).acceptOwnership();
+        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -418,11 +413,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(this));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         Ownable(address(compliance)).transferOwnership(deployer);
         vm.prank(deployer);
-        ModularCompliance(address(compliance)).acceptOwnership();
+        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 

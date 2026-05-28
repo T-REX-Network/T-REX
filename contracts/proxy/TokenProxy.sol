@@ -77,12 +77,14 @@ contract TokenProxy is AbstractProxy {
         string memory _symbol,
         uint8 _decimals,
         address _onchainID,
-        address _owner
+        address _owner,
+        address[] memory _tokenAgents
     ) AbstractProxy(implementationAuthority) {
         (bool success,) = getLogic()
             .delegatecall(
                 abi.encodeCall(
-                    Token.init, (_name, _symbol, _decimals, _identityRegistry, _compliance, _onchainID, _owner)
+                    Token.init,
+                    (_name, _symbol, _decimals, _identityRegistry, _compliance, _onchainID, _owner, _tokenAgents)
                 )
             );
         require(success, ErrorsLib.InitializationFailed());

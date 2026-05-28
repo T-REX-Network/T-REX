@@ -85,22 +85,19 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
         _disableInitializers();
     }
 
-    function init(address _owner) external initializer {
+    function init(address _owner, uint256[] calldata _initialTopics) external initializer {
+        require(_initialTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
         __Ownable_init(_owner);
+        for (uint256 i = 0; i < _initialTopics.length; i++) {
+            _addClaimTopic(_initialTopics[i]);
+        }
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-addClaimTopic}.
      */
     function addClaimTopic(uint256 claimTopic) external override onlyOwner {
-        Storage storage s = _getStorage();
-        uint256 length = s.claimTopics.length;
-        require(length < 15, ErrorsLib.MaxTopicsReached(15));
-        for (uint256 i = 0; i < length; i++) {
-            require(s.claimTopics[i] != claimTopic, ErrorsLib.ClaimTopicAlreadyExists());
-        }
-        s.claimTopics.push(claimTopic);
-        emit ERC3643EventsLib.ClaimTopicAdded(claimTopic);
+        _addClaimTopic(claimTopic);
     }
 
     /**
@@ -132,6 +129,17 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
     function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
         return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function _addClaimTopic(uint256 claimTopic) internal {
+        Storage storage s = _getStorage();
+        uint256 length = s.claimTopics.length;
+        require(length < 15, ErrorsLib.MaxTopicsReached(15));
+        for (uint256 i = 0; i < length; i++) {
+            require(s.claimTopics[i] != claimTopic, ErrorsLib.ClaimTopicAlreadyExists());
+        }
+        s.claimTopics.push(claimTopic);
+        emit ERC3643EventsLib.ClaimTopicAdded(claimTopic);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

@@ -12,6 +12,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TREXGateway } from "contracts/factory/TREXGateway.sol";
+import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
@@ -20,6 +21,7 @@ import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopi
 import { IERC3643IdentityRegistry, IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { AbstractAgentRole } from "contracts/roles/AbstractAgentRole.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { Countries } from "test/integration/helpers/Countries.sol";
@@ -159,8 +161,6 @@ contract TREXSuiteTest is Test {
         address tokenAddress = trexFactory.getToken(salt);
         vm.label(tokenAddress, symbol);
 
-        _setOwnership(tokenAddress);
-
         return Token(tokenAddress);
     }
 
@@ -204,27 +204,21 @@ contract TREXSuiteTest is Test {
         address tokenAddress = trexFactory.getToken(salt);
         vm.label(tokenAddress, symbol);
 
-        _setOwnership(tokenAddress);
-
         return Token(tokenAddress);
     }
 
-    function _setOwnership(address tokenAddress) internal {
-        Token ptoken = Token(tokenAddress);
-
-        vm.startPrank(deployer);
-        ptoken.acceptOwnership();
-        Ownable2Step(address(ptoken.compliance())).acceptOwnership();
-        Ownable2Step(address(ptoken.identityRegistry())).acceptOwnership();
-        Ownable2Step(address(ptoken.identityRegistry().issuersRegistry())).acceptOwnership();
-        Ownable2Step(address(ptoken.identityRegistry().topicsRegistry())).acceptOwnership();
-        vm.stopPrank();
-
-        Ownable2Step irs = Ownable2Step(address(ptoken.identityRegistry().identityStorage()));
-        vm.prank(irs.owner());
-        irs.transferOwnership(deployer);
-        vm.prank(deployer);
-        irs.acceptOwnership();
+    /// @notice Deploys a fresh ModularCompliance proxy with no token bound and ownership held by `address(this)`.
+    ///         Initializes with a sentinel token then unbinds it so the resulting MC is in a clean unbound state,
+    ///         ready to be wired to a token via `setCompliance` (Token-self-bind path) by the caller.
+    function _newUnboundComplianceProxy(address implementationAuthority_) internal returns (ModularCompliance) {
+        address sentinel = address(uint160(uint256(keccak256("trex.test.unboundMC.sentinel"))));
+        address[] memory noModules = new address[](0);
+        bytes[] memory noSettings = new bytes[](0);
+        ModularComplianceProxy proxy =
+            new ModularComplianceProxy(implementationAuthority_, sentinel, address(this), noModules, noSettings);
+        ModularCompliance freshCompliance = ModularCompliance(address(proxy));
+        freshCompliance.unbindToken(sentinel);
+        return freshCompliance;
     }
 
     function getTREXContracts() public view returns (ITREXImplementationAuthority.TREXContracts memory) {
@@ -272,6 +266,39 @@ contract TREXSuiteTest is Test {
 
         vm.prank(_caller);
         _identity.addClaim(_claimTopic, 1, _claimIssuer, signature, _claimData, "uri");
+    }
+
+    /// @notice Regression guard for the part-1..7 refactor: after `deployTREXSuite` returns, the factory
+    ///         must hold no role on any suite contract. None of the 6 suite contracts may be owned by the
+    ///         factory or have a pending-owner state, and the factory must not be an agent on any of the
+    ///         three AgentRole-bearing contracts (IR, IRS, Token).
+    function _assertFactoryHoldsNothing(
+        address factory_,
+        address ctr,
+        address tir,
+        address irs,
+        address ir,
+        address mc,
+        address token_
+    ) internal view {
+        // ownership: none of the 6 suite contracts should be factory-owned
+        assertNotEq(Ownable2Step(ctr).owner(), factory_, "CTR.owner must not be the factory");
+        assertNotEq(Ownable2Step(tir).owner(), factory_, "TIR.owner must not be the factory");
+        assertNotEq(Ownable2Step(irs).owner(), factory_, "IRS.owner must not be the factory");
+        assertNotEq(Ownable2Step(ir).owner(), factory_, "IR.owner must not be the factory");
+        assertNotEq(Ownable2Step(mc).owner(), factory_, "MC.owner must not be the factory");
+        assertNotEq(Ownable2Step(token_).owner(), factory_, "Token.owner must not be the factory");
+        // no pending-owner state on any suite contract
+        assertEq(Ownable2Step(ctr).pendingOwner(), address(0), "CTR must have no pending owner");
+        assertEq(Ownable2Step(tir).pendingOwner(), address(0), "TIR must have no pending owner");
+        assertEq(Ownable2Step(irs).pendingOwner(), address(0), "IRS must have no pending owner");
+        assertEq(Ownable2Step(ir).pendingOwner(), address(0), "IR must have no pending owner");
+        assertEq(Ownable2Step(mc).pendingOwner(), address(0), "MC must have no pending owner");
+        assertEq(Ownable2Step(token_).pendingOwner(), address(0), "Token must have no pending owner");
+        // factory must not hold the agent role on any AgentRole-bearing contract
+        assertFalse(AbstractAgentRole(ir).isAgent(factory_), "Factory must not be agent on IR");
+        assertFalse(AbstractAgentRole(irs).isAgent(factory_), "Factory must not be agent on IRS");
+        assertFalse(AbstractAgentRole(token_).isAgent(factory_), "Factory must not be agent on Token");
     }
 
 }

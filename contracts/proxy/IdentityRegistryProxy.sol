@@ -74,12 +74,15 @@ contract IdentityRegistryProxy is AbstractProxy {
         address _trustedIssuersRegistry,
         address _claimTopicsRegistry,
         address _identityStorage,
-        address _owner
+        address _owner,
+        address[] memory _irAgents,
+        address _tokenAddress
     ) AbstractProxy(implementationAuthority) {
         (bool success,) = getLogic()
             .delegatecall(
                 abi.encodeCall(
-                    IdentityRegistry.init, (_trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage, _owner)
+                    IdentityRegistry.init,
+                    (_trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage, _owner, _irAgents, _tokenAddress)
                 )
             );
         require(success, ErrorsLib.InitializationFailed());

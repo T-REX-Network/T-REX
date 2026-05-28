@@ -102,6 +102,9 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
      *  @param trustedIssuersRegistryAddress the trusted issuers registry linked to the Identity Registry
      *  @param claimTopicsRegistryAddress the claim topics registry linked to the Identity Registry
      *  @param identityStorageAddress the identity registry storage linked to the Identity Registry
+     *  @param _owner final owner of the Identity Registry (no intermediate factory ownership)
+     *  @param _irAgents initial set of agents (capped at 5) — granted via the shared internal `_addAgent` helper
+     *         so the factory can pre-bake the Token's CREATE3 address into the IR at init time
      *  emits a `ClaimTopicsRegistrySet` event
      *  emits a `TrustedIssuersRegistrySet` event
      *  emits an `IdentityStorageSet` event
@@ -110,13 +113,16 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
         address trustedIssuersRegistryAddress,
         address claimTopicsRegistryAddress,
         address identityStorageAddress,
-        address _owner
+        address _owner,
+        address[] calldata _irAgents,
+        address _tokenAddress
     ) external initializer {
         require(
             trustedIssuersRegistryAddress != address(0) && claimTopicsRegistryAddress != address(0)
                 && identityStorageAddress != address(0),
             ErrorsLib.ZeroAddress()
         );
+        require(_irAgents.length <= 5, ErrorsLib.MaxAgentsReached(5));
         Storage storage s = _getStorage();
         s.tokenTopicsRegistry = IClaimTopicsRegistry(claimTopicsRegistryAddress);
         s.tokenIssuersRegistry = ITrustedIssuersRegistry(trustedIssuersRegistryAddress);
@@ -129,6 +135,11 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
         emit EventsLib.EligibilityChecksEnabled();
 
         __Ownable_init(_owner);
+
+        _addAgent(_tokenAddress);
+        for (uint256 i = 0; i < _irAgents.length; i++) {
+            _addAgent(_irAgents[i]);
+        }
     }
 
     /**

@@ -102,8 +102,39 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         _disableInitializers();
     }
 
-    function init(address _owner) external initializer {
+    /**
+     *  @dev Initializes the modular compliance with its final owner, the bound token, the initial set of
+     *       modules and matching module settings.
+     *  @param _token address of the token bound to this compliance — pre-computed via CREATE3 by the factory so
+     *         the compliance never needs the deprecated `Token-self-bind` indirection
+     *  @param _owner final owner of the compliance (no intermediate factory ownership)
+     *  @param _modules initial set of modules to bind (capped at 25 — matches the existing post-init cap)
+     *  @param _moduleSettings optional per-module settings forwarded via `_callModuleFunction` after each module is
+     *         bound. `_moduleSettings.length` must be `<= _modules.length`; settings beyond `_modules.length` are
+     *         not accepted
+     *  emits a `TokenBound` event
+     *  emits a `ModuleAdded` event for each module
+     *  emits a `ModuleInteraction` event for each `_moduleSettings[i]` applied
+     */
+    function init(address _token, address _owner, address[] calldata _modules, bytes[] calldata _moduleSettings)
+        external
+        initializer
+    {
+        require(_token != address(0) && _owner != address(0), ErrorsLib.ZeroAddress());
+        require(_modules.length >= _moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
+        require(_modules.length <= 25, ErrorsLib.MaxModulesReached(25));
+
         __Ownable_init(_owner);
+        _bindToken(_token);
+
+        for (uint256 i = 0; i < _modules.length; i++) {
+            if (!_getStorage().modules.contains(_modules[i])) {
+                _addModule(_modules[i]);
+            }
+            if (i < _moduleSettings.length) {
+                _callModuleFunction(_moduleSettings[i], _modules[i]);
+            }
+        }
     }
 
     /**
@@ -115,9 +146,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
             owner() == msg.sender || (s.tokenBound == address(0) && msg.sender == _token),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
-        require(_token != address(0), ErrorsLib.ZeroAddress());
-        s.tokenBound = _token;
-        emit ERC3643EventsLib.TokenBound(_token);
+        _bindToken(_token);
     }
 
     /**
@@ -190,9 +219,9 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      */
     function addAndSetModule(address _module, bytes[] calldata _interactions) external override onlyOwner {
         require(_interactions.length <= 5, ErrorsLib.ArraySizeLimited(5));
-        addModule(_module);
+        _addModule(_module);
         for (uint256 i = 0; i < _interactions.length; i++) {
-            callModuleFunction(_interactions[i], _module);
+            _callModuleFunction(_interactions[i], _module);
         }
     }
 
@@ -243,6 +272,36 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      *  @dev See {IModularCompliance-addModule}.
      */
     function addModule(address _module) public override onlyOwner {
+        _addModule(_module);
+    }
+
+    /**
+     *  @dev see {IModularCompliance-callModuleFunction}.
+     */
+    function callModuleFunction(bytes calldata callData, address _module) public override onlyOwner {
+        _callModuleFunction(callData, _module);
+    }
+
+    /**
+     *  @dev See {IERC165-supportsInterface}.
+     */
+    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+        return interfaceId == type(IModularCompliance).interfaceId
+            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
+    }
+
+    /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
+    ///      No caller check — the public `bindToken` wrapper enforces the owner/Token-self-bind policy.
+    function _bindToken(address _token) internal {
+        require(_token != address(0), ErrorsLib.ZeroAddress());
+        _getStorage().tokenBound = _token;
+        emit ERC3643EventsLib.TokenBound(_token);
+    }
+
+    /// @dev Binds a module to the compliance with the existing validation rules (zero check, duplicate check,
+    ///      cap of 25, plug-and-play / canComplianceBind requirement). No caller check — wrappers enforce it.
+    function _addModule(address _module) internal {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(!s.modules.contains(_module), ErrorsLib.ModuleAlreadyBound());
@@ -258,10 +317,10 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         emit EventsLib.ModuleAdded(_module);
     }
 
-    /**
-     *  @dev see {IModularCompliance-callModuleFunction}.
-     */
-    function callModuleFunction(bytes calldata callData, address _module) public override onlyOwner {
+    /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
+    ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check —
+    ///      wrappers enforce it.
+    function _callModuleFunction(bytes calldata callData, address _module) internal {
         require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
         // NOTE: Use assembly to call the interaction instead of a low level
         // call for two reasons:
@@ -293,15 +352,6 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         }
 
         emit EventsLib.ModuleInteraction(_module, _selector(callData));
-    }
-
-    /**
-     *  @dev See {IERC165-supportsInterface}.
-     */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
-        return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @dev Extracts the Solidity ABI selector for the specified interaction.

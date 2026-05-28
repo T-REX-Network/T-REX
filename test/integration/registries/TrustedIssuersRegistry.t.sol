@@ -353,7 +353,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
     /// @notice Should revert when implementation authority is zero address
     function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TrustedIssuersRegistryProxy(address(0), deployer);
+        new TrustedIssuersRegistryProxy(address(0), deployer, new address[](0), new uint256[][](0));
     }
 
     /// @notice Should revert when initialization fails (invalid implementation)
@@ -385,7 +385,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
         // because MockContract doesn't have init() function, causing InitializationFailed() revert
         vm.expectRevert(ErrorsLib.InitializationFailed.selector);
-        new TrustedIssuersRegistryProxy(address(incompleteIA), deployer);
+        new TrustedIssuersRegistryProxy(address(incompleteIA), deployer, new address[](0), new uint256[][](0));
     }
 
 }
