@@ -128,7 +128,7 @@ abstract contract AbstractProxy is IProxy, Initializable {
         // solhint-disable-next-line no-inline-assembly
         assembly {
             calldatacopy(0x0, 0x0, calldatasize())
-            let success := delegatecall(sub(gas(), 10000), logic, 0x0, calldatasize(), 0, 0)
+            let success := delegatecall(gas(), logic, 0x0, calldatasize(), 0, 0)
             let retSz := returndatasize()
             returndatacopy(0, 0, retSz)
             switch success

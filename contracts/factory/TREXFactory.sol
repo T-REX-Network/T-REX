@@ -62,12 +62,11 @@
 pragma solidity ^0.8.30;
 
 import { IIdFactory } from "@onchain-id/solidity/contracts/factory/IIdFactory.sol";
-import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
+
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
-import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
@@ -79,11 +78,8 @@ import { ModularComplianceProxy } from "../proxy/ModularComplianceProxy.sol";
 import { TokenProxy } from "../proxy/TokenProxy.sol";
 import { TrustedIssuersRegistryProxy } from "../proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
-import { IClaimTopicsRegistry } from "../registry/interface/IClaimTopicsRegistry.sol";
-import { IIdentityRegistry } from "../registry/interface/IIdentityRegistry.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
-import { ITrustedIssuersRegistry } from "../registry/interface/ITrustedIssuersRegistry.sol";
-import { IToken } from "../token/IToken.sol";
+import { Create3 } from "../vendor/openzeppelin/Create3.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
 contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
@@ -94,7 +90,7 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
     /// the address of the Identity Factory used to deploy token OIDs
     address private _idFactory;
 
-    /// mapping containing info about the token contracts corresponding to salt already used for CREATE2 deployments
+    /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
     constructor(address implementationAuthority, address idFactory, address accessManager)
@@ -107,96 +103,105 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuite}.
+     *
+     *  The deployment uses CREATE3 so each suite contract address is a pure function of (factory, salt,
+     *  contractType). That determinism lets the factory pre-compute the Token address and bake it into the
+     *  ModularCompliance (token binding) and into the on-chain identity wiring before the Token itself is deployed.
+     *
+     *  Initial claim topics, trusted issuers and compliance modules are baked into the respective `init()`s
+     *  (CTR / TIR / MC) — there are no post-deploy `addClaimTopic` / `addTrustedIssuer` / `addModule` loops.
+     *
+     *  Access control is delegated entirely to the shared AccessManager: per-contract function roles are wired via
+     *  {AccessManagerSetupLib} and the agent/admin roles are granted on the AccessManager. The factory must hold the
+     *  admin role (roleId 0) on the provided AccessManager.
      */
     // solhint-disable-next-line code-complexity, function-max-lines
-    function deployTREXSuite(
-        string memory _salt,
-        TokenDetails calldata _tokenDetails,
-        ClaimDetails calldata _claimDetails
-    ) external override restricted {
-        require(tokenDeployed[_salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
+    function deployTREXSuite(string memory salt, TokenDetails calldata tokenDetails, ClaimDetails calldata claimDetails)
+        external
+        override
+        restricted
+    {
+        require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
 
-        IAccessManager accessManager = IAccessManager(_tokenDetails.accessManager);
-        require(address(accessManager) != address(0), ErrorsLib.ZeroAddress());
+        require(tokenDetails.accessManager != address(0), ErrorsLib.ZeroAddress());
         {
-            (bool hasAdminRole,) = accessManager.hasRole(0, address(this));
+            (bool hasAdminRole,) = IAccessManager(tokenDetails.accessManager).hasRole(0, address(this));
             require(hasAdminRole, ErrorsLib.FactoryMissingAdminRoleOnAccessManager());
         }
 
-        require((_claimDetails.issuers).length == (_claimDetails.issuerClaims).length, ErrorsLib.InvalidClaimPattern());
-        require((_claimDetails.issuers).length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
-        require((_claimDetails.claimTopics).length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
+        require((claimDetails.issuers).length == (claimDetails.issuerClaims).length, ErrorsLib.InvalidClaimPattern());
+        require((claimDetails.issuers).length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
+        require((claimDetails.claimTopics).length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
         require(
-            (_tokenDetails.irAgents).length <= 5 && (_tokenDetails.tokenAgents).length <= 5,
-            ErrorsLib.MaxAgentsReached(5)
+            (tokenDetails.irAgents).length <= 5 && (tokenDetails.tokenAgents).length <= 5, ErrorsLib.MaxAgentsReached(5)
         );
-        require((_tokenDetails.complianceModules).length <= 30, ErrorsLib.MaxModuleActionsReached(30));
+        require((tokenDetails.complianceModules).length <= 30, ErrorsLib.MaxModuleActionsReached(30));
         require(
-            (_tokenDetails.complianceModules).length >= (_tokenDetails.complianceSettings).length,
+            (tokenDetails.complianceModules).length >= (tokenDetails.complianceSettings).length,
             ErrorsLib.InvalidCompliancePattern()
         );
 
-        ITrustedIssuersRegistry tir =
-            ITrustedIssuersRegistry(_deployTIR(_salt, _implementationAuthority, accessManager));
-        AccessManagerSetupLib.setupTrustedIssuersRegistryRoles(accessManager, address(tir));
+        address tir = _deployTIR(salt, tokenDetails.accessManager, claimDetails.issuers, claimDetails.issuerClaims);
+        address ctr = _deployCTR(salt, tokenDetails.accessManager, claimDetails.claimTopics);
+        address mc = _deployMC(salt, tokenDetails, tokenDetails.accessManager);
 
-        IClaimTopicsRegistry ctr = IClaimTopicsRegistry(_deployCTR(_salt, _implementationAuthority, accessManager));
-        AccessManagerSetupLib.setupClaimTopicsRegistryRoles(accessManager, address(ctr));
+        address irs = tokenDetails.irs == address(0) ? _deployIRS(salt, tokenDetails.accessManager) : tokenDetails.irs;
 
-        IModularCompliance mc = IModularCompliance(_deployMC(_salt, _implementationAuthority, accessManager));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc));
+        address ir = _deployIR(salt, tir, ctr, irs, tokenDetails.accessManager);
+        require(ir == _predictAddress(salt, "IR"), ErrorsLib.AddressPredictionMismatch());
 
-        IIdentityRegistryStorage irs;
-        if (_tokenDetails.irs == address(0)) {
-            irs = IIdentityRegistryStorage(_deployIRS(_salt, _implementationAuthority, accessManager));
-        } else {
-            irs = IIdentityRegistryStorage(_tokenDetails.irs);
+        address token = _deployToken(salt, tokenDetails, ir, mc, tokenDetails.accessManager);
+
+        // Wire all AccessManager roles / grants / binding (kept out of this frame to bound stack usage).
+        _wireSuiteRoles(tokenDetails, tir, ctr, mc, irs, ir, token);
+
+        tokenDeployed[salt] = token;
+
+        emit EventsLib.TREXSuiteDeployed(token, ir, irs, tir, ctr, mc, salt);
+    }
+
+    /**
+     * @dev Configures the per-contract function roles on the AccessManager (via {AccessManagerSetupLib}) and grants
+     *      the agent / admin / identity-admin roles for the freshly deployed suite. Binding the IR to the IRS grants
+     *      the IR the AGENT role so it can write to the IRS.
+     */
+    function _wireSuiteRoles(
+        TokenDetails calldata tokenDetails,
+        address tir,
+        address ctr,
+        address mc,
+        address irs,
+        address ir,
+        address token
+    ) private {
+        IAccessManager accessManager = IAccessManager(tokenDetails.accessManager);
+
+        AccessManagerSetupLib.setupTrustedIssuersRegistryRoles(accessManager, tir);
+        AccessManagerSetupLib.setupClaimTopicsRegistryRoles(accessManager, ctr);
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc);
+
+        if (tokenDetails.irs == address(0)) {
+            AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs);
+            // The IRS must be able to grant the AGENT role to the Identity Registries it binds.
+            accessManager.grantRole(0, irs, 0);
         }
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs));
-        accessManager.grantRole(0, address(irs), 0);
 
-        IIdentityRegistry ir = IIdentityRegistry(
-            _deployIR(_salt, _implementationAuthority, address(tir), address(ctr), address(irs), accessManager)
-        );
-        AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, address(ir));
+        AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, ir);
 
-        IToken token = IToken(_deployToken(_salt, _implementationAuthority, address(ir), address(mc), _tokenDetails));
-        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token));
-        accessManager.grantRole(RolesLib.AGENT, address(token), 0);
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(token), 0);
+        AccessManagerSetupLib.setupTokenRoles(accessManager, token);
+        accessManager.grantRole(RolesLib.AGENT, token, 0);
+        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, token, 0);
 
-        if (_tokenDetails.ONCHAINID == address(0)) {
-            address _tokenID = IIdFactory(_idFactory).createTokenIdentity(address(token), _tokenDetails.owner, _salt);
-            token.setOnchainID(_tokenID);
-        }
-        for (uint256 i = 0; i < (_claimDetails.claimTopics).length; i++) {
-            ctr.addClaimTopic(_claimDetails.claimTopics[i]);
-        }
-        for (uint256 i = 0; i < (_claimDetails.issuers).length; i++) {
-            tir.addTrustedIssuer(IClaimIssuer((_claimDetails).issuers[i]), _claimDetails.issuerClaims[i]);
-        }
-        irs.bindIdentityRegistry(address(ir));
-        accessManager.grantRole(RolesLib.AGENT, address(irs), 0);
+        // Binding grants the AGENT role to the IR on the AccessManager so it can write to the IRS.
+        IIdentityRegistryStorage(irs).bindIdentityRegistry(ir);
+        accessManager.grantRole(RolesLib.AGENT, irs, 0);
 
-        for (uint256 i = 0; i < (_tokenDetails.irAgents).length; i++) {
-            accessManager.grantRole(RolesLib.AGENT, _tokenDetails.irAgents[i], 0);
+        for (uint256 i = 0; i < (tokenDetails.irAgents).length; i++) {
+            accessManager.grantRole(RolesLib.AGENT, tokenDetails.irAgents[i], 0);
         }
-        for (uint256 i = 0; i < (_tokenDetails.tokenAgents).length; i++) {
-            accessManager.grantRole(RolesLib.AGENT, _tokenDetails.tokenAgents[i], 0);
+        for (uint256 i = 0; i < (tokenDetails.tokenAgents).length; i++) {
+            accessManager.grantRole(RolesLib.AGENT, tokenDetails.tokenAgents[i], 0);
         }
-        for (uint256 i = 0; i < (_tokenDetails.complianceModules).length; i++) {
-            if (!mc.isModuleBound(_tokenDetails.complianceModules[i])) {
-                mc.addModule(_tokenDetails.complianceModules[i]);
-            }
-            if (i < (_tokenDetails.complianceSettings).length) {
-                mc.callModuleFunction(_tokenDetails.complianceSettings[i], _tokenDetails.complianceModules[i]);
-            }
-        }
-        tokenDeployed[_salt] = address(token);
-
-        emit EventsLib.TREXSuiteDeployed(
-            address(token), address(ir), address(irs), address(tir), address(ctr), address(mc), _salt
-        );
     }
 
     /**
@@ -216,8 +221,8 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
     /**
      *  @dev See {ITREXFactory-getToken}.
      */
-    function getToken(string calldata _salt) external view override returns (address) {
-        return tokenDeployed[_salt];
+    function getToken(string calldata salt) external view override returns (address) {
+        return tokenDeployed[salt];
     }
 
     /**
@@ -256,110 +261,153 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
         emit EventsLib.IdFactorySet(idFactory);
     }
 
-    /// deploy function with create2 opcode call
-    /// returns the address of the contract created
-    function _deploy(string memory salt, bytes memory bytecode) private returns (address) {
-        bytes32 saltBytes = bytes32(keccak256(abi.encodePacked(salt)));
-        address addr;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            let encoded_data := add(0x20, bytecode) // load initialization code.
-            let encoded_size := mload(bytecode) // load init code's length.
-            addr := create2(0, encoded_data, encoded_size, saltBytes)
-            if iszero(extcodesize(addr)) {
-                revert(0, 0)
-            }
-        }
+    /**
+     * @dev Deploys a contract using CREATE3
+     * @param salt Base salt for deployment
+     * @param contractType Contract type identifier (e.g., "TIR", "CTR")
+     * @param bytecode Full creation bytecode including constructor parameters
+     */
+    function _deploy(string memory salt, string memory contractType, bytes memory bytecode) internal returns (address) {
+        address addr = Create3.deploy(0, saltBytes(salt, contractType), bytecode);
         emit EventsLib.Deployed(addr);
         return addr;
     }
 
-    /// function used to deploy a trusted issuers registry using CREATE2
-    function _deployTIR(string memory _salt, address implementationAuthority_, IAccessManager accessManager_)
+    /**
+     * @dev Returns the address at which `_deploy(salt, contractType, ...)` would land.
+     *      Pure function of (factory address, salt, contractType) — bytecode does not influence the result under
+     *      CREATE3, which lets the factory pre-compute one suite contract's address while feeding it into another
+     *      contract's constructor (e.g. pre-binding the Token address into the ModularCompliance proxy).
+     */
+    function _predictAddress(string memory salt, string memory contractType) internal view returns (address) {
+        return Create3.computeAddress(saltBytes(salt, contractType), address(this));
+    }
+
+    /**
+     * @dev Computes the CREATE3 salt for a given (salt, contractType) pair.
+     *      Salt layout (32 bytes) — preserved from the previous CreateX integration so the per-factory address
+     *      derivation stays unchanged should an operator deploy this factory at the same address on multiple
+     *      chains.
+     *      1) 20 bytes: factory address
+     *      2) 1 byte: 0x00
+     *      3) 11 bytes: bytes11(keccak256(salt, contractType))
+     *
+     *      The contractType discriminator prevents the 6 suite contracts from colliding on a single CREATE3 slot
+     *      (they all share the user-provided salt).
+     */
+    function saltBytes(string memory salt, string memory contractType) private view returns (bytes32) {
+        return bytes32(
+            abi.encodePacked(address(this), bytes1(0x00), bytes11(keccak256(abi.encodePacked(salt, contractType))))
+        );
+    }
+
+    /// function used to deploy a trusted issuers registry using CREATE3
+    function _deployTIR(
+        string memory salt,
+        address accessManager,
+        address[] memory issuers,
+        uint256[][] memory issuerClaims
+    ) private returns (address) {
+        bytes memory code = type(TrustedIssuersRegistryProxy).creationCode;
+        bytes memory constructData = abi.encode(_implementationAuthority, accessManager, issuers, issuerClaims);
+        bytes memory bytecode = abi.encodePacked(code, constructData);
+        return _deploy(salt, "TIR", bytecode);
+    }
+
+    /// function used to deploy a claim topics registry using CREATE3
+    function _deployCTR(string memory salt, address accessManager, uint256[] memory _initialTopics)
         private
         returns (address)
     {
-        bytes memory _code = type(TrustedIssuersRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_, address(accessManager_));
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, bytecode);
+        bytes memory code = type(ClaimTopicsRegistryProxy).creationCode;
+        bytes memory constructData = abi.encode(_implementationAuthority, accessManager, _initialTopics);
+        bytes memory bytecode = abi.encodePacked(code, constructData);
+        return _deploy(salt, "CTR", bytecode);
     }
 
-    /// function used to deploy a claim topics registry using CREATE2
-    function _deployCTR(string memory _salt, address implementationAuthority_, IAccessManager accessManager_)
+    /// function used to deploy modular compliance contract using CREATE3.
+    /// The Token's predicted CREATE3 address is baked in so the compliance binds the Token at init time.
+    function _deployMC(string memory salt, TokenDetails calldata tokenDetails, address accessManager)
         private
         returns (address)
     {
-        bytes memory _code = type(ClaimTopicsRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_, address(accessManager_));
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, bytecode);
+        bytes memory code = type(ModularComplianceProxy).creationCode;
+        bytes memory constructData = abi.encode(
+            _implementationAuthority,
+            accessManager,
+            _predictAddress(salt, "Token"),
+            tokenDetails.complianceModules,
+            tokenDetails.complianceSettings
+        );
+        bytes memory bytecode = abi.encodePacked(code, constructData);
+        return _deploy(salt, "MC", bytecode);
     }
 
-    /// function used to deploy modular compliance contract using CREATE2
-    function _deployMC(string memory _salt, address implementationAuthority_, IAccessManager accessManager_)
-        private
-        returns (address)
-    {
-        bytes memory _code = type(ModularComplianceProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_, address(accessManager_));
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, bytecode);
+    /// function used to deploy an identity registry storage using CREATE3
+    function _deployIRS(string memory salt, address accessManager) private returns (address) {
+        bytes memory code = type(IdentityRegistryStorageProxy).creationCode;
+        bytes memory constructData = abi.encode(_implementationAuthority, accessManager);
+        bytes memory bytecode = abi.encodePacked(code, constructData);
+        return _deploy(salt, "IRS", bytecode);
     }
 
-    /// function used to deploy an identity registry storage using CREATE2
-    function _deployIRS(string memory _salt, address implementationAuthority_, IAccessManager accessManager_)
-        private
-        returns (address)
-    {
-        bytes memory _code = type(IdentityRegistryStorageProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_, address(accessManager_));
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, bytecode);
-    }
-
-    /// function used to deploy an identity registry using CREATE2
+    /// function used to deploy an identity registry using CREATE3
     function _deployIR(
         string memory salt,
-        address implementationAuthorityAddress,
-        address trustedIssuersRegistryAddress,
-        address claimTopicsRegistryAddress,
-        address identityStorageAddress,
-        IAccessManager accessManager
+        address trustedIssuersRegistry,
+        address claimTopicsRegistry,
+        address identityStorage,
+        address accessManager
     ) private returns (address) {
         bytes memory code = type(IdentityRegistryProxy).creationCode;
         bytes memory constructData = abi.encode(
-            implementationAuthorityAddress,
-            trustedIssuersRegistryAddress,
-            claimTopicsRegistryAddress,
-            identityStorageAddress,
-            address(accessManager)
+            _implementationAuthority, trustedIssuersRegistry, claimTopicsRegistry, identityStorage, accessManager
         );
         bytes memory bytecode = abi.encodePacked(code, constructData);
-        return _deploy(salt, bytecode);
+        return _deploy(salt, "IR", bytecode);
     }
 
-    /// function used to deploy a token using CREATE2
+    /// Resolve the OID (caller-supplied or freshly minted via `IIdFactory.createTokenIdentity` against the Token's
+    /// predicted CREATE3 address) and deploy the Token proxy. Asserts the deployed Token's CREATE3 address matches
+    /// the prediction reused by the MC + OID wiring.
     function _deployToken(
-        string memory _salt,
-        address implementationAuthority_,
-        address _identityRegistry,
-        address _compliance,
-        TokenDetails calldata _tokenDetails
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        address identityRegistry,
+        address compliance,
+        address accessManager
     ) private returns (address) {
-        bytes memory _code = type(TokenProxy).creationCode;
-        bytes memory _constructData = abi.encode(
-            implementationAuthority_,
-            _identityRegistry,
-            _compliance,
-            _tokenDetails.name,
-            _tokenDetails.symbol,
-            _tokenDetails.decimals,
-            _tokenDetails.ONCHAINID,
-            _tokenDetails.accessManager
+        address token = _deploy(
+            salt, "Token", _tokenBytecode(salt, tokenDetails, identityRegistry, compliance, accessManager)
         );
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, bytecode);
+        require(token == _predictAddress(salt, "Token"), ErrorsLib.AddressPredictionMismatch());
+        return token;
+    }
+
+    function _tokenBytecode(
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        address identityRegistry,
+        address compliance,
+        address accessManager
+    ) private returns (bytes memory) {
+        address oid = tokenDetails.ONCHAINID;
+        if (oid == address(0)) {
+            oid = IIdFactory(_idFactory).createTokenIdentity(_predictAddress(salt, "Token"), tokenDetails.owner, salt);
+        }
+        return abi.encodePacked(
+            type(TokenProxy).creationCode,
+            abi.encode(
+                _implementationAuthority,
+                identityRegistry,
+                compliance,
+                tokenDetails.name,
+                tokenDetails.symbol,
+                tokenDetails.decimals,
+                oid,
+                accessManager
+            )
+        );
     }
 
 }

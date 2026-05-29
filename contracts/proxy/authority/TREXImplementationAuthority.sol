@@ -152,12 +152,12 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, A
         override
         restricted
     {
-        addTREXVersion(_version, _trex);
-        useTREXVersion(_version);
+        _addTREXVersion(_version, _trex);
+        _useTREXVersion(_version);
     }
 
     /**
-     *  @dev See {ITREXImplementationAuthority-fetchVersionList}.
+     *  @dev See {ITREXImplementationAuthority-fetchVersion}.
      */
     function fetchVersion(Version calldata _version) external override {
         require(!isReferenceContract(), ErrorsLib.CannotCallOnReferenceContract());
@@ -291,6 +291,10 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, A
      *  @dev See {ITREXImplementationAuthority-addTREXVersion}.
      */
     function addTREXVersion(Version calldata _version, TREXContracts calldata _trex) public override restricted {
+        _addTREXVersion(_version, _trex);
+    }
+
+    function _addTREXVersion(Version calldata _version, TREXContracts calldata _trex) internal {
         require(isReferenceContract(), ErrorsLib.OnlyReferenceContractCanCall());
         require(
             _contracts[_versionToBytes(_version)].tokenImplementation == address(0), ErrorsLib.VersionAlreadyExists()
@@ -311,6 +315,10 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, A
      *  @dev See {ITREXImplementationAuthority-useTREXVersion}.
      */
     function useTREXVersion(Version calldata _version) public override restricted {
+        _useTREXVersion(_version);
+    }
+
+    function _useTREXVersion(Version calldata _version) internal {
         require(_versionToBytes(_version) != _versionToBytes(_currentVersion), ErrorsLib.VersionAlreadyInUse());
         require(_contracts[_versionToBytes(_version)].tokenImplementation != address(0), ErrorsLib.NonExistingVersion());
 

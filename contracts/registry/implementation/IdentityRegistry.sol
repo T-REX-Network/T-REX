@@ -102,10 +102,10 @@ contract IdentityRegistry is IIdentityRegistry, OwnableUpgradeable, AccessManage
     }
 
     /// @notice Initializes the contract
-    /// @param accessManagerAddress the address of the access manager
     /// @param trustedIssuersRegistryAddress the address of the trusted issuers registry
     /// @param claimTopicsRegistryAddress the address of the claim topics registry
     /// @param identityStorageAddress the address of the identity registry storage
+    /// @param accessManagerAddress the address of the access manager
     function init(
         address trustedIssuersRegistryAddress,
         address claimTopicsRegistryAddress,
@@ -128,8 +128,8 @@ contract IdentityRegistry is IIdentityRegistry, OwnableUpgradeable, AccessManage
         emit ERC3643EventsLib.IdentityStorageSet(identityStorageAddress);
         emit EventsLib.EligibilityChecksEnabled();
 
-        __Ownable_init(accessManagerAddress);
         __AccessManaged_init(accessManagerAddress);
+        __Ownable_init(accessManagerAddress);
     }
 
     /**

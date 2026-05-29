@@ -83,7 +83,6 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error NoTokenToRecover();
     error RecoveryNotPossible();
-    error TransferNotPossible();
     error UnverifiedIdentity();
 
     // ModularCompliance Errors
@@ -111,10 +110,10 @@ library ErrorsLib {
     error PublicDeploymentsNotAllowed();
     error PublicCannotDeployOnBehalf();
     error DiscountOutOfRange();
-    error BatchMaxLengthExceeded(uint16 lengthLimit);
 
     // TREXFactory Errors
     error FactoryMissingAdminRoleOnAccessManager();
+    error AddressPredictionMismatch();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);

@@ -16,8 +16,17 @@ contract AbstractProxyTest is TREXSuiteTest {
     function setUp() public override {
         super.setUp();
         // Deploy ModularComplianceProxy (which inherits from AbstractProxy)
-        proxy =
-            IProxy(address(new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager))));
+        proxy = IProxy(
+            address(
+                new ModularComplianceProxy(
+                    address(trexImplementationAuthority),
+                    address(accessManager),
+                    address(token),
+                    new address[](0),
+                    new bytes[](0)
+                )
+            )
+        );
     }
 
     // ============ setImplementationAuthority() Tests ============

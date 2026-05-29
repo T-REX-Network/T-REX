@@ -82,6 +82,7 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
@@ -115,6 +116,8 @@ contract Token is
 
     /// @custom:storage-location erc7201:token.storage.main
     struct TokenStorage {
+        string name;
+        string symbol;
         uint8 decimals;
         address onchainId;
         IERC3643Compliance compliance;
@@ -132,30 +135,27 @@ contract Token is
     bytes32 private constant TOKEN_STORAGE_LOCATION =
         0x3eb201768b0b55c18fa93955aeb38c6bf0f381d8227d53e1b0e5b066883d4e00;
 
-    bytes32 private constant ERC20_STORAGE_LOCATION =
-        0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00;
-    bytes32 private constant EIP712_STORAGE_LOCATION =
-        0xa16a46d94261c7517cc8ff89f61c0ce93598e3c849801011dee649a6a557d100;
-
     constructor() ERC2771ContextUpgradeable(address(0)) {
         _disableInitializers();
     }
 
     /// @dev the constructor initiates the token contract
-    /// msg.sender is set automatically as the owner of the smart contract
-    /// @param name the name of the token
-    /// @param symbol the symbol of the token
+    /// @param tokenName the name of the token
+    /// @param tokenSymbol the symbol of the token
     /// @param tokenDecimals the decimals of the token
     /// @param identityRegistryAddress the address of the Identity registry linked to the token
     /// @param complianceAddress the address of the compliance contract linked to the token
+    ///     The factory pre-binds the predicted Token CREATE3 address in MC.init, so Token.init does NOT
+    ///     call `bindToken` itself — the wiring is already in place by the time this code runs.
     /// @param onchainIdAddress the address of the onchainID of the token
     ///     onchainID can be zero address if not set, can be set later by the owner
+    /// @param accessManagerAddress the address of the AccessManager contract
     /// emits an `UpdatedTokenInformation` event
     /// emits an `IdentityRegistryAdded` event
     /// emits a `ComplianceAdded` event
     function init(
-        string memory name,
-        string memory symbol,
+        string memory tokenName,
+        string memory tokenSymbol,
         uint8 tokenDecimals,
         address identityRegistryAddress,
         address complianceAddress,
@@ -163,21 +163,23 @@ contract Token is
         address accessManagerAddress
     ) external initializer {
         require(identityRegistryAddress != address(0) && complianceAddress != address(0), ErrorsLib.ZeroAddress());
-        require(bytes(name).length > 0 && bytes(symbol).length > 0, ErrorsLib.EmptyString());
+        require(bytes(tokenName).length > 0 && bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         require(tokenDecimals <= 18, ErrorsLib.DecimalsOutOfRange(tokenDecimals));
 
-        __ERC20_init(name, symbol);
-        __ERC20Permit_init(name);
+        __ERC20_init(tokenName, tokenSymbol);
+        __ERC20Permit_init(tokenName);
         __Pausable_init();
         __AccessManaged_init(accessManagerAddress);
         __Ownable_init(accessManagerAddress);
 
         TokenStorage storage s = _tokenStorage();
+        s.name = tokenName;
+        s.symbol = tokenSymbol;
         s.decimals = tokenDecimals;
         s.onchainId = onchainIdAddress;
 
-        _setIdentityRegistry(identityRegistryAddress);
-        _setCompliance(complianceAddress);
+        s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        s.compliance = IERC3643Compliance(complianceAddress);
         _emitUpdatedTokenInformation();
 
         _pause();
@@ -186,18 +188,16 @@ contract Token is
     /* ----- Main token properties ----- */
 
     /// @inheritdoc IERC3643
-    function setName(string calldata name) external override restricted {
-        require(bytes(name).length > 0, ErrorsLib.EmptyString());
-        _erc20Storage()._name = name;
-        _eip712Storage()._name = name;
-        _eip712Storage()._hashedName = 0;
+    function setName(string calldata tokenName) external override restricted {
+        require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
+        _tokenStorage().name = tokenName;
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setSymbol(string calldata symbol) external override restricted {
-        require(bytes(symbol).length > 0, ErrorsLib.EmptyString());
-        _erc20Storage()._symbol = symbol;
+    function setSymbol(string calldata tokenSymbol) external override restricted {
+        require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
+        _tokenStorage().symbol = tokenSymbol;
         _emitUpdatedTokenInformation();
     }
 
@@ -209,21 +209,17 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function setIdentityRegistry(address _identityRegistry) external override restricted {
-        _setIdentityRegistry(_identityRegistry);
-    }
+    function setIdentityRegistry(address _identityRegistry) public override restricted {
+        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
 
-    function _setIdentityRegistry(address _identityRegistry) internal {
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryAdded(_identityRegistry);
     }
 
     /// @inheritdoc IERC3643
-    function setCompliance(address _compliance) external override restricted {
-        _setCompliance(_compliance);
-    }
+    function setCompliance(address _compliance) public override restricted {
+        require(_compliance != address(0), ErrorsLib.ZeroAddress());
 
-    function _setCompliance(address _compliance) internal {
         TokenStorage storage s = _tokenStorage();
         if (address(s.compliance) != address(0)) {
             s.compliance.unbindToken(address(this));
@@ -231,6 +227,21 @@ contract Token is
         s.compliance = IERC3643Compliance(_compliance);
         s.compliance.bindToken(address(this));
         emit ERC3643EventsLib.ComplianceAdded(_compliance);
+    }
+
+    /// @inheritdoc IERC20Metadata
+    function name() public view override(ERC20Upgradeable, IERC20Metadata) returns (string memory) {
+        return _tokenStorage().name;
+    }
+
+    /// @inheritdoc IERC20Metadata
+    function symbol() public view override(ERC20Upgradeable, IERC20Metadata) returns (string memory) {
+        return _tokenStorage().symbol;
+    }
+
+    /// @inheritdoc IERC20Metadata
+    function decimals() public view override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
+        return _tokenStorage().decimals;
     }
 
     /// @inheritdoc IERC3643
@@ -251,6 +262,10 @@ contract Token is
     /// @inheritdoc IERC3643
     function version() public pure override returns (string memory) {
         return VERSION;
+    }
+
+    function _EIP712Name() internal view override returns (string memory) {
+        return name();
     }
 
     /* ----- Pause Functions ----- */
@@ -274,29 +289,12 @@ contract Token is
 
     /// @inheritdoc IERC3643
     function mint(address to, uint256 amount) public override restricted {
-        TokenStorage storage s = _tokenStorage();
-        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
-        require(s.compliance.canTransfer(address(0), to, amount), ErrorsLib.ComplianceNotFollowed());
-
         _mint(to, amount);
-        s.compliance.created(to, amount);
     }
 
     /// @inheritdoc IERC3643
     function burn(address from, uint256 amount) public override restricted {
-        uint256 balance = balanceOf(from);
-        require(balance >= amount, ERC20InsufficientBalance(from, balance, amount));
-
-        TokenStorage storage s = _tokenStorage();
-
-        uint256 freeBalance = balance - s.frozenStatus[from].amount;
-        if (amount > freeBalance) {
-            uint256 tokensToUnfreeze = amount - freeBalance;
-            s.frozenStatus[from].amount -= tokensToUnfreeze;
-            emit ERC3643EventsLib.TokensUnfrozen(from, tokensToUnfreeze);
-        }
         _burn(from, amount);
-        s.compliance.destroyed(from, amount);
     }
 
     /// @inheritdoc IERC3643
@@ -395,12 +393,10 @@ contract Token is
             ErrorsLib.RecoveryNotPossible()
         );
 
-        _transfer(lostWallet, newWallet, investorTokens);
-
         uint256 frozenTokens = s.frozenStatus[lostWallet].amount;
+        _forceUpdate(lostWallet, newWallet, investorTokens);
+
         if (frozenTokens > 0) {
-            s.frozenStatus[lostWallet].amount = 0;
-            emit ERC3643EventsLib.TokensUnfrozen(lostWallet, frozenTokens);
             s.frozenStatus[newWallet].amount += frozenTokens;
             emit ERC3643EventsLib.TokensFrozen(newWallet, frozenTokens);
         }
@@ -431,86 +427,13 @@ contract Token is
 
     /* ----- Transfer Functions ----- */
 
-    /// @inheritdoc IERC20
-    /// @notice ERC-20 overridden function that include logic to check for trade validity.
-    /// Require that the msg.sender and to addresses are not frozen.
-    /// Require that the value should not exceed available balance .
-    /// Require that the to address is a verified address
-    function transfer(address to, uint256 amount)
-        public
-        override(ERC20Upgradeable, IERC20)
-        whenNotPaused
-        returns (bool)
-    {
-        TokenStorage storage s = _tokenStorage();
-        address sender = _msgSender();
-
-        require(!s.frozenStatus[sender].addressFrozen, ErrorsLib.FrozenWallet(sender));
-        require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
-
-        uint256 balance = balanceOf(sender) - s.frozenStatus[sender].amount;
-        require(amount <= balance, IERC20Errors.ERC20InsufficientBalance(sender, balance, amount));
-
-        if (s.identityRegistry.isVerified(to) && s.compliance.canTransfer(sender, to, amount)) {
-            _transfer(sender, to, amount);
-            s.compliance.transferred(sender, to, amount);
-            return true;
-        }
-
-        revert ErrorsLib.TransferNotPossible();
-    }
-
     /// @inheritdoc IERC3643
     function forcedTransfer(address from, address to, uint256 amount) public override restricted returns (bool) {
-        uint256 balance = balanceOf(from);
-        require(amount <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, amount));
-
         TokenStorage storage s = _tokenStorage();
-        uint256 freeBalance = balance - s.frozenStatus[from].amount;
-        if (amount > freeBalance) {
-            uint256 tokensToUnfreeze = amount - freeBalance;
-            s.frozenStatus[from].amount -= tokensToUnfreeze;
-            emit ERC3643EventsLib.TokensUnfrozen(from, tokensToUnfreeze);
-        }
-
-        if (s.identityRegistry.isVerified(to)) {
-            _transfer(from, to, amount);
-            s.compliance.transferred(from, to, amount);
-            return true;
-        }
-
-        revert ErrorsLib.TransferNotPossible();
-    }
-
-    /// @inheritdoc IERC20
-    /// @notice ERC-20 overridden function that include logic to check for trade validity.
-    /// Require that the from and to addresses are not frozen.
-    /// Require that the value should not exceed available balance .
-    /// Require that the to address is a verified address
-    function transferFrom(address from, address to, uint256 amount)
-        public
-        override(ERC20Upgradeable, IERC20)
-        whenNotPaused
-        returns (bool)
-    {
-        TokenStorage storage s = _tokenStorage();
-        require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
-        require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
-
-        uint256 balance = balanceOf(from) - s.frozenStatus[from].amount;
-        require(amount <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, amount));
-
-        if (s.identityRegistry.isVerified(to) && s.compliance.canTransfer(from, to, amount)) {
-            address sender = _msgSender();
-            if (!s.defaultAllowances[sender] || s.defaultAllowanceOptOuts[from]) {
-                _approve(from, sender, allowance(from, sender) - amount);
-            }
-            _transfer(from, to, amount);
-            s.compliance.transferred(from, to, amount);
-            return true;
-        }
-
-        revert ErrorsLib.TransferNotPossible();
+        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+        _forceUpdate(from, to, amount);
+        s.compliance.transferred(from, to, amount);
+        return true;
     }
 
     /// @inheritdoc IERC3643
@@ -616,15 +539,47 @@ contract Token is
         }
     }
 
-    function _erc20Storage() private pure returns (ERC20Upgradeable.ERC20Storage storage $) {
-        assembly {
-            $.slot := ERC20_STORAGE_LOCATION
+    function _update(address from, address to, uint256 value) internal override {
+        TokenStorage storage s = _tokenStorage();
+        bool isMint = from == address(0);
+        bool isBurn = to == address(0);
+
+        if (!isMint && !isBurn) {
+            _requireNotPaused();
+            require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
+            require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
+            uint256 freeBalance = balanceOf(from) - s.frozenStatus[from].amount;
+            require(value <= freeBalance, IERC20Errors.ERC20InsufficientBalance(from, freeBalance, value));
+        } else if (isBurn) {
+            _autoUnfreezeFor(from, value);
         }
+
+        if (!isBurn) {
+            require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+            require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());
+        }
+
+        super._update(from, to, value);
+
+        if (isMint) s.compliance.created(to, value);
+        else if (isBurn) s.compliance.destroyed(from, value);
+        else s.compliance.transferred(from, to, value);
     }
 
-    function _eip712Storage() private pure returns (EIP712Upgradeable.EIP712Storage storage $) {
-        assembly {
-            $.slot := EIP712_STORAGE_LOCATION
+    function _forceUpdate(address from, address to, uint256 value) private {
+        _autoUnfreezeFor(from, value);
+        super._update(from, to, value);
+    }
+
+    function _autoUnfreezeFor(address from, uint256 value) private {
+        TokenStorage storage s = _tokenStorage();
+        uint256 balance = balanceOf(from);
+        require(value <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, value));
+        uint256 freeBalance = balance - s.frozenStatus[from].amount;
+        if (value > freeBalance) {
+            uint256 toUnfreeze = value - freeBalance;
+            s.frozenStatus[from].amount -= toUnfreeze;
+            emit ERC3643EventsLib.TokensUnfrozen(from, toUnfreeze);
         }
     }
 

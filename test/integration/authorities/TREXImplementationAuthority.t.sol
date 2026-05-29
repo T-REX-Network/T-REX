@@ -2,15 +2,14 @@
 pragma solidity ^0.8.30;
 
 import { console } from "@forge-std/console.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
+import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
-import { ModularCompliance, ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import { IAFactory } from "contracts/proxy/authority/IAFactory.sol";
 import {
     ITREXImplementationAuthority,
@@ -273,11 +272,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         vm.prank(deployer);
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
-        ModularComplianceProxy complianceProxy =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager));
-        ModularCompliance newCompliance = ModularCompliance(address(complianceProxy));
-        vm.prank(accessManagerAdmin);
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(newCompliance));
+        ModularCompliance newCompliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         vm.prank(deployer);
         token.setCompliance(address(newCompliance));
 
@@ -298,8 +293,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        vm.prank(deployer);
         token.setCompliance(address(compliance));
 
         // Deploy another reference IA with different version
@@ -339,8 +334,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        vm.prank(deployer);
         token.setCompliance(address(compliance));
 
         // Deploy another reference IA - it already has version 4.0.0 set up from deploy()
@@ -365,8 +360,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -397,8 +391,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         // Replace compliance with a new one
-        ModularComplianceProxy compliance =
-            new ModularComplianceProxy(address(trexImplementationAuthority), address(accessManager));
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        vm.prank(deployer);
         token.setCompliance(address(compliance));
 
         // Change to the reference contract itself (getReferenceContract() returns this IA)

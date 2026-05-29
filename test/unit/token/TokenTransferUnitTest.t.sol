@@ -78,7 +78,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
             abi.encode(false)
         );
 
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         vm.prank(from);
         token.transfer(to, transferAmount);
     }
@@ -90,7 +90,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
             abi.encode(false)
         );
 
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
         vm.prank(from);
         token.transfer(to, transferAmount);
     }
@@ -129,11 +129,12 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenTransferFromRevertsWhenInsufficientBalance() public {
-        // Approve spender
-        vm.prank(from);
-        token.approve(spender, transferAmount);
-
         uint256 excessiveAmount = mintAmount - frozenAmount + 1;
+
+        // Approve spender for the attempted excessive amount so allowance check passes
+        // and the free-balance check inside _update fires the expected error.
+        vm.prank(from);
+        token.approve(spender, excessiveAmount);
 
         // Freeze some tokens
         vm.prank(agent);
@@ -159,7 +160,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
             abi.encode(false)
         );
 
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         vm.prank(spender);
         token.transferFrom(from, to, transferAmount);
     }
@@ -175,7 +176,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
             abi.encode(false)
         );
 
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
         vm.prank(spender);
         token.transferFrom(from, to, transferAmount);
     }

@@ -64,6 +64,7 @@ pragma solidity ^0.8.30;
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
@@ -75,6 +76,8 @@ import { ITREXFactory } from "./ITREXFactory.sol";
 import { ITREXGateway } from "./ITREXGateway.sol";
 
 contract TREXGateway is ITREXGateway, Ownable, AccessManaged, AgentRole, IERC165 {
+
+    using SafeERC20 for IERC20;
 
     /// address of the TREX Factory that is managed by the Gateway
     address private _factory;
@@ -157,20 +160,6 @@ contract TREXGateway is ITREXGateway, Ownable, AccessManaged, AgentRole, IERC165
     }
 
     /**
-     *  @dev See {ITREXGateway-batchAddDeployer}.
-     */
-    function batchAddDeployer(address[] calldata deployers) external override restricted {
-        require(deployers.length <= 500, ErrorsLib.BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(!isDeployer(deployers[i]), ErrorsLib.DeployerAlreadyExists(deployers[i]));
-
-            _deployers[deployers[i]] = true;
-            emit EventsLib.DeployerAdded(deployers[i]);
-        }
-    }
-
-    /**
      *  @dev See {ITREXGateway-addDeployer}.
      */
     function addDeployer(address deployer) external override restricted {
@@ -178,20 +167,6 @@ contract TREXGateway is ITREXGateway, Ownable, AccessManaged, AgentRole, IERC165
 
         _deployers[deployer] = true;
         emit EventsLib.DeployerAdded(deployer);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchRemoveDeployer}.
-     */
-    function batchRemoveDeployer(address[] calldata deployers) external override restricted {
-        require(deployers.length <= 500, ErrorsLib.BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(isDeployer(deployers[i]), ErrorsLib.DeployerDoesNotExist(deployers[i]));
-
-            delete _deployers[deployers[i]];
-            emit EventsLib.DeployerRemoved(deployers[i]);
-        }
     }
 
     /**
@@ -205,24 +180,6 @@ contract TREXGateway is ITREXGateway, Ownable, AccessManaged, AgentRole, IERC165
     }
 
     /**
-     *  @dev See {ITREXGateway-batchApplyFeeDiscount}.
-     */
-    function batchApplyFeeDiscount(address[] calldata deployers, uint16[] calldata discounts)
-        external
-        override
-        restricted
-    {
-        require(deployers.length <= 500, ErrorsLib.BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(discounts[i] <= 10000, ErrorsLib.DiscountOutOfRange());
-
-            _feeDiscount[deployers[i]] = discounts[i];
-            emit EventsLib.FeeDiscountApplied(deployers[i], discounts[i]);
-        }
-    }
-
-    /**
      *  @dev See {ITREXGateway-applyFeeDiscount}.
      */
     function applyFeeDiscount(address deployer, uint16 discount) external override restricted {
@@ -230,20 +187,6 @@ contract TREXGateway is ITREXGateway, Ownable, AccessManaged, AgentRole, IERC165
 
         _feeDiscount[deployer] = discount;
         emit EventsLib.FeeDiscountApplied(deployer, discount);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchDeployTREXSuite}.
-     */
-    function batchDeployTREXSuite(
-        ITREXFactory.TokenDetails[] memory _tokenDetails,
-        ITREXFactory.ClaimDetails[] memory _claimDetails
-    ) external override {
-        require(_tokenDetails.length <= 5, ErrorsLib.BatchMaxLengthExceeded(5));
-
-        for (uint256 i = 0; i < _tokenDetails.length; i++) {
-            deployTREXSuite(_tokenDetails[i], _claimDetails[i]);
-        }
     }
 
     /**
@@ -291,7 +234,7 @@ contract TREXGateway is ITREXGateway, Ownable, AccessManaged, AgentRole, IERC165
         if (_deploymentFeeEnabled) {
             if (_deploymentFee.fee > 0 && _feeDiscount[msg.sender] < 10000) {
                 feeApplied = calculateFee(msg.sender);
-                IERC20(_deploymentFee.feeToken).transferFrom(msg.sender, _deploymentFee.feeCollector, feeApplied);
+                IERC20(_deploymentFee.feeToken).safeTransferFrom(msg.sender, _deploymentFee.feeCollector, feeApplied);
             }
         }
         string memory _salt = string(abi.encodePacked(Strings.toHexString(_tokenDetails.owner), _tokenDetails.name));

@@ -68,6 +68,7 @@ import {
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
@@ -80,14 +81,14 @@ import { IModule } from "./modules/IModule.sol";
 
 contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessManagedUpgradeable, IERC165 {
 
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
     struct Storage {
         /// token linked to the compliance contract
         address tokenBound;
-        /// Array of modules bound to the compliance
-        address[] modules;
-        /// Mapping of module binding status
-        mapping(address => bool) moduleBound;
+        /// Set of modules bound to the compliance
+        EnumerableSet.AddressSet modules;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
@@ -106,11 +107,42 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         _disableInitializers();
     }
 
-    /// @notice Initializes the contract
-    /// @param accessManagerAddress the address of the access manager
-    function init(address accessManagerAddress) external initializer {
+    /**
+     *  @dev Initializes the modular compliance with the access manager, the bound token, the initial set of
+     *       modules and matching module settings.
+     *  @param accessManagerAddress address of the access manager
+     *  @param _token address of the token bound to this compliance — pre-computed via CREATE3 by the factory so
+     *         the compliance never needs the deprecated `Token-self-bind` indirection
+     *  @param _modules initial set of modules to bind (capped at 25 — matches the existing post-init cap)
+     *  @param _moduleSettings optional per-module settings forwarded via `_callModuleFunction` after each module is
+     *         bound. `_moduleSettings.length` must be `<= _modules.length`; settings beyond `_modules.length` are
+     *         not accepted
+     *  emits a `TokenBound` event
+     *  emits a `ModuleAdded` event for each module
+     *  emits a `ModuleInteraction` event for each `_moduleSettings[i]` applied
+     */
+    function init(
+        address accessManagerAddress,
+        address _token,
+        address[] calldata _modules,
+        bytes[] calldata _moduleSettings
+    ) external initializer {
+        require(_token != address(0), ErrorsLib.ZeroAddress());
+        require(_modules.length >= _moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
+        require(_modules.length <= 25, ErrorsLib.MaxModulesReached(25));
+
         __AccessManaged_init(accessManagerAddress);
         __Ownable_init(accessManagerAddress);
+        _bindToken(_token);
+
+        for (uint256 i = 0; i < _modules.length; i++) {
+            if (!_getStorage().modules.contains(_modules[i])) {
+                _addModule(_modules[i]);
+            }
+            if (i < _moduleSettings.length) {
+                _callModuleFunction(_moduleSettings[i], _modules[i]);
+            }
+        }
     }
 
     /**
@@ -122,9 +154,7 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
             _isOwner(msg.sender) || (s.tokenBound == address(0) && msg.sender == _token),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
-        require(_token != address(0), ErrorsLib.ZeroAddress());
-        s.tokenBound = _token;
-        emit ERC3643EventsLib.TokenBound(_token);
+        _bindToken(_token);
     }
 
     /**
@@ -147,18 +177,10 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
-        require(s.moduleBound[_module], ErrorsLib.ModuleNotBound());
-        uint256 length = s.modules.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (s.modules[i] == _module) {
-                IModule(_module).unbindCompliance(address(this));
-                s.modules[i] = s.modules[length - 1];
-                s.modules.pop();
-                s.moduleBound[_module] = false;
-                emit EventsLib.ModuleRemoved(_module);
-                break;
-            }
-        }
+        require(s.modules.contains(_module), ErrorsLib.ModuleNotBound());
+        IModule(_module).unbindCompliance(address(this));
+        s.modules.remove(_module);
+        emit EventsLib.ModuleRemoved(_module);
     }
 
     /**
@@ -168,9 +190,9 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         require(_from != address(0) && _to != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules[i]).moduleTransferAction(_from, _to, _value);
+            IModule(s.modules.at(i)).moduleTransferAction(_from, _to, _value);
         }
     }
 
@@ -181,9 +203,9 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         require(_to != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules[i]).moduleMintAction(_to, _value);
+            IModule(s.modules.at(i)).moduleMintAction(_to, _value);
         }
     }
 
@@ -194,9 +216,9 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         require(_from != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules[i]).moduleBurnAction(_from, _value);
+            IModule(s.modules.at(i)).moduleBurnAction(_from, _value);
         }
     }
 
@@ -205,9 +227,9 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
      */
     function addAndSetModule(address _module, bytes[] calldata _interactions) external override restricted {
         require(_interactions.length <= 5, ErrorsLib.ArraySizeLimited(5));
-        addModule(_module);
+        _addModule(_module);
         for (uint256 i = 0; i < _interactions.length; i++) {
-            callModuleFunction(_interactions[i], _module);
+            _callModuleFunction(_interactions[i], _module);
         }
     }
 
@@ -215,14 +237,14 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
      *  @dev See {IModularCompliance-isModuleBound}.
      */
     function isModuleBound(address _module) external view override returns (bool) {
-        return _getStorage().moduleBound[_module];
+        return _getStorage().modules.contains(_module);
     }
 
     /**
      *  @dev See {IModularCompliance-getModules}.
      */
     function getModules() external view override returns (address[] memory) {
-        return _getStorage().modules;
+        return _getStorage().modules.values();
     }
 
     /**
@@ -244,9 +266,9 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
      */
     function canTransfer(address _from, address _to, uint256 _value) external view override returns (bool) {
         Storage storage s = _getStorage();
-        uint256 length = s.modules.length;
+        uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(s.modules[i]).moduleCheck(_from, _to, _value, address(this))) {
+            if (!IModule(s.modules.at(i)).moduleCheck(_from, _to, _value, address(this))) {
                 return false;
             }
         }
@@ -258,10 +280,40 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
      *  @dev See {IModularCompliance-addModule}.
      */
     function addModule(address _module) public override restricted {
+        _addModule(_module);
+    }
+
+    /**
+     *  @dev see {IModularCompliance-callModuleFunction}.
+     */
+    function callModuleFunction(bytes calldata callData, address _module) public override restricted {
+        _callModuleFunction(callData, _module);
+    }
+
+    /**
+     *  @dev See {IERC165-supportsInterface}.
+     */
+    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+        return interfaceId == type(IModularCompliance).interfaceId
+            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
+    }
+
+    /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
+    ///      No caller check — the public `bindToken` wrapper enforces the owner/Token-self-bind policy.
+    function _bindToken(address _token) internal {
+        require(_token != address(0), ErrorsLib.ZeroAddress());
+        _getStorage().tokenBound = _token;
+        emit ERC3643EventsLib.TokenBound(_token);
+    }
+
+    /// @dev Binds a module to the compliance with the existing validation rules (zero check, duplicate check,
+    ///      cap of 25, plug-and-play / canComplianceBind requirement). No caller check — wrappers enforce it.
+    function _addModule(address _module) internal {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(!s.moduleBound[_module], ErrorsLib.ModuleAlreadyBound());
-        require(s.modules.length <= 24, ErrorsLib.MaxModulesReached(25));
+        require(!s.modules.contains(_module), ErrorsLib.ModuleAlreadyBound());
+        require(s.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
         IModule module = IModule(_module);
         require(
             module.isPlugAndPlay() || module.canComplianceBind(address(this)),
@@ -269,20 +321,22 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         );
 
         module.bindCompliance(address(this));
-        s.modules.push(_module);
-        s.moduleBound[_module] = true;
+        s.modules.add(_module);
         emit EventsLib.ModuleAdded(_module);
     }
 
-    /**
-     *  @dev see {IModularCompliance-callModuleFunction}.
-     */
-    function callModuleFunction(bytes calldata callData, address _module) public override restricted {
-        require(_getStorage().moduleBound[_module], ErrorsLib.ModuleNotBound());
-        // NOTE: Use assembly to call the interaction instead of a low level call for two reasons:
-        // - We don't want to copy the return data, since we discard it for interactions.
+    /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
+    ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check —
+    ///      wrappers enforce it.
+    function _callModuleFunction(bytes calldata callData, address _module) internal {
+        require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
+        // NOTE: Use assembly to call the interaction instead of a low level
+        // call for two reasons:
+        // - We don't want to copy the return data, since we discard it for
+        // interactions.
         // - Solidity will under certain conditions generate code to copy input
         // calldata twice to memory (the second being a "memcopy loop").
+        // solhint-disable-next-line no-inline-assembly
         assembly {
             let freeMemoryPointer := mload(0x40) // Load the free memory pointer from memory location 0x40
 
@@ -306,15 +360,6 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         }
 
         emit EventsLib.ModuleInteraction(_module, _selector(callData));
-    }
-
-    /**
-     *  @dev See {IERC165-supportsInterface}.
-     */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
-        return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @dev Extracts the Solidity ABI selector for the specified interaction.
@@ -350,4 +395,3 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
     }
 
 }
-

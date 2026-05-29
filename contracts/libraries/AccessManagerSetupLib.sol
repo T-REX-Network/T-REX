@@ -212,27 +212,21 @@ library AccessManagerSetupLib {
 
     function setupTREXGatewayRoles(IAccessManager accessManager, address trexGateway) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](10);
+        bytes4[] memory functions = new bytes4[](7);
         functions[0] = TREXGateway.setFactory.selector;
         functions[1] = TREXGateway.setPublicDeploymentStatus.selector;
         functions[2] = TREXGateway.enableDeploymentFee.selector;
         functions[3] = TREXGateway.setDeploymentFee.selector;
-        functions[4] = TREXGateway.batchAddDeployer.selector;
-        functions[5] = TREXGateway.addDeployer.selector;
-        functions[6] = TREXGateway.batchRemoveDeployer.selector;
-        functions[7] = TREXGateway.removeDeployer.selector;
-        functions[8] = TREXGateway.batchApplyFeeDiscount.selector;
-        functions[9] = TREXGateway.applyFeeDiscount.selector;
+        functions[4] = TREXGateway.addDeployer.selector;
+        functions[5] = TREXGateway.removeDeployer.selector;
+        functions[6] = TREXGateway.applyFeeDiscount.selector;
         accessManager.setTargetFunctionRole(trexGateway, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        functions = new bytes4[](6);
-        functions[0] = TREXGateway.batchAddDeployer.selector;
-        functions[1] = TREXGateway.addDeployer.selector;
-        functions[2] = TREXGateway.batchRemoveDeployer.selector;
-        functions[3] = TREXGateway.removeDeployer.selector;
-        functions[4] = TREXGateway.batchApplyFeeDiscount.selector;
-        functions[5] = TREXGateway.applyFeeDiscount.selector;
+        functions = new bytes4[](3);
+        functions[0] = TREXGateway.addDeployer.selector;
+        functions[1] = TREXGateway.removeDeployer.selector;
+        functions[2] = TREXGateway.applyFeeDiscount.selector;
         accessManager.setTargetFunctionRole(trexGateway, functions, RolesLib.AGENT);
     }
 

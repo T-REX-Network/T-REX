@@ -349,10 +349,7 @@ contract TestModuleTest is TREXSuiteTest {
     /// @notice Should revert when msg.sender is bound compliance but _compliance parameter is different
     function test_unbindCompliance_RevertWhen_ComplianceMismatch() public {
         // Deploy a second compliance and bind it
-        ModularCompliance compliance2Implementation = new ModularCompliance();
-        bytes memory initData2 = abi.encodeCall(ModularCompliance.init, (address(accessManager)));
-        ERC1967Proxy compliance2Proxy = new ERC1967Proxy(address(compliance2Implementation), initData2);
-        ModularCompliance compliance2 = ModularCompliance(address(compliance2Proxy));
+        ModularCompliance compliance2 = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         // Bind compliance2 to the module
         vm.prank(address(compliance2));

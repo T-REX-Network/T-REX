@@ -15,6 +15,7 @@ import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TREXGateway } from "contracts/factory/TREXGateway.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
@@ -235,6 +236,23 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
         vm.label(tokenAddress, symbol);
 
         return Token(tokenAddress);
+    }
+
+    /// @notice Deploys a fresh ModularCompliance proxy bound to a sentinel token, then unbinds it so the
+    ///         resulting MC is in a clean unbound state, ready to be wired to a token via `setCompliance`
+    ///         (Token-self-bind path) by the caller. Ownership is held by the shared AccessManager; the unbind
+    ///         is performed as `deployer`, which holds the OWNER role.
+    function _newUnboundComplianceProxy(address implementationAuthority_) internal returns (ModularCompliance) {
+        address sentinel = address(uint160(uint256(keccak256("trex.test.unboundMC.sentinel"))));
+        address[] memory noModules = new address[](0);
+        bytes[] memory noSettings = new bytes[](0);
+        ModularComplianceProxy proxy = new ModularComplianceProxy(
+            implementationAuthority_, address(accessManager), sentinel, noModules, noSettings
+        );
+        ModularCompliance freshCompliance = ModularCompliance(address(proxy));
+        vm.prank(deployer);
+        freshCompliance.unbindToken(sentinel);
+        return freshCompliance;
     }
 
     function getTREXContracts() public view returns (ITREXImplementationAuthority.TREXContracts memory) {

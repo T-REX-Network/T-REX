@@ -119,7 +119,7 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when recipient identity is not verified
     function test_transfer_RevertWhen_RecipientNotVerified() public {
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         token.transfer(another, 100);
     }
 
@@ -137,7 +137,7 @@ contract TokenTransferTest is TREXSuiteTest {
 
         // bob is verified but compliance blocks transfer (covers isVerified=true && canTransfer=false branch)
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
         token.transfer(bob, 100);
     }
 
@@ -172,6 +172,10 @@ contract TokenTransferTest is TREXSuiteTest {
 
     /// @notice Should revert when token is paused
     function test_transferFrom_RevertWhen_Paused() public {
+        // Approve before pausing so allowance check passes when transferFrom runs.
+        vm.prank(alice);
+        token.approve(alice, 100);
+
         vm.prank(agent);
         token.pause();
 
@@ -182,6 +186,9 @@ contract TokenTransferTest is TREXSuiteTest {
 
     /// @notice Should revert when sender address is frozen
     function test_transferFrom_RevertWhen_SenderFrozen() public {
+        vm.prank(alice);
+        token.approve(alice, 100);
+
         vm.prank(agent);
         token.setAddressFrozen(alice, true);
 
@@ -192,6 +199,9 @@ contract TokenTransferTest is TREXSuiteTest {
 
     /// @notice Should revert when recipient address is frozen
     function test_transferFrom_RevertWhen_RecipientFrozen() public {
+        vm.prank(alice);
+        token.approve(alice, 100);
+
         vm.prank(agent);
         token.setAddressFrozen(bob, true);
 
@@ -203,6 +213,10 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when sender has not enough balance
     function test_transferFrom_RevertWhen_InsufficientBalance() public {
         uint256 balance = token.balanceOf(alice);
+
+        // Approve the excessive amount so allowance check passes; balance check fires inside _update.
+        vm.prank(alice);
+        token.approve(alice, balance + 1000);
 
         vm.prank(alice);
         vm.expectRevert(
@@ -217,6 +231,10 @@ contract TokenTransferTest is TREXSuiteTest {
         vm.prank(agent);
         token.freezePartialTokens(alice, balance - 100);
 
+        // Approve the attempted amount so allowance check passes; free-balance check fires inside _update.
+        vm.prank(alice);
+        token.approve(alice, balance);
+
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, alice, 100, balance));
         token.transferFrom(alice, bob, balance);
@@ -225,7 +243,10 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when recipient identity is not verified
     function test_transferFrom_RevertWhen_RecipientNotVerified() public {
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        token.approve(alice, 100);
+
+        vm.prank(alice);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         token.transferFrom(alice, another, 100);
     }
 
@@ -241,9 +262,12 @@ contract TokenTransferTest is TREXSuiteTest {
         vm.prank(deployer);
         compliance.callModuleFunction(blockModuleCall, address(testModule));
 
+        vm.prank(alice);
+        token.approve(alice, 100);
+
         // bob is verified but compliance blocks transfer (covers isVerified=true && canTransfer=false branch)
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
         token.transferFrom(alice, bob, 100);
     }
 
@@ -336,7 +360,7 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when recipient identity is not verified
     function test_forcedTransfer_RevertWhen_RecipientNotVerified() public {
         vm.prank(agent);
-        vm.expectRevert(ErrorsLib.TransferNotPossible.selector);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         token.forcedTransfer(alice, another, 100);
     }
 

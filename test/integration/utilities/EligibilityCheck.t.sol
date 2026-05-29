@@ -11,6 +11,7 @@ import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityReg
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
+import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
 import { Countries } from "../helpers/Countries.sol";
 import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
@@ -48,9 +49,12 @@ contract EligibilityCheckTest is TREXSuiteTest {
         bytes memory claimData = "Some claim public data.";
         _addClaim(aliceIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), alice);
 
-        // Deploy UtilityChecker
-        utilityChecker = new UtilityChecker();
-        utilityChecker.initialize();
+        // Deploy UtilityChecker via proxy
+        UtilityChecker utilityCheckerImpl = new UtilityChecker();
+        bytes memory utilityCheckerInitData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        UtilityCheckerProxy utilityCheckerProxy =
+            new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
+        utilityChecker = UtilityChecker(address(utilityCheckerProxy));
     }
 
     // ============ getVerifiedDetails() Tests ============
