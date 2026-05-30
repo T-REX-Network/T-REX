@@ -83,4 +83,7 @@ library RolesLib {
     uint64 constant INFRA_ADMIN = ROLE_PREFIX + 12;
     uint64 constant SPENDING_ADMIN = ROLE_PREFIX + 13;
 
+    // admin role of AGENT (grant/revoke AGENT without the AccessManager ADMIN_ROLE)
+    uint64 constant AGENT_MANAGER = ROLE_PREFIX + 14;
+
 }

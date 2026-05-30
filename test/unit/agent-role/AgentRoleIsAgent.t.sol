@@ -5,6 +5,7 @@ import { Test } from "@forge-std/Test.sol";
 import { AccessManaged, IAccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { AgentRole } from "contracts/roles/AgentRole.sol";
 
@@ -23,6 +24,8 @@ contract AgentRoleIsAgent is Test {
 
     constructor() {
         accessManager = new AccessManager(address(this));
+        AccessManagerSetupLib.setupAgentManagerRole(accessManager);
+        accessManager.grantRole(RolesLib.AGENT_MANAGER, address(this), 0);
         agentRole = new AgentRoleMock(address(accessManager));
     }
 

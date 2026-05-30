@@ -132,7 +132,7 @@ interface ITREXFactory {
      *  IR address , Compliance address
      *  Identity Registry : deploy the IR contract (proxy) and set the owner, agents,
      *  IRS address, TIR address, CTR address
-     *  IRS : deploy IRS contract (proxy) if required (address set as 0 in the TokenDetails, bind IRS to IR, set owner
+     *  IRS : deploy IRS contract (proxy) if required (address set as 0 in the TokenDetails), bind IRS to IR, set owner
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
      *  TIR : deploy TIR contract (proxy), set trusted issuers, set owner
      *  Compliance: deploy modular compliance, bind with token, add modules, set modules parameters, set owner

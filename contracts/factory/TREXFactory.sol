@@ -125,8 +125,12 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
 
         require(tokenDetails.accessManager != address(0), ErrorsLib.ZeroAddress());
         {
-            (bool hasAdminRole,) = IAccessManager(tokenDetails.accessManager).hasRole(0, address(this));
+            IAccessManager accessManager = IAccessManager(tokenDetails.accessManager);
+            (bool hasAdminRole,) = accessManager.hasRole(0, address(this));
             require(hasAdminRole, ErrorsLib.FactoryMissingAdminRoleOnAccessManager());
+            // required to grant AGENT to the token / agents below
+            (bool hasAgentManagerRole,) = accessManager.hasRole(RolesLib.AGENT_MANAGER, address(this));
+            require(hasAgentManagerRole, ErrorsLib.FactoryMissingAgentManagerRoleOnAccessManager());
         }
 
         require((claimDetails.issuers).length == (claimDetails.issuerClaims).length, ErrorsLib.InvalidClaimPattern());
@@ -161,9 +165,9 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
     }
 
     /**
-     * @dev Configures the per-contract function roles on the AccessManager (via {AccessManagerSetupLib}) and grants
-     *      the agent / admin / identity-admin roles for the freshly deployed suite. Binding the IR to the IRS grants
-     *      the IR the AGENT role so it can write to the IRS.
+     * @dev Wires the per-contract function roles (via {AccessManagerSetupLib}) and grants the AGENT role to the
+     *      token and IR/token agents of the freshly deployed suite. Binding the IR to the IRS grants the IR the
+     *      AGENT role so it can write to the IRS.
      */
     function _wireSuiteRoles(
         TokenDetails calldata tokenDetails,
@@ -182,19 +186,18 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
 
         if (tokenDetails.irs == address(0)) {
             AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs);
-            // The IRS must be able to grant the AGENT role to the Identity Registries it binds.
-            accessManager.grantRole(0, irs, 0);
+            // lets the IRS grant AGENT to the IRs it binds
+            accessManager.grantRole(RolesLib.AGENT_MANAGER, irs, 0);
         }
 
         AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, ir);
 
         AccessManagerSetupLib.setupTokenRoles(accessManager, token);
+        // required by the token's recoveryAddress flow
         accessManager.grantRole(RolesLib.AGENT, token, 0);
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, token, 0);
 
         // Binding grants the AGENT role to the IR on the AccessManager so it can write to the IRS.
         IIdentityRegistryStorage(irs).bindIdentityRegistry(ir);
-        accessManager.grantRole(RolesLib.AGENT, irs, 0);
 
         for (uint256 i = 0; i < (tokenDetails.irAgents).length; i++) {
             accessManager.grantRole(RolesLib.AGENT, tokenDetails.irAgents[i], 0);

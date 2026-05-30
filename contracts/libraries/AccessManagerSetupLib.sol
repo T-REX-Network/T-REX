@@ -252,10 +252,16 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
     }
 
+    /// @notice Makes AGENT_MANAGER the admin of AGENT. Call once, before any AGENT grant.
+    function setupAgentManagerRole(IAccessManager accessManager) internal {
+        accessManager.setRoleAdmin(RolesLib.AGENT, RolesLib.AGENT_MANAGER);
+    }
+
     function setupLabels(IAccessManager accessManager) internal {
         accessManager.labelRole(RolesLib.OWNER, "TREX-Suite Owner");
 
         accessManager.labelRole(RolesLib.AGENT, "TREX-Suite Agent");
+        accessManager.labelRole(RolesLib.AGENT_MANAGER, "TREX-Suite Agent: Manager");
         accessManager.labelRole(RolesLib.AGENT_MINTER, "TREX-Suite Agent: Minter");
         accessManager.labelRole(RolesLib.AGENT_BURNER, "TREX-Suite Agent: Burner");
         accessManager.labelRole(RolesLib.AGENT_PARTIAL_FREEZER, "TREX-Suite Agent: Partial Freezer");

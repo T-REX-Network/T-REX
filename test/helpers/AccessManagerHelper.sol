@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import { Test } from "@forge-std/Test.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 contract AccessManagerHelper is Test {
@@ -16,6 +17,12 @@ contract AccessManagerHelper is Test {
 
     constructor() {
         accessManager = new AccessManager(accessManagerAdmin);
+
+        // let the admin account grant AGENT
+        vm.startPrank(accessManagerAdmin);
+        AccessManagerSetupLib.setupAgentManagerRole(accessManager);
+        accessManager.grantRole(RolesLib.AGENT_MANAGER, accessManagerAdmin, NO_DELAY);
+        vm.stopPrank();
     }
 
     function _setRoles(address owner, address agent) internal {

@@ -74,6 +74,17 @@ contract TREXFactoryDeployTREXSuite is Test {
         trexFactory.deployTREXSuite("salt", tokenDetails, claimDetails);
     }
 
+    function testRevertsWhenMissingAgentManagerRoleOnFactory() public {
+        // ADMIN_ROLE but no AGENT_MANAGER
+        accessManager.grantRole(0, address(trexFactory), 0);
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createTokenDetails(address(accessManager));
+        ITREXFactory.ClaimDetails memory claimDetails = _createClaimDetails();
+
+        vm.expectRevert(ErrorsLib.FactoryMissingAgentManagerRoleOnAccessManager.selector);
+        trexFactory.deployTREXSuite("salt", tokenDetails, claimDetails);
+    }
+
     // ----- Helpers -----
 
     function _createTokenDetails(address accessManagerAddress) internal returns (ITREXFactory.TokenDetails memory) {

@@ -50,9 +50,8 @@ contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
         vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs));
         accessManager.grantRole(RolesLib.OWNER, owner, NO_DELAY);
-        // The IRS must hold the admin role so it can grant the AGENT role to the IR it binds
-        // (mirrors the wiring the factory performs for a freshly-deployed IRS).
-        accessManager.grantRole(0, address(irs), NO_DELAY);
+        // lets the IRS grant AGENT to the IR it binds
+        accessManager.grantRole(RolesLib.AGENT_MANAGER, address(irs), NO_DELAY);
         vm.stopPrank();
 
         address ir = makeAddr("ir");

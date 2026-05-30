@@ -78,6 +78,8 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
         accessManager = new AccessManager(accessManagerAdmin);
 
         vm.startPrank(accessManagerAdmin);
+        AccessManagerSetupLib.setupAgentManagerRole(accessManager);
+        accessManager.grantRole(RolesLib.AGENT_MANAGER, accessManagerAdmin, 0);
         accessManager.grantRole(RolesLib.OWNER, deployer, 0);
         accessManager.grantRole(RolesLib.TOKEN_ADMIN, deployer, 0);
         accessManager.grantRole(RolesLib.SPENDING_ADMIN, deployer, 0);
@@ -94,7 +96,7 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
 
         accessManager.grantRole(0, address(trexFactory), 0);
         accessManager.grantRole(RolesLib.OWNER, address(trexFactory), 0);
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(trexFactory), 0);
+        accessManager.grantRole(RolesLib.AGENT_MANAGER, address(trexFactory), 0);
 
         accessManager.grantRole(RolesLib.OWNER, address(trexGateway), 0);
         vm.stopPrank();

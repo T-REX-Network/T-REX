@@ -113,6 +113,7 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error FactoryMissingAdminRoleOnAccessManager();
+    error FactoryMissingAgentManagerRoleOnAccessManager();
     error AddressPredictionMismatch();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
