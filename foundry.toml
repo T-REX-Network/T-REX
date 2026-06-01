@@ -13,6 +13,24 @@ evm_version = "cancun"
 [profile.default.fuzz]
 runs = 2000
 
+[profile.default.invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+call_override = false
+
+# Fast profile used by the Gambit mutation-testing runner (audit/mutation/run_mutation.sh).
+# Reduced fuzz/invariant budgets keep per-mutant wall-clock low while still exercising
+# the randomized harnesses that catch arithmetic/logic mutants the unit tests miss.
+[profile.mutation]
+[profile.mutation.fuzz]
+runs = 96
+[profile.mutation.invariant]
+runs = 24
+depth = 48
+fail_on_revert = false
+call_override = false
+
 [profile.default.fmt]
 sort_imports = true
 contract_new_lines = true
