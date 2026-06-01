@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
@@ -136,7 +137,83 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
     }
 
+    /// @dev Recovering a wallet with **no** partially-frozen tokens must NOT run the `if (frozenTokens > 0)`
+    ///      branch (Token.sol:399): no `TokensFrozen` event for the new wallet and its frozen amount stays 0.
+    ///      Kills the `frozenTokens > 0 => true` mutant, which would emit a spurious `TokensFrozen(new, 0)`.
+    function testTokenRecoveryDoesNotFreezeNewWalletWhenNothingFrozen() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryContains(newWallet, false);
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+
+        vm.recordLogs();
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(
+            _countLogs(logs, ERC3643EventsLib.TokensFrozen.selector, newWallet), 0, "spurious TokensFrozen(newWallet)"
+        );
+        assertEq(token.getFrozenTokens(newWallet), 0);
+    }
+
+    /// @dev Recovering a wallet that is **not** address-frozen must NOT run the `if (lostWallet.addressFrozen)`
+    ///      block (Token.sol:404): the new wallet must not become frozen and no `AddressFrozen` events fire.
+    ///      Kills the `addressFrozen => true` mutant.
+    function testTokenRecoveryDoesNotToggleAddressFreezeWhenLostWalletNotFrozen() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryContains(newWallet, false);
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+
+        vm.recordLogs();
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertFalse(token.isFrozen(newWallet), "newWallet wrongly frozen");
+        assertEq(_countLogs(logs, ERC3643EventsLib.AddressFrozen.selector, lostWallet), 0);
+        assertEq(_countLogs(logs, ERC3643EventsLib.AddressFrozen.selector, newWallet), 0);
+    }
+
+    /// @dev When the new wallet is **already** address-frozen, recovery of a frozen lost wallet must NOT
+    ///      re-emit `AddressFrozen(newWallet, true)` — the inner `if (!newWallet.addressFrozen)` guard
+    ///      (Token.sol:408) is false. Kills the `!addressFrozen => true` mutant.
+    function testTokenRecoveryDoesNotRefreezeAlreadyFrozenNewWallet() public {
+        vm.startPrank(agent);
+        token.setAddressFrozen(lostWallet, true);
+        token.setAddressFrozen(newWallet, true);
+        vm.stopPrank();
+
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryContains(newWallet, false);
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+
+        vm.recordLogs();
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        // lostWallet is thawed (original behaviour) and newWallet stays frozen, but with no *new* freeze event.
+        assertFalse(token.isFrozen(lostWallet));
+        assertTrue(token.isFrozen(newWallet));
+        assertEq(
+            _countLogs(logs, ERC3643EventsLib.AddressFrozen.selector, newWallet), 0, "spurious re-freeze(newWallet)"
+        );
+    }
+
     /// ----- Helpers ------
+
+    /// @dev Counts recorded logs matching `sig` (topic0) whose first indexed arg (topic1) is `indexedAddr`.
+    function _countLogs(Vm.Log[] memory logs, bytes32 sig, address indexedAddr) internal pure returns (uint256 n) {
+        bytes32 wanted = bytes32(uint256(uint160(indexedAddr)));
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length > 1 && logs[i].topics[0] == sig && logs[i].topics[1] == wanted) {
+                n++;
+            }
+        }
+    }
 
     function mockIdentityRegistryContains(address wallet, bool contains) internal {
         vm.mockCall(

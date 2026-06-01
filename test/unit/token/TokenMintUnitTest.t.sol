@@ -54,6 +54,9 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenMintNominal() public {
+        // The post-mint compliance hook must fire (Token._update: compliance.created(to, value)).
+        vm.expectCall(compliance, abi.encodeWithSelector(IERC3643Compliance.created.selector, user1, mintAmount));
+
         vm.prank(agent);
         token.mint(user1, mintAmount);
 

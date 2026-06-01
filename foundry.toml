@@ -19,7 +19,7 @@ depth = 64
 fail_on_revert = false
 call_override = false
 
-# Fast profile used by the Gambit mutation-testing runner (audit/mutation/run_mutation.sh).
+# Fast profile used by the Gambit mutation-testing runner (mutation/run_mutation.sh).
 # Reduced fuzz/invariant budgets keep per-mutant wall-clock low while still exercising
 # the randomized harnesses that catch arithmetic/logic mutants the unit tests miss.
 [profile.mutation]

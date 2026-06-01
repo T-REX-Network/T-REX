@@ -128,7 +128,7 @@ contract TREXSuiteTest is Test, AccessManagerHelper {
         modularComplianceImplementation = new ModularCompliance();
     }
 
-    function _deployFactories() internal {
+    function _deployFactories() internal virtual {
         trexImplementationAuthority = _deployTREXImplementationAuthority(true);
 
         vm.startPrank(deployer);

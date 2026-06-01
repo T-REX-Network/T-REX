@@ -5,6 +5,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { TokenBaseUnitTest } from "../helpers/TokenBaseUnitTest.t.sol";
 
@@ -33,10 +34,22 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         assertEq(address(token.compliance()), newCompliance);
     }
 
+    /// @dev When a compliance is already bound, setting a new one must unbind the old and bind the new.
+    ///      `expectCall` pins both external calls (Token.sol:225-229) so deleting either is caught.
     function testTokenSetComplianceUnbindsPreviousCompliance() public {
+        vm.expectCall(compliance, abi.encodeWithSelector(IERC3643Compliance.unbindToken.selector, address(token)));
+        vm.expectCall(newCompliance, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector, address(token)));
+
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.ComplianceAdded(newCompliance);
         token.setCompliance(newCompliance);
+    }
+
+    /// @dev Pins the `_compliance != address(0)` guard (Token.sol:221) — covers the revert branch and kills the
+    ///      zero-check mutants.
+    function testTokenSetComplianceRevertsWhenZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        token.setCompliance(address(0));
     }
 
 }
