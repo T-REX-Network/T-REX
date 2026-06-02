@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -31,6 +32,9 @@ contract TokenBurnUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenBurnNominal() public {
+        // The post-burn compliance hook must fire (Token._update: compliance.destroyed(from, value)).
+        vm.expectCall(compliance, abi.encodeWithSelector(IERC3643Compliance.destroyed.selector, user1, burnAmount));
+
         vm.prank(agent);
         token.burn(user1, burnAmount);
 

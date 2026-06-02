@@ -96,6 +96,12 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenTransferNominal() public {
+        // The post-transfer compliance hook must fire with the transfer (not mint/burn) selector
+        // (Token._update: compliance.transferred(from, to, value)).
+        vm.expectCall(
+            compliance, abi.encodeWithSelector(IERC3643Compliance.transferred.selector, from, to, transferAmount)
+        );
+
         vm.prank(from);
         bool success = token.transfer(to, transferAmount);
 

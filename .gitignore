@@ -7,6 +7,14 @@ coverage/
 coverage.json
 gas-report.txt
 
+gambit_out/
+
+# Local-only audit artifacts (Slither/coverage/fuzz output, analysis notes)
+.audit-cache/
+
+# Certora prover scratch dir (uploaded source zips, build cache) — NOT the specs in certora/
+.certora_internal/
+
 .env
 node_modules/
 

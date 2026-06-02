@@ -5,6 +5,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
@@ -67,6 +68,12 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenForcedTransferNominal() public {
+        // forcedTransfer notifies compliance via `transferred` (Token.sol:436) even though it bypasses
+        // canTransfer; `expectCall` pins that hook so deleting it is caught.
+        vm.expectCall(
+            compliance, abi.encodeWithSelector(IERC3643Compliance.transferred.selector, from, to, transferAmount)
+        );
+
         vm.prank(agent);
         bool success = token.forcedTransfer(from, to, transferAmount);
 

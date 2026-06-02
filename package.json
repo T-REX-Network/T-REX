@@ -27,8 +27,11 @@
     "format": "forge fmt --check",
     "format:fix": "forge fmt",
     "test": "forge test --gas-report",
-    "coverage": "forge coverage --no-match-coverage \"(test|dependencies|scripts)\"",
-    "coverage:report": "mkdir -p coverage && forge coverage --no-match-coverage \"(test|scripts|dependencies)\" --report lcov --report-file coverage/lcov.info && genhtml coverage/lcov.info -o coverage/report --branch-coverage --ignore-errors inconsistent && open coverage/report/index.html",
+    "test:core": "forge test --gas-report --no-match-path \"test/{fuzz,integration/mocks}/**/*.sol\"",
+    "test:mutation": "bash mutation/run_mutation.sh",
+    "verify": "certora/run.sh Token && certora/run.sh ModularCompliance && certora/run.sh IdentityRegistry",
+    "coverage": "forge coverage --no-match-coverage \"(test|dependencies|scripts|vendor)\" --no-match-path \"test/{fuzz,integration/mocks}/**/*.sol\"",
+    "coverage:report": "mkdir -p coverage && forge coverage --no-match-coverage \"(test|scripts|dependencies|vendor)\" --no-match-path \"test/{fuzz,integration/mocks}/**/*.sol\" --report lcov --report-file coverage/lcov.info && genhtml coverage/lcov.info -o coverage/report --branch-coverage --ignore-errors inconsistent && open coverage/report/index.html",
     "clean": "forge clean"
   },
   "repository": {
