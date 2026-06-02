@@ -281,11 +281,8 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
      *      Pure function of (factory address, salt, contractType) — bytecode does not influence the result under
      *      CREATE3, which lets the factory pre-compute one suite contract's address while feeding it into another
      *      contract's constructor (e.g. pre-binding the Token address into the ModularCompliance proxy).
-     * @dev `virtual` only as a test seam: the `AddressPredictionMismatch` guards in `deployTREXSuite` are a
-     *      defensive invariant that production inputs cannot violate (deploy and prediction share the same
-     *      CREATE3 derivation), so a test harness overrides this to force a divergence and exercise the revert.
      */
-    function _predictAddress(string memory salt, string memory contractType) internal view virtual returns (address) {
+    function _predictAddress(string memory salt, string memory contractType) internal view returns (address) {
         return Create3.computeAddress(saltBytes(salt, contractType), address(this));
     }
 
