@@ -36,4 +36,5 @@ contract GatewayFuzzTest is TREXSuiteTest {
         vm.expectRevert();
         trexGateway.applyFeeDiscount(deployer, discount);
     }
+
 }

@@ -71,4 +71,5 @@ contract AuthFuzzTest is TREXSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.setName(newName);
     }
+
 }

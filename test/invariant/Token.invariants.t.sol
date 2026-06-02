@@ -102,4 +102,5 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         console2.log("unfreeze       ", handler.callsUnfreeze());
         console2.log("pauseToggle    ", handler.callsPauseToggle());
     }
+
 }

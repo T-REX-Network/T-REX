@@ -139,4 +139,5 @@ contract TokenHandler is Test {
     function actorAt(uint256 i) external view returns (address) {
         return actors[i];
     }
+
 }

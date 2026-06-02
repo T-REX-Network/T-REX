@@ -17,11 +17,16 @@ contract Create3Wrapper {
     }
 
     /// Mirrors TREXFactory.saltBytes so we can assert the per-contractType discriminator never collides.
-    function saltBytes(address factory, string memory salt, string memory contractType) external pure returns (bytes32) {
+    function saltBytes(address factory, string memory salt, string memory contractType)
+        external
+        pure
+        returns (bytes32)
+    {
         return bytes32(
             abi.encodePacked(factory, bytes1(0x00), bytes11(keccak256(abi.encodePacked(salt, contractType))))
         );
     }
+
 }
 
 /// @title CREATE3 determinism fuzzing
@@ -65,4 +70,5 @@ contract Create3FuzzTest is Test {
             }
         }
     }
+
 }

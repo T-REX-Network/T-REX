@@ -105,9 +105,7 @@ contract TokenFuzzTest is TREXSuiteTest {
     // ------------------------------------------------------------------
 
     /// allowance(owner, spender) == max  IFF  default-allowance(spender) && !optOut(owner).
-    function testFuzz_defaultAllowanceTruthTable(address owner, address spender, bool makeDefault, bool optOut)
-        public
-    {
+    function testFuzz_defaultAllowanceTruthTable(address owner, address spender, bool makeDefault, bool optOut) public {
         vm.assume(owner != address(0) && spender != address(0));
         vm.assume(owner != spender);
 
@@ -125,4 +123,5 @@ contract TokenFuzzTest is TREXSuiteTest {
         uint256 expected = (makeDefault && !optOut) ? type(uint256).max : 0;
         assertEq(token.allowance(owner, spender), expected, "default-allowance truth table");
     }
+
 }
