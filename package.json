@@ -19,7 +19,7 @@
     "!out/TREXSuiteTest.sol"
   ],
   "scripts": {
-    "prepare": "husky && forge soldeer install",
+    "prepare": "husky || true && forge soldeer install",
     "build": "forge build",
     "format": "forge fmt --check",
     "format:fix": "forge fmt",
