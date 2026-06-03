@@ -30,6 +30,11 @@ jobs:
       - name: Build contracts
         run: forge build
 
+      - name: Align version with release tag
+        run: npm pkg set version="${TAG#v}"
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+
       - name: Publish to npm
         run: npm publish --ignore-scripts --tag ${{ github.event.release.prerelease && 'beta' || 'latest' }}
         env:
