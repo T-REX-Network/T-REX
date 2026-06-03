@@ -1,8 +1,7 @@
 {
-  "name": "@erc3643org/erc-3643",
+  "name": "@t-rex-network/t-rex",
   "version": "4.2.0-beta1",
   "description": "A fully compliant environment for the issuance and use of tokenized securities implementing the ERC-3643 standard.",
-  "main": "index.js",
   "publishConfig": {
     "access": "public"
   },
@@ -11,15 +10,13 @@
     "test": "test"
   },
   "files": [
-    "artifacts",
     "contracts",
-    "index.js",
-    "index.d.ts",
-    "!contract/_testContracts",
-    "!artifacts/contracts/_testContracts",
-    "!contract/Migrations.sol",
-    "!artifacts/contracts/Migrations.sol",
-    "!artifacts/build-info"
+    "out",
+    "!out/build-info",
+    "!out/**/*.t.sol",
+    "!out/Test.sol",
+    "!out/MockContract.sol",
+    "!out/TREXSuiteTest.sol"
   ],
   "scripts": {
     "prepare": "husky && forge soldeer install",
