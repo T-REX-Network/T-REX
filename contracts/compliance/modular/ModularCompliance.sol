@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -322,53 +323,12 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     ///      wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
-        // NOTE: Use assembly to call the interaction instead of a low level
-        // call for two reasons:
-        // - We don't want to copy the return data, since we discard it for
-        // interactions.
-        // - Solidity will under certain conditions generate code to copy input
-        // calldata twice to memory (the second being a "memcopy loop").
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            let freeMemoryPointer := mload(0x40) // Load the free memory pointer from memory location 0x40
 
-            // Copy callData from calldata to the free memory location
-            calldatacopy(freeMemoryPointer, callData.offset, callData.length)
-
-            if iszero( // Check if the call returns zero (indicating failure)
-                call( // Perform the external call
-                    gas(), // Provide all available gas
-                    _module, // Address of the target module
-                    0, // No ether is sent with the call
-                    freeMemoryPointer, // Input data starts at the free memory pointer
-                    callData.length, // Input data length
-                    0, // Output data location (not used)
-                    0 // Output data size (not used)
-                )
-            ) {
-                returndatacopy(0, 0, returndatasize()) // Copy return data to memory starting at position 0
-                revert(0, returndatasize()) // Revert the transaction with the return data
-            }
+        if (!LowLevelCall.callNoReturn(_module, callData)) {
+            LowLevelCall.bubbleRevert();
         }
 
-        emit EventsLib.ModuleInteraction(_module, _selector(callData));
-    }
-
-    /// @dev Extracts the Solidity ABI selector for the specified interaction.
-    /// @param callData Interaction data.
-    /// @return result The 4 byte function selector of the call encoded in this interaction.
-    function _selector(bytes calldata callData) internal pure returns (bytes4 result) {
-        if (callData.length >= 4) {
-            // NOTE: Read the first word of the interaction's calldata. The
-            // value does not need to be shifted since `bytesN` values are left
-            // aligned, and the value does not need to be masked since masking
-            // occurs when the value is accessed and not stored:
-            // <https://docs.soliditylang.org/en/v0.7.6/abi-spec.html#encoding-of-indexed-event-parameters>
-            // <https://docs.soliditylang.org/en/v0.7.6/assembly.html#access-to-external-variables-functions-and-libraries>
-            assembly {
-                result := calldataload(callData.offset)
-            }
-        }
+        emit EventsLib.ModuleInteraction(_module, bytes4(callData));
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
