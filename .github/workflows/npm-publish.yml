@@ -7,6 +7,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       HUSKY: 0
     steps:
@@ -30,12 +33,12 @@ jobs:
       - name: Build contracts
         run: forge build
 
-      - name: Align version with release tag
-        run: npm pkg set version="${TAG#v}"
+      - name: Set version from release tag
+        run: npm version "${TAG#v}" --no-git-tag-version --allow-same-version --ignore-scripts
         env:
           TAG: ${{ github.event.release.tag_name }}
 
       - name: Publish to npm
-        run: npm publish --ignore-scripts --tag ${{ github.event.release.prerelease && 'beta' || 'latest' }}
+        run: npm publish --ignore-scripts --provenance --tag ${{ github.event.release.prerelease && 'beta' || 'latest' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

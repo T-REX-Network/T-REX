@@ -1,6 +1,6 @@
 {
   "name": "@t-rex-network/t-rex",
-  "version": "4.2.0-beta1",
+  "version": "0.0.0-development",
   "description": "A fully compliant environment for the issuance and use of tokenized securities implementing the ERC-3643 standard.",
   "publishConfig": {
     "access": "public"
@@ -30,14 +30,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ERC-3643/ERC-3643.git"
+    "url": "git+https://github.com/T-REX-Network/T-REX.git"
   },
   "author": "ERC-3643 Association",
   "license": "SEE LICENSE IN LICENSE.md",
   "bugs": {
-    "url": "https://github.com/ERC-3643/ERC-3643/issues"
+    "url": "https://github.com/T-REX-Network/T-REX/issues"
   },
-  "homepage": "https://github.com/ERC-3643/ERC-3643#README",
+  "homepage": "https://github.com/T-REX-Network/T-REX#README",
   "devDependencies": {
     "@commitlint/cli": "^19.5.0",
     "@commitlint/config-conventional": "^19.5.0",
