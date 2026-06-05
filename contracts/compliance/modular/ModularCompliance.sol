@@ -168,9 +168,8 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
-        require(s.modules.contains(_module), ErrorsLib.ModuleNotBound());
+        require(s.modules.remove(_module), ErrorsLib.ModuleNotBound());
         IModule(_module).unbindCompliance(address(this));
-        s.modules.remove(_module);
         emit EventsLib.ModuleRemoved(_module);
     }
 
