@@ -85,28 +85,22 @@ abstract contract AbstractAgentRole {
         _;
     }
 
-    function addAgent(address agent) public virtual {
-        _addAgent(agent);
-    }
-
-    function removeAgent(address agent) public virtual {
-        require(agent != address(0), ErrorsLib.ZeroAddress());
-
-        _getAgentRoleStorage().agents.remove(agent);
-        emit EventsLib.AgentRemoved(agent);
-    }
-
     function isAgent(address _agent) public view returns (bool) {
         return _getAgentRoleStorage().agents.has(_agent);
     }
 
-    /// @dev Internal helper used by `addAgent` and by `init`-time configuration where `onlyOwner` checks would
-    ///      otherwise reject the call because `msg.sender` is not yet the final owner.
     function _addAgent(address agent) internal {
         require(agent != address(0), ErrorsLib.ZeroAddress());
 
         _getAgentRoleStorage().agents.add(agent);
         emit EventsLib.AgentAdded(agent);
+    }
+
+    function _removeAgent(address agent) internal {
+        require(agent != address(0), ErrorsLib.ZeroAddress());
+
+        _getAgentRoleStorage().agents.remove(agent);
+        emit EventsLib.AgentRemoved(agent);
     }
 
     function _checkIsAgent() internal view virtual {

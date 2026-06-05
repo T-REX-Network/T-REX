@@ -71,12 +71,12 @@ contract AgentRoleUpgradeable is AbstractAgentRole, Ownable2StepUpgradeable {
 
     constructor() Ownable2StepUpgradeable() { }
 
-    function addAgent(address _agent) public override onlyOwner {
-        super.addAgent(_agent);
+    function addAgent(address _agent) public onlyOwner {
+        super._addAgent(_agent);
     }
 
-    function removeAgent(address _agent) public override onlyOwner {
-        super.removeAgent(_agent);
+    function removeAgent(address _agent) public onlyOwner {
+        super._removeAgent(_agent);
     }
 
 }
