@@ -265,7 +265,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
                         bool _validity
                     ) {
                         if (_validity) {
-                            j = claimIds.length;
+                            break;
                         }
                         if (!_validity && j == (claimIds.length - 1)) {
                             return false;
