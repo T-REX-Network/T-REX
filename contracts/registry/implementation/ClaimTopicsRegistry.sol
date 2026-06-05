@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
@@ -73,9 +74,11 @@ import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
 contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, IERC165 {
 
+    using EnumerableSet for EnumerableSet.UintSet;
+
     /// @custom:storage-location erc7201:ERC3643.storage.ClaimTopicsRegistry
     struct Storage {
-        uint256[] claimTopics;
+        EnumerableSet.UintSet claimTopics;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ClaimTopicsRegistry")) - 1)) & ~bytes32(uint256(0xff));
@@ -104,15 +107,8 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
      *  @dev See {IClaimTopicsRegistry-removeClaimTopic}.
      */
     function removeClaimTopic(uint256 claimTopic) external override onlyOwner {
-        Storage storage s = _getStorage();
-        uint256 length = s.claimTopics.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (s.claimTopics[i] == claimTopic) {
-                s.claimTopics[i] = s.claimTopics[length - 1];
-                s.claimTopics.pop();
-                emit ERC3643EventsLib.ClaimTopicRemoved(claimTopic);
-                break;
-            }
+        if (_getStorage().claimTopics.remove(claimTopic)) {
+            emit ERC3643EventsLib.ClaimTopicRemoved(claimTopic);
         }
     }
 
@@ -120,7 +116,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
      *  @dev See {IClaimTopicsRegistry-getClaimTopics}.
      */
     function getClaimTopics() external view override returns (uint256[] memory) {
-        return _getStorage().claimTopics;
+        return _getStorage().claimTopics.values();
     }
 
     /**
@@ -133,12 +129,8 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
 
     function _addClaimTopic(uint256 claimTopic) internal {
         Storage storage s = _getStorage();
-        uint256 length = s.claimTopics.length;
-        require(length < 15, ErrorsLib.MaxClaimTopicsReached(15));
-        for (uint256 i = 0; i < length; i++) {
-            require(s.claimTopics[i] != claimTopic, ErrorsLib.ClaimTopicAlreadyExists());
-        }
-        s.claimTopics.push(claimTopic);
+        require(s.claimTopics.length() < 15, ErrorsLib.MaxClaimTopicsReached(15));
+        require(s.claimTopics.add(claimTopic), ErrorsLib.ClaimTopicAlreadyExists());
         emit ERC3643EventsLib.ClaimTopicAdded(claimTopic);
     }
 
