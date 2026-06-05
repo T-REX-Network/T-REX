@@ -105,16 +105,15 @@ contract TREXFactory is ITREXFactory, Ownable {
         ClaimDetails calldata _claimDetails
     ) external override onlyOwner {
         require(tokenDeployed[_salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
-        require((_claimDetails.issuers).length == (_claimDetails.issuerClaims).length, ErrorsLib.InvalidClaimPattern());
-        require((_claimDetails.issuers).length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
-        require((_claimDetails.claimTopics).length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
+        require(_claimDetails.issuers.length == _claimDetails.issuerClaims.length, ErrorsLib.InvalidClaimPattern());
+        require(_claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
+        require(_claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
         require(
-            (_tokenDetails.irAgents).length <= 5 && (_tokenDetails.tokenAgents).length <= 5,
-            ErrorsLib.MaxAgentsReached(5)
+            _tokenDetails.irAgents.length <= 5 && _tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
         );
-        require((_tokenDetails.complianceModules).length <= 30, ErrorsLib.MaxModuleActionsReached(30));
+        require(_tokenDetails.complianceModules.length <= 25, ErrorsLib.MaxModulesReached(25));
         require(
-            (_tokenDetails.complianceModules).length >= (_tokenDetails.complianceSettings).length,
+            _tokenDetails.complianceModules.length >= _tokenDetails.complianceSettings.length,
             ErrorsLib.InvalidCompliancePattern()
         );
 

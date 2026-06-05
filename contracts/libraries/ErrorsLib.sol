@@ -120,7 +120,6 @@ library ErrorsLib {
     error MaxClaimIssuersReached(uint256 max);
     error MaxClaimTopicsReached(uint256 max);
     error MaxAgentsReached(uint256 max);
-    error MaxModuleActionsReached(uint256 max);
     error TokenAlreadyDeployed();
 
     // Roles Errors

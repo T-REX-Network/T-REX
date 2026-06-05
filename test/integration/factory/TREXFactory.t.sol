@@ -176,9 +176,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.deployTREXSuite("salt2", tokenDetails, claimDetails);
     }
 
-    function test_deployTREXSuite_RevertWhen_MoreThan30ComplianceModules() public {
-        address[] memory complianceModules = new address[](31); // 31 modules > 30
-        for (uint256 i = 0; i < 31; i++) {
+    function test_deployTREXSuite_RevertWhen_MoreThan25ComplianceModules() public {
+        address[] memory complianceModules = new address[](26); // 26 modules > 25
+        for (uint256 i = 0; i < 26; i++) {
             complianceModules[i] = address(uint160(i + 200));
         }
 
@@ -198,7 +198,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxModuleActionsReached.selector, 30));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxModulesReached.selector, 25));
         trexFactory.deployTREXSuite("salt2", tokenDetails, claimDetails);
     }
 
