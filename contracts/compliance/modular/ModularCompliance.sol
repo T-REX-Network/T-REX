@@ -155,8 +155,8 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         require(owner() == msg.sender || msg.sender == _token, ErrorsLib.OnlyOwnerOrTokenCanCall());
 
         Storage storage s = _getStorage();
-        require(_token == s.tokenBound, ErrorsLib.TokenNotBound());
         require(_token != address(0), ErrorsLib.ZeroAddress());
+        require(_token == s.tokenBound, ErrorsLib.TokenNotBound());
         delete s.tokenBound;
         emit ERC3643EventsLib.TokenUnbound(_token);
     }
