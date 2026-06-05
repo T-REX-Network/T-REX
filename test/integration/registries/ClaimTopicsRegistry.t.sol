@@ -59,7 +59,7 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
 
         // Now try to add 16th topic, should revert (length 15 is not < 15)
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxTopicsReached.selector, 15));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 15));
         claimTopicsRegistry.addClaimTopic(15);
     }
 

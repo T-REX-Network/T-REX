@@ -134,7 +134,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
     function _addClaimTopic(uint256 claimTopic) internal {
         Storage storage s = _getStorage();
         uint256 length = s.claimTopics.length;
-        require(length < 15, ErrorsLib.MaxTopicsReached(15));
+        require(length < 15, ErrorsLib.MaxClaimTopicsReached(15));
         for (uint256 i = 0; i < length; i++) {
             require(s.claimTopics[i] != claimTopic, ErrorsLib.ClaimTopicAlreadyExists());
         }

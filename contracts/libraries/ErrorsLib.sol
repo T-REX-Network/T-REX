@@ -129,7 +129,6 @@ library ErrorsLib {
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
-    error MaxTopicsReached(uint256 max);
 
     // IdentityRegistry Errors
     error EligibilityChecksDisabledAlready();
