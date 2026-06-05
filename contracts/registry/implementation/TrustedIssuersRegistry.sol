@@ -163,8 +163,9 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
         require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
         require(_claimTopics.length > 0, ErrorsLib.ClaimTopicsCannotBeEmpty());
 
-        for (uint256 i = 0; i < s.trustedIssuerClaimTopics[address(_trustedIssuer)].length; i++) {
-            uint256 claimTopic = s.trustedIssuerClaimTopics[address(_trustedIssuer)][i];
+        uint256[] storage claimTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        for (uint256 i = 0; i < claimTopics.length; i++) {
+            uint256 claimTopic = claimTopics[i];
             uint256 topicsLength = s.claimTopicsToTrustedIssuers[claimTopic].length;
             for (uint256 j = 0; j < topicsLength; j++) {
                 if (s.claimTopicsToTrustedIssuers[claimTopic][j] == _trustedIssuer) {
