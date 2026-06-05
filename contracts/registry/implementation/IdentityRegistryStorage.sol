@@ -170,8 +170,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     function unbindIdentityRegistry(address _identityRegistry) external override onlyOwner {
         require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(s.identityRegistries.length() > 0, ErrorsLib.IdentityRegistryNotStored());
-        s.identityRegistries.remove(_identityRegistry);
+        require(s.identityRegistries.remove(_identityRegistry), ErrorsLib.IdentityRegistryNotStored());
 
         removeAgent(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryUnbound(_identityRegistry);
