@@ -439,11 +439,28 @@ contract Token is
         uint256 frozenTokens = s.frozenStatus[lostWallet].amount;
         _forceUpdate(lostWallet, newWallet, investorTokens);
 
-        if (frozenTokens > 0) {
-            s.frozenStatus[newWallet].amount += frozenTokens;
-            emit ERC3643EventsLib.TokensFrozen(newWallet, frozenTokens);
-        }
+        _migrateFrozenAmount(newWallet, frozenTokens);
+        _migrateAddressFrozen(lostWallet, newWallet);
+        _migrateIdentity(lostWallet, newWallet, investorOnchainId);
 
+        emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
+
+        return true;
+    }
+
+    /// @dev Carries the lost wallet's frozen-token amount onto the new wallet. The amount is captured by the
+    ///      caller before `_forceUpdate` runs, since `_forceUpdate` auto-unfreezes and zeroes the lost wallet.
+    function _migrateFrozenAmount(address newWallet, uint256 frozenAmount) private {
+        if (frozenAmount > 0) {
+            _tokenStorage().frozenStatus[newWallet].amount += frozenAmount;
+            emit ERC3643EventsLib.TokensFrozen(newWallet, frozenAmount);
+        }
+    }
+
+    /// @dev Carries the address-frozen flag from the lost wallet onto the new wallet (only when the new wallet
+    ///      is not already frozen).
+    function _migrateAddressFrozen(address lostWallet, address newWallet) private {
+        TokenStorage storage s = _tokenStorage();
         if (s.frozenStatus[lostWallet].addressFrozen) {
             s.frozenStatus[lostWallet].addressFrozen = false;
             emit ERC3643EventsLib.AddressFrozen(lostWallet, false, address(this));
@@ -453,6 +470,12 @@ contract Token is
                 emit ERC3643EventsLib.AddressFrozen(newWallet, true, address(this));
             }
         }
+    }
+
+    /// @dev Moves the on-chain identity from the lost wallet to the new wallet (registering the new wallet only
+    ///      when it is not already known to the identity registry).
+    function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
+        TokenStorage storage s = _tokenStorage();
         if (s.identityRegistry.contains(lostWallet)) {
             if (!s.identityRegistry.contains(newWallet)) {
                 s.identityRegistry
@@ -462,10 +485,6 @@ contract Token is
             }
             s.identityRegistry.deleteIdentity(lostWallet);
         }
-
-        emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
-
-        return true;
     }
 
     /* ----- Transfer Functions ----- */
