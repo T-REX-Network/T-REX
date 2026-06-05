@@ -322,22 +322,22 @@ contract TREXFactory is ITREXFactory, Ownable {
         address _identityRegistry,
         address _compliance
     ) private returns (address) {
-        address token = _deploy(_salt, "Token", _tokenBytecode(_salt, _tokenDetails, _identityRegistry, _compliance));
-        require(token == _predictAddress(_salt, "Token"), ErrorsLib.AddressPredictionMismatch());
+        address predictedToken = _predictAddress(_salt, "Token");
+        address oid = _tokenDetails.ONCHAINID;
+        if (oid == address(0)) {
+            oid = IIdFactory(_idFactory).createTokenIdentity(predictedToken, _tokenDetails.owner, _salt);
+        }
+        address token = _deploy(_salt, "Token", _tokenBytecode(_tokenDetails, _identityRegistry, _compliance, oid));
+        require(token == predictedToken, ErrorsLib.AddressPredictionMismatch());
         return token;
     }
 
     function _tokenBytecode(
-        string memory _salt,
         TokenDetails calldata _tokenDetails,
         address _identityRegistry,
-        address _compliance
-    ) private returns (bytes memory) {
-        address oid = _tokenDetails.ONCHAINID;
-        if (oid == address(0)) {
-            oid =
-                IIdFactory(_idFactory).createTokenIdentity(_predictAddress(_salt, "Token"), _tokenDetails.owner, _salt);
-        }
+        address _compliance,
+        address _oid
+    ) private view returns (bytes memory) {
         return abi.encodePacked(
             type(TokenProxy).creationCode,
             abi.encode(
@@ -347,7 +347,7 @@ contract TREXFactory is ITREXFactory, Ownable {
                 _tokenDetails.name,
                 _tokenDetails.symbol,
                 _tokenDetails.decimals,
-                oid,
+                _oid,
                 _tokenDetails.owner,
                 _tokenDetails.tokenAgents
             )
