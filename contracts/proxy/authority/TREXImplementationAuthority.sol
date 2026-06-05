@@ -141,7 +141,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /**
      *  @dev See {ITREXImplementationAuthority-useTREXVersion}.
      */
-    function addAndUseTREXVersion(Version calldata _version, TREXContracts calldata _trex) external override {
+    function addAndUseTREXVersion(Version calldata _version, TREXContracts calldata _trex) external override onlyOwner {
         _addTREXVersion(_version, _trex);
         _useTREXVersion(_version);
     }
