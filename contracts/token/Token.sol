@@ -193,6 +193,8 @@ contract Token is
     /* ----- Main token properties ----- */
 
     /// @inheritdoc IERC3643
+    /// @dev The EIP-712 domain separator is derived from `name()` (see `_EIP712Name`), so changing the name
+    ///      rotates the domain separator and invalidates any outstanding (unused) ERC-2612 permit signatures.
     function setName(string calldata tokenName) external override onlyOwner {
         require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
         _tokenStorage().name = tokenName;
