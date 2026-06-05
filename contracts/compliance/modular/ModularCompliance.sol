@@ -129,9 +129,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         _bindToken(_token);
 
         for (uint256 i = 0; i < _modules.length; i++) {
-            if (!_getStorage().modules.contains(_modules[i])) {
-                _addModule(_modules[i]);
-            }
+            _addModule(_modules[i]);
             if (i < _moduleSettings.length) {
                 _callModuleFunction(_moduleSettings[i], _modules[i]);
             }
