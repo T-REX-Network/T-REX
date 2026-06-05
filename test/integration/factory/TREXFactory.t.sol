@@ -423,12 +423,12 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertTrue(tir.isTrustedIssuer(address(issuerA)), "issuerA must be registered after init");
         assertTrue(tir.isTrustedIssuer(address(issuerB)), "issuerB must be registered after init");
 
-        uint256[] memory storedTopicsA = tir.getTrustedIssuerClaimTopics(ClaimIssuer(address(issuerA)));
+        uint256[] memory storedTopicsA = tir.getTrustedIssuerClaimTopics(address(issuerA));
         assertEq(storedTopicsA.length, 2, "TIR topics length for issuerA must match input");
         assertEq(storedTopicsA[0], 42, "first topic for issuerA must match input");
         assertEq(storedTopicsA[1], 1337, "second topic for issuerA must match input");
 
-        uint256[] memory storedTopicsB = tir.getTrustedIssuerClaimTopics(ClaimIssuer(address(issuerB)));
+        uint256[] memory storedTopicsB = tir.getTrustedIssuerClaimTopics(address(issuerB));
         assertEq(storedTopicsB.length, 1, "TIR topics length for issuerB must match input");
         assertEq(storedTopicsB[0], 99, "topic for issuerB must match input");
 

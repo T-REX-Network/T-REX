@@ -368,7 +368,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
         // Remove all trusted issuers for the claim topic
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
-        IClaimIssuer[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuersForClaimTopic(topics[0]);
+        address[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuersForClaimTopic(topics[0]);
         for (uint256 i = 0; i < trustedIssuers.length; i++) {
             vm.prank(deployer);
             trustedIssuersRegistry.removeTrustedIssuer(trustedIssuers[i]);
@@ -407,9 +407,9 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
         // Remove existing trusted issuer and add both tricky and normal issuer
         vm.startPrank(deployer);
-        trustedIssuersRegistry.removeTrustedIssuer(IClaimIssuer(address(claimIssuer)));
-        trustedIssuersRegistry.addTrustedIssuer(IClaimIssuer(address(trickyClaimIssuer)), topics);
-        trustedIssuersRegistry.addTrustedIssuer(IClaimIssuer(address(claimIssuer)), topics);
+        trustedIssuersRegistry.removeTrustedIssuer(address(claimIssuer));
+        trustedIssuersRegistry.addTrustedIssuer(address(trickyClaimIssuer), topics);
+        trustedIssuersRegistry.addTrustedIssuer(address(claimIssuer), topics);
         vm.stopPrank();
 
         // Get alice's existing claim
@@ -440,7 +440,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
         // Add tricky issuer as trusted
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(IClaimIssuer(address(trickyClaimIssuer)), topics);
+        trustedIssuersRegistry.addTrustedIssuer(address(trickyClaimIssuer), topics);
 
         // Get alice's existing claim and remove it
         bytes32[] memory claimIds = aliceIdentity.getClaimIdsByTopic(topic);

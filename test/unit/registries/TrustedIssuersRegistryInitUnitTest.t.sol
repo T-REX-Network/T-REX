@@ -3,7 +3,6 @@ pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
-import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -59,16 +58,16 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         assertTrue(tir.isTrustedIssuer(address(issuer1)));
         assertTrue(tir.isTrustedIssuer(address(issuer2)));
 
-        uint256[] memory storedTopics1 = tir.getTrustedIssuerClaimTopics(IClaimIssuer(address(issuer1)));
+        uint256[] memory storedTopics1 = tir.getTrustedIssuerClaimTopics(address(issuer1));
         assertEq(storedTopics1.length, 2);
         assertEq(storedTopics1[0], 1);
         assertEq(storedTopics1[1], 2);
 
-        uint256[] memory storedTopics2 = tir.getTrustedIssuerClaimTopics(IClaimIssuer(address(issuer2)));
+        uint256[] memory storedTopics2 = tir.getTrustedIssuerClaimTopics(address(issuer2));
         assertEq(storedTopics2.length, 1);
         assertEq(storedTopics2[0], 3);
 
-        IClaimIssuer[] memory allIssuers = tir.getTrustedIssuers();
+        address[] memory allIssuers = tir.getTrustedIssuers();
         assertEq(allIssuers.length, 2);
     }
 
@@ -80,7 +79,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         topics[0] = 5;
 
         vm.prank(owner);
-        tir.addTrustedIssuer(IClaimIssuer(address(issuer)), topics);
+        tir.addTrustedIssuer(address(issuer), topics);
 
         assertTrue(tir.isTrustedIssuer(address(issuer)));
     }
@@ -94,7 +93,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
 
         vm.prank(notOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
-        tir.addTrustedIssuer(IClaimIssuer(address(issuer)), topics);
+        tir.addTrustedIssuer(address(issuer), topics);
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {

@@ -37,7 +37,6 @@
 //                                        :#%%=
 //
 pragma solidity 0.8.30;
-import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 
 interface IERC3643TrustedIssuersRegistry {
 
@@ -55,7 +54,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  This function can only be called by the owner of the Trusted Issuers Registry contract
      *  emits a `TrustedIssuerAdded` event
      */
-    function addTrustedIssuer(IClaimIssuer _trustedIssuer, uint256[] calldata _claimTopics) external;
+    function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external;
 
     /**
      *  @dev Removes the ClaimIssuer contract of a trusted claim issuer.
@@ -64,7 +63,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  This function can only be called by the owner of the Trusted Issuers Registry contract
      *  emits a `TrustedIssuerRemoved` event
      */
-    function removeTrustedIssuer(IClaimIssuer _trustedIssuer) external;
+    function removeTrustedIssuer(address _trustedIssuer) external;
 
     /**
      *  @dev Updates the set of claim topics that a trusted issuer is allowed to emit.
@@ -76,7 +75,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  This function can only be called by the owner of the Trusted Issuers Registry contract
      *  emits a `ClaimTopicsUpdated` event
      */
-    function updateIssuerClaimTopics(IClaimIssuer _trustedIssuer, uint256[] calldata _claimTopics) external;
+    function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external;
 
     /// Getters
 
@@ -84,14 +83,14 @@ interface IERC3643TrustedIssuersRegistry {
      *  @dev Function for getting all the trusted claim issuers stored.
      *  @return array of all claim issuers registered.
      */
-    function getTrustedIssuers() external view returns (IClaimIssuer[] memory);
+    function getTrustedIssuers() external view returns (address[] memory);
 
     /**
      *  @dev Function for getting all the trusted issuer allowed for a given claim topic.
      *  @param claimTopic the claim topic to get the trusted issuers for.
      *  @return array of all claim issuer addresses that are allowed for the given claim topic.
      */
-    function getTrustedIssuersForClaimTopic(uint256 claimTopic) external view returns (IClaimIssuer[] memory);
+    function getTrustedIssuersForClaimTopic(uint256 claimTopic) external view returns (address[] memory);
 
     /**
      *  @dev Checks if the ClaimIssuer contract is trusted
@@ -106,7 +105,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  @param _trustedIssuer the trusted issuer concerned.
      *  @return The set of claim topics that the trusted issuer is allowed to emit
      */
-    function getTrustedIssuerClaimTopics(IClaimIssuer _trustedIssuer) external view returns (uint256[] memory);
+    function getTrustedIssuerClaimTopics(address _trustedIssuer) external view returns (uint256[] memory);
 
     /**
      *  @dev Function for checking if the trusted claim issuer is allowed

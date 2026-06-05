@@ -62,7 +62,6 @@
  */
 pragma solidity 0.8.30;
 
-import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
 library ERC3643EventsLib {
@@ -141,10 +140,10 @@ library ERC3643EventsLib {
     // IERC3643TrustedIssuersRegistry Events
     // ============================================
 
-    event TrustedIssuerAdded(IClaimIssuer indexed _trustedIssuer, uint256[] _claimTopics);
+    event TrustedIssuerAdded(address indexed _trustedIssuer, uint256[] _claimTopics);
 
-    event TrustedIssuerRemoved(IClaimIssuer indexed _trustedIssuer);
+    event TrustedIssuerRemoved(address indexed _trustedIssuer);
 
-    event ClaimTopicsUpdated(IClaimIssuer indexed _trustedIssuer, uint256[] _claimTopics);
+    event ClaimTopicsUpdated(address indexed _trustedIssuer, uint256[] _claimTopics);
 
 }

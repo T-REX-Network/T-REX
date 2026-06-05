@@ -246,7 +246,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
         bytes memory data;
         uint256 claimTopic;
         for (claimTopic = 0; claimTopic < requiredClaimTopics.length; claimTopic++) {
-            IClaimIssuer[] memory trustedIssuers =
+            address[] memory trustedIssuers =
                 s.tokenIssuersRegistry.getTrustedIssuersForClaimTopic(requiredClaimTopics[claimTopic]);
 
             if (trustedIssuers.length == 0) return false;

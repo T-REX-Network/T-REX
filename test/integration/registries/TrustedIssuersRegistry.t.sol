@@ -2,7 +2,6 @@
 pragma solidity 0.8.30;
 
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
-import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
@@ -37,7 +36,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         claimTopics[0] = CLAIM_TOPIC_1;
 
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(claimIssuer, claimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(claimIssuer), claimTopics);
     }
 
     // ============ addTrustedIssuer() Tests ============
@@ -50,7 +49,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         ClaimIssuer anotherClaimIssuer = new ClaimIssuer(another);
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
-        trustedIssuersRegistry.addTrustedIssuer(anotherClaimIssuer, claimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(anotherClaimIssuer), claimTopics);
     }
 
     /// @notice Should revert when issuer to add is zero address
@@ -60,7 +59,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        trustedIssuersRegistry.addTrustedIssuer(ClaimIssuer(address(0)), claimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(0), claimTopics);
     }
 
     /// @notice Should revert when issuer is already registered
@@ -70,7 +69,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.TrustedIssuerAlreadyExists.selector);
-        trustedIssuersRegistry.addTrustedIssuer(claimIssuer, claimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(claimIssuer), claimTopics);
     }
 
     /// @notice Should revert when claim topics array is empty
@@ -80,7 +79,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.TrustedClaimTopicsCannotBeEmpty.selector);
-        trustedIssuersRegistry.addTrustedIssuer(newClaimIssuer, emptyClaimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(newClaimIssuer), emptyClaimTopics);
     }
 
     /// @notice Should revert when claim topics array exceeds 15 topics
@@ -93,7 +92,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopcisReached.selector, 15));
-        trustedIssuersRegistry.addTrustedIssuer(newClaimIssuer, claimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(newClaimIssuer), claimTopics);
     }
 
     /// @notice Should revert when there are already 49 trusted issuers
@@ -108,14 +107,14 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
             address issuerAddress = address(uint160(uint256(keccak256(abi.encodePacked("issuer", i)))));
             ClaimIssuer newClaimIssuer = new ClaimIssuer(issuerAddress);
             vm.prank(deployer);
-            trustedIssuersRegistry.addTrustedIssuer(newClaimIssuer, claimTopics);
+            trustedIssuersRegistry.addTrustedIssuer(address(newClaimIssuer), claimTopics);
         }
 
         // Try to add 51st issuer (50 already exist, so this should fail)
         ClaimIssuer fiftyFirstClaimIssuer = new ClaimIssuer(another);
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxTrustedIssuersReached.selector, 50));
-        trustedIssuersRegistry.addTrustedIssuer(fiftyFirstClaimIssuer, claimTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(fiftyFirstClaimIssuer), claimTopics);
     }
 
     // ============ removeTrustedIssuer() Tests ============
@@ -126,14 +125,14 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
-        trustedIssuersRegistry.removeTrustedIssuer(anotherClaimIssuerForRemove);
+        trustedIssuersRegistry.removeTrustedIssuer(address(anotherClaimIssuerForRemove));
     }
 
     /// @notice Should revert when issuer to remove is zero address
     function test_removeTrustedIssuer_RevertWhen_ZeroAddress() public {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        trustedIssuersRegistry.removeTrustedIssuer(ClaimIssuer(address(0)));
+        trustedIssuersRegistry.removeTrustedIssuer(address(0));
     }
 
     /// @notice Should revert when issuer is not registered
@@ -142,7 +141,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.NotATrustedIssuer.selector);
-        trustedIssuersRegistry.removeTrustedIssuer(newClaimIssuer);
+        trustedIssuersRegistry.removeTrustedIssuer(address(newClaimIssuer));
     }
 
     /// @notice Should remove the issuer from trusted list
@@ -167,11 +166,11 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         topicsCharlie[2] = CLAIM_TOPIC_1;
 
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(bobClaimIssuer, topicsBob);
+        trustedIssuersRegistry.addTrustedIssuer(address(bobClaimIssuer), topicsBob);
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(anotherClaimIssuer, topicsAnother);
+        trustedIssuersRegistry.addTrustedIssuer(address(anotherClaimIssuer), topicsAnother);
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(charlieClaimIssuer, topicsCharlie);
+        trustedIssuersRegistry.addTrustedIssuer(address(charlieClaimIssuer), topicsCharlie);
 
         // Verify another is trusted
         assertTrue(trustedIssuersRegistry.isTrustedIssuer(address(anotherClaimIssuer)));
@@ -179,14 +178,14 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         // Remove another
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.TrustedIssuerRemoved(IClaimIssuer(address(anotherClaimIssuer)));
-        trustedIssuersRegistry.removeTrustedIssuer(anotherClaimIssuer);
+        emit ERC3643EventsLib.TrustedIssuerRemoved(address(anotherClaimIssuer));
+        trustedIssuersRegistry.removeTrustedIssuer(address(anotherClaimIssuer));
 
         // Verify another is no longer trusted
         assertFalse(trustedIssuersRegistry.isTrustedIssuer(address(anotherClaimIssuer)));
 
         // Verify remaining issuers
-        IClaimIssuer[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuers();
+        address[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuers();
 
         // remember that in setup we already added claimIssuer to trusted issuer
         assertEq(trustedIssuers.length, 3);
@@ -205,7 +204,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
-        trustedIssuersRegistry.updateIssuerClaimTopics(anotherClaimIssuerForUpdate, claimTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(anotherClaimIssuerForUpdate), claimTopics);
     }
 
     /// @notice Should revert when issuer to update is zero address
@@ -215,7 +214,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        trustedIssuersRegistry.updateIssuerClaimTopics(ClaimIssuer(address(0)), claimTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(0), claimTopics);
     }
 
     /// @notice Should revert when issuer is not registered
@@ -226,7 +225,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.NotATrustedIssuer.selector);
-        trustedIssuersRegistry.updateIssuerClaimTopics(newClaimIssuer, claimTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(newClaimIssuer), claimTopics);
     }
 
     /// @notice Should revert when claim topics array have more than 15 elements
@@ -238,7 +237,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopcisReached.selector, 15));
-        trustedIssuersRegistry.updateIssuerClaimTopics(claimIssuer, claimTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), claimTopics);
     }
 
     /// @notice Should revert when claim topics array is empty
@@ -247,13 +246,13 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ClaimTopicsCannotBeEmpty.selector);
-        trustedIssuersRegistry.updateIssuerClaimTopics(claimIssuer, emptyClaimTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), emptyClaimTopics);
     }
 
     /// @notice Should update the topics of the trusted issuers
     function test_updateIssuerClaimTopics_Success() public {
         // Get initial claim topics
-        uint256[] memory initialTopics = trustedIssuersRegistry.getTrustedIssuerClaimTopics(claimIssuer);
+        uint256[] memory initialTopics = trustedIssuersRegistry.getTrustedIssuerClaimTopics(address(claimIssuer));
         // remember in the setup function we added CLAIM_TOPIC_1 to the claimIssuer
         assertGt(initialTopics.length, 0);
 
@@ -264,8 +263,8 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         // Update claim topics
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.ClaimTopicsUpdated(IClaimIssuer(address(claimIssuer)), newTopics);
-        trustedIssuersRegistry.updateIssuerClaimTopics(claimIssuer, newTopics);
+        emit ERC3643EventsLib.ClaimTopicsUpdated(address(claimIssuer), newTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), newTopics);
 
         // Verify new topics are set
         assertTrue(trustedIssuersRegistry.hasClaimTopic(address(claimIssuer), CLAIM_TOPIC_3));
@@ -274,7 +273,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         assertFalse(trustedIssuersRegistry.hasClaimTopic(address(claimIssuer), initialTopics[0]));
 
         // Verify getter returns new topics
-        uint256[] memory retrievedTopics = trustedIssuersRegistry.getTrustedIssuerClaimTopics(claimIssuer);
+        uint256[] memory retrievedTopics = trustedIssuersRegistry.getTrustedIssuerClaimTopics(address(claimIssuer));
         assertEq(retrievedTopics.length, 2);
         assertEq(retrievedTopics[0], CLAIM_TOPIC_3);
         assertEq(retrievedTopics[1], CLAIM_TOPIC_4);
@@ -291,9 +290,9 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         topics[0] = CLAIM_TOPIC_1;
 
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(firstIssuer, topics);
+        trustedIssuersRegistry.addTrustedIssuer(address(firstIssuer), topics);
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(secondIssuer, topics);
+        trustedIssuersRegistry.addTrustedIssuer(address(secondIssuer), topics);
 
         // Update claim topics for the secondIssuer so the inner loop iterates past index 0
         uint256[] memory newTopics = new uint256[](1);
@@ -301,8 +300,8 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.ClaimTopicsUpdated(IClaimIssuer(address(secondIssuer)), newTopics);
-        trustedIssuersRegistry.updateIssuerClaimTopics(secondIssuer, newTopics);
+        emit ERC3643EventsLib.ClaimTopicsUpdated(address(secondIssuer), newTopics);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(secondIssuer), newTopics);
 
         // Verify mapping updated: no longer associated with CLAIM_TOPIC_1 and now mapped to CLAIM_TOPIC_2
         assertFalse(trustedIssuersRegistry.hasClaimTopic(address(secondIssuer), CLAIM_TOPIC_1));
@@ -316,7 +315,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         ClaimIssuer newClaimIssuer = new ClaimIssuer(deployer);
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.TrustedIssuerDoesNotExist.selector);
-        trustedIssuersRegistry.getTrustedIssuerClaimTopics(newClaimIssuer);
+        trustedIssuersRegistry.getTrustedIssuerClaimTopics(address(newClaimIssuer));
     }
 
     // ============ supportsInterface() Tests ============

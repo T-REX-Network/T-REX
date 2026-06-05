@@ -129,20 +129,20 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         _details = new EligibilityCheckDetails[](topicsCount);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
             uint256 topic = requiredClaimTopics[claimTopic];
-            IClaimIssuer[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
+            address[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
 
             for (uint256 i; i < trustedIssuers.length; i++) {
                 (bool topicMatch, bool pass) = _getEligibility(trustedIssuers[i], topic, identity);
                 if (topicMatch) {
                     _details[claimTopic] =
-                        EligibilityCheckDetails({ issuer: trustedIssuers[i], topic: topic, pass: pass });
+                        EligibilityCheckDetails({ issuer: IClaimIssuer(trustedIssuers[i]), topic: topic, pass: pass });
                 }
             }
         }
     }
 
     /// @dev Function splitted to avoid stack too deep error
-    function _getEligibility(IClaimIssuer trustedIssuer, uint256 topic, IIdentity identity)
+    function _getEligibility(address trustedIssuer, uint256 topic, IIdentity identity)
         internal
         view
         returns (bool topicMatch, bool pass)

@@ -2,7 +2,6 @@
 pragma solidity 0.8.30;
 
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
-import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
 
@@ -100,7 +99,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         assertEq(results.length, 1);
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
-        IClaimIssuer[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuersForClaimTopic(topics[0]);
+        address[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuersForClaimTopic(topics[0]);
 
         assertEq(address(results[0].issuer), address(trustedIssuers[0]));
         assertEq(results[0].topic, topics[0]);
@@ -136,7 +135,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
         newTopics[0] = claimTopic2;
         newTopics[1] = claimTopic3;
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(newclaimIssuer, newTopics);
+        trustedIssuersRegistry.addTrustedIssuer(address(newclaimIssuer), newTopics);
 
         // Add claims to alice's identity for the new topics using the new claim issuer
         bytes memory claimData = "Some claim public data 2.";
@@ -154,7 +153,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         uint256[] memory allTopics = claimTopicsRegistry.getClaimTopics();
         for (uint256 i = 0; i < allTopics.length; i++) {
-            IClaimIssuer[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuersForClaimTopic(allTopics[i]);
+            address[] memory trustedIssuers = trustedIssuersRegistry.getTrustedIssuersForClaimTopic(allTopics[i]);
             assertEq(address(results[i].issuer), address(trustedIssuers[0]));
             assertEq(results[i].topic, allTopics[i]);
             assertTrue(results[i].pass);
@@ -171,7 +170,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         // Add tricky issuer as trusted
         vm.prank(deployer);
-        trustedIssuersRegistry.addTrustedIssuer(IClaimIssuer(address(trickyClaimIssuer)), topics);
+        trustedIssuersRegistry.addTrustedIssuer(address(trickyClaimIssuer), topics);
 
         // Get alice's existing claim and remove it
         bytes32[] memory claimIds = aliceIdentity.getClaimIdsByTopic(topic);
