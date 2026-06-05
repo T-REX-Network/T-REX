@@ -172,7 +172,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
         Storage storage s = _getStorage();
         require(s.identityRegistries.remove(_identityRegistry), ErrorsLib.IdentityRegistryNotStored());
 
-        removeAgent(_identityRegistry);
+        _removeAgent(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryUnbound(_identityRegistry);
     }
 
