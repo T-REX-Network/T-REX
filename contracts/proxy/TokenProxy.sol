@@ -62,7 +62,8 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+
 import { Token } from "../token/Token.sol";
 import { AbstractProxy } from "./AbstractProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
@@ -80,14 +81,15 @@ contract TokenProxy is AbstractProxy {
         address _owner,
         address[] memory _tokenAgents
     ) AbstractProxy(implementationAuthority) {
-        (bool success,) = getLogic()
-            .delegatecall(
+        if (!LowLevelCall.delegatecallNoReturn(
+                getLogic(),
                 abi.encodeCall(
                     Token.init,
                     (_name, _symbol, _decimals, _identityRegistry, _compliance, _onchainID, _owner, _tokenAgents)
                 )
-            );
-        require(success, ErrorsLib.InitializationFailed());
+            )) {
+            LowLevelCall.bubbleRevert();
+        }
     }
 
     function getLogic() internal view override returns (address) {

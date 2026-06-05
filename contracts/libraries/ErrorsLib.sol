@@ -69,7 +69,6 @@ library ErrorsLib {
     error ZeroAddress();
     error ZeroValue();
     error ArraySizeLimited(uint256 maxSize);
-    error InitializationFailed();
     error InvalidImplementationAuthority();
 
     // Token Errors

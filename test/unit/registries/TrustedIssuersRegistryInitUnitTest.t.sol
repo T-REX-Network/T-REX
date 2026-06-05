@@ -98,7 +98,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
         new TrustedIssuersRegistryProxy(implementationAuthority, address(0), new address[](0), new uint256[][](0));
     }
 
@@ -107,7 +107,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         issuers[0] = makeAddr("issuer");
         uint256[][] memory issuerClaims = new uint256[][](0);
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.InvalidClaimPattern.selector);
         new TrustedIssuersRegistryProxy(implementationAuthority, owner, issuers, issuerClaims);
     }
 
@@ -122,7 +122,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
             issuerClaims[i] = topics;
         }
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimIssuersReached.selector, 5));
         new TrustedIssuersRegistryProxy(implementationAuthority, owner, issuers, issuerClaims);
     }
 

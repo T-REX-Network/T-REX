@@ -112,7 +112,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     function test_init_RevertWhen_TrustedIssuersRegistryZeroAddress() public {
         // Deploy proxy with zero address for Trusted Issuers Registry
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(
             address(trexImplementationAuthority),
             randomAddress,
@@ -128,7 +128,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     function test_init_RevertWhen_ClaimTopicsRegistryZeroAddress() public {
         // Deploy proxy with zero address for Claim Topics Registry
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(
             address(trexImplementationAuthority),
             randomAddress,
@@ -144,7 +144,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     function test_init_RevertWhen_IdentityStorageZeroAddress() public {
         // Deploy proxy with zero address for Identity Storage
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(
             address(trexImplementationAuthority),
             address(0),
@@ -183,9 +183,9 @@ contract IdentityRegistryTest is TREXSuiteTest {
         incompleteIA.addAndUseTREXVersion(version, contracts);
 
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
-        // because MockContract doesn't have init() function, causing InitializationFailed() revert
+        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert();
         new IdentityRegistryProxy(
             address(incompleteIA),
             randomAddress,

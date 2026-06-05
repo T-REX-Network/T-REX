@@ -72,7 +72,7 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
         new ClaimTopicsRegistryProxy(implementationAuthority, address(0), new uint256[](0));
     }
 
@@ -82,7 +82,7 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
             topics[i] = i + 1;
         }
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 5));
         new ClaimTopicsRegistryProxy(implementationAuthority, owner, topics);
     }
 
@@ -91,7 +91,7 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         topics[0] = 7;
         topics[1] = 7;
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ClaimTopicAlreadyExists.selector);
         new ClaimTopicsRegistryProxy(implementationAuthority, owner, topics);
     }
 

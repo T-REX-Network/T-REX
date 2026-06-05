@@ -74,7 +74,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
         new IdentityRegistryStorageProxy(implementationAuthority, address(0), address(0));
     }
 

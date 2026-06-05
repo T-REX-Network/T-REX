@@ -103,12 +103,12 @@ contract ModularComplianceInitUnitTest is Test {
     }
 
     function test_init_RevertWhen_TokenIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ModularComplianceProxy(implementationAuthority, address(0), owner, _emptyModules(), _emptySettings());
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ModularComplianceProxy(implementationAuthority, token, address(0), _emptyModules(), _emptySettings());
     }
 
@@ -120,7 +120,7 @@ contract ModularComplianceInitUnitTest is Test {
         settings[0] = abi.encodeWithSignature("blockModule(bool)", true);
         settings[1] = abi.encodeWithSignature("blockModule(bool)", false);
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.InvalidCompliancePattern.selector);
         new ModularComplianceProxy(implementationAuthority, token, owner, modules, settings);
     }
 
@@ -130,7 +130,7 @@ contract ModularComplianceInitUnitTest is Test {
             modules[i] = _deployTestModuleWithProxy();
         }
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxModulesReached.selector, 25));
         new ModularComplianceProxy(implementationAuthority, token, owner, modules, _emptySettings());
     }
 

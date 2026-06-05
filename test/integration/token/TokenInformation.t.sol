@@ -494,7 +494,7 @@ contract TokenInformationTest is TREXSuiteTest {
     /// @notice Should revert when identity registry is zero address
     function test_TokenProxy_constructor_RevertWhen_IdentityRegistryZeroAddress() public {
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new TokenProxy(
             address(trexImplementationAuthority),
             address(0),
@@ -511,7 +511,7 @@ contract TokenInformationTest is TREXSuiteTest {
     /// @notice Should revert when compliance is zero address
     function test_TokenProxy_constructor_RevertWhen_ComplianceZeroAddress() public {
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new TokenProxy(
             address(trexImplementationAuthority),
             randomAddress,
@@ -529,7 +529,7 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_TokenProxy_constructor_RevertWhen_NameEmpty() public {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
         new TokenProxy(
             address(trexImplementationAuthority),
             randomAddress,
@@ -547,7 +547,7 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_TokenProxy_constructor_RevertWhen_SymbolEmpty() public {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
         new TokenProxy(
             address(trexImplementationAuthority),
             randomAddress,
@@ -565,7 +565,7 @@ contract TokenInformationTest is TREXSuiteTest {
     function test_TokenProxy_constructor_RevertWhen_DecimalsGreaterThan18() public {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DecimalsOutOfRange.selector, uint8(19)));
         new TokenProxy(
             address(trexImplementationAuthority),
             randomAddress,
@@ -606,10 +606,10 @@ contract TokenInformationTest is TREXSuiteTest {
         incompleteIA.addAndUseTREXVersion(version, contracts);
 
         // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
-        // because MockContract doesn't have init() function, causing InitializationFailed() revert
+        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert();
         new TokenProxy(
             address(incompleteIA),
             randomAddress,

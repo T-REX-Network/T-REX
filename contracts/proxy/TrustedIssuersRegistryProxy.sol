@@ -63,7 +63,8 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+
 import { TrustedIssuersRegistry } from "../registry/implementation/TrustedIssuersRegistry.sol";
 import { AbstractProxy } from "./AbstractProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
@@ -76,9 +77,11 @@ contract TrustedIssuersRegistryProxy is AbstractProxy {
         address[] memory _issuers,
         uint256[][] memory _issuerClaims
     ) AbstractProxy(implementationAuthority) {
-        (bool success,) = getLogic()
-            .delegatecall(abi.encodeCall(TrustedIssuersRegistry.init, (_owner, _issuers, _issuerClaims)));
-        require(success, ErrorsLib.InitializationFailed());
+        if (!LowLevelCall.delegatecallNoReturn(
+                getLogic(), abi.encodeCall(TrustedIssuersRegistry.init, (_owner, _issuers, _issuerClaims))
+            )) {
+            LowLevelCall.bubbleRevert();
+        }
     }
 
     function getLogic() internal view override returns (address) {

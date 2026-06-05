@@ -62,8 +62,9 @@
 
 pragma solidity 0.8.30;
 
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { AbstractProxy } from "./AbstractProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
 
@@ -76,9 +77,11 @@ contract ModularComplianceProxy is AbstractProxy {
         address[] memory _modules,
         bytes[] memory _moduleSettings
     ) AbstractProxy(implementationAuthority) {
-        (bool success,) = getLogic()
-            .delegatecall(abi.encodeCall(ModularCompliance.init, (_token, _owner, _modules, _moduleSettings)));
-        require(success, ErrorsLib.InitializationFailed());
+        if (!LowLevelCall.delegatecallNoReturn(
+                getLogic(), abi.encodeCall(ModularCompliance.init, (_token, _owner, _modules, _moduleSettings))
+            )) {
+            LowLevelCall.bubbleRevert();
+        }
     }
 
     function getLogic() internal view override returns (address) {

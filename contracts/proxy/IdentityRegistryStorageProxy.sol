@@ -62,7 +62,8 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { AbstractProxy } from "./AbstractProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
@@ -72,8 +73,11 @@ contract IdentityRegistryStorageProxy is AbstractProxy {
     constructor(address implementationAuthority, address _owner, address _initialIR)
         AbstractProxy(implementationAuthority)
     {
-        (bool success,) = getLogic().delegatecall(abi.encodeCall(IdentityRegistryStorage.init, (_owner, _initialIR)));
-        require(success, ErrorsLib.InitializationFailed());
+        if (!LowLevelCall.delegatecallNoReturn(
+                getLogic(), abi.encodeCall(IdentityRegistryStorage.init, (_owner, _initialIR))
+            )) {
+            LowLevelCall.bubbleRevert();
+        }
     }
 
     function getLogic() internal view override returns (address) {

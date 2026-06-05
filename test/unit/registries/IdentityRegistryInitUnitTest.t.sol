@@ -86,27 +86,27 @@ contract IdentityRegistryInitUnitTest is Test {
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
         new IdentityRegistryProxy(implementationAuthority, tir, ctr, irs, address(0), new address[](0), tokenAddress);
     }
 
     function test_init_RevertWhen_TIRIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(implementationAuthority, address(0), ctr, irs, owner, new address[](0), tokenAddress);
     }
 
     function test_init_RevertWhen_CTRIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(implementationAuthority, tir, address(0), irs, owner, new address[](0), tokenAddress);
     }
 
     function test_init_RevertWhen_IRSIsZeroAddress() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(implementationAuthority, tir, ctr, address(0), owner, new address[](0), tokenAddress);
     }
 
     function test_init_RevertWhen_TokenAddressIsZero() public {
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(implementationAuthority, tir, ctr, irs, owner, new address[](0), address(0));
     }
 
@@ -116,7 +116,7 @@ contract IdentityRegistryInitUnitTest is Test {
             irAgents[i] = address(uint160(i + 1));
         }
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxAgentsReached.selector, 5));
         new IdentityRegistryProxy(implementationAuthority, tir, ctr, irs, owner, irAgents, tokenAddress);
     }
 
@@ -124,7 +124,7 @@ contract IdentityRegistryInitUnitTest is Test {
         address[] memory irAgents = new address[](1);
         irAgents[0] = address(0);
 
-        vm.expectRevert(ErrorsLib.InitializationFailed.selector);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(implementationAuthority, tir, ctr, irs, owner, irAgents, tokenAddress);
     }
 
