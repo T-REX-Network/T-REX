@@ -67,5 +67,4 @@ import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsR
 // solhint-disable-next-line no-empty-blocks
 interface IClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
     // functions that are not part of the original standard can be added here in future versions
-
-    }
+}
