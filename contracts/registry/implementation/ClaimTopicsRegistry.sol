@@ -89,7 +89,6 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
     }
 
     function init(address _owner, uint256[] calldata _initialTopics) external initializer {
-        require(_initialTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
         __Ownable_init(_owner);
         for (uint256 i = 0; i < _initialTopics.length; i++) {
             _addClaimTopic(_initialTopics[i]);

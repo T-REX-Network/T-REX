@@ -235,9 +235,7 @@ contract TREXFactory is ITREXFactory, Ownable {
      *      (they all share the user-provided salt).
      */
     function _saltBytes(string memory salt, string memory contractType) private view returns (bytes32) {
-        return bytes32(
-            abi.encodePacked(address(this), bytes1(0x00), bytes11(keccak256(abi.encodePacked(salt, contractType))))
-        );
+        return bytes20(address(this)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
     }
 
     /// function used to deploy a trusted issuers registry using CREATE3
@@ -248,10 +246,14 @@ contract TREXFactory is ITREXFactory, Ownable {
         address[] memory _issuers,
         uint256[][] memory _issuerClaims
     ) private returns (address) {
-        bytes memory _code = type(TrustedIssuersRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_, _owner, _issuers, _issuerClaims);
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, "TIR", bytecode);
+        return _deploy(
+            _salt,
+            "TIR",
+            bytes.concat(
+                type(TrustedIssuersRegistryProxy).creationCode,
+                abi.encode(implementationAuthority_, _owner, _issuers, _issuerClaims)
+            )
+        );
     }
 
     /// function used to deploy a claim topics registry using CREATE3
@@ -261,32 +263,43 @@ contract TREXFactory is ITREXFactory, Ownable {
         address _owner,
         uint256[] memory _initialTopics
     ) private returns (address) {
-        bytes memory _code = type(ClaimTopicsRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(implementationAuthority_, _owner, _initialTopics);
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, "CTR", bytecode);
+        return _deploy(
+            _salt,
+            "CTR",
+            bytes.concat(
+                type(ClaimTopicsRegistryProxy).creationCode,
+                abi.encode(implementationAuthority_, _owner, _initialTopics)
+            )
+        );
     }
 
     /// function used to deploy modular compliance contract using CREATE3
     function _deployMC(string memory _salt, TokenDetails calldata _tokenDetails) private returns (address) {
-        bytes memory _code = type(ModularComplianceProxy).creationCode;
-        bytes memory _constructData = abi.encode(
-            _implementationAuthority,
-            _predictAddress(_salt, "Token"),
-            _tokenDetails.owner,
-            _tokenDetails.complianceModules,
-            _tokenDetails.complianceSettings
+        return _deploy(
+            _salt,
+            "MC",
+            bytes.concat(
+                type(ModularComplianceProxy).creationCode,
+                abi.encode(
+                    _implementationAuthority,
+                    _predictAddress(_salt, "Token"),
+                    _tokenDetails.owner,
+                    _tokenDetails.complianceModules,
+                    _tokenDetails.complianceSettings
+                )
+            )
         );
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, "MC", bytecode);
     }
 
     function _deployIRS(string memory _salt, TokenDetails calldata _tokenDetails) private returns (address) {
-        bytes memory _code = type(IdentityRegistryStorageProxy).creationCode;
-        bytes memory _constructData =
-            abi.encode(_implementationAuthority, _tokenDetails.owner, _predictAddress(_salt, "IR"));
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, "IRS", bytecode);
+        return _deploy(
+            _salt,
+            "IRS",
+            bytes.concat(
+                type(IdentityRegistryStorageProxy).creationCode,
+                abi.encode(_implementationAuthority, _tokenDetails.owner, _predictAddress(_salt, "IR"))
+            )
+        );
     }
 
     /// Deploy the IR with the Token's predicted CREATE3 address baked in so the IR grants the agent
@@ -298,18 +311,24 @@ contract TREXFactory is ITREXFactory, Ownable {
         address _claimTopicsRegistry,
         address _identityStorage
     ) private returns (address) {
-        bytes memory _code = type(IdentityRegistryProxy).creationCode;
-        bytes memory _constructData = abi.encode(
-            _implementationAuthority,
-            _trustedIssuersRegistry,
-            _claimTopicsRegistry,
-            _identityStorage,
-            _tokenDetails.owner,
-            _tokenDetails.irAgents,
-            _predictAddress(_salt, "Token")
+        address tokenAddress = _predictAddress(_salt, "Token");
+
+        return _deploy(
+            _salt,
+            "IR",
+            bytes.concat(
+                type(IdentityRegistryProxy).creationCode,
+                abi.encode(
+                    _implementationAuthority,
+                    _trustedIssuersRegistry,
+                    _claimTopicsRegistry,
+                    _identityStorage,
+                    _tokenDetails.owner,
+                    _tokenDetails.irAgents,
+                    tokenAddress
+                )
+            )
         );
-        bytes memory bytecode = abi.encodePacked(_code, _constructData);
-        return _deploy(_salt, "IR", bytecode);
     }
 
     /// Resolve the OID (caller-supplied or freshly minted via `IIdFactory.createTokenIdentity` against
@@ -338,7 +357,7 @@ contract TREXFactory is ITREXFactory, Ownable {
         address _compliance,
         address _oid
     ) private view returns (bytes memory) {
-        return abi.encodePacked(
+        return bytes.concat(
             type(TokenProxy).creationCode,
             abi.encode(
                 _implementationAuthority,

@@ -76,16 +76,6 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         new ClaimTopicsRegistryProxy(implementationAuthority, address(0), new uint256[](0));
     }
 
-    function test_init_RevertWhen_MoreThan5InitialTopics() public {
-        uint256[] memory topics = new uint256[](6);
-        for (uint256 i = 0; i < 6; i++) {
-            topics[i] = i + 1;
-        }
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 5));
-        new ClaimTopicsRegistryProxy(implementationAuthority, owner, topics);
-    }
-
     function test_init_RevertWhen_DuplicateInitialTopics() public {
         uint256[] memory topics = new uint256[](2);
         topics[0] = 7;

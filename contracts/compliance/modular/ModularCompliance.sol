@@ -302,8 +302,8 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     function _addModule(address _module) internal {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(!s.modules.contains(_module), ErrorsLib.ModuleAlreadyBound());
         require(s.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
+        require(s.modules.add(_module), ErrorsLib.ModuleAlreadyBound());
         IModule module = IModule(_module);
         require(
             module.isPlugAndPlay() || module.canComplianceBind(address(this)),
@@ -311,7 +311,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         );
 
         module.bindCompliance(address(this));
-        s.modules.add(_module);
+
         emit EventsLib.ModuleAdded(_module);
     }
 
