@@ -149,7 +149,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
         address[] calldata userAddresses,
         IIdentity[] calldata identities,
         uint16[] calldata countries
-    ) external override {
+    ) external {
         for (uint256 i = 0; i < userAddresses.length; i++) {
             registerIdentity(userAddresses[i], identities[i], countries[i]);
         }
@@ -158,7 +158,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-updateIdentity}.
      */
-    function updateIdentity(address userAddress, IIdentity userIdentity) external override onlyAgent {
+    function updateIdentity(address userAddress, IIdentity userIdentity) external onlyAgent {
         IIdentity oldIdentity = identity(userAddress);
         _getStorage().tokenIdentityStorage.modifyStoredIdentity(userAddress, userIdentity);
         emit ERC3643EventsLib.IdentityUpdated(oldIdentity, userIdentity);
@@ -167,7 +167,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-updateCountry}.
      */
-    function updateCountry(address _userAddress, uint16 _country) external override onlyAgent {
+    function updateCountry(address _userAddress, uint16 _country) external onlyAgent {
         _getStorage().tokenIdentityStorage.modifyStoredInvestorCountry(_userAddress, _country);
         emit ERC3643EventsLib.CountryUpdated(_userAddress, _country);
     }
@@ -175,7 +175,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-deleteIdentity}.
      */
-    function deleteIdentity(address _userAddress) external override onlyAgent {
+    function deleteIdentity(address _userAddress) external onlyAgent {
         IIdentity oldIdentity = identity(_userAddress);
         _getStorage().tokenIdentityStorage.removeIdentityFromStorage(_userAddress);
         emit ERC3643EventsLib.IdentityRemoved(_userAddress, oldIdentity);
@@ -184,7 +184,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-setIdentityRegistryStorage}.
      */
-    function setIdentityRegistryStorage(address _identityRegistryStorage) external override onlyOwner {
+    function setIdentityRegistryStorage(address _identityRegistryStorage) external onlyOwner {
         _getStorage().tokenIdentityStorage = IIdentityRegistryStorage(_identityRegistryStorage);
         emit ERC3643EventsLib.IdentityStorageSet(_identityRegistryStorage);
     }
@@ -192,7 +192,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-setClaimTopicsRegistry}.
      */
-    function setClaimTopicsRegistry(address _claimTopicsRegistry) external override onlyOwner {
+    function setClaimTopicsRegistry(address _claimTopicsRegistry) external onlyOwner {
         _getStorage().tokenTopicsRegistry = IClaimTopicsRegistry(_claimTopicsRegistry);
         emit ERC3643EventsLib.ClaimTopicsRegistrySet(_claimTopicsRegistry);
     }
@@ -200,7 +200,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-setTrustedIssuersRegistry}.
      */
-    function setTrustedIssuersRegistry(address _trustedIssuersRegistry) external override onlyOwner {
+    function setTrustedIssuersRegistry(address _trustedIssuersRegistry) external onlyOwner {
         _getStorage().tokenIssuersRegistry = ITrustedIssuersRegistry(_trustedIssuersRegistry);
         emit ERC3643EventsLib.TrustedIssuersRegistrySet(_trustedIssuersRegistry);
     }
@@ -208,7 +208,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-disableEligibilityChecks}.
      */
-    function disableEligibilityChecks() external override onlyOwner {
+    function disableEligibilityChecks() external onlyOwner {
         Storage storage s = _getStorage();
         require(!s.checksDisabled, ErrorsLib.EligibilityChecksDisabledAlready());
         s.checksDisabled = true;
@@ -218,7 +218,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-enableEligibilityChecks}.
      */
-    function enableEligibilityChecks() external override onlyOwner {
+    function enableEligibilityChecks() external onlyOwner {
         Storage storage s = _getStorage();
         require(s.checksDisabled, ErrorsLib.EligibilityChecksEnabledAlready());
         s.checksDisabled = false;
@@ -229,7 +229,7 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
      *  @dev See {IIdentityRegistry-isVerified}.
      */
     // solhint-disable-next-line code-complexity
-    function isVerified(address userAddress) external view override returns (bool) {
+    function isVerified(address userAddress) external view returns (bool) {
         Storage storage s = _getStorage();
 
         if (s.checksDisabled) return true;
@@ -286,42 +286,42 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-investorCountry}.
      */
-    function investorCountry(address _userAddress) external view override returns (uint16) {
+    function investorCountry(address _userAddress) external view returns (uint16) {
         return _getStorage().tokenIdentityStorage.storedInvestorCountry(_userAddress);
     }
 
     /**
      *  @dev See {IIdentityRegistry-issuersRegistry}.
      */
-    function issuersRegistry() external view override returns (IERC3643TrustedIssuersRegistry) {
+    function issuersRegistry() external view returns (IERC3643TrustedIssuersRegistry) {
         return _getStorage().tokenIssuersRegistry;
     }
 
     /**
      *  @dev See {IIdentityRegistry-topicsRegistry}.
      */
-    function topicsRegistry() external view override returns (IERC3643ClaimTopicsRegistry) {
+    function topicsRegistry() external view returns (IERC3643ClaimTopicsRegistry) {
         return _getStorage().tokenTopicsRegistry;
     }
 
     /**
      *  @dev See {IIdentityRegistry-identityStorage}.
      */
-    function identityStorage() external view override returns (IERC3643IdentityRegistryStorage) {
+    function identityStorage() external view returns (IERC3643IdentityRegistryStorage) {
         return _getStorage().tokenIdentityStorage;
     }
 
     /**
      *  @dev See {IIdentityRegistry-contains}.
      */
-    function contains(address _userAddress) external view override returns (bool) {
+    function contains(address _userAddress) external view returns (bool) {
         return address(identity(_userAddress)) != address(0);
     }
 
     /**
      *  @dev See {IIdentityRegistry-registerIdentity}.
      */
-    function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) public override onlyAgent {
+    function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) public onlyAgent {
         _getStorage().tokenIdentityStorage.addIdentityToStorage(_userAddress, _identity, _country);
         emit ERC3643EventsLib.IdentityRegistered(_userAddress, _identity);
     }
@@ -329,14 +329,14 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
     /**
      *  @dev See {IIdentityRegistry-identity}.
      */
-    function identity(address _userAddress) public view override returns (IIdentity) {
+    function identity(address _userAddress) public view returns (IIdentity) {
         return _getStorage().tokenIdentityStorage.storedIdentity(_userAddress);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IIdentityRegistry).interfaceId
             || interfaceId == type(IERC3643IdentityRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;

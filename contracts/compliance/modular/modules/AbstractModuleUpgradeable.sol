@@ -120,7 +120,7 @@ abstract contract AbstractModuleUpgradeable is
     /**
      *  @dev See {IModule-bindCompliance}.
      */
-    function bindCompliance(address _compliance) external override onlyProxy {
+    function bindCompliance(address _compliance) external onlyProxy {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
         require(!s.complianceBound[_compliance], ErrorsLib.ComplianceAlreadyBound());
@@ -132,7 +132,7 @@ abstract contract AbstractModuleUpgradeable is
     /**
      *  @dev See {IModule-unbindCompliance}.
      */
-    function unbindCompliance(address _compliance) external override onlyComplianceCall onlyProxy {
+    function unbindCompliance(address _compliance) external onlyComplianceCall onlyProxy {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
         require(msg.sender == _compliance, ErrorsLib.OnlyComplianceContractCanCall());
@@ -146,7 +146,7 @@ abstract contract AbstractModuleUpgradeable is
     /**
      *  @dev See {IModule-isComplianceBound}.
      */
-    function isComplianceBound(address _compliance) external view override returns (bool) {
+    function isComplianceBound(address _compliance) external view returns (bool) {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         return s.complianceBound[_compliance];
     }
@@ -159,7 +159,7 @@ abstract contract AbstractModuleUpgradeable is
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IModule).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;
     }

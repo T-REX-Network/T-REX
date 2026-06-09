@@ -92,7 +92,7 @@ contract IAFactory is IIAFactory, IERC165 {
     /**
      *  @dev See {IIAFactory-deployIA}.
      */
-    function deployIA(address _token) external override returns (address) {
+    function deployIA(address _token) external returns (address) {
         require(ITREXFactory(_trexFactory).getImplementationAuthority() == msg.sender, OnlyReferenceIACanDeploy());
         TREXImplementationAuthority _newIA = new TREXImplementationAuthority(
             false, ITREXImplementationAuthority(msg.sender).getTREXFactory(), address(this)
@@ -108,14 +108,14 @@ contract IAFactory is IIAFactory, IERC165 {
     /**
      *  @dev See {IIAFactory-deployedByFactory}.
      */
-    function deployedByFactory(address _ia) external view override returns (bool) {
+    function deployedByFactory(address _ia) external view returns (bool) {
         return _deployedByFactory[_ia];
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IIAFactory).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 

@@ -67,4 +67,5 @@ import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643Identity
 // solhint-disable-next-line no-empty-blocks
 interface IIdentityRegistryStorage is IERC3643IdentityRegistryStorage {
     // functions that are not part of the original standard can be added here in future versions
-}
+
+    }

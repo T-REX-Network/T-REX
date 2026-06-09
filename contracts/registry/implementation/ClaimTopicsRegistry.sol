@@ -99,14 +99,14 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
     /**
      *  @dev See {IClaimTopicsRegistry-addClaimTopic}.
      */
-    function addClaimTopic(uint256 claimTopic) external override onlyOwner {
+    function addClaimTopic(uint256 claimTopic) external onlyOwner {
         _addClaimTopic(claimTopic);
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-removeClaimTopic}.
      */
-    function removeClaimTopic(uint256 claimTopic) external override onlyOwner {
+    function removeClaimTopic(uint256 claimTopic) external onlyOwner {
         if (_getStorage().claimTopics.remove(claimTopic)) {
             emit ERC3643EventsLib.ClaimTopicRemoved(claimTopic);
         }
@@ -115,14 +115,14 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
     /**
      *  @dev See {IClaimTopicsRegistry-getClaimTopics}.
      */
-    function getClaimTopics() external view override returns (uint256[] memory) {
+    function getClaimTopics() external view returns (uint256[] memory) {
         return _getStorage().claimTopics.values();
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;
     }

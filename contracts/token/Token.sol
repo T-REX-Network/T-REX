@@ -195,14 +195,14 @@ contract Token is
     /// @inheritdoc IERC3643
     /// @dev The EIP-712 domain separator is derived from `name()` (see `_EIP712Name`), so changing the name
     ///      rotates the domain separator and invalidates any outstanding (unused) ERC-2612 permit signatures.
-    function setName(string calldata tokenName) external override onlyOwner {
+    function setName(string calldata tokenName) external onlyOwner {
         require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
         _tokenStorage().name = tokenName;
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setSymbol(string calldata tokenSymbol) external override onlyOwner {
+    function setSymbol(string calldata tokenSymbol) external onlyOwner {
         require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         _tokenStorage().symbol = tokenSymbol;
         _emitUpdatedTokenInformation();
@@ -210,13 +210,13 @@ contract Token is
 
     /// @inheritdoc IERC3643
     /// @dev if _onchainID is set at zero address it means no ONCHAINID is bound to this token
-    function setOnchainID(address onchainIdAddress) external override onlyOwner {
+    function setOnchainID(address onchainIdAddress) external onlyOwner {
         _tokenStorage().onchainId = onchainIdAddress;
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setIdentityRegistry(address _identityRegistry) public override onlyOwner {
+    function setIdentityRegistry(address _identityRegistry) public onlyOwner {
         require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
 
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(_identityRegistry);
@@ -224,7 +224,7 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function setCompliance(address _compliance) public override onlyOwner {
+    function setCompliance(address _compliance) public onlyOwner {
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
 
         TokenStorage storage s = _tokenStorage();
@@ -252,22 +252,22 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function onchainID() external view override returns (address) {
+    function onchainID() external view returns (address) {
         return _tokenStorage().onchainId;
     }
 
     /// @inheritdoc IERC3643
-    function identityRegistry() external view override returns (IERC3643IdentityRegistry) {
+    function identityRegistry() external view returns (IERC3643IdentityRegistry) {
         return _tokenStorage().identityRegistry;
     }
 
     /// @inheritdoc IERC3643
-    function compliance() external view override returns (IERC3643Compliance) {
+    function compliance() external view returns (IERC3643Compliance) {
         return _tokenStorage().compliance;
     }
 
     /// @inheritdoc IERC3643
-    function version() public pure override returns (string memory) {
+    function version() public pure returns (string memory) {
         return VERSION;
     }
 
@@ -278,7 +278,7 @@ contract Token is
     /* ----- Pause Functions ----- */
 
     /// @inheritdoc IERC3643
-    function pause() external override onlyAgent whenNotPaused {
+    function pause() external onlyAgent whenNotPaused {
         require(
             !getAgentRestrictions(_msgSender()).disablePause,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "pause disabled")
@@ -288,7 +288,7 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function unpause() external override onlyAgent whenPaused {
+    function unpause() external onlyAgent whenPaused {
         require(
             !getAgentRestrictions(_msgSender()).disablePause,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "pause disabled")
@@ -305,7 +305,7 @@ contract Token is
     /* ----- Minting & Burning Functions ----- */
 
     /// @inheritdoc IERC3643
-    function mint(address to, uint256 amount) public override onlyAgent {
+    function mint(address to, uint256 amount) public onlyAgent {
         require(
             !getAgentRestrictions(_msgSender()).disableMint, ErrorsLib.AgentNotAuthorized(_msgSender(), "mint disabled")
         );
@@ -313,7 +313,7 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function burn(address from, uint256 amount) public override onlyAgent {
+    function burn(address from, uint256 amount) public onlyAgent {
         require(
             !getAgentRestrictions(_msgSender()).disableBurn, ErrorsLib.AgentNotAuthorized(_msgSender(), "burn disabled")
         );
@@ -321,14 +321,14 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function batchMint(address[] calldata tos, uint256[] calldata amounts) external override {
+    function batchMint(address[] calldata tos, uint256[] calldata amounts) external {
         for (uint256 i = 0; i < tos.length; i++) {
             mint(tos[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchBurn(address[] calldata froms, uint256[] calldata amounts) external override {
+    function batchBurn(address[] calldata froms, uint256[] calldata amounts) external {
         for (uint256 i = 0; i < froms.length; i++) {
             burn(froms[i], amounts[i]);
         }
@@ -337,7 +337,7 @@ contract Token is
     /* ----- Freezing Functions ----- */
 
     /// @inheritdoc IERC3643
-    function freezePartialTokens(address user, uint256 amount) public override onlyAgent {
+    function freezePartialTokens(address user, uint256 amount) public onlyAgent {
         require(
             !getAgentRestrictions(_msgSender()).disablePartialFreeze,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "partial freeze disabled")
@@ -354,7 +354,7 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function unfreezePartialTokens(address user, uint256 amount) public override onlyAgent {
+    function unfreezePartialTokens(address user, uint256 amount) public onlyAgent {
         require(
             !getAgentRestrictions(_msgSender()).disablePartialFreeze,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "partial freeze disabled")
@@ -371,7 +371,7 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function setAddressFrozen(address user, bool freeze) public override onlyAgent {
+    function setAddressFrozen(address user, bool freeze) public onlyAgent {
         require(
             !getAgentRestrictions(_msgSender()).disableAddressFreeze,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "address freeze disabled")
@@ -390,26 +390,26 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external override {
+    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external {
         for (uint256 i = 0; i < users.length; i++) {
             unfreezePartialTokens(users[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes) external override {
+    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes) external {
         for (uint256 i = 0; i < users.length; i++) {
             setAddressFrozen(users[i], freezes[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function isFrozen(address user) external view override returns (bool) {
+    function isFrozen(address user) external view returns (bool) {
         return _tokenStorage().frozenStatus[user].addressFrozen;
     }
 
     /// @inheritdoc IERC3643
-    function getFrozenTokens(address user) external view override returns (uint256) {
+    function getFrozenTokens(address user) external view returns (uint256) {
         return _tokenStorage().frozenStatus[user].amount;
     }
 
@@ -418,7 +418,6 @@ contract Token is
     /// @inheritdoc IERC3643
     function recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         external
-        override
         onlyAgent
         returns (bool)
     {
@@ -490,7 +489,7 @@ contract Token is
     /* ----- Transfer Functions ----- */
 
     /// @inheritdoc IERC3643
-    function forcedTransfer(address from, address to, uint256 amount) public override onlyAgent returns (bool) {
+    function forcedTransfer(address from, address to, uint256 amount) public onlyAgent returns (bool) {
         require(
             !getAgentRestrictions(_msgSender()).disableForceTransfer,
             ErrorsLib.AgentNotAuthorized(_msgSender(), "force transfer disabled")
@@ -503,7 +502,7 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function batchTransfer(address[] calldata tos, uint256[] calldata amounts) external override {
+    function batchTransfer(address[] calldata tos, uint256[] calldata amounts) external {
         for (uint256 i = 0; i < tos.length; i++) {
             transfer(tos[i], amounts[i]);
         }
@@ -512,7 +511,6 @@ contract Token is
     /// @inheritdoc IERC3643
     function batchForcedTransfer(address[] calldata froms, address[] calldata tos, uint256[] calldata amounts)
         external
-        override
     {
         for (uint256 i = 0; i < froms.length; i++) {
             forcedTransfer(froms[i], tos[i], amounts[i]);
@@ -522,7 +520,7 @@ contract Token is
     /* ----- Default Allowance Functions ----- */
 
     /// @inheritdoc IToken
-    function setAllowanceForAll(address[] calldata targets, bool allow) external override onlyOwner {
+    function setAllowanceForAll(address[] calldata targets, bool allow) external onlyOwner {
         uint256 targetsCount = targets.length;
         require(targetsCount <= 100, ErrorsLib.ArraySizeLimited(100));
 
@@ -535,7 +533,7 @@ contract Token is
     }
 
     /// @inheritdoc IToken
-    function setDefaultAllowance(bool allow) external override {
+    function setDefaultAllowance(bool allow) external {
         TokenStorage storage s = _tokenStorage();
         address sender = _msgSender();
         require(s.defaultAllowanceOptOuts[sender] == allow, ErrorsLib.DefaultAllowanceOptOutAlreadySet(sender, allow));
@@ -562,7 +560,7 @@ contract Token is
     /* ----- Agent Restrictions Functions ----- */
 
     /// @inheritdoc IToken
-    function setAgentRestrictions(address agent, TokenRoles memory restrictions) external override onlyOwner {
+    function setAgentRestrictions(address agent, TokenRoles memory restrictions) external onlyOwner {
         if (!isAgent(agent)) {
             revert ErrorsLib.AddressNotAgent(agent);
         }
@@ -580,7 +578,7 @@ contract Token is
     }
 
     /// @inheritdoc IToken
-    function getAgentRestrictions(address agent) public view override returns (TokenRoles memory) {
+    function getAgentRestrictions(address agent) public view returns (TokenRoles memory) {
         return _tokenStorage().agentsRestrictions[agent];
     }
 
@@ -622,7 +620,7 @@ contract Token is
     /* ----- Utility Functions ----- */
 
     /// @inheritdoc IERC165
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IToken).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId
             || interfaceId == type(IERC3643).interfaceId || interfaceId == type(IERC20Permit).interfaceId;

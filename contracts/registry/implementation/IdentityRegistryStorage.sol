@@ -108,11 +108,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
      */
-    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country)
-        external
-        override
-        onlyAgent
-    {
+    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external onlyAgent {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
@@ -125,7 +121,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredIdentity}.
      */
-    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external override onlyAgent {
+    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external onlyAgent {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
@@ -137,7 +133,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
      */
-    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external override onlyAgent {
+    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external onlyAgent {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
@@ -148,7 +144,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-removeIdentityFromStorage}.
      */
-    function removeIdentityFromStorage(address _userAddress) external override onlyAgent {
+    function removeIdentityFromStorage(address _userAddress) external onlyAgent {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
@@ -160,14 +156,14 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-bindIdentityRegistry}.
      */
-    function bindIdentityRegistry(address _identityRegistry) external override onlyOwner {
+    function bindIdentityRegistry(address _identityRegistry) external onlyOwner {
         _bindIdentityRegistry(_identityRegistry);
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-unbindIdentityRegistry}.
      */
-    function unbindIdentityRegistry(address _identityRegistry) external override onlyOwner {
+    function unbindIdentityRegistry(address _identityRegistry) external onlyOwner {
         require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.identityRegistries.remove(_identityRegistry), ErrorsLib.IdentityRegistryNotStored());
@@ -179,28 +175,28 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-linkedIdentityRegistries}.
      */
-    function linkedIdentityRegistries() external view override returns (address[] memory) {
+    function linkedIdentityRegistries() external view returns (address[] memory) {
         return _getStorage().identityRegistries.values();
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedIdentity}.
      */
-    function storedIdentity(address _userAddress) external view override returns (IIdentity) {
+    function storedIdentity(address _userAddress) external view returns (IIdentity) {
         return _getStorage().identities[_userAddress].identityContract;
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedInvestorCountry}.
      */
-    function storedInvestorCountry(address _userAddress) external view override returns (uint16) {
+    function storedInvestorCountry(address _userAddress) external view returns (uint16) {
         return _getStorage().identities[_userAddress].investorCountry;
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
     }

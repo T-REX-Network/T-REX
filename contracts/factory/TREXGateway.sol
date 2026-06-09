@@ -107,7 +107,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-setFactory}.
      */
-    function setFactory(address factory) external override onlyOwner {
+    function setFactory(address factory) external onlyOwner {
         require(factory != address(0), ErrorsLib.ZeroAddress());
 
         _factory = factory;
@@ -117,7 +117,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-setPublicDeploymentStatus}.
      */
-    function setPublicDeploymentStatus(bool _isEnabled) external override onlyOwner {
+    function setPublicDeploymentStatus(bool _isEnabled) external onlyOwner {
         if (_isEnabled == _publicDeploymentStatus) {
             if (_isEnabled) {
                 revert ErrorsLib.PublicDeploymentAlreadyEnabled();
@@ -132,14 +132,14 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-transferFactoryOwnership}.
      */
-    function transferFactoryOwnership(address _newOwner) external override onlyOwner {
+    function transferFactoryOwnership(address _newOwner) external onlyOwner {
         Ownable(_factory).transferOwnership(_newOwner);
     }
 
     /**
      *  @dev See {ITREXGateway-enableDeploymentFee}.
      */
-    function enableDeploymentFee(bool _isEnabled) external override onlyOwner {
+    function enableDeploymentFee(bool _isEnabled) external onlyOwner {
         if (_isEnabled == _deploymentFeeEnabled) {
             if (_isEnabled) {
                 revert ErrorsLib.DeploymentFeesAlreadyEnabled();
@@ -154,7 +154,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-setDeploymentFee}.
      */
-    function setDeploymentFee(uint256 _fee, address _feeToken, address _feeCollector) external override onlyOwner {
+    function setDeploymentFee(uint256 _fee, address _feeToken, address _feeCollector) external onlyOwner {
         require(_feeToken != address(0) && _feeCollector != address(0), ErrorsLib.ZeroAddress());
 
         _deploymentFee.fee = _fee;
@@ -166,7 +166,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-addDeployer}.
      */
-    function addDeployer(address deployer) external override {
+    function addDeployer(address deployer) external {
         require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
         require(!isDeployer(deployer), ErrorsLib.DeployerAlreadyExists(deployer));
 
@@ -177,7 +177,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-removeDeployer}.
      */
-    function removeDeployer(address deployer) external override {
+    function removeDeployer(address deployer) external {
         require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
         require(isDeployer(deployer), ErrorsLib.DeployerDoesNotExist(deployer));
 
@@ -188,7 +188,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-applyFeeDiscount}.
      */
-    function applyFeeDiscount(address deployer, uint16 discount) external override {
+    function applyFeeDiscount(address deployer, uint16 discount) external {
         require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
         require(discount <= 10000, ErrorsLib.DiscountOutOfRange());
 
@@ -199,28 +199,28 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-getPublicDeploymentStatus}.
      */
-    function getPublicDeploymentStatus() external view override returns (bool) {
+    function getPublicDeploymentStatus() external view returns (bool) {
         return _publicDeploymentStatus;
     }
 
     /**
      *  @dev See {ITREXGateway-getFactory}.
      */
-    function getFactory() external view override returns (address) {
+    function getFactory() external view returns (address) {
         return _factory;
     }
 
     /**
      *  @dev See {ITREXGateway-getDeploymentFee}.
      */
-    function getDeploymentFee() external view override returns (Fee memory) {
+    function getDeploymentFee() external view returns (Fee memory) {
         return _deploymentFee;
     }
 
     /**
      *  @dev See {ITREXGateway-isDeploymentFeeEnabled}.
      */
-    function isDeploymentFeeEnabled() external view override returns (bool) {
+    function isDeploymentFeeEnabled() external view returns (bool) {
         return _deploymentFeeEnabled;
     }
 
@@ -230,7 +230,7 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     function deployTREXSuite(
         ITREXFactory.TokenDetails memory _tokenDetails,
         ITREXFactory.ClaimDetails memory _claimDetails
-    ) public override {
+    ) public {
         require(_publicDeploymentStatus || isDeployer(msg.sender), ErrorsLib.PublicDeploymentsNotAllowed());
         require(
             !_publicDeploymentStatus || msg.sender == _tokenDetails.owner || isDeployer(msg.sender),
@@ -252,21 +252,21 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     /**
      *  @dev See {ITREXGateway-isDeployer}.
      */
-    function isDeployer(address deployer) public view override returns (bool) {
+    function isDeployer(address deployer) public view returns (bool) {
         return _deployers[deployer];
     }
 
     /**
      *  @dev See {ITREXGateway-calculateFee}.
      */
-    function calculateFee(address deployer) public view override returns (uint256) {
+    function calculateFee(address deployer) public view returns (uint256) {
         return _deploymentFee.fee - ((_feeDiscount[deployer] * _deploymentFee.fee) / 10000);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(ITREXGateway).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;
     }

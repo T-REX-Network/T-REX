@@ -90,7 +90,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getTransferStatus(address _token, address _from, address _to, uint256 _amount)
         external
         view
-        override
         returns (bool _freezeStatus, bool _eligibilityStatus, bool _complianceStatus)
     {
         IToken token = IToken(_token);
@@ -117,7 +116,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getVerifiedDetails(address _token, address _userAddress)
         public
         view
-        override
         returns (EligibilityCheckDetails[] memory _details)
     {
         IERC3643IdentityRegistry identityRegistry = IToken(_token).identityRegistry();
@@ -164,7 +162,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getFreezeStatus(address _token, address _from, address _to, uint256 _amount)
         public
         view
-        override
         returns (bool _frozen, uint256 _availableBalance)
     {
         IToken token = IToken(_token);
@@ -182,7 +179,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getTransferDetails(address _token, address _from, address _to, uint256 _value)
         public
         view
-        override
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IToken(_token).compliance()));

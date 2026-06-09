@@ -80,7 +80,7 @@ abstract contract AbstractProxy is IProxy, Initializable {
     /**
      *  @dev See {IProxy-setImplementationAuthority}.
      */
-    function setImplementationAuthority(address _newImplementationAuthority) external override {
+    function setImplementationAuthority(address _newImplementationAuthority) external {
         require(msg.sender == getImplementationAuthority(), ErrorsLib.OnlyCurrentImplementationAuthorityCanCall());
         require(_newImplementationAuthority != address(0), ErrorsLib.ZeroAddress());
         require(
@@ -99,7 +99,7 @@ abstract contract AbstractProxy is IProxy, Initializable {
     /**
      *  @dev See {IProxy-getImplementationAuthority}.
      */
-    function getImplementationAuthority() public view override returns (address) {
+    function getImplementationAuthority() public view returns (address) {
         address implemAuth;
         // solhint-disable-next-line no-inline-assembly
         assembly {

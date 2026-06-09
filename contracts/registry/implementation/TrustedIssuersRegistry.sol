@@ -115,14 +115,14 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     /**
      *  @dev See {ITrustedIssuersRegistry-addTrustedIssuer}.
      */
-    function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external override onlyOwner {
+    function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external onlyOwner {
         _addTrustedIssuer(_trustedIssuer, _claimTopics);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-removeTrustedIssuer}.
      */
-    function removeTrustedIssuer(address _trustedIssuer) external override onlyOwner {
+    function removeTrustedIssuer(address _trustedIssuer) external onlyOwner {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
@@ -140,11 +140,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     /**
      *  @dev See {ITrustedIssuersRegistry-updateIssuerClaimTopics}.
      */
-    function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics)
-        external
-        override
-        onlyOwner
-    {
+    function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external onlyOwner {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
@@ -167,28 +163,28 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     /**
      *  @dev See {ITrustedIssuersRegistry-getTrustedIssuers}.
      */
-    function getTrustedIssuers() external view override returns (address[] memory) {
+    function getTrustedIssuers() external view returns (address[] memory) {
         return _getStorage().trustedIssuers.values();
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-getTrustedIssuersForClaimTopic}.
      */
-    function getTrustedIssuersForClaimTopic(uint256 claimTopic) external view override returns (address[] memory) {
+    function getTrustedIssuersForClaimTopic(uint256 claimTopic) external view returns (address[] memory) {
         return _getStorage().claimTopicsToTrustedIssuers[claimTopic].values();
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-isTrustedIssuer}.
      */
-    function isTrustedIssuer(address _issuer) external view override returns (bool) {
+    function isTrustedIssuer(address _issuer) external view returns (bool) {
         return _getStorage().trustedIssuers.contains(_issuer);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-getTrustedIssuerClaimTopics}.
      */
-    function getTrustedIssuerClaimTopics(address _trustedIssuer) external view override returns (uint256[] memory) {
+    function getTrustedIssuerClaimTopics(address _trustedIssuer) external view returns (uint256[] memory) {
         Storage storage s = _getStorage();
         require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.TrustedIssuerDoesNotExist());
         return s.trustedIssuerClaimTopics[_trustedIssuer].values();
@@ -197,14 +193,14 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     /**
      *  @dev See {ITrustedIssuersRegistry-hasClaimTopic}.
      */
-    function hasClaimTopic(address _issuer, uint256 _claimTopic) external view override returns (bool) {
+    function hasClaimTopic(address _issuer, uint256 _claimTopic) external view returns (bool) {
         return _getStorage().trustedIssuerClaimTopics[_issuer].contains(_claimTopic);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC3643TrustedIssuersRegistry).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
     }

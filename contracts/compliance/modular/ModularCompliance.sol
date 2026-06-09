@@ -139,7 +139,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IERC3643Compliance-bindToken}.
      */
-    function bindToken(address _token) external override {
+    function bindToken(address _token) external {
         Storage storage s = _getStorage();
         require(
             owner() == msg.sender || (s.tokenBound == address(0) && msg.sender == _token),
@@ -151,7 +151,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IERC3643Compliance-unbindToken}.
      */
-    function unbindToken(address _token) external override {
+    function unbindToken(address _token) external {
         require(owner() == msg.sender || msg.sender == _token, ErrorsLib.OnlyOwnerOrTokenCanCall());
 
         Storage storage s = _getStorage();
@@ -164,7 +164,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-removeModule}.
      */
-    function removeModule(address _module) external override onlyOwner {
+    function removeModule(address _module) external onlyOwner {
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
@@ -176,7 +176,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IERC3643Compliance-transferred}.
      */
-    function transferred(address _from, address _to, uint256 _value) external override onlyBoundedToken {
+    function transferred(address _from, address _to, uint256 _value) external onlyBoundedToken {
         require(_from != address(0) && _to != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
@@ -189,7 +189,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IERC3643Compliance-created}.
      */
-    function created(address _to, uint256 _value) external override onlyBoundedToken {
+    function created(address _to, uint256 _value) external onlyBoundedToken {
         require(_to != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
@@ -202,7 +202,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IERC3643Compliance-destroyed}.
      */
-    function destroyed(address _from, uint256 _value) external override onlyBoundedToken {
+    function destroyed(address _from, uint256 _value) external onlyBoundedToken {
         require(_from != address(0), ErrorsLib.ZeroAddress());
         require(_value > 0, ErrorsLib.ZeroValue());
         Storage storage s = _getStorage();
@@ -215,7 +215,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */
-    function addAndSetModule(address _module, bytes[] calldata _interactions) external override onlyOwner {
+    function addAndSetModule(address _module, bytes[] calldata _interactions) external onlyOwner {
         require(_interactions.length <= 5, ErrorsLib.ArraySizeLimited(5));
         _addModule(_module);
         for (uint256 i = 0; i < _interactions.length; i++) {
@@ -226,35 +226,35 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-isModuleBound}.
      */
-    function isModuleBound(address _module) external view override returns (bool) {
+    function isModuleBound(address _module) external view returns (bool) {
         return _getStorage().modules.contains(_module);
     }
 
     /**
      *  @dev See {IModularCompliance-getModules}.
      */
-    function getModules() external view override returns (address[] memory) {
+    function getModules() external view returns (address[] memory) {
         return _getStorage().modules.values();
     }
 
     /**
      *  @dev See {IERC3643Compliance-getTokenBound}.
      */
-    function getTokenBound() external view override returns (address) {
+    function getTokenBound() external view returns (address) {
         return _getStorage().tokenBound;
     }
 
     /**
      *  @dev See {IERC3643Compliance-getTokenBound}.
      */
-    function isTokenBound(address _token) external view override returns (bool) {
+    function isTokenBound(address _token) external view returns (bool) {
         return _token == _getStorage().tokenBound;
     }
 
     /**
      *  @dev See {IERC3643Compliance-canTransfer}.
      */
-    function canTransfer(address _from, address _to, uint256 _value) external view override returns (bool) {
+    function canTransfer(address _from, address _to, uint256 _value) external view returns (bool) {
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
@@ -269,21 +269,21 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-addModule}.
      */
-    function addModule(address _module) public override onlyOwner {
+    function addModule(address _module) public onlyOwner {
         _addModule(_module);
     }
 
     /**
      *  @dev see {IModularCompliance-callModuleFunction}.
      */
-    function callModuleFunction(bytes calldata callData, address _module) public override onlyOwner {
+    function callModuleFunction(bytes calldata callData, address _module) public onlyOwner {
         _callModuleFunction(callData, _module);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
             || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;

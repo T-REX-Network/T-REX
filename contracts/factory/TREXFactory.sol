@@ -103,7 +103,7 @@ contract TREXFactory is ITREXFactory, Ownable {
         string memory _salt,
         TokenDetails calldata _tokenDetails,
         ClaimDetails calldata _claimDetails
-    ) external override onlyOwner {
+    ) external onlyOwner {
         require(tokenDeployed[_salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
         require(_claimDetails.issuers.length == _claimDetails.issuerClaims.length, ErrorsLib.InvalidClaimPattern());
         require(_claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
@@ -147,35 +147,35 @@ contract TREXFactory is ITREXFactory, Ownable {
     /**
      *  @dev See {ITREXFactory-recoverContractOwnership}.
      */
-    function recoverContractOwnership(address _contract, address _newOwner) external override onlyOwner {
+    function recoverContractOwnership(address _contract, address _newOwner) external onlyOwner {
         (Ownable(_contract)).transferOwnership(_newOwner);
     }
 
     /**
      *  @dev See {ITREXFactory-getImplementationAuthority}.
      */
-    function getImplementationAuthority() external view override returns (address) {
+    function getImplementationAuthority() external view returns (address) {
         return _implementationAuthority;
     }
 
     /**
      *  @dev See {ITREXFactory-getIdFactory}.
      */
-    function getIdFactory() external view override returns (address) {
+    function getIdFactory() external view returns (address) {
         return _idFactory;
     }
 
     /**
      *  @dev See {ITREXFactory-getToken}.
      */
-    function getToken(string calldata _salt) external view override returns (address) {
+    function getToken(string calldata _salt) external view returns (address) {
         return tokenDeployed[_salt];
     }
 
     /**
      *  @dev See {ITREXFactory-setImplementationAuthority}.
      */
-    function setImplementationAuthority(address implementationAuthority_) public override onlyOwner {
+    function setImplementationAuthority(address implementationAuthority_) public onlyOwner {
         require(implementationAuthority_ != address(0), ErrorsLib.ZeroAddress());
         // should not be possible to set an implementation authority that is not complete
         require(
@@ -194,7 +194,7 @@ contract TREXFactory is ITREXFactory, Ownable {
     /**
      *  @dev See {ITREXFactory-setIdFactory}.
      */
-    function setIdFactory(address idFactory_) public override onlyOwner {
+    function setIdFactory(address idFactory_) public onlyOwner {
         require(idFactory_ != address(0), ErrorsLib.ZeroAddress());
         _idFactory = idFactory_;
         emit EventsLib.IdFactorySet(idFactory_);
