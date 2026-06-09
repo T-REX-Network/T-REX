@@ -316,8 +316,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     }
 
     /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
-    ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check —
-    ///      wrappers enforce it.
+    ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
 
@@ -325,6 +324,8 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
             LowLevelCall.bubbleRevert();
         }
 
+        // For calldata shorter than 4 bytes the emitted "selector" is a zero-padded partial value rather than a real selector.
+        // forge-lint: disable-next-line(unsafe-typecast
         emit EventsLib.ModuleInteraction(_module, bytes4(callData));
     }
 
