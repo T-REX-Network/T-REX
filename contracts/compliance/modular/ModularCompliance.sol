@@ -325,7 +325,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         }
 
         // For calldata shorter than 4 bytes the emitted "selector" is a zero-padded partial value rather than a real selector.
-        // forge-lint: disable-next-line(unsafe-typecast
+        // forge-lint: disable-next-line(unsafe-typecast)
         emit EventsLib.ModuleInteraction(_module, bytes4(callData));
     }
 

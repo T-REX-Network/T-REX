@@ -64,11 +64,6 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-
-import {
-    ContextUpgradeable,
-    ERC2771ContextUpgradeable
-} from "@openzeppelin/contracts-upgradeable/metatx/ERC2771ContextUpgradeable.sol";
 import {
     ERC20PermitUpgradeable,
     ERC20Upgradeable,
@@ -91,14 +86,7 @@ import { IERC173 } from "../roles/IERC173.sol";
 import { IToken } from "./IToken.sol";
 import { TokenRoles } from "./TokenStructs.sol";
 
-contract Token is
-    ERC20PermitUpgradeable,
-    PausableUpgradeable,
-    AgentRoleUpgradeable,
-    ERC2771ContextUpgradeable,
-    IToken,
-    IERC165
-{
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradeable, IToken, IERC165 {
 
     string internal constant VERSION = "5.0.0";
 
@@ -118,8 +106,6 @@ contract Token is
         address trustedForwarder;
 
         mapping(address user => FrozenStatus) frozenStatus;
-        mapping(address spender => bool) defaultAllowances;
-        mapping(address user => bool) defaultAllowanceOptOuts;
 
         mapping(address agent => TokenRoles) agentsRestrictions;
     }
@@ -128,7 +114,7 @@ contract Token is
     bytes32 private constant TOKEN_STORAGE_LOCATION =
         0x3eb201768b0b55c18fa93955aeb38c6bf0f381d8227d53e1b0e5b066883d4e00;
 
-    constructor() ERC2771ContextUpgradeable(address(0)) {
+    constructor() {
         _disableInitializers();
     }
 
@@ -516,46 +502,6 @@ contract Token is
         }
     }
 
-    /* ----- Default Allowance Functions ----- */
-
-    /// @inheritdoc IToken
-    function setAllowanceForAll(address[] calldata targets, bool allow) external onlyOwner {
-        uint256 targetsCount = targets.length;
-        require(targetsCount <= 100, ErrorsLib.ArraySizeLimited(100));
-
-        TokenStorage storage s = _tokenStorage();
-        for (uint256 i = 0; i < targetsCount; i++) {
-            require(s.defaultAllowances[targets[i]] != allow, ErrorsLib.DefaultAllowanceAlreadySet(targets[i], allow));
-            s.defaultAllowances[targets[i]] = allow;
-            emit EventsLib.DefaultAllowanceUpdated(targets[i], allow, _msgSender());
-        }
-    }
-
-    /// @inheritdoc IToken
-    function setDefaultAllowance(bool allow) external {
-        TokenStorage storage s = _tokenStorage();
-        address sender = _msgSender();
-        require(s.defaultAllowanceOptOuts[sender] == allow, ErrorsLib.DefaultAllowanceOptOutAlreadySet(sender, allow));
-
-        s.defaultAllowanceOptOuts[sender] = !allow;
-        emit EventsLib.DefaultAllowanceOptOutUpdated(sender, !allow);
-    }
-
-    /// @inheritdoc IERC20
-    function allowance(address _owner, address _spender)
-        public
-        view
-        override(ERC20Upgradeable, IERC20)
-        returns (uint256)
-    {
-        TokenStorage storage s = _tokenStorage();
-        if (s.defaultAllowances[_spender] && !s.defaultAllowanceOptOuts[_owner]) {
-            return type(uint256).max;
-        }
-
-        return super.allowance(_owner, _spender);
-    }
-
     /* ----- Agent Restrictions Functions ----- */
 
     /// @inheritdoc IToken
@@ -579,41 +525,6 @@ contract Token is
     /// @inheritdoc IToken
     function getAgentRestrictions(address agent) public view returns (TokenRoles memory) {
         return _tokenStorage().agentsRestrictions[agent];
-    }
-
-    /* ----- ERC2771 Context Functions ----- */
-
-    /// @inheritdoc ERC2771ContextUpgradeable
-    function trustedForwarder() public view virtual override returns (address) {
-        return _tokenStorage().trustedForwarder;
-    }
-
-    /// @inheritdoc IToken
-    function setTrustedForwarder(address newTrustedForwarder) external onlyOwner {
-        _tokenStorage().trustedForwarder = newTrustedForwarder;
-
-        emit EventsLib.TrustedForwarderSet(newTrustedForwarder);
-    }
-
-    function _msgSender() internal view override(ContextUpgradeable, ERC2771ContextUpgradeable) returns (address) {
-        return super._msgSender();
-    }
-
-    function _msgData() internal view override(ContextUpgradeable, ERC2771ContextUpgradeable) returns (bytes calldata) {
-        return super._msgData();
-    }
-
-    function _contextSuffixLength()
-        internal
-        view
-        override(ContextUpgradeable, ERC2771ContextUpgradeable)
-        returns (uint256)
-    {
-        return super._contextSuffixLength();
-    }
-
-    function _checkIsAgent() internal view override {
-        require(isAgent(_msgSender()), ErrorsLib.CallerDoesNotHaveAgentRole());
     }
 
     /* ----- Utility Functions ----- */

@@ -218,6 +218,9 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
             issuerTopics.add(_claimTopics[i]);
             s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(address(_trustedIssuer));
         }
+
+        // This event will re-emit eventual duplicated _claimTopics.
+        // They won't be added to storage (.add ignores them) but will be emitted here regardless.
         emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
     }
 
