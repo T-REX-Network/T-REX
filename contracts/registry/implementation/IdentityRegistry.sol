@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -257,23 +258,21 @@ contract IdentityRegistry is IIdentityRegistry, AgentRoleUpgradeable, IERC165 {
             }
 
             for (uint256 j = 0; j < claimIds.length; j++) {
-                (foundClaimTopic, scheme, issuer, sig, data,) = identity(userAddress).getClaim(claimIds[j]);
+                IIdentity userIdentity = identity(userAddress);
+                (foundClaimTopic, scheme, issuer, sig, data,) = userIdentity.getClaim(claimIds[j]);
 
                 if (foundClaimTopic == requiredClaimTopics[claimTopic]) {
-                    try IClaimIssuer(issuer)
-                        .isClaimValid(identity(userAddress), requiredClaimTopics[claimTopic], sig, data) returns (
-                        bool _validity
-                    ) {
-                        if (_validity) {
-                            break;
-                        }
-                        if (!_validity && j == (claimIds.length - 1)) {
-                            return false;
-                        }
-                    } catch {
-                        if (j == (claimIds.length - 1)) {
-                            return false;
-                        }
+                    (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
+                        issuer,
+                        abi.encodeCall(
+                            IClaimIssuer.isClaimValid, (userIdentity, requiredClaimTopics[claimTopic], sig, data)
+                        )
+                    );
+
+                    if (success && result != bytes32(0)) {
+                        break;
+                    } else if (j == (claimIds.length - 1)) {
+                        return false;
                     }
                 } else if (j == (claimIds.length - 1)) {
                     return false;
