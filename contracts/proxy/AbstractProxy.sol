@@ -62,25 +62,27 @@
 
 pragma solidity 0.8.30;
 
-import "../errors/CommonErrors.sol";
-import "../errors/InvalidArgumentErrors.sol";
-import "./authority/ITREXImplementationAuthority.sol";
-import "./interface/IProxy.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
-/// Errors
-
-/// @dev Thrown when called by other than the current implementation authority.
-error OnlyCurrentImplementationAuthorityCanCall();
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
+import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
+import { IProxy } from "./interface/IProxy.sol";
 
 abstract contract AbstractProxy is IProxy, Initializable {
+
+    constructor(address implementationAuthority) {
+        require(implementationAuthority != address(0), ErrorsLib.ZeroAddress());
+        _storeImplementationAuthority(implementationAuthority);
+        emit EventsLib.ImplementationAuthoritySet(implementationAuthority);
+    }
 
     /**
      *  @dev See {IProxy-setImplementationAuthority}.
      */
-    function setImplementationAuthority(address _newImplementationAuthority) external override {
-        require(msg.sender == getImplementationAuthority(), OnlyCurrentImplementationAuthorityCanCall());
-        require(_newImplementationAuthority != address(0), ZeroAddress());
+    function setImplementationAuthority(address _newImplementationAuthority) external {
+        require(msg.sender == getImplementationAuthority(), ErrorsLib.OnlyCurrentImplementationAuthorityCanCall());
+        require(_newImplementationAuthority != address(0), ErrorsLib.ZeroAddress());
         require(
             (ITREXImplementationAuthority(_newImplementationAuthority)).getTokenImplementation() != address(0)
                 && (ITREXImplementationAuthority(_newImplementationAuthority)).getCTRImplementation() != address(0)
@@ -88,16 +90,16 @@ abstract contract AbstractProxy is IProxy, Initializable {
                 && (ITREXImplementationAuthority(_newImplementationAuthority)).getIRSImplementation() != address(0)
                 && (ITREXImplementationAuthority(_newImplementationAuthority)).getMCImplementation() != address(0)
                 && (ITREXImplementationAuthority(_newImplementationAuthority)).getTIRImplementation() != address(0),
-            InvalidImplementationAuthority()
+            ErrorsLib.InvalidImplementationAuthority()
         );
         _storeImplementationAuthority(_newImplementationAuthority);
-        emit ImplementationAuthoritySet(_newImplementationAuthority);
+        emit EventsLib.ImplementationAuthoritySet(_newImplementationAuthority);
     }
 
     /**
      *  @dev See {IProxy-getImplementationAuthority}.
      */
-    function getImplementationAuthority() public view override returns (address) {
+    function getImplementationAuthority() public view returns (address) {
         address implemAuth;
         // solhint-disable-next-line no-inline-assembly
         assembly {
@@ -116,5 +118,29 @@ abstract contract AbstractProxy is IProxy, Initializable {
             sstore(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc, implementationAuthority)
         }
     }
+
+    function getLogic() internal view virtual returns (address);
+
+    // solhint-disable-next-line no-complex-fallback
+    fallback() external payable {
+        address logic = getLogic();
+
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            calldatacopy(0x0, 0x0, calldatasize())
+            let success := delegatecall(gas(), logic, 0x0, calldatasize(), 0, 0)
+            let retSz := returndatasize()
+            returndatacopy(0, 0, retSz)
+            switch success
+            case 0 {
+                revert(0, retSz)
+            }
+            default {
+                return(0, retSz)
+            }
+        }
+    }
+
+    receive() external payable { }
 
 }

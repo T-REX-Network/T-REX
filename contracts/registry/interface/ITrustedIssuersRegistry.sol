@@ -62,10 +62,9 @@
  */
 
 pragma solidity 0.8.30;
-import "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 
 // solhint-disable-next-line no-empty-blocks
 interface ITrustedIssuersRegistry is IERC3643TrustedIssuersRegistry {
     // functions that are not part of the original standard can be added here in future versions
-
-    }
+}

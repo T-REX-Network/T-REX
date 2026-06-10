@@ -63,8 +63,7 @@
 
 pragma solidity 0.8.30;
 
-import "../errors/InvalidArgumentErrors.sol";
-import "../errors/RoleErrors.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 
 /**
  * @title Roles
@@ -80,7 +79,7 @@ library Roles {
      * @dev Give an account access to this role.
      */
     function add(Role storage role, address account) internal {
-        require(!has(role, account), AccountAlreadyHasRole());
+        require(!has(role, account), ErrorsLib.AccountAlreadyHasRole());
         role.bearer[account] = true;
     }
 
@@ -88,7 +87,7 @@ library Roles {
      * @dev Remove an account's access to this role.
      */
     function remove(Role storage role, address account) internal {
-        require(has(role, account), AccountDoesNotHaveRole());
+        require(has(role, account), ErrorsLib.AccountDoesNotHaveRole());
         role.bearer[account] = false;
     }
 
@@ -97,8 +96,7 @@ library Roles {
      * @return bool
      */
     function has(Role storage role, address account) internal view returns (bool) {
-        require(account != address(0), ZeroAddress());
-        return role.bearer[account];
+        return account != address(0) && role.bearer[account];
     }
 
 }

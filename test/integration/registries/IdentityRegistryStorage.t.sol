@@ -1,0 +1,313 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity 0.8.30;
+
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+
+import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { ClaimTopicsRegistryProxy } from "contracts/proxy/ClaimTopicsRegistryProxy.sol";
+import { IdentityRegistryProxy } from "contracts/proxy/IdentityRegistryProxy.sol";
+import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
+import { TrustedIssuersRegistryProxy } from "contracts/proxy/TrustedIssuersRegistryProxy.sol";
+import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
+import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
+import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
+import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+
+import { MockContract } from "../mocks/MockContract.sol";
+import { Countries } from "test/integration/helpers/Countries.sol";
+import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+
+contract IdentityRegistryStorageTest is TREXSuiteTest {
+
+    // Contracts
+    IdentityRegistryStorage public identityRegistryStorage;
+
+    /// @notice Sets up IdentityRegistryStorage via proxy
+    function setUp() public override {
+        super.setUp();
+
+        identityRegistryStorage = IdentityRegistryStorage(address(token.identityRegistry().identityStorage()));
+
+        vm.prank(deployer);
+        identityRegistryStorage.addAgent(agent);
+
+        // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
+        // For Foundry, we start with 0 bound registries (tests will bind as needed)
+    }
+
+    // ============ init() Tests ============
+
+    /// @notice Should revert when contract was already initialized
+    function test_init_RevertWhen_AlreadyInitialized() public {
+        vm.prank(deployer);
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        identityRegistryStorage.init(deployer, address(0));
+    }
+
+    // ============ addIdentityToStorage() Tests ============
+
+    /// @notice Should revert when sender is not agent
+    function test_addIdentityToStorage_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        identityRegistryStorage.addIdentityToStorage(charlie, charlieIdentity, Countries.UNITED_STATES);
+    }
+
+    /// @notice Should revert when identity is zero address
+    function test_addIdentityToStorage_RevertWhen_IdentityZeroAddress() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.addIdentityToStorage(charlie, IIdentity(address(0)), Countries.UNITED_STATES);
+    }
+
+    /// @notice Should revert when wallet is zero address
+    function test_addIdentityToStorage_RevertWhen_WalletZeroAddress() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.addIdentityToStorage(address(0), charlieIdentity, Countries.UNITED_STATES);
+    }
+
+    /// @notice Should revert when wallet is already registered
+    function test_addIdentityToStorage_RevertWhen_AlreadyStored() public {
+        // Try to add bob again
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.AddressAlreadyStored.selector);
+        identityRegistryStorage.addIdentityToStorage(bob, charlieIdentity, Countries.FRANCE);
+    }
+
+    // ============ modifyStoredIdentity() Tests ============
+
+    /// @notice Should revert when sender is not agent
+    function test_modifyStoredIdentity_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
+    }
+
+    /// @notice Should revert when identity is zero address
+    function test_modifyStoredIdentity_RevertWhen_IdentityZeroAddress() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.modifyStoredIdentity(charlie, IIdentity(address(0)));
+    }
+
+    /// @notice Should revert when wallet is zero address
+    function test_modifyStoredIdentity_RevertWhen_WalletZeroAddress() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.modifyStoredIdentity(address(0), charlieIdentity);
+    }
+
+    /// @notice Should revert when wallet is not registered
+    function test_modifyStoredIdentity_RevertWhen_NotStored() public {
+        vm.prank(agent);
+        identityRegistryStorage.removeIdentityFromStorage(charlie);
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+        identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
+    }
+
+    // ============ modifyStoredInvestorCountry() Tests ============
+
+    /// @notice Should revert when sender is not agent
+    function test_modifyStoredInvestorCountry_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
+    }
+
+    /// @notice Should revert when wallet is zero address
+    function test_modifyStoredInvestorCountry_RevertWhen_WalletZeroAddress() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.modifyStoredInvestorCountry(address(0), Countries.UNITED_STATES);
+    }
+
+    /// @notice Should revert when wallet is not registered
+    function test_modifyStoredInvestorCountry_RevertWhen_NotStored() public {
+        vm.prank(agent);
+        identityRegistryStorage.removeIdentityFromStorage(charlie);
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+        identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
+    }
+
+    // ============ removeIdentityFromStorage() Tests ============
+
+    /// @notice Should revert when sender is not agent
+    function test_removeIdentityFromStorage_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        identityRegistryStorage.removeIdentityFromStorage(charlie);
+    }
+
+    /// @notice Should revert when wallet is zero address
+    function test_removeIdentityFromStorage_RevertWhen_WalletZeroAddress() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.removeIdentityFromStorage(address(0));
+    }
+
+    /// @notice Should revert when wallet is not registered
+    function test_removeIdentityFromStorage_RevertWhen_NotStored() public {
+        vm.prank(agent);
+        identityRegistryStorage.removeIdentityFromStorage(charlie);
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+        identityRegistryStorage.removeIdentityFromStorage(charlie);
+    }
+
+    // ============ bindIdentityRegistry() Tests ============
+
+    /// @notice Should revert when sender is not owner
+    function test_bindIdentityRegistry_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+    }
+
+    /// @notice Should revert when identity registry is zero address
+    function test_bindIdentityRegistry_RevertWhen_ZeroAddress() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.bindIdentityRegistry(address(0));
+    }
+
+    /// @notice Should revert when there are already 299 identity registries bound
+    function test_bindIdentityRegistry_RevertWhen_MoreThan299Registries() public {
+        // Add 300 registries (max is 300, so length 300 means we have 300 registries)
+        // Check is length < 300, so when length is 299, we can add one more (300th)
+        // When length is 300, we cannot add more (301st should fail)
+        for (uint256 i = 1; i < 300; i++) {
+            address registryAddress = vm.addr(i + 1000);
+            vm.prank(deployer);
+            identityRegistryStorage.bindIdentityRegistry(registryAddress);
+        }
+
+        // Try to add 301st registry (should fail, length is now 300, not < 300)
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, 300));
+        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+    }
+
+    // ============ unbindIdentityRegistry() Tests ============
+
+    /// @notice Should revert when sender is not owner
+    function test_unbindIdentityRegistry_RevertWhen_NotOwner() public {
+        // Bind first
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        identityRegistryStorage.unbindIdentityRegistry(address(charlieIdentity));
+    }
+
+    /// @notice Should revert when identity registry is zero address
+    function test_unbindIdentityRegistry_RevertWhen_ZeroAddress() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        identityRegistryStorage.unbindIdentityRegistry(address(0));
+    }
+
+    /// @notice Should revert when identity registry is not bound
+    function test_unbindIdentityRegistry_RevertWhen_NotBound() public {
+        address identityRegistry = address(token.identityRegistry());
+
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
+
+        vm.expectRevert(ErrorsLib.IdentityRegistryNotStored.selector);
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
+    }
+
+    /// @notice Should unbind the identity registry
+    function test_unbindIdentityRegistry_Success() public {
+        address identityRegistry = address(token.identityRegistry());
+
+        vm.expectEmit(true, false, false, false);
+        emit ERC3643EventsLib.IdentityRegistryUnbound(identityRegistry);
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
+    }
+
+    // ============ supportsInterface() Tests ============
+
+    /// @notice Should return false for unsupported interfaces
+    function test_supportsInterface_ReturnsFalse_ForUnsupported() public view {
+        bytes4 unsupportedInterfaceId = 0x12345678;
+        assertFalse(identityRegistryStorage.supportsInterface(unsupportedInterfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC3643IdentityRegistryStorage interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistryStorage() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC3643IdentityRegistryStorageInterfaceId();
+        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC173 interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC173InterfaceId();
+        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC165 interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC165InterfaceId();
+        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+    }
+
+    // ============ Constructor Tests ============
+
+    /// @notice Should revert when implementation authority is zero address
+    function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new IdentityRegistryStorageProxy(address(0), deployer, address(0));
+    }
+
+    /// @notice Should revert when initialization fails (invalid implementation)
+    function test_constructor_RevertWhen_InitializationFails() public {
+        // Deploy a mock contract that doesn't have init() function
+        MockContract mockImpl = new MockContract();
+
+        // Deploy an IA and manually set an invalid IRS implementation
+        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+
+        // Create a version with invalid IRS implementation (mock contract without init())
+        ITREXImplementationAuthority.Version memory version =
+            ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
+
+        ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
+            tokenImplementation: address(mockImpl), // Invalid - doesn't have proper init
+            ctrImplementation: address(mockImpl), // Invalid
+            irImplementation: address(mockImpl), // Invalid
+            irsImplementation: address(mockImpl), // Invalid - doesn't have init() function
+            tirImplementation: address(mockImpl), // Invalid
+            mcImplementation: address(mockImpl) // Invalid
+        });
+
+        // Add version to IA (need to be owner)
+        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        vm.prank(deployer);
+        incompleteIA.addAndUseTREXVersion(version, contracts);
+
+        // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
+        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
+        vm.expectRevert();
+        new IdentityRegistryStorageProxy(address(incompleteIA), deployer, address(0));
+    }
+
+}

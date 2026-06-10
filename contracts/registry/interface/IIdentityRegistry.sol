@@ -62,15 +62,7 @@
 
 pragma solidity 0.8.30;
 
-import "../../ERC-3643/IERC3643IdentityRegistry.sol";
-
-/// Events
-
-/// @dev This event is emitted when Eligibility checks are disabled.
-event EligibilityChecksDisabled();
-
-/// @dev This event is emitted when Eligibility checks are enabled.
-event EligibilityChecksEnabled();
+import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
 
 interface IIdentityRegistry is IERC3643IdentityRegistry {
 

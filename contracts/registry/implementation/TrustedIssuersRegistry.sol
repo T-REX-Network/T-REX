@@ -63,40 +63,35 @@
 
 pragma solidity 0.8.30;
 
-import "../../errors/InvalidArgumentErrors.sol";
-import "../../roles/IERC173.sol";
-import "../../roles/OwnableOnceNext2StepUpgradeable.sol";
-import "../interface/ITrustedIssuersRegistry.sol";
-import "../storage/TIRStorage.sol";
-import "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-/// Errors
+import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { IERC173 } from "../../roles/IERC173.sol";
+import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-/// @dev Thrown when claim topics is empty.
-error ClaimTopicsCannotBeEmpty();
+contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradeable, IERC165 {
 
-/// @dev Thrown when maximum number of claim topics is reached.
-/// @param _max maximum number of claim topics.
-error MaxClaimTopcisReached(uint256 _max);
+    using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.UintSet;
 
-/// @dev Thrown when the maximum number of trusted issuers is reached.
-/// @param _max maximum number of trusted issuers.
-error MaxTrustedIssuersReached(uint256 _max);
+    /// @custom:storage-location erc7201:ERC3643.storage.TrustedIssuersRegistry
+    struct Storage {
+        /// @dev Set containing all TrustedIssuers identity contract addresses.
+        EnumerableSet.AddressSet trustedIssuers;
 
-/// @dev Thrown when called by other than a trusted issuer.
-error NotATrustedIssuer();
+        /// @dev Mapping between a trusted issuer address and its corresponding claimTopics.
+        mapping(address issuer => EnumerableSet.UintSet) trustedIssuerClaimTopics;
 
-/// @dev Thrown when trusted claim topics is empty.
-error TrustedClaimTopicsCannotBeEmpty();
+        /// @dev Mapping between a claim topic and the allowed trusted issuers for it.
+        mapping(uint256 topic => EnumerableSet.AddressSet) claimTopicsToTrustedIssuers;
+    }
 
-/// @dev Thrown when trusted issuer already exists.
-error TrustedIssuerAlreadyExists();
-
-/// @dev Thrown when trusted issuer doesn"t exist.
-error TrustedIssuerDoesNotExist();
-
-contract TrustedIssuersRegistry is ITrustedIssuersRegistry, OwnableOnceNext2StepUpgradeable, TIRStorage, IERC165 {
+    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.TrustedIssuersRegistry")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0xcf1a470b7a594e056f36cedab0ef91f3f14bce049596c7dfdd4c7c9a318d5000;
 
     constructor() {
         _disableInitializers();
@@ -104,154 +99,135 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, OwnableOnceNext2Step
 
     /// Functions
 
-    function init() external initializer {
-        __Ownable_init();
+    function init(address _owner, address[] calldata _issuers, uint256[][] calldata _issuerClaims)
+        external
+        initializer
+    {
+        require(_issuers.length == _issuerClaims.length, ErrorsLib.InvalidClaimPattern());
+        __Ownable_init(_owner);
+        for (uint256 i = 0; i < _issuers.length; i++) {
+            _addTrustedIssuer(_issuers[i], _issuerClaims[i]);
+        }
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-addTrustedIssuer}.
      */
-    function addTrustedIssuer(IClaimIssuer _trustedIssuer, uint256[] calldata _claimTopics)
-        external
-        override
-        onlyOwner
-    {
-        require(address(_trustedIssuer) != address(0), ZeroAddress());
-        require(_trustedIssuerClaimTopics[address(_trustedIssuer)].length == 0, TrustedIssuerAlreadyExists());
-        require(_claimTopics.length > 0, TrustedClaimTopicsCannotBeEmpty());
-        require(_claimTopics.length <= 15, MaxClaimTopcisReached(15));
-        require(_trustedIssuers.length < 50, MaxTrustedIssuersReached(50));
-        _trustedIssuers.push(_trustedIssuer);
-        _trustedIssuerClaimTopics[address(_trustedIssuer)] = _claimTopics;
-        for (uint256 i = 0; i < _claimTopics.length; i++) {
-            _claimTopicsToTrustedIssuers[_claimTopics[i]].push(_trustedIssuer);
-        }
-        emit TrustedIssuerAdded(_trustedIssuer, _claimTopics);
+    function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external onlyOwner {
+        _addTrustedIssuer(_trustedIssuer, _claimTopics);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-removeTrustedIssuer}.
      */
-    function removeTrustedIssuer(IClaimIssuer _trustedIssuer) external override onlyOwner {
-        require(address(_trustedIssuer) != address(0), ZeroAddress());
-        require(_trustedIssuerClaimTopics[address(_trustedIssuer)].length != 0, NotATrustedIssuer());
-        uint256 length = _trustedIssuers.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (_trustedIssuers[i] == _trustedIssuer) {
-                _trustedIssuers[i] = _trustedIssuers[length - 1];
-                _trustedIssuers.pop();
-                break;
-            }
+    function removeTrustedIssuer(address _trustedIssuer) external onlyOwner {
+        require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
+        Storage storage s = _getStorage();
+        require(s.trustedIssuers.remove(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
+
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        uint256[] memory claimTopics = issuerTopics.values();
+        for (uint256 i = 0; i < claimTopics.length; i++) {
+            s.claimTopicsToTrustedIssuers[claimTopics[i]].remove(address(_trustedIssuer));
         }
-        for (
-            uint256 claimTopicIndex = 0;
-            claimTopicIndex < _trustedIssuerClaimTopics[address(_trustedIssuer)].length;
-            claimTopicIndex++
-        ) {
-            uint256 claimTopic = _trustedIssuerClaimTopics[address(_trustedIssuer)][claimTopicIndex];
-            uint256 topicsLength = _claimTopicsToTrustedIssuers[claimTopic].length;
-            for (uint256 i = 0; i < topicsLength; i++) {
-                if (_claimTopicsToTrustedIssuers[claimTopic][i] == _trustedIssuer) {
-                    _claimTopicsToTrustedIssuers[claimTopic][i] =
-                        _claimTopicsToTrustedIssuers[claimTopic][topicsLength - 1];
-                    _claimTopicsToTrustedIssuers[claimTopic].pop();
-                    break;
-                }
-            }
-        }
-        delete _trustedIssuerClaimTopics[address(_trustedIssuer)];
-        emit TrustedIssuerRemoved(_trustedIssuer);
+        issuerTopics.clear();
+
+        emit ERC3643EventsLib.TrustedIssuerRemoved(_trustedIssuer);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-updateIssuerClaimTopics}.
      */
-    function updateIssuerClaimTopics(IClaimIssuer _trustedIssuer, uint256[] calldata _claimTopics)
-        external
-        override
-        onlyOwner
-    {
-        require(address(_trustedIssuer) != address(0), ZeroAddress());
-        require(_trustedIssuerClaimTopics[address(_trustedIssuer)].length != 0, NotATrustedIssuer());
-        require(_claimTopics.length <= 15, MaxClaimTopcisReached(15));
-        require(_claimTopics.length > 0, ClaimTopicsCannotBeEmpty());
+    function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external onlyOwner {
+        require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
+        Storage storage s = _getStorage();
+        require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(_claimTopics.length > 0, ErrorsLib.ClaimTopicsCannotBeEmpty());
 
-        for (uint256 i = 0; i < _trustedIssuerClaimTopics[address(_trustedIssuer)].length; i++) {
-            uint256 claimTopic = _trustedIssuerClaimTopics[address(_trustedIssuer)][i];
-            uint256 topicsLength = _claimTopicsToTrustedIssuers[claimTopic].length;
-            for (uint256 j = 0; j < topicsLength; j++) {
-                if (_claimTopicsToTrustedIssuers[claimTopic][j] == _trustedIssuer) {
-                    _claimTopicsToTrustedIssuers[claimTopic][j] =
-                        _claimTopicsToTrustedIssuers[claimTopic][topicsLength - 1];
-                    _claimTopicsToTrustedIssuers[claimTopic].pop();
-                    break;
-                }
-            }
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
+        uint256[] memory oldTopics = issuerTopics.values();
+        for (uint256 i = 0; i < oldTopics.length; i++) {
+            s.claimTopicsToTrustedIssuers[oldTopics[i]].remove(_trustedIssuer);
+            issuerTopics.remove(oldTopics[i]);
         }
-        _trustedIssuerClaimTopics[address(_trustedIssuer)] = _claimTopics;
         for (uint256 i = 0; i < _claimTopics.length; i++) {
-            _claimTopicsToTrustedIssuers[_claimTopics[i]].push(_trustedIssuer);
+            issuerTopics.add(_claimTopics[i]);
+            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
         }
-        emit ClaimTopicsUpdated(_trustedIssuer, _claimTopics);
+        emit ERC3643EventsLib.ClaimTopicsUpdated(_trustedIssuer, _claimTopics);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-getTrustedIssuers}.
      */
-    function getTrustedIssuers() external view override returns (IClaimIssuer[] memory) {
-        return _trustedIssuers;
+    function getTrustedIssuers() external view returns (address[] memory) {
+        return _getStorage().trustedIssuers.values();
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-getTrustedIssuersForClaimTopic}.
      */
-    function getTrustedIssuersForClaimTopic(uint256 claimTopic) external view override returns (IClaimIssuer[] memory) {
-        return _claimTopicsToTrustedIssuers[claimTopic];
+    function getTrustedIssuersForClaimTopic(uint256 claimTopic) external view returns (address[] memory) {
+        return _getStorage().claimTopicsToTrustedIssuers[claimTopic].values();
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-isTrustedIssuer}.
      */
-    function isTrustedIssuer(address _issuer) external view override returns (bool) {
-        if (_trustedIssuerClaimTopics[_issuer].length > 0) {
-            return true;
-        }
-        return false;
+    function isTrustedIssuer(address _issuer) external view returns (bool) {
+        return _getStorage().trustedIssuers.contains(_issuer);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-getTrustedIssuerClaimTopics}.
      */
-    function getTrustedIssuerClaimTopics(IClaimIssuer _trustedIssuer)
-        external
-        view
-        override
-        returns (uint256[] memory)
-    {
-        require(_trustedIssuerClaimTopics[address(_trustedIssuer)].length != 0, TrustedIssuerDoesNotExist());
-        return _trustedIssuerClaimTopics[address(_trustedIssuer)];
+    function getTrustedIssuerClaimTopics(address _trustedIssuer) external view returns (uint256[] memory) {
+        Storage storage s = _getStorage();
+        require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.TrustedIssuerDoesNotExist());
+        return s.trustedIssuerClaimTopics[_trustedIssuer].values();
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-hasClaimTopic}.
      */
-    function hasClaimTopic(address _issuer, uint256 _claimTopic) external view override returns (bool) {
-        uint256 length = _trustedIssuerClaimTopics[_issuer].length;
-        uint256[] memory claimTopics = _trustedIssuerClaimTopics[_issuer];
-        for (uint256 i = 0; i < length; i++) {
-            if (claimTopics[i] == _claimTopic) {
-                return true;
-            }
-        }
-        return false;
+    function hasClaimTopic(address _issuer, uint256 _claimTopic) external view returns (bool) {
+        return _getStorage().trustedIssuerClaimTopics[_issuer].contains(_claimTopic);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC3643TrustedIssuersRegistry).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function _addTrustedIssuer(address _trustedIssuer, uint256[] memory _claimTopics) internal {
+        require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
+
+        Storage storage s = _getStorage();
+        require(!s.trustedIssuers.contains(address(_trustedIssuer)), ErrorsLib.TrustedIssuerAlreadyExists());
+        require(_claimTopics.length > 0, ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(s.trustedIssuers.length() < 50, ErrorsLib.MaxTrustedIssuersReached(50));
+        s.trustedIssuers.add(address(_trustedIssuer));
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        for (uint256 i = 0; i < _claimTopics.length; i++) {
+            issuerTopics.add(_claimTopics[i]);
+            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(address(_trustedIssuer));
+        }
+
+        // This event will re-emit eventual duplicated _claimTopics.
+        // They won't be added to storage (.add ignores them) but will be emitted here regardless.
+        emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
+    }
+
+    function _getStorage() internal pure returns (Storage storage s) {
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            s.slot := STORAGE_LOCATION
+        }
     }
 
 }

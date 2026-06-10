@@ -38,16 +38,6 @@
 //
 pragma solidity 0.8.30;
 
-/// Events
-
-/// @dev This event is emitted when a claim topic has been added to the ClaimTopicsRegistry.
-/// @param _claimTopic is the required claim added to the Claim Topics Registry.
-event ClaimTopicAdded(uint256 indexed _claimTopic);
-
-/// @dev This event is emitted when a claim topic has been removed from the ClaimTopicsRegistry.
-/// @param _claimTopic is the required claim removed from the Claim Topics Registry.
-event ClaimTopicRemoved(uint256 indexed _claimTopic);
-
 interface IERC3643ClaimTopicsRegistry {
 
     /**

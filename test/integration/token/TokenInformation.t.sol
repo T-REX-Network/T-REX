@@ -1,0 +1,745 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity 0.8.30;
+
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+
+import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
+import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
+import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
+import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { PausableUpgradeable, Token } from "contracts/token/Token.sol";
+import { TokenRoles } from "contracts/token/TokenStructs.sol";
+import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+
+import { MockContract } from "../mocks/MockContract.sol";
+import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+
+contract TokenInformationTest is TREXSuiteTest {
+
+    IdentityRegistry public identityRegistry;
+
+    function setUp() public override {
+        super.setUp();
+
+        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+
+        vm.prank(agent);
+        token.unpause();
+    }
+
+    // ============ setName() Tests ============
+
+    /// @notice Should revert when called by not owner
+    function test_setName_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        token.setName("My Token");
+    }
+
+    /// @notice Should revert when the name is empty
+    function test_setName_RevertWhen_EmptyString() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
+        token.setName("");
+    }
+
+    /// @notice Should set the name
+    function test_setName_Success() public {
+        string memory newName = "Updated Test Token";
+
+        vm.prank(deployer);
+        token.setName(newName);
+
+        assertEq(keccak256(bytes(token.name())), keccak256(bytes(newName)), "Token name should match");
+    }
+
+    // ============ setSymbol() Tests ============
+
+    /// @notice Should revert when called by not owner
+    function test_setSymbol_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        token.setSymbol("UpdtTK");
+    }
+
+    /// @notice Should revert when the symbol is empty
+    function test_setSymbol_RevertWhen_EmptyString() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
+        token.setSymbol("");
+    }
+
+    /// @notice Should set the symbol
+    function test_setSymbol_Success() public {
+        string memory newSymbol = "UpdtTK";
+
+        vm.prank(deployer);
+        token.setSymbol(newSymbol);
+
+        assertEq(keccak256(bytes(token.symbol())), keccak256(bytes(newSymbol)), "Token symbol should match");
+    }
+
+    // ============ setOnchainID() Tests ============
+
+    /// @notice Should revert when called by not owner
+    function test_setOnchainID_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        token.setOnchainID(address(0));
+    }
+
+    /// @notice Should set the onchainID
+    function test_setOnchainID_Success() public {
+        // create an identity using IdFactory
+        vm.startPrank(deployer);
+        IIdentity newIdentity = IIdentity(idFactory.createIdentity(deployer, "deployer-salt"));
+        token.setOnchainID(address(newIdentity));
+        vm.stopPrank();
+
+        assertEq(token.onchainID(), address(newIdentity));
+    }
+
+    // ============ setIdentityRegistry() Tests ============
+
+    /// @notice Should revert when called by not owner
+    function test_setIdentityRegistry_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        token.setIdentityRegistry(address(0));
+    }
+
+    // ============ totalSupply() Tests ============
+
+    /// @notice Should return the total supply
+    function test_totalSupply_ReturnsTotalSupply() public view {
+        // Token starts with zero total supply
+        assertEq(token.totalSupply(), 0);
+    }
+
+    // ============ setCompliance() Tests ============
+
+    /// @notice Should revert when called by not owner
+    function test_setCompliance_RevertWhen_NotOwner() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        token.setCompliance(address(0));
+    }
+
+    // ============ compliance() Tests ============
+
+    /// @notice Should return the compliance address
+    function test_compliance_ReturnsComplianceAddress() public {
+        // Deploy ModularCompliance proxy (similar to deploySuiteWithModularCompliancesFixture)
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        // Transfer ownership to deployer (compliance is owned by test contract after deployment)
+        Ownable(address(complianceProxy)).transferOwnership(deployer);
+
+        // Set compliance
+        vm.prank(deployer);
+        token.setCompliance(address(complianceProxy));
+
+        assertEq(address(token.compliance()), address(complianceProxy));
+    }
+
+    /// @notice Should unbind existing compliance when setting new compliance
+    function test_setCompliance_UnbindsExistingCompliance() public {
+        // Deploy first compliance
+        ModularCompliance complianceProxy1 = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy1)).transferOwnership(deployer);
+
+        // Deploy second compliance
+        ModularCompliance complianceProxy2 = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy2)).transferOwnership(deployer);
+
+        // Set first compliance
+        vm.prank(deployer);
+        token.setCompliance(address(complianceProxy1));
+        assertEq(address(token.compliance()), address(complianceProxy1));
+
+        // Set second compliance (should unbind first)
+        vm.prank(deployer);
+        token.setCompliance(address(complianceProxy2));
+        assertEq(address(token.compliance()), address(complianceProxy2));
+    }
+
+    // ============ pause() Tests ============
+
+    /// @notice Should revert when the caller is not an agent
+    function test_pause_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        token.pause();
+    }
+
+    /// @notice Should revert when agent permission is restricted
+    function test_pause_RevertWhen_AgentRestricted() public {
+        TokenRoles memory restrictions = TokenRoles({
+            disableMint: false,
+            disableBurn: false,
+            disablePartialFreeze: false,
+            disableAddressFreeze: false,
+            disableRecovery: false,
+            disableForceTransfer: false,
+            disablePause: true
+        });
+
+        vm.prank(deployer);
+        token.setAgentRestrictions(agent, restrictions);
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "pause disabled"));
+        token.pause();
+    }
+
+    /// @notice Should pause the token when not paused
+    function test_pause_Success() public {
+        vm.prank(agent);
+        token.pause();
+
+        assertTrue(token.paused());
+    }
+
+    /// @notice Should revert when the token is already paused
+    function test_pause_RevertWhen_AlreadyPaused() public {
+        // First pause
+        vm.prank(agent);
+        token.pause();
+
+        // Try to pause again
+        vm.prank(agent);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        token.pause();
+    }
+
+    // ============ unpause() Tests ============
+
+    /// @notice Should revert when the caller is not an agent
+    function test_unpause_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        token.unpause();
+    }
+
+    /// @notice Should revert when agent permission is restricted
+    function test_unpause_RevertWhen_AgentRestricted() public {
+        // First pause
+        vm.prank(agent);
+        token.pause();
+
+        // Set restrictions
+        TokenRoles memory restrictions = TokenRoles({
+            disableMint: false,
+            disableBurn: false,
+            disablePartialFreeze: false,
+            disableAddressFreeze: false,
+            disableRecovery: false,
+            disableForceTransfer: false,
+            disablePause: true
+        });
+
+        vm.prank(deployer);
+        token.setAgentRestrictions(agent, restrictions);
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "pause disabled"));
+        token.unpause();
+    }
+
+    /// @notice Should unpause the token when paused
+    function test_unpause_Success() public {
+        // First pause
+        vm.prank(agent);
+        token.pause();
+
+        // Unpause
+        vm.prank(agent);
+        token.unpause();
+
+        assertFalse(token.paused());
+    }
+
+    /// @notice Should revert when the token is not paused
+    function test_unpause_RevertWhen_NotPaused() public {
+        vm.prank(agent);
+        vm.expectRevert(PausableUpgradeable.ExpectedPause.selector);
+        token.unpause();
+    }
+
+    // ============ setAddressFrozen() Tests ============
+
+    /// @notice Should revert when sender is not an agent
+    function test_setAddressFrozen_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        token.setAddressFrozen(another, true);
+    }
+
+    /// @notice Should revert when agent permission is restricted
+    function test_setAddressFrozen_RevertWhen_AgentRestricted() public {
+        TokenRoles memory restrictions = TokenRoles({
+            disableMint: false,
+            disableBurn: false,
+            disablePartialFreeze: false,
+            disableAddressFreeze: true,
+            disableRecovery: false,
+            disableForceTransfer: false,
+            disablePause: false
+        });
+
+        vm.prank(deployer);
+        token.setAgentRestrictions(agent, restrictions);
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "address freeze disabled"));
+        token.setAddressFrozen(alice, true);
+    }
+
+    /// @notice Should freeze address successfully
+    function test_setAddressFrozen_Success() public {
+        vm.prank(agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.AddressFrozen(alice, true, agent);
+        token.setAddressFrozen(alice, true);
+
+        assertTrue(token.isFrozen(alice));
+    }
+
+    /// @notice Should unfreeze address successfully
+    function test_setAddressFrozen_UnfreezeSuccess() public {
+        vm.prank(agent);
+        token.setAddressFrozen(alice, true);
+
+        vm.prank(agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.AddressFrozen(alice, false, agent);
+        token.setAddressFrozen(alice, false);
+
+        assertFalse(token.isFrozen(alice));
+    }
+
+    // ============ freezePartialTokens() Tests ============
+
+    /// @notice Should revert when amounts exceed current balance
+    function test_freezePartialTokens_RevertWhen_AmountExceedsBalance() public {
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, another, 0, 1));
+        token.freezePartialTokens(another, 1);
+    }
+
+    // ============ supportsInterface() Tests ============
+
+    /// @notice Should return false for unsupported interfaces
+    function test_supportsInterface_ReturnsFalse_ForUnsupported() public view {
+        bytes4 unsupportedInterfaceId = 0x12345678;
+        assertFalse(token.supportsInterface(unsupportedInterfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC20 interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC20() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC20InterfaceId();
+        assertTrue(token.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IToken interface ID
+    function test_supportsInterface_ReturnsTrue_ForIToken() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getITokenInterfaceId();
+        assertTrue(token.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC3643 interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC3643() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC3643InterfaceId();
+        assertTrue(token.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC173 interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC173InterfaceId();
+        assertTrue(token.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC165 interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC165InterfaceId();
+        assertTrue(token.supportsInterface(interfaceId));
+    }
+
+    /// @notice Should correctly identify the IERC20Permit interface ID
+    function test_supportsInterface_ReturnsTrue_ForIERC20Permit() public {
+        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
+        bytes4 interfaceId = calculator.getIERC20PermitInterfaceId();
+        assertTrue(token.supportsInterface(interfaceId));
+    }
+
+    // ============ batchSetAddressFrozen() Tests ============
+
+    /// @notice Should perform batch address freezing
+    function test_batchSetAddressFrozen_Success() public {
+        address[] memory userAddresses = new address[](2);
+        userAddresses[0] = alice;
+        userAddresses[1] = bob;
+        bool[] memory freeze = new bool[](2);
+        freeze[0] = true;
+        freeze[1] = true;
+
+        vm.prank(agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.AddressFrozen(alice, true, agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.AddressFrozen(bob, true, agent);
+        token.batchSetAddressFrozen(userAddresses, freeze);
+
+        assertTrue(token.isFrozen(alice));
+        assertTrue(token.isFrozen(bob));
+    }
+
+    // ============ batchFreezePartialTokens() Tests ============
+
+    /// @notice Should perform batch partial token freezing
+    function test_batchFreezePartialTokens_Success() public {
+        // Ensure users have balances
+        vm.prank(agent);
+        token.mint(alice, 1000);
+        vm.prank(agent);
+        token.mint(bob, 500);
+
+        address[] memory userAddresses = new address[](2);
+        userAddresses[0] = alice;
+        userAddresses[1] = bob;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 100;
+        amounts[1] = 200;
+
+        vm.prank(agent);
+        token.batchFreezePartialTokens(userAddresses, amounts);
+
+        assertEq(token.getFrozenTokens(alice), 100);
+        assertEq(token.getFrozenTokens(bob), 200);
+    }
+
+    // ============ batchUnfreezePartialTokens() Tests ============
+
+    /// @notice Should perform batch partial token unfreezing
+    function test_batchUnfreezePartialTokens_Success() public {
+        // Ensure users have balances
+        vm.prank(agent);
+        token.mint(alice, 1000);
+        vm.prank(agent);
+        token.mint(bob, 500);
+
+        // First freeze tokens
+        vm.prank(agent);
+        token.freezePartialTokens(alice, 200);
+        vm.prank(agent);
+        token.freezePartialTokens(bob, 300);
+
+        address[] memory userAddresses = new address[](2);
+        userAddresses[0] = alice;
+        userAddresses[1] = bob;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 100;
+        amounts[1] = 200;
+
+        vm.prank(agent);
+        token.batchUnfreezePartialTokens(userAddresses, amounts);
+
+        assertEq(token.getFrozenTokens(alice), 100);
+        assertEq(token.getFrozenTokens(bob), 100);
+    }
+
+    // ============ Constructor Tests ============
+
+    /// @notice Should prevent direct initialization of Token implementation
+    function test_constructor_CallsDisableInitializers() public {
+        Token tokenImplementation = new Token();
+        assertTrue(address(tokenImplementation) != address(0));
+
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy)).transferOwnership(deployer);
+
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        tokenImplementation.init(
+            "Test Token",
+            "TEST",
+            18,
+            address(identityRegistry),
+            address(complianceProxy),
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    /// @notice Should revert when implementation authority is zero address
+    function test_TokenProxy_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
+        address randomAddress = vm.addr(999);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new TokenProxy(
+            address(0), randomAddress, randomAddress, "Test", "TST", 18, address(0), deployer, new address[](0)
+        );
+    }
+
+    /// @notice Should revert when identity registry is zero address
+    function test_TokenProxy_constructor_RevertWhen_IdentityRegistryZeroAddress() public {
+        address randomAddress = vm.addr(999);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new TokenProxy(
+            address(trexImplementationAuthority),
+            address(0),
+            randomAddress,
+            "Test",
+            "TST",
+            18,
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    /// @notice Should revert when compliance is zero address
+    function test_TokenProxy_constructor_RevertWhen_ComplianceZeroAddress() public {
+        address randomAddress = vm.addr(999);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new TokenProxy(
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(0),
+            "Test",
+            "TST",
+            18,
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    /// @notice Should revert when name is empty string
+    function test_TokenProxy_constructor_RevertWhen_NameEmpty() public {
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        address randomAddress = vm.addr(999);
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
+        new TokenProxy(
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(complianceProxy),
+            "",
+            "TST",
+            18,
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    /// @notice Should revert when symbol is empty string
+    function test_TokenProxy_constructor_RevertWhen_SymbolEmpty() public {
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        address randomAddress = vm.addr(999);
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
+        new TokenProxy(
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(complianceProxy),
+            "Test",
+            "",
+            18,
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    /// @notice Should revert when decimals is greater than 18
+    function test_TokenProxy_constructor_RevertWhen_DecimalsGreaterThan18() public {
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        address randomAddress = vm.addr(999);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DecimalsOutOfRange.selector, uint8(19)));
+        new TokenProxy(
+            address(trexImplementationAuthority),
+            randomAddress,
+            address(complianceProxy),
+            "Test",
+            "TST",
+            19,
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    /// @notice Should revert when initialization fails (invalid implementation)
+    function test_TokenProxy_constructor_RevertWhen_InitializationFails() public {
+        // Deploy a mock contract that doesn't have init() function
+        MockContract mockImpl = new MockContract();
+
+        // Deploy an IA and manually set an invalid Token implementation
+        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+
+        // Create a version with invalid Token implementation (mock contract without init())
+        ITREXImplementationAuthority.Version memory version =
+            ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
+
+        ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
+            tokenImplementation: address(mockImpl), // Invalid - doesn't have init() function
+            ctrImplementation: address(mockImpl), // Invalid
+            irImplementation: address(mockImpl), // Invalid
+            irsImplementation: address(mockImpl), // Invalid
+            tirImplementation: address(mockImpl), // Invalid
+            mcImplementation: address(mockImpl) // Invalid
+        });
+
+        // Add version to IA (need to be owner)
+        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        vm.prank(deployer);
+        incompleteIA.addAndUseTREXVersion(version, contracts);
+
+        // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
+        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        address randomAddress = vm.addr(999);
+        vm.expectRevert();
+        new TokenProxy(
+            address(incompleteIA),
+            randomAddress,
+            address(complianceProxy),
+            "Test",
+            "TST",
+            18,
+            address(0),
+            deployer,
+            new address[](0)
+        );
+    }
+
+    // ============ Token.init() Tests ============
+
+    function test_init_RevertWhen_IdentityRegistryZeroAddress_DirectCall() public {
+        // Deploy new implementation
+        Token implementation = new Token();
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy)).transferOwnership(deployer);
+
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new ERC1967Proxy(
+            address(implementation),
+            abi.encodeWithSelector(
+                Token.init.selector,
+                "Test Token",
+                "TEST",
+                18,
+                address(0), // Zero address for Identity Registry
+                address(complianceProxy),
+                address(0),
+                deployer,
+                new address[](0)
+            )
+        );
+    }
+
+    function test_init_RevertWhen_ComplianceZeroAddress_DirectCall() public {
+        // Deploy new implementation
+        Token implementation = new Token();
+        address randomAddress = vm.addr(999);
+
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new ERC1967Proxy(
+            address(implementation),
+            abi.encodeWithSelector(
+                Token.init.selector,
+                "Test Token",
+                "TEST",
+                18,
+                randomAddress,
+                address(0), // Zero address for Compliance
+                address(0),
+                deployer,
+                new address[](0)
+            )
+        );
+    }
+
+    function test_init_RevertWhen_NameEmpty_DirectCall() public {
+        // Deploy new implementation
+        Token implementation = new Token();
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy)).transferOwnership(deployer);
+        address randomAddress = vm.addr(999);
+
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
+        new ERC1967Proxy(
+            address(implementation),
+            abi.encodeWithSelector(
+                Token.init.selector,
+                "", // Empty name
+                "TEST",
+                18,
+                randomAddress,
+                address(complianceProxy),
+                address(0),
+                deployer,
+                new address[](0)
+            )
+        );
+    }
+
+    function test_init_RevertWhen_SymbolEmpty_DirectCall() public {
+        // Deploy new implementation
+        Token implementation = new Token();
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy)).transferOwnership(deployer);
+        address randomAddress = vm.addr(999);
+
+        vm.expectRevert(ErrorsLib.EmptyString.selector);
+        new ERC1967Proxy(
+            address(implementation),
+            abi.encodeWithSelector(
+                Token.init.selector,
+                "Test Token",
+                "", // Empty symbol
+                18,
+                randomAddress,
+                address(complianceProxy),
+                address(0),
+                deployer,
+                new address[](0)
+            )
+        );
+    }
+
+    function test_init_RevertWhen_DecimalsGreaterThan18_DirectCall() public {
+        // Deploy new implementation
+        Token implementation = new Token();
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        Ownable(address(complianceProxy)).transferOwnership(deployer);
+        address randomAddress = vm.addr(999);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DecimalsOutOfRange.selector, 19));
+        new ERC1967Proxy(
+            address(implementation),
+            abi.encodeWithSelector(
+                Token.init.selector,
+                "Test Token",
+                "TEST",
+                19, // Decimals > 18
+                randomAddress,
+                address(complianceProxy),
+                address(0),
+                deployer,
+                new address[](0)
+            )
+        );
+    }
+
+}

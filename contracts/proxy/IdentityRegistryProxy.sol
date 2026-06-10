@@ -62,8 +62,11 @@
 
 pragma solidity 0.8.30;
 
-import "../errors/CommonErrors.sol";
-import "./AbstractProxy.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+
+import { IdentityRegistry } from "../registry/implementation/IdentityRegistry.sol";
+import { AbstractProxy } from "./AbstractProxy.sol";
+import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
 
 contract IdentityRegistryProxy is AbstractProxy {
 
@@ -71,45 +74,24 @@ contract IdentityRegistryProxy is AbstractProxy {
         address implementationAuthority,
         address _trustedIssuersRegistry,
         address _claimTopicsRegistry,
-        address _identityStorage
-    ) {
-        require(
-            implementationAuthority != address(0) && _trustedIssuersRegistry != address(0)
-                && _claimTopicsRegistry != address(0) && _identityStorage != address(0),
-            ZeroAddress()
-        );
-        _storeImplementationAuthority(implementationAuthority);
-        emit ImplementationAuthoritySet(implementationAuthority);
-
-        address logic = (ITREXImplementationAuthority(getImplementationAuthority())).getIRImplementation();
-
-        // solhint-disable-next-line avoid-low-level-calls
-        (bool success,) = logic.delegatecall(
-            abi.encodeWithSignature(
-                "init(address,address,address)", _trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage
-            )
-        );
-        require(success, InitializationFailed());
+        address _identityStorage,
+        address _owner,
+        address[] memory _irAgents,
+        address _tokenAddress
+    ) AbstractProxy(implementationAuthority) {
+        if (!LowLevelCall.delegatecallNoReturn(
+                getLogic(),
+                abi.encodeCall(
+                    IdentityRegistry.init,
+                    (_trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage, _owner, _irAgents, _tokenAddress)
+                )
+            )) {
+            LowLevelCall.bubbleRevert();
+        }
     }
 
-    // solhint-disable-next-line no-complex-fallback
-    fallback() external payable {
-        address logic = (ITREXImplementationAuthority(getImplementationAuthority())).getIRImplementation();
-
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            calldatacopy(0x0, 0x0, calldatasize())
-            let success := delegatecall(sub(gas(), 10000), logic, 0x0, calldatasize(), 0, 0)
-            let retSz := returndatasize()
-            returndatacopy(0, 0, retSz)
-            switch success
-            case 0 {
-                revert(0, retSz)
-            }
-            default {
-                return(0, retSz)
-            }
-        }
+    function getLogic() internal view override returns (address) {
+        return (ITREXImplementationAuthority(getImplementationAuthority())).getIRImplementation();
     }
 
 }

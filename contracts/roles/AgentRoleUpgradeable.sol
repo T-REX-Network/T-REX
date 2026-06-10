@@ -63,46 +63,20 @@
 
 pragma solidity 0.8.30;
 
-import "../errors/InvalidArgumentErrors.sol";
-import "../errors/RoleErrors.sol";
-import "./OwnableOnceNext2StepUpgradeable.sol";
-import "./Roles.sol";
+import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 
-/// Events
+import { AbstractAgentRole } from "./AbstractAgentRole.sol";
 
-/// @dev This event is emmited when an agent is added.
-/// @param _agent Address of agent contract
-event AgentAdded(address indexed _agent);
+contract AgentRoleUpgradeable is AbstractAgentRole, Ownable2StepUpgradeable {
 
-/// @dev This event is emmited when an agent is removed.
-/// @param _agent Address of agent contract
-event AgentRemoved(address indexed _agent);
-
-contract AgentRoleUpgradeable is OwnableOnceNext2StepUpgradeable {
-
-    using Roles for Roles.Role;
-
-    Roles.Role private _agents;
-
-    modifier onlyAgent() {
-        require(isAgent(msg.sender), CallerDoesNotHaveAgentRole());
-        _;
-    }
+    constructor() Ownable2StepUpgradeable() { }
 
     function addAgent(address _agent) public onlyOwner {
-        require(_agent != address(0), ZeroAddress());
-        _agents.add(_agent);
-        emit AgentAdded(_agent);
+        super._addAgent(_agent);
     }
 
     function removeAgent(address _agent) public onlyOwner {
-        require(_agent != address(0), ZeroAddress());
-        _agents.remove(_agent);
-        emit AgentRemoved(_agent);
-    }
-
-    function isAgent(address _agent) public view returns (bool) {
-        return _agents.has(_agent);
+        super._removeAgent(_agent);
     }
 
 }

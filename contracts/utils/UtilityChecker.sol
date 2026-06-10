@@ -77,6 +77,10 @@ import { IUtilityChecker } from "./IUtilityChecker.sol";
 
 contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable {
 
+    constructor() {
+        _disableInitializers();
+    }
+
     function initialize() external initializer {
         __Ownable_init(msg.sender);
     }
@@ -86,7 +90,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getTransferStatus(address _token, address _from, address _to, uint256 _amount)
         external
         view
-        override
         returns (bool _freezeStatus, bool _eligibilityStatus, bool _complianceStatus)
     {
         IToken token = IToken(_token);
@@ -113,7 +116,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getVerifiedDetails(address _token, address _userAddress)
         public
         view
-        override
         returns (EligibilityCheckDetails[] memory _details)
     {
         IERC3643IdentityRegistry identityRegistry = IToken(_token).identityRegistry();
@@ -125,30 +127,31 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         _details = new EligibilityCheckDetails[](topicsCount);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
             uint256 topic = requiredClaimTopics[claimTopic];
-            IClaimIssuer[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
+            address[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
 
             for (uint256 i; i < trustedIssuers.length; i++) {
                 (bool topicMatch, bool pass) = _getEligibility(trustedIssuers[i], topic, identity);
                 if (topicMatch) {
                     _details[claimTopic] =
-                        EligibilityCheckDetails({ issuer: trustedIssuers[i], topic: topic, pass: pass });
+                        EligibilityCheckDetails({ issuer: IClaimIssuer(trustedIssuers[i]), topic: topic, pass: pass });
                 }
             }
         }
     }
 
     /// @dev Function splitted to avoid stack too deep error
-    function _getEligibility(IClaimIssuer _trustedIssuer, uint256 _topic, IIdentity _identity)
+    function _getEligibility(address trustedIssuer, uint256 topic, IIdentity identity)
         internal
         view
         returns (bool topicMatch, bool pass)
     {
-        bytes32 claimId = keccak256(abi.encode(_trustedIssuer, _topic));
-        (uint256 foundClaimTopic,, address issuer, bytes memory sig, bytes memory data,) = _identity.getClaim(claimId);
-        if (foundClaimTopic != _topic) return (false, false);
+        /// forge-lint: disable-next-line(asm-keccak256)
+        bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
+        (uint256 foundClaimTopic,, address issuer, bytes memory sig, bytes memory data,) = identity.getClaim(claimId);
+        if (foundClaimTopic != topic) return (false, false);
         topicMatch = true;
 
-        try IClaimIssuer(issuer).isClaimValid(_identity, _topic, sig, data) returns (bool validity) {
+        try IClaimIssuer(issuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
             pass = validity;
         } catch {
             pass = false;
@@ -159,7 +162,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getFreezeStatus(address _token, address _from, address _to, uint256 _amount)
         public
         view
-        override
         returns (bool _frozen, uint256 _availableBalance)
     {
         IToken token = IToken(_token);
@@ -177,7 +179,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getTransferDetails(address _token, address _from, address _to, uint256 _value)
         public
         view
-        override
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IToken(_token).compliance()));

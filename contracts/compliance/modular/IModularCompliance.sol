@@ -62,24 +62,7 @@
 
 pragma solidity 0.8.30;
 
-import "../../ERC-3643/IERC3643Compliance.sol";
-
-/// events
-
-/// @dev Event emitted for each executed interaction with a module contract.
-/// For gas efficiency, only the interaction calldata selector (first 4 bytes) is included in the event.
-/// For interactions without calldata or whose calldata is shorter than 4 bytes, the selector will be `0`.
-/// @param _target Address of the module.
-/// @param _selector See above comments.
-event ModuleInteraction(address indexed _target, bytes4 _selector);
-
-/// @dev This event is emitted when a module has been added to the list of modules bound to the compliance contract.
-/// @param _module  The address of the compliance module.
-event ModuleAdded(address indexed _module);
-
-/// @dev This event is emitted when a module has been removed from the list of modules bound to the compliance contract.
-/// @param _module is the address of the compliance module
-event ModuleRemoved(address indexed _module);
+import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 
 interface IModularCompliance is IERC3643Compliance {
 

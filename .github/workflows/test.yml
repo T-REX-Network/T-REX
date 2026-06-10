@@ -8,6 +8,7 @@ on:
 env:
   FOUNDRY_PROFILE: ci
   ALCHEMY_KEY: ${{ secrets.ALCHEMY_KEY }}
+  HUSKY: 0
 
 jobs:
   check:
@@ -17,9 +18,7 @@ jobs:
     name: Foundry project
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v6
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
@@ -36,14 +35,10 @@ jobs:
         run: forge fmt --check
         id: lint
 
-      - name: Run build
-        run: forge build
-        id: build
-
       - name: Run tests
         run: forge test --gas-report
         id: test
 
       - name: Run coverage
-        run: ./.github/scripts/forge_coverage.sh
+        run: forge coverage --no-match-coverage "(test|dependencies|scripts|vendor)"
         id: coverage

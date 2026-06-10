@@ -61,48 +61,21 @@
  */
 pragma solidity 0.8.30;
 
-import "../errors/InvalidArgumentErrors.sol";
-import "../errors/RoleErrors.sol";
-import "../roles/AgentRole.sol";
-import "../roles/IERC173.sol";
-import "./ITREXGateway.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-
-/// Errors
-
-/// The Public Deployment Status is already set properly
-error PublicDeploymentAlreadyEnabled();
-
-/// The Public Deployment Status is already set properly
-error PublicDeploymentAlreadyDisabled();
-
-/// The Deployment fees are already enabled
-error DeploymentFeesAlreadyEnabled();
-
-/// The Deployment fees are already disabled
-error DeploymentFeesAlreadyDisabled();
-
-/// The address is already a deployer
-error DeployerAlreadyExists(address deployer);
-
-/// The address is not a deployer
-error DeployerDoesNotExist(address deployer);
-
-/// Cannot deploy if not deployer when public deployment disabled
-error PublicDeploymentsNotAllowed();
-
-/// Public deployers can only deploy for themselves
-error PublicCannotDeployOnBehalf();
-
-/// Discount cannot be bigger than 10000 (100%)
-error DiscountOutOfRange();
-
-/// Batch Size is too big, could run out of gas
-error BatchMaxLengthExceeded(uint16 lengthLimit);
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
+import { AgentRole } from "../roles/AgentRole.sol";
+import { IERC173 } from "../roles/IERC173.sol";
+import { ITREXFactory } from "./ITREXFactory.sol";
+import { ITREXGateway } from "./ITREXGateway.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
+
+    using SafeERC20 for IERC20;
 
     /// address of the TREX Factory that is managed by the Gateway
     address private _factory;
@@ -127,186 +100,127 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     constructor(address factory, bool publicDeploymentStatus) {
         _factory = factory;
         _publicDeploymentStatus = publicDeploymentStatus;
-        emit FactorySet(factory);
-        emit PublicDeploymentStatusSet(publicDeploymentStatus);
+        emit EventsLib.FactorySet(factory);
+        emit EventsLib.PublicDeploymentStatusSet(publicDeploymentStatus);
     }
 
     /**
      *  @dev See {ITREXGateway-setFactory}.
      */
-    function setFactory(address factory) external override onlyOwner {
-        require(factory != address(0), ZeroAddress());
+    function setFactory(address factory) external onlyOwner {
+        require(factory != address(0), ErrorsLib.ZeroAddress());
 
         _factory = factory;
-        emit FactorySet(factory);
+        emit EventsLib.FactorySet(factory);
     }
 
     /**
      *  @dev See {ITREXGateway-setPublicDeploymentStatus}.
      */
-    function setPublicDeploymentStatus(bool _isEnabled) external override onlyOwner {
+    function setPublicDeploymentStatus(bool _isEnabled) external onlyOwner {
         if (_isEnabled == _publicDeploymentStatus) {
             if (_isEnabled) {
-                revert PublicDeploymentAlreadyEnabled();
+                revert ErrorsLib.PublicDeploymentAlreadyEnabled();
             }
-            revert PublicDeploymentAlreadyDisabled();
+            revert ErrorsLib.PublicDeploymentAlreadyDisabled();
         }
 
         _publicDeploymentStatus = _isEnabled;
-        emit PublicDeploymentStatusSet(_isEnabled);
+        emit EventsLib.PublicDeploymentStatusSet(_isEnabled);
     }
 
     /**
      *  @dev See {ITREXGateway-transferFactoryOwnership}.
      */
-    function transferFactoryOwnership(address _newOwner) external override onlyOwner {
+    function transferFactoryOwnership(address _newOwner) external onlyOwner {
         Ownable(_factory).transferOwnership(_newOwner);
     }
 
     /**
      *  @dev See {ITREXGateway-enableDeploymentFee}.
      */
-    function enableDeploymentFee(bool _isEnabled) external override onlyOwner {
+    function enableDeploymentFee(bool _isEnabled) external onlyOwner {
         if (_isEnabled == _deploymentFeeEnabled) {
             if (_isEnabled) {
-                revert DeploymentFeesAlreadyEnabled();
+                revert ErrorsLib.DeploymentFeesAlreadyEnabled();
             }
-            revert DeploymentFeesAlreadyDisabled();
+            revert ErrorsLib.DeploymentFeesAlreadyDisabled();
         }
 
         _deploymentFeeEnabled = _isEnabled;
-        emit DeploymentFeeEnabled(_isEnabled);
+        emit EventsLib.DeploymentFeeEnabled(_isEnabled);
     }
 
     /**
      *  @dev See {ITREXGateway-setDeploymentFee}.
      */
-    function setDeploymentFee(uint256 _fee, address _feeToken, address _feeCollector) external override onlyOwner {
-        require(_feeToken != address(0) && _feeCollector != address(0), ZeroAddress());
+    function setDeploymentFee(uint256 _fee, address _feeToken, address _feeCollector) external onlyOwner {
+        require(_feeToken != address(0) && _feeCollector != address(0), ErrorsLib.ZeroAddress());
 
         _deploymentFee.fee = _fee;
         _deploymentFee.feeToken = _feeToken;
         _deploymentFee.feeCollector = _feeCollector;
-        emit DeploymentFeeSet(_fee, _feeToken, _feeCollector);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchAddDeployer}.
-     */
-    function batchAddDeployer(address[] calldata deployers) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), SenderIsNotAdmin());
-        require(deployers.length <= 500, BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(!isDeployer(deployers[i]), DeployerAlreadyExists(deployers[i]));
-
-            _deployers[deployers[i]] = true;
-            emit DeployerAdded(deployers[i]);
-        }
+        emit EventsLib.DeploymentFeeSet(_fee, _feeToken, _feeCollector);
     }
 
     /**
      *  @dev See {ITREXGateway-addDeployer}.
      */
-    function addDeployer(address deployer) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), SenderIsNotAdmin());
-        require(!isDeployer(deployer), DeployerAlreadyExists(deployer));
+    function addDeployer(address deployer) external {
+        require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
+        require(!isDeployer(deployer), ErrorsLib.DeployerAlreadyExists(deployer));
 
         _deployers[deployer] = true;
-        emit DeployerAdded(deployer);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchRemoveDeployer}.
-     */
-    function batchRemoveDeployer(address[] calldata deployers) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), SenderIsNotAdmin());
-        require(deployers.length <= 500, BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(isDeployer(deployers[i]), DeployerDoesNotExist(deployers[i]));
-
-            delete _deployers[deployers[i]];
-            emit DeployerRemoved(deployers[i]);
-        }
+        emit EventsLib.DeployerAdded(deployer);
     }
 
     /**
      *  @dev See {ITREXGateway-removeDeployer}.
      */
-    function removeDeployer(address deployer) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), SenderIsNotAdmin());
-        require(isDeployer(deployer), DeployerDoesNotExist(deployer));
+    function removeDeployer(address deployer) external {
+        require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
+        require(isDeployer(deployer), ErrorsLib.DeployerDoesNotExist(deployer));
 
         delete _deployers[deployer];
-        emit DeployerRemoved(deployer);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchApplyFeeDiscount}.
-     */
-    function batchApplyFeeDiscount(address[] calldata deployers, uint16[] calldata discounts) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), SenderIsNotAdmin());
-        require(deployers.length <= 500, BatchMaxLengthExceeded(500));
-
-        for (uint256 i = 0; i < deployers.length; i++) {
-            require(discounts[i] <= 10000, DiscountOutOfRange());
-
-            _feeDiscount[deployers[i]] = discounts[i];
-            emit FeeDiscountApplied(deployers[i], discounts[i]);
-        }
+        emit EventsLib.DeployerRemoved(deployer);
     }
 
     /**
      *  @dev See {ITREXGateway-applyFeeDiscount}.
      */
-    function applyFeeDiscount(address deployer, uint16 discount) external override {
-        require(isAgent(msg.sender) || msg.sender == owner(), SenderIsNotAdmin());
-        require(discount <= 10000, DiscountOutOfRange());
+    function applyFeeDiscount(address deployer, uint16 discount) external {
+        require(isAgent(msg.sender) || msg.sender == owner(), ErrorsLib.SenderIsNotAdmin());
+        require(discount <= 10000, ErrorsLib.DiscountOutOfRange());
 
         _feeDiscount[deployer] = discount;
-        emit FeeDiscountApplied(deployer, discount);
-    }
-
-    /**
-     *  @dev See {ITREXGateway-batchDeployTREXSuite}.
-     */
-    function batchDeployTREXSuite(
-        ITREXFactory.TokenDetails[] memory _tokenDetails,
-        ITREXFactory.ClaimDetails[] memory _claimDetails
-    ) external override {
-        require(_tokenDetails.length <= 5, BatchMaxLengthExceeded(5));
-
-        for (uint256 i = 0; i < _tokenDetails.length; i++) {
-            deployTREXSuite(_tokenDetails[i], _claimDetails[i]);
-        }
+        emit EventsLib.FeeDiscountApplied(deployer, discount);
     }
 
     /**
      *  @dev See {ITREXGateway-getPublicDeploymentStatus}.
      */
-    function getPublicDeploymentStatus() external view override returns (bool) {
+    function getPublicDeploymentStatus() external view returns (bool) {
         return _publicDeploymentStatus;
     }
 
     /**
      *  @dev See {ITREXGateway-getFactory}.
      */
-    function getFactory() external view override returns (address) {
+    function getFactory() external view returns (address) {
         return _factory;
     }
 
     /**
      *  @dev See {ITREXGateway-getDeploymentFee}.
      */
-    function getDeploymentFee() external view override returns (Fee memory) {
+    function getDeploymentFee() external view returns (Fee memory) {
         return _deploymentFee;
     }
 
     /**
      *  @dev See {ITREXGateway-isDeploymentFeeEnabled}.
      */
-    function isDeploymentFeeEnabled() external view override returns (bool) {
+    function isDeploymentFeeEnabled() external view returns (bool) {
         return _deploymentFeeEnabled;
     }
 
@@ -316,43 +230,43 @@ contract TREXGateway is ITREXGateway, AgentRole, IERC165 {
     function deployTREXSuite(
         ITREXFactory.TokenDetails memory _tokenDetails,
         ITREXFactory.ClaimDetails memory _claimDetails
-    ) public override {
-        require(_publicDeploymentStatus || isDeployer(msg.sender), PublicDeploymentsNotAllowed());
+    ) public {
+        require(_publicDeploymentStatus || isDeployer(msg.sender), ErrorsLib.PublicDeploymentsNotAllowed());
         require(
             !_publicDeploymentStatus || msg.sender == _tokenDetails.owner || isDeployer(msg.sender),
-            PublicCannotDeployOnBehalf()
+            ErrorsLib.PublicCannotDeployOnBehalf()
         );
 
         uint256 feeApplied = 0;
         if (_deploymentFeeEnabled) {
             if (_deploymentFee.fee > 0 && _feeDiscount[msg.sender] < 10000) {
                 feeApplied = calculateFee(msg.sender);
-                IERC20(_deploymentFee.feeToken).transferFrom(msg.sender, _deploymentFee.feeCollector, feeApplied);
+                IERC20(_deploymentFee.feeToken).safeTransferFrom(msg.sender, _deploymentFee.feeCollector, feeApplied);
             }
         }
         string memory _salt = string(abi.encodePacked(Strings.toHexString(_tokenDetails.owner), _tokenDetails.name));
         ITREXFactory(_factory).deployTREXSuite(_salt, _tokenDetails, _claimDetails);
-        emit GatewaySuiteDeploymentProcessed(msg.sender, _tokenDetails.owner, feeApplied);
+        emit EventsLib.GatewaySuiteDeploymentProcessed(msg.sender, _tokenDetails.owner, feeApplied);
     }
 
     /**
      *  @dev See {ITREXGateway-isDeployer}.
      */
-    function isDeployer(address deployer) public view override returns (bool) {
+    function isDeployer(address deployer) public view returns (bool) {
         return _deployers[deployer];
     }
 
     /**
      *  @dev See {ITREXGateway-calculateFee}.
      */
-    function calculateFee(address deployer) public view override returns (uint256) {
+    function calculateFee(address deployer) public view returns (uint256) {
         return _deploymentFee.fee - ((_feeDiscount[deployer] * _deploymentFee.fee) / 10000);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(ITREXGateway).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;
     }

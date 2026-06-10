@@ -62,72 +62,82 @@
 
 pragma solidity 0.8.30;
 
-import "../../roles/IERC173.sol";
-import "../../roles/OwnableOnceNext2StepUpgradeable.sol";
-import "../interface/IClaimTopicsRegistry.sol";
-import "../storage/CTRStorage.sol";
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-/// Errors
+import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
+import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { IERC173 } from "../../roles/IERC173.sol";
+import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
-/// @dev Thrown when maximum topic number is reached.
-/// @param _max maximum numlber of topics.
-error MaxTopicsReached(uint256 _max);
+contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, IERC165 {
 
-/// @dev Thrown whern claim topic already exists.
-error ClaimTopicAlreadyExists();
+    using EnumerableSet for EnumerableSet.UintSet;
 
-contract ClaimTopicsRegistry is IClaimTopicsRegistry, OwnableOnceNext2StepUpgradeable, CTRStorage, IERC165 {
+    /// @custom:storage-location erc7201:ERC3643.storage.ClaimTopicsRegistry
+    struct Storage {
+        EnumerableSet.UintSet claimTopics;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ClaimTopicsRegistry")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0xeb77843660c963beb5d27db8816b70a285e2678d36793e5743f8650e153ee600;
 
     constructor() {
         _disableInitializers();
     }
 
-    function init() external initializer {
-        __Ownable_init();
+    function init(address _owner, uint256[] calldata _initialTopics) external initializer {
+        __Ownable_init(_owner);
+        for (uint256 i = 0; i < _initialTopics.length; i++) {
+            _addClaimTopic(_initialTopics[i]);
+        }
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-addClaimTopic}.
      */
-    function addClaimTopic(uint256 _claimTopic) external override onlyOwner {
-        uint256 length = _claimTopics.length;
-        require(length < 15, MaxTopicsReached(15));
-        for (uint256 i = 0; i < length; i++) {
-            require(_claimTopics[i] != _claimTopic, ClaimTopicAlreadyExists());
-        }
-        _claimTopics.push(_claimTopic);
-        emit ClaimTopicAdded(_claimTopic);
+    function addClaimTopic(uint256 claimTopic) external onlyOwner {
+        _addClaimTopic(claimTopic);
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-removeClaimTopic}.
      */
-    function removeClaimTopic(uint256 _claimTopic) external override onlyOwner {
-        uint256 length = _claimTopics.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (_claimTopics[i] == _claimTopic) {
-                _claimTopics[i] = _claimTopics[length - 1];
-                _claimTopics.pop();
-                emit ClaimTopicRemoved(_claimTopic);
-                break;
-            }
+    function removeClaimTopic(uint256 claimTopic) external onlyOwner {
+        if (_getStorage().claimTopics.remove(claimTopic)) {
+            emit ERC3643EventsLib.ClaimTopicRemoved(claimTopic);
         }
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-getClaimTopics}.
      */
-    function getClaimTopics() external view override returns (uint256[] memory) {
-        return _claimTopics;
+    function getClaimTopics() external view returns (uint256[] memory) {
+        return _getStorage().claimTopics.values();
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual override returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
             || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function _addClaimTopic(uint256 claimTopic) internal {
+        Storage storage s = _getStorage();
+        require(s.claimTopics.length() < 15, ErrorsLib.MaxClaimTopicsReached(15));
+        require(s.claimTopics.add(claimTopic), ErrorsLib.ClaimTopicAlreadyExists());
+        emit ERC3643EventsLib.ClaimTopicAdded(claimTopic);
+    }
+
+    function _getStorage() internal pure returns (Storage storage s) {
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            s.slot := STORAGE_LOCATION
+        }
     }
 
 }

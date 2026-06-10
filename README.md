@@ -1,10 +1,10 @@
 # T-REX : Token for Regulated EXchanges
 
-![GitHub](https://img.shields.io/github/license/ERC-3643/ERC-3643?color=green)
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/ERC-3643/ERC-3643)
-![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/ERC-3643/ERC-3643/publish-release.yml)
-![GitHub repo size](https://img.shields.io/github/repo-size/ERC-3643/ERC-3643)
-![GitHub Release Date](https://img.shields.io/github/release-date/ERC-3643/ERC-3643)
+![GitHub](https://img.shields.io/github/license/T-REX-Network/T-REX?color=green)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/T-REX-Network/T-REX)
+![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/T-REX-Network/T-REX/test.yml?branch=trex-v5-develop)
+![GitHub repo size](https://img.shields.io/github/repo-size/T-REX-Network/T-REX)
+![GitHub Release Date](https://img.shields.io/github/release-date/T-REX-Network/T-REX)
 
 ---
 
@@ -42,7 +42,7 @@ The T-REX protocol consists of several key components:
 
 ## Getting Started
 
-1. Clone the repository: `git clone https://github.com/ERC-3643/ERC-3643.git`
+1. Clone the repository: `git clone https://github.com/T-REX-Network/T-REX.git`
 2. Install [Foundry](https://getfoundry.sh/) if you haven't already
 3. Install dependencies: `forge soldeer install`
 4. Compile the contracts: `forge build`

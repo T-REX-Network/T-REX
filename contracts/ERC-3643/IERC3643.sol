@@ -39,66 +39,10 @@
 
 pragma solidity 0.8.30;
 
-import "./IERC3643Compliance.sol";
-import "./IERC3643IdentityRegistry.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-
-/// Events
-
-/// @dev This event is emitted when the token information is updated.
-/// @param _newName is the name of the token.
-/// @param _newSymbol is the symbol of the token.
-/// @param _newDecimals is the decimals of the token.
-/// @param _newVersion is the version of the token.
-/// @param _newOnchainID is the address of the onchainID of the token.
-event UpdatedTokenInformation(
-    string indexed _newName,
-    string indexed _newSymbol,
-    uint8 _newDecimals,
-    string _newVersion,
-    address indexed _newOnchainID
-);
-
-/// @dev This event is emitted when the IdentityRegistry has been set for the token.
-/// @param _identityRegistry is the address of the Identity Registry of the token.
-event IdentityRegistryAdded(address indexed _identityRegistry);
-
-/// @dev This event is emitted when the Compliance has been set for the token.
-/// @param _compliance is the address of the Compliance contract of the token.
-event ComplianceAdded(address indexed _compliance);
-
-/// @dev This event is emitted when an investor successfully recovers his tokens.
-/// @param _lostWallet is the address of the wallet that the investor lost access to.
-/// @param _newWallet is the address of the wallet that the investor provided for the recovery.
-/// @param _investorOnchainID is the address of the onchainID of the investor who asked for a recovery.
-event RecoverySuccess(address indexed _lostWallet, address indexed _newWallet, address indexed _investorOnchainID);
-
-/// @dev This event is emitted when the wallet of an investor is frozen or unfrozen.
-/// @param _userAddress is the wallet of the investor that is concerned by the freezing status.
-/// @param _isFrozen is the freezing status of the wallet.
-/// @param _isFrozen equals `true` the wallet is frozen after emission of the event.
-/// @param _isFrozen equals `false` the wallet is unfrozen after emission of the event.
-/// @param _owner is the address of the agent who called the function to freeze the wallet.
-event AddressFrozen(address indexed _userAddress, bool indexed _isFrozen, address indexed _owner);
-
-/// @dev This event is emitted when a certain amount of tokens is frozen on a wallet.
-/// @param _userAddress is the wallet of the investor that is concerned by the freezing status.
-/// @param _amount is the amount of tokens that are frozen.
-event TokensFrozen(address indexed _userAddress, uint256 _amount);
-
-/// @dev This event is emitted when a certain amount of tokens is unfrozen on a wallet.
-/// @param _userAddress is the wallet of the investor that is concerned by the freezing status.
-/// @param _amount is the amount of tokens that are unfrozen.
-event TokensUnfrozen(address indexed _userAddress, uint256 _amount);
-
-/// @dev This event is emitted when the token is paused.
-/// @param _userAddress is the address of the wallet that called the pause function
-event Paused(address _userAddress);
-
-/// @dev This event is emitted when the token is unpaused.
-/// @param _userAddress is the address of the wallet that called the unpause function.
-event Unpaused(address _userAddress);
+import { IERC3643Compliance } from "./IERC3643Compliance.sol";
+import { IERC3643IdentityRegistry } from "./IERC3643IdentityRegistry.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface IERC3643 is IERC20, IERC20Metadata {
 
