@@ -104,7 +104,6 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
         initializer
     {
         require(_issuers.length == _issuerClaims.length, ErrorsLib.InvalidClaimPattern());
-        require(_issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
         __Ownable_init(_owner);
         for (uint256 i = 0; i < _issuers.length; i++) {
             _addTrustedIssuer(_issuers[i], _issuerClaims[i]);
@@ -124,15 +123,15 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     function removeTrustedIssuer(address _trustedIssuer) external onlyOwner {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
-        s.trustedIssuers.remove(_trustedIssuer);
+        require(s.trustedIssuers.remove(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
         uint256[] memory claimTopics = issuerTopics.values();
         for (uint256 i = 0; i < claimTopics.length; i++) {
             s.claimTopicsToTrustedIssuers[claimTopics[i]].remove(address(_trustedIssuer));
-            issuerTopics.remove(claimTopics[i]);
         }
+        issuerTopics.clear();
+
         emit ERC3643EventsLib.TrustedIssuerRemoved(_trustedIssuer);
     }
 

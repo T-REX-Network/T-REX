@@ -110,21 +110,6 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         new TrustedIssuersRegistryProxy(implementationAuthority, owner, issuers, issuerClaims);
     }
 
-    function test_init_RevertWhen_MoreThan5Issuers() public {
-        address[] memory issuers = new address[](6);
-        uint256[][] memory issuerClaims = new uint256[][](6);
-
-        for (uint256 i = 0; i < 6; i++) {
-            issuers[i] = makeAddr(string(abi.encodePacked("issuer", i)));
-            uint256[] memory topics = new uint256[](1);
-            topics[0] = i + 1;
-            issuerClaims[i] = topics;
-        }
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimIssuersReached.selector, 5));
-        new TrustedIssuersRegistryProxy(implementationAuthority, owner, issuers, issuerClaims);
-    }
-
     function _deployProxy(address _owner, address[] memory _issuers, uint256[][] memory _issuerClaims)
         private
         returns (TrustedIssuersRegistry)
