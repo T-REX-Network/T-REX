@@ -40,5 +40,5 @@ jobs:
         id: test
 
       - name: Run coverage
-        run: forge coverage --no-match-coverage "(test|dependencies|scripts)"
+        run: forge coverage --no-match-coverage "(test|dependencies|scripts|vendor)"
         id: coverage

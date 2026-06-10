@@ -116,6 +116,8 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         // Mock identity registry contains - both wallets are registered
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryContains(newWallet, true);
+        // New wallet's identity must match investorOnchainId, otherwise recovery is rejected
+        mockIdentityRegistryIdentity(newWallet, IIdentity(investorOnchainId));
 
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
@@ -152,6 +154,14 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
             identityRegistry,
             abi.encodeWithSelector(IERC3643IdentityRegistry.contains.selector, wallet),
             abi.encode(contains)
+        );
+    }
+
+    function mockIdentityRegistryIdentity(address wallet, IIdentity identity) internal {
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(IERC3643IdentityRegistry.identity.selector, wallet),
+            abi.encode(identity)
         );
     }
 

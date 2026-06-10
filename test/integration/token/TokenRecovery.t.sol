@@ -130,6 +130,25 @@ contract TokenRecoveryTest is TREXSuiteTest {
         assertTrue(identityRegistry.contains(another));
     }
 
+    /// @notice Should revert when the new wallet is already registered with an identity that differs from
+    ///         investorOnchainId, instead of silently keeping the new wallet's pre-existing identity
+    function test_recoveryAddress_RevertWhen_NewWalletHasDifferentIdentity() public {
+        // Register another (new wallet) with a different identity than bob (lost wallet)
+        vm.prank(agent);
+        identityRegistry.registerIdentity(another, charlieIdentity, 1);
+
+        // Sanity: both wallets registered, with distinct identities, before recovery
+        assertTrue(identityRegistry.contains(bob));
+        assertTrue(identityRegistry.contains(another));
+        assertEq(address(identityRegistry.identity(bob)), address(bobIdentity));
+        assertEq(address(identityRegistry.identity(another)), address(charlieIdentity));
+
+        // Recovery must reject: another's on-chain identity (charlieIdentity) does not match investorOnchainId
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.RecoveryNotPossible.selector);
+        token.recoveryAddress(bob, another, address(bobIdentity));
+    }
+
     /// @notice Should recover without touching IRS when recovery already happened on another token
     function test_recoveryAddress_Success_RecoveryAlreadyHappened() public {
         // Delete bob and register another (simulating recovery on another token)

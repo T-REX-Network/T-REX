@@ -460,6 +460,13 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     ///      when it is not already known to the identity registry).
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
         TokenStorage storage s = _tokenStorage();
+
+        require(
+            !s.identityRegistry.contains(newWallet)
+                || s.identityRegistry.identity(newWallet) == IIdentity(investorOnchainId),
+            ErrorsLib.RecoveryNotPossible()
+        );
+
         if (s.identityRegistry.contains(lostWallet)) {
             if (!s.identityRegistry.contains(newWallet)) {
                 s.identityRegistry

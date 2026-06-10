@@ -24,8 +24,8 @@
     "format": "forge fmt --check",
     "format:fix": "forge fmt",
     "test": "forge test --gas-report",
-    "coverage": "forge coverage --no-match-coverage \"(test|dependencies|scripts)\" --ir-minimum",
-    "coverage:report": "mkdir -p coverage && forge coverage --no-match-coverage \"(test|scripts|dependencies)\" --ir-minimum --report lcov --report-file coverage/lcov.info && genhtml coverage/lcov.info -o coverage/report --branch-coverage && open coverage/report/index.html",
+    "coverage": "forge coverage --no-match-coverage \"(test|dependencies|scripts|vendor)\"",
+    "coverage:report": "mkdir -p coverage && forge coverage --no-match-coverage \"(test|scripts|dependencies|vendor)\" --report lcov --report-file coverage/lcov.info && genhtml coverage/lcov.info -o coverage/report --branch-coverage && open coverage/report/index.html",
     "clean": "forge clean"
   },
   "repository": {
