@@ -101,7 +101,6 @@ abstract contract AbstractProxy is IProxy, Initializable {
      */
     function getImplementationAuthority() public view returns (address) {
         address implemAuth;
-        // solhint-disable-next-line no-inline-assembly
         assembly {
             implemAuth := sload(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc)
         }
@@ -113,7 +112,6 @@ abstract contract AbstractProxy is IProxy, Initializable {
      *  the slot storage is the result of `keccak256("ERC-3643.proxy.beacon")`
      */
     function _storeImplementationAuthority(address implementationAuthority) internal {
-        // solhint-disable-next-line no-inline-assembly
         assembly {
             sstore(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc, implementationAuthority)
         }
@@ -121,11 +119,9 @@ abstract contract AbstractProxy is IProxy, Initializable {
 
     function getLogic() internal view virtual returns (address);
 
-    // solhint-disable-next-line no-complex-fallback
     fallback() external payable {
         address logic = getLogic();
 
-        // solhint-disable-next-line no-inline-assembly
         assembly {
             calldatacopy(0x0, 0x0, calldatasize())
             let success := delegatecall(gas(), logic, 0x0, calldatasize(), 0, 0)

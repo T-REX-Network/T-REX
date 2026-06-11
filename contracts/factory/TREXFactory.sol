@@ -64,9 +64,13 @@ pragma solidity 0.8.30;
 import { IIdFactory } from "@onchain-id/solidity/contracts/factory/IIdFactory.sol";
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
+import { RolesLib } from "../libraries/RolesLib.sol";
 import { ClaimTopicsRegistryProxy } from "../proxy/ClaimTopicsRegistryProxy.sol";
 import { IdentityRegistryProxy } from "../proxy/IdentityRegistryProxy.sol";
 import { IdentityRegistryStorageProxy } from "../proxy/IdentityRegistryStorageProxy.sol";
@@ -78,7 +82,7 @@ import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistr
 import { Create3 } from "../vendor/openzeppelin/Create3.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
-contract TREXFactory is ITREXFactory, Ownable {
+contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
     address private _implementationAuthority;
@@ -89,66 +93,55 @@ contract TREXFactory is ITREXFactory, Ownable {
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
-    /// constructor is setting the implementation authority and the Identity Factory of the TREX factory
-    constructor(address implementationAuthority_, address idFactory_) Ownable(msg.sender) {
-        setImplementationAuthority(implementationAuthority_);
-        setIdFactory(idFactory_);
+    constructor(address implementationAuthority, address idFactory, address accessManager)
+        Ownable(accessManager)
+        AccessManaged(accessManager)
+    {
+        _setImplementationAuthority(implementationAuthority);
+        _setIdFactory(idFactory);
     }
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuite}.
      */
-    // solhint-disable-next-line code-complexity, function-max-lines
-    function deployTREXSuite(
-        string memory _salt,
-        TokenDetails calldata _tokenDetails,
-        ClaimDetails calldata _claimDetails
-    ) external onlyOwner {
-        require(tokenDeployed[_salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
-        require(_claimDetails.issuers.length == _claimDetails.issuerClaims.length, ErrorsLib.InvalidClaimPattern());
-        require(_claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
-        require(_claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
-        require(
-            _tokenDetails.irAgents.length <= 5 && _tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
-        );
-        require(_tokenDetails.complianceModules.length <= 25, ErrorsLib.MaxModulesReached(25));
-        require(
-            _tokenDetails.complianceModules.length >= _tokenDetails.complianceSettings.length,
-            ErrorsLib.InvalidCompliancePattern()
-        );
+    function deployTREXSuite(string memory salt, TokenDetails calldata tokenDetails, ClaimDetails calldata claimDetails)
+        external
+        restricted
+    {
+        require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
 
-        address tir = _deployTIR(
-            _salt, _implementationAuthority, _tokenDetails.owner, _claimDetails.issuers, _claimDetails.issuerClaims
+        require(tokenDetails.accessManager != address(0), ErrorsLib.ZeroAddress());
+        require(claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
+        require(claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
+        require(
+            tokenDetails.irAgents.length <= 5 && tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
         );
-        address ctr = _deployCTR(_salt, _implementationAuthority, _tokenDetails.owner, _claimDetails.claimTopics);
+        require(tokenDetails.complianceModules.length <= 25, ErrorsLib.MaxModulesReached(25));
 
-        address irs = _tokenDetails.irs;
+        address tir = _deployTIR(salt, tokenDetails.accessManager, claimDetails.issuers, claimDetails.issuerClaims);
+        address ctr = _deployCTR(salt, tokenDetails.accessManager, claimDetails.claimTopics);
+
+        address irs = tokenDetails.irs;
         if (irs == address(0)) {
-            irs = _deployIRS(_salt, _tokenDetails);
+            irs = _deployIRS(salt, tokenDetails);
         }
 
-        address ir = _deployIR(_salt, _tokenDetails, tir, ctr, irs);
-        require(ir == _predictAddress(_salt, "IR"), ErrorsLib.AddressPredictionMismatch());
-        address mc = _deployMC(_salt, _tokenDetails);
+        address ir = _deployIR(salt, tokenDetails, tir, ctr, irs);
+        require(ir == _predictAddress(salt, "IR"), ErrorsLib.AddressPredictionMismatch());
+        address mc = _deployMC(salt, tokenDetails);
 
-        // For a freshly-deployed IRS, the binding is folded into init; for a reused IRS, the binding is
-        // still applied here (the factory must be owner of the reused IRS, same precondition as before
-        // the refactor).
-        if (_tokenDetails.irs != address(0)) {
+        // a reused IRS must be governed by the same AccessManager as the rest of the suite
+        if (tokenDetails.irs != address(0)) {
+            require(IAccessManaged(irs).authority() == tokenDetails.accessManager, ErrorsLib.AuthorityMismatch());
             IIdentityRegistryStorage(irs).bindIdentityRegistry(ir);
         }
 
-        address token = _deployToken(_salt, _tokenDetails, ir, mc);
-        tokenDeployed[_salt] = token;
+        address token = _deployToken(salt, tokenDetails, ir, mc);
+        tokenDeployed[salt] = token;
 
-        emit EventsLib.TREXSuiteDeployed(token, ir, irs, tir, ctr, mc, _salt);
-    }
+        _grantAgentRoles(tokenDetails, token, ir);
 
-    /**
-     *  @dev See {ITREXFactory-recoverContractOwnership}.
-     */
-    function recoverContractOwnership(address _contract, address _newOwner) external onlyOwner {
-        (Ownable(_contract)).transferOwnership(_newOwner);
+        emit EventsLib.TREXSuiteDeployed(token, ir, irs, tir, ctr, mc, salt);
     }
 
     /**
@@ -168,36 +161,46 @@ contract TREXFactory is ITREXFactory, Ownable {
     /**
      *  @dev See {ITREXFactory-getToken}.
      */
-    function getToken(string calldata _salt) external view returns (address) {
-        return tokenDeployed[_salt];
+    function getToken(string calldata salt) external view returns (address) {
+        return tokenDeployed[salt];
     }
 
     /**
      *  @dev See {ITREXFactory-setImplementationAuthority}.
      */
-    function setImplementationAuthority(address implementationAuthority_) public onlyOwner {
-        require(implementationAuthority_ != address(0), ErrorsLib.ZeroAddress());
-        // should not be possible to set an implementation authority that is not complete
-        require(
-            (ITREXImplementationAuthority(implementationAuthority_)).getTokenImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthority_)).getCTRImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthority_)).getIRImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthority_)).getIRSImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthority_)).getMCImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthority_)).getTIRImplementation() != address(0),
-            ErrorsLib.InvalidImplementationAuthority()
-        );
-        _implementationAuthority = implementationAuthority_;
-        emit EventsLib.ImplementationAuthoritySet(implementationAuthority_);
+    function setImplementationAuthority(address implementationAuthorityAddress) public restricted {
+        _setImplementationAuthority(implementationAuthorityAddress);
     }
 
     /**
      *  @dev See {ITREXFactory-setIdFactory}.
      */
-    function setIdFactory(address idFactory_) public onlyOwner {
-        require(idFactory_ != address(0), ErrorsLib.ZeroAddress());
-        _idFactory = idFactory_;
-        emit EventsLib.IdFactorySet(idFactory_);
+    function setIdFactory(address idFactoryAddress) public restricted {
+        _setIdFactory(idFactoryAddress);
+    }
+
+    /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
+    function _setImplementationAuthority(address implementationAuthorityAddress) internal {
+        require(implementationAuthorityAddress != address(0), ErrorsLib.ZeroAddress());
+        // should not be possible to set an implementation authority that is not complete
+        require(
+            (ITREXImplementationAuthority(implementationAuthorityAddress)).getTokenImplementation() != address(0)
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getCTRImplementation() != address(0)
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getIRImplementation() != address(0)
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getIRSImplementation() != address(0)
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getMCImplementation() != address(0)
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getTIRImplementation() != address(0),
+            ErrorsLib.InvalidImplementationAuthority()
+        );
+        _implementationAuthority = implementationAuthorityAddress;
+        emit EventsLib.ImplementationAuthoritySet(implementationAuthorityAddress);
+    }
+
+    /// internal setter for the identity factory, see {ITREXFactory-setIdFactory}
+    function _setIdFactory(address idFactoryAddress) internal {
+        require(idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
+        _idFactory = idFactoryAddress;
+        emit EventsLib.IdFactorySet(idFactoryAddress);
     }
 
     /**
@@ -240,137 +243,142 @@ contract TREXFactory is ITREXFactory, Ownable {
 
     /// function used to deploy a trusted issuers registry using CREATE3
     function _deployTIR(
-        string memory _salt,
-        address implementationAuthority_,
-        address _owner,
-        address[] memory _issuers,
-        uint256[][] memory _issuerClaims
+        string memory salt,
+        address accessManagerAddress,
+        address[] memory issuers,
+        uint256[][] memory issuerClaims
     ) private returns (address) {
         return _deploy(
-            _salt,
+            salt,
             "TIR",
             bytes.concat(
                 type(TrustedIssuersRegistryProxy).creationCode,
-                abi.encode(implementationAuthority_, _owner, _issuers, _issuerClaims)
+                abi.encode(_implementationAuthority, accessManagerAddress, issuers, issuerClaims)
             )
         );
     }
 
     /// function used to deploy a claim topics registry using CREATE3
-    function _deployCTR(
-        string memory _salt,
-        address implementationAuthority_,
-        address _owner,
-        uint256[] memory _initialTopics
-    ) private returns (address) {
+    function _deployCTR(string memory salt, address accessManagerAddress, uint256[] memory initialTopics)
+        private
+        returns (address)
+    {
         return _deploy(
-            _salt,
+            salt,
             "CTR",
             bytes.concat(
                 type(ClaimTopicsRegistryProxy).creationCode,
-                abi.encode(implementationAuthority_, _owner, _initialTopics)
+                abi.encode(_implementationAuthority, accessManagerAddress, initialTopics)
             )
         );
     }
 
     /// function used to deploy modular compliance contract using CREATE3
-    function _deployMC(string memory _salt, TokenDetails calldata _tokenDetails) private returns (address) {
+    function _deployMC(string memory salt, TokenDetails calldata tokenDetails) private returns (address) {
         return _deploy(
-            _salt,
+            salt,
             "MC",
             bytes.concat(
                 type(ModularComplianceProxy).creationCode,
                 abi.encode(
                     _implementationAuthority,
-                    _predictAddress(_salt, "Token"),
-                    _tokenDetails.owner,
-                    _tokenDetails.complianceModules,
-                    _tokenDetails.complianceSettings
+                    _predictAddress(salt, "Token"),
+                    tokenDetails.accessManager,
+                    tokenDetails.complianceModules,
+                    tokenDetails.complianceSettings
                 )
             )
         );
     }
 
-    function _deployIRS(string memory _salt, TokenDetails calldata _tokenDetails) private returns (address) {
+    function _deployIRS(string memory salt, TokenDetails calldata tokenDetails) private returns (address) {
         return _deploy(
-            _salt,
+            salt,
             "IRS",
             bytes.concat(
                 type(IdentityRegistryStorageProxy).creationCode,
-                abi.encode(_implementationAuthority, _tokenDetails.owner, _predictAddress(_salt, "IR"))
+                abi.encode(_implementationAuthority, tokenDetails.accessManager, _predictAddress(salt, "IR"))
             )
         );
     }
 
-    /// Deploy the IR with the Token's predicted CREATE3 address baked in so the IR grants the agent
-    /// role to the Token at init time, and the factory never needs to call `addAgent` post-deploy.
+    /// function used to deploy an identity registry using CREATE3
     function _deployIR(
-        string memory _salt,
-        TokenDetails calldata _tokenDetails,
-        address _trustedIssuersRegistry,
-        address _claimTopicsRegistry,
-        address _identityStorage
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        address trustedIssuersRegistry,
+        address claimTopicsRegistry,
+        address identityStorage
     ) private returns (address) {
-        address tokenAddress = _predictAddress(_salt, "Token");
-
         return _deploy(
-            _salt,
+            salt,
             "IR",
             bytes.concat(
                 type(IdentityRegistryProxy).creationCode,
                 abi.encode(
                     _implementationAuthority,
-                    _trustedIssuersRegistry,
-                    _claimTopicsRegistry,
-                    _identityStorage,
-                    _tokenDetails.owner,
-                    _tokenDetails.irAgents,
-                    tokenAddress
+                    trustedIssuersRegistry,
+                    claimTopicsRegistry,
+                    identityStorage,
+                    tokenDetails.accessManager
                 )
             )
         );
     }
 
-    /// Resolve the OID (caller-supplied or freshly minted via `IIdFactory.createTokenIdentity` against
-    /// the Token's predicted CREATE3 address) and deploy the Token proxy whose `init` carries the final
-    /// owner, configured agents and the resolved OID. Asserts the deployed Token's CREATE3 address
-    /// matches the prediction reused by the IR + MC + OID wiring.
+    /// Resolves the OID (caller-supplied or minted via `IIdFactory.createTokenIdentity` against the
+    /// Token's predicted CREATE3 address) and deploys the Token proxy. Asserts the deployed Token's
+    /// CREATE3 address matches the prediction used by the MC + OID wiring.
     function _deployToken(
-        string memory _salt,
-        TokenDetails calldata _tokenDetails,
-        address _identityRegistry,
-        address _compliance
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        address identityRegistry,
+        address compliance
     ) private returns (address) {
-        address predictedToken = _predictAddress(_salt, "Token");
-        address oid = _tokenDetails.ONCHAINID;
+        address predictedToken = _predictAddress(salt, "Token");
+        address oid = tokenDetails.ONCHAINID;
         if (oid == address(0)) {
-            oid = IIdFactory(_idFactory).createTokenIdentity(predictedToken, _tokenDetails.owner, _salt);
+            oid = IIdFactory(_idFactory).createTokenIdentity(predictedToken, tokenDetails.accessManager, salt);
         }
-        address token = _deploy(_salt, "Token", _tokenBytecode(_tokenDetails, _identityRegistry, _compliance, oid));
+        address token = _deploy(salt, "Token", _tokenBytecode(tokenDetails, identityRegistry, compliance, oid));
         require(token == predictedToken, ErrorsLib.AddressPredictionMismatch());
         return token;
     }
 
     function _tokenBytecode(
-        TokenDetails calldata _tokenDetails,
-        address _identityRegistry,
-        address _compliance,
-        address _oid
+        TokenDetails calldata tokenDetails,
+        address identityRegistry,
+        address compliance,
+        address oid
     ) private view returns (bytes memory) {
         return bytes.concat(
             type(TokenProxy).creationCode,
             abi.encode(
                 _implementationAuthority,
-                _identityRegistry,
-                _compliance,
-                _tokenDetails.name,
-                _tokenDetails.symbol,
-                _tokenDetails.decimals,
-                _oid,
-                _tokenDetails.owner,
-                _tokenDetails.tokenAgents
+                identityRegistry,
+                compliance,
+                tokenDetails.name,
+                tokenDetails.symbol,
+                tokenDetails.decimals,
+                oid,
+                tokenDetails.accessManager
             )
         );
+    }
+
+    /// Grants the AGENT role to the token, the identity registry and the configured agents.
+    /// Requires the factory to hold the admin role of AGENT on `tokenDetails.accessManager`.
+    function _grantAgentRoles(TokenDetails calldata tokenDetails, address token, address identityRegistry) private {
+        IAccessManager accessManager = IAccessManager(tokenDetails.accessManager);
+
+        accessManager.grantRole(RolesLib.AGENT, token, 0);
+        accessManager.grantRole(RolesLib.AGENT, identityRegistry, 0);
+        for (uint256 i = 0; i < tokenDetails.irAgents.length; i++) {
+            accessManager.grantRole(RolesLib.AGENT, tokenDetails.irAgents[i], 0);
+        }
+        for (uint256 i = 0; i < tokenDetails.tokenAgents.length; i++) {
+            accessManager.grantRole(RolesLib.AGENT, tokenDetails.tokenAgents[i], 0);
+        }
     }
 
 }

@@ -2,17 +2,18 @@
 pragma solidity 0.8.30;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
-import { IAFactory } from "contracts/proxy/authority/IAFactory.sol";
+import { IAFactory, IIAFactory } from "contracts/proxy/authority/IAFactory.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
 } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -31,7 +32,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     function test_setTREXFactory_RevertWhen_FactoryNotUsingThisAuthority() public {
         // Deploy another IA and factory using it
         TREXImplementationAuthority otherIA = _deployTREXImplementationAuthority(true);
-        TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory));
+        TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory), address(accessManager));
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.OnlyReferenceContractCanCall.selector);
@@ -41,8 +42,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     /// @notice Should set the trex factory address
     function test_setTREXFactory_Success() public {
         // Deploy a new factory using this IA
-        TREXFactory newFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
-        Ownable(address(newFactory)).transferOwnership(deployer);
+        TREXFactory newFactory =
+            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
@@ -81,7 +82,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     function test_setIAFactory_RevertWhen_FactoryReferencesDifferentIA() public {
         // Deploy another reference IA and factory using it
         TREXImplementationAuthority otherIA = _deployTREXImplementationAuthority(true);
-        TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory));
+        TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory), address(accessManager));
 
         // Create a new reference IA with the other factory in constructor
         // This factory references otherIASetup, not this IA
@@ -114,8 +115,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should revert when version was already fetched
     function test_fetchVersion_RevertWhen_AlreadyFetched() public {
-        TREXFactory factory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
-        Ownable(address(factory)).transferOwnership(deployer);
+        TREXFactory factory =
+            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         // Deploy non-reference IA
         TREXImplementationAuthority otherIA =
@@ -137,8 +138,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should fetch and set the versions from the reference contract
     function test_fetchVersion_Success() public {
-        TREXFactory factory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
-        Ownable(address(factory)).transferOwnership(deployer);
+        TREXFactory factory =
+            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         // Deploy non-reference IA
         TREXImplementationAuthority otherIA =
@@ -172,8 +173,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should revert when called on a non-reference contract
     function test_addTREXVersion_RevertWhen_NonReferenceContract() public {
-        TREXFactory factory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
-        Ownable(address(factory)).transferOwnership(deployer);
+        TREXFactory factory =
+            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         // Deploy non-reference IA
         TREXImplementationAuthority otherIA =
@@ -255,8 +256,8 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should revert when new authority is zero address on non-reference contract
     function test_changeImplementationAuthority_RevertWhen_ZeroAddressOnNonReference() public {
-        TREXFactory factory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
-        Ownable(address(factory)).transferOwnership(deployer);
+        TREXFactory factory =
+            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         // Deploy non-reference IA
         TREXImplementationAuthority otherIA =
@@ -282,15 +283,12 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setIAFactory(address(iaFactory));
 
         ModularCompliance newCompliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
-        newCompliance.transferOwnership(deployer);
-        vm.prank(deployer);
-        newCompliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(newCompliance));
 
         vm.expectEmit(true, false, false, false);
         emit EventsLib.ImplementationAuthorityChanged(address(token), address(0));
-        vm.prank(deployer);
+        vm.prank(address(accessManager));
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(0));
     }
 
@@ -306,9 +304,6 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         // Replace compliance with a new one
         ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
-        Ownable(address(compliance)).transferOwnership(deployer);
-        vm.prank(deployer);
-        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -330,7 +325,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         otherIA.addAndUseTREXVersion(version, contracts);
 
         vm.expectRevert(ErrorsLib.VersionOfNewIAMustBeTheSameAsCurrentIA.selector);
-        vm.prank(deployer);
+        vm.prank(address(accessManager));
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(otherIA));
     }
 
@@ -346,9 +341,6 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         // Replace compliance with a new one
         ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
-        Ownable(address(compliance)).transferOwnership(deployer);
-        vm.prank(deployer);
-        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -358,7 +350,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         // Note: otherIASetup already has version 4.0.0 added and in use from deploy(),
         // so we don't need to call addAndUseTREXVersion again
 
-        vm.prank(deployer);
+        vm.prank(address(accessManager));
         vm.expectRevert(ErrorsLib.NewIAIsNotAReferenceContract.selector);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(otherIA));
     }
@@ -375,15 +367,12 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         // Replace compliance with a new one
         ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
-        Ownable(address(compliance)).transferOwnership(deployer);
-        vm.prank(deployer);
-        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
         // Deploy non-reference IA that fetched version but not deployed by factory
-        TREXFactory factory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
-        Ownable(address(factory)).transferOwnership(deployer);
+        TREXFactory factory =
+            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         TREXImplementationAuthority otherIA =
             new TREXImplementationAuthority(false, address(factory), address(trexImplementationAuthority));
@@ -396,7 +385,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         vm.prank(deployer);
         otherIA.useTREXVersion(version);
 
-        vm.prank(deployer);
+        vm.prank(address(accessManager));
         vm.expectRevert(ErrorsLib.InvalidImplementationAuthority.selector);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(otherIA));
     }
@@ -414,9 +403,6 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         // Replace compliance with a new one
         ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
-        Ownable(address(compliance)).transferOwnership(deployer);
-        vm.prank(deployer);
-        compliance.acceptOwnership();
         vm.prank(deployer);
         token.setCompliance(address(compliance));
 
@@ -424,7 +410,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         address referenceContract = trexImplementationAuthority.getReferenceContract();
         assertEq(referenceContract, address(trexImplementationAuthority), "Should be the reference contract");
 
-        vm.prank(deployer);
+        vm.prank(address(accessManager));
         vm.expectEmit(true, false, false, false);
         emit EventsLib.ImplementationAuthorityChanged(address(token), referenceContract);
         trexImplementationAuthority.changeImplementationAuthority(address(token), referenceContract);
@@ -440,23 +426,17 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should correctly identify the ITREXImplementationAuthority interface ID
     function test_supportsInterface_ReturnsTrue_ForITREXImplementationAuthority() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getITREXImplementationAuthorityInterfaceId();
-        assertTrue(trexImplementationAuthority.supportsInterface(interfaceId));
+        assertTrue(trexImplementationAuthority.supportsInterface(type(ITREXImplementationAuthority).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(trexImplementationAuthority.supportsInterface(interfaceId));
+        assertTrue(trexImplementationAuthority.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(trexImplementationAuthority.supportsInterface(interfaceId));
+        assertTrue(trexImplementationAuthority.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ IAFactory supportsInterface() Tests ============
@@ -477,9 +457,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setTREXFactory(address(trexFactory));
 
         IAFactory iaFactory = new IAFactory(address(trexFactory));
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIIAFactoryInterfaceId();
-        assertTrue(iaFactory.supportsInterface(interfaceId));
+        assertTrue(iaFactory.supportsInterface(type(IIAFactory).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID (IAFactory)
@@ -488,9 +466,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         trexImplementationAuthority.setTREXFactory(address(trexFactory));
 
         IAFactory iaFactory = new IAFactory(address(trexFactory));
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(iaFactory.supportsInterface(interfaceId));
+        assertTrue(iaFactory.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ IAFactory deployIA() Tests ============

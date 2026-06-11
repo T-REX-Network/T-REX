@@ -72,18 +72,15 @@ contract IdentityRegistryProxy is AbstractProxy {
 
     constructor(
         address implementationAuthority,
-        address _trustedIssuersRegistry,
-        address _claimTopicsRegistry,
-        address _identityStorage,
-        address _owner,
-        address[] memory _irAgents,
-        address _tokenAddress
+        address trustedIssuersRegistry,
+        address claimTopicsRegistry,
+        address identityStorage,
+        address accessManager
     ) AbstractProxy(implementationAuthority) {
         if (!LowLevelCall.delegatecallNoReturn(
                 getLogic(),
                 abi.encodeCall(
-                    IdentityRegistry.init,
-                    (_trustedIssuersRegistry, _claimTopicsRegistry, _identityStorage, _owner, _irAgents, _tokenAddress)
+                    IdentityRegistry.init, (trustedIssuersRegistry, claimTopicsRegistry, identityStorage, accessManager)
                 )
             )) {
             LowLevelCall.bubbleRevert();

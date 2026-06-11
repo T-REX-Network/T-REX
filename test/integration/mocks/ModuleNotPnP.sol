@@ -62,8 +62,11 @@
 
 pragma solidity 0.8.30;
 
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { IERC173 } from "contracts/roles/IERC173.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 // basic test contract showcasing the behavior of a module not plug & play
 contract ModuleNotPnP is AbstractModuleUpgradeable {
@@ -87,7 +90,8 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
     }
 
     function setModuleReady(address compliance, bool ready) external {
-        require(msg.sender == IERC173(compliance).owner(), "only compliance owner can call");
+        (bool isOwner,) = IAccessManager(IAccessManaged(compliance).authority()).hasRole(RolesLib.OWNER, msg.sender);
+        require(isOwner, "only compliance owner can call");
         _moduleReady[compliance] = ready;
     }
 

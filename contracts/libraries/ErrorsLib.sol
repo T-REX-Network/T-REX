@@ -114,6 +114,7 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error AddressPredictionMismatch();
+    error AuthorityMismatch();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);

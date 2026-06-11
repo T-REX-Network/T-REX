@@ -65,8 +65,6 @@ interface ITREXFactory {
 
     /// Types
     struct TokenDetails {
-        // address of the owner of all contracts
-        address owner;
         // name of the token
         string name;
         // symbol / ticker of the token
@@ -78,7 +76,6 @@ interface ITREXFactory {
         // if an address is provided, please ensure that the factory is set as owner of the contract
         address irs;
         // ONCHAINID of the token
-        // solhint-disable-next-line var-name-mixedcase
         address ONCHAINID;
         // list of agents of the identity registry (can be set to an AgentManager contract)
         address[] irAgents;
@@ -89,6 +86,8 @@ interface ITREXFactory {
         address[] complianceModules;
         // settings calls for compliance modules
         bytes[] complianceSettings;
+        // access manager address
+        address accessManager;
     }
 
     struct ClaimDetails {
@@ -151,15 +150,6 @@ interface ITREXFactory {
         TokenDetails calldata _tokenDetails,
         ClaimDetails calldata _claimDetails
     ) external;
-
-    /**
-     *  @dev function that can be used to recover the ownership of contracts owned by the factory
-     *  typically used for IRS contracts owned by the factory (ownership of IRS is mandatory to call bind function)
-     *  @param _contract The smart contract address
-     *  @param _newOwner The address to transfer ownership to
-     *  Only owner can call.
-     */
-    function recoverContractOwnership(address _contract, address _newOwner) external;
 
     /**
      *  @dev getter for implementation authority address

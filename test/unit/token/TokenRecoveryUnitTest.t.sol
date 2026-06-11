@@ -3,10 +3,12 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { TokenRoles } from "contracts/token/TokenStructs.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -30,8 +32,17 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
     function testTokenRecoveryAddressRevertsWhenNotAgent(address caller) public {
         vm.assume(caller != agent);
 
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         vm.prank(caller);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+    }
+
+    function testTokenRecoveryAddressRevertsWhenCallerOnlyMinter() public {
+        address minter = makeAddr("Minter");
+        accessManager.grantRole(RolesLib.AGENT_MINTER, minter, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
+        vm.prank(minter);
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
     }
 
@@ -126,25 +137,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
 
         assertEq(token.balanceOf(lostWallet), 0);
         assertEq(token.balanceOf(newWallet), mintAmount);
-    }
-
-    function testTokenRecoveryAddressRevertsWhenDisableRecoveryRestrictionIsSet() public {
-        // Set restriction to disable recovery
-        TokenRoles memory restrictions = TokenRoles({
-            disableMint: false,
-            disableBurn: false,
-            disablePartialFreeze: false,
-            disableAddressFreeze: false,
-            disableRecovery: true,
-            disableForceTransfer: false,
-            disablePause: false
-        });
-
-        token.setAgentRestrictions(agent, restrictions);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "recovery disabled"));
-        vm.prank(agent);
-        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
     }
 
     /// ----- Helpers ------

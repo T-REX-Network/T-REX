@@ -65,12 +65,12 @@ pragma solidity 0.8.30;
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
+import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ITREXFactory } from "../../factory/ITREXFactory.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
-import { IERC173 } from "../../roles/IERC173.sol";
-import { IToken } from "../../token/IToken.sol";
+import { IERC173 } from "../../vendor/IERC173.sol";
 import { IProxy } from "../interface/IProxy.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
@@ -163,15 +163,14 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /**
      *  @dev See {ITREXImplementationAuthority-changeImplementationAuthority}.
      */
-    // solhint-disable-next-line code-complexity, function-max-lines
     function changeImplementationAuthority(address _token, address _newImplementationAuthority) external {
         require(_token != address(0), ErrorsLib.ZeroAddress());
         require(
             _newImplementationAuthority != address(0) || isReferenceContract(), ErrorsLib.OnlyReferenceContractCanCall()
         );
 
-        address _ir = address(IToken(_token).identityRegistry());
-        address _mc = address(IToken(_token).compliance());
+        address _ir = address(IERC3643(_token).identityRegistry());
+        address _mc = address(IERC3643(_token).compliance());
         address _irs = address(IERC3643IdentityRegistry(_ir).identityStorage());
         address _ctr = address(IERC3643IdentityRegistry(_ir).topicsRegistry());
         address _tir = address(IERC3643IdentityRegistry(_ir).issuersRegistry());

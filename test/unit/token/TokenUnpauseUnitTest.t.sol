@@ -2,9 +2,7 @@
 pragma solidity 0.8.30;
 
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-
-import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { TokenRoles } from "contracts/token/TokenStructs.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -17,7 +15,7 @@ contract TokenUnpauseUnitTest is TokenBaseUnitTest {
     function testTokenUnpauseRevertsWhenNotAgent(address caller) public {
         vm.assume(caller != agent);
 
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         vm.prank(caller);
         token.unpause();
     }
@@ -40,24 +38,6 @@ contract TokenUnpauseUnitTest is TokenBaseUnitTest {
         token.unpause();
 
         assertFalse(token.paused());
-    }
-
-    function testTokenUnpauseRevertsWhenDisablePauseRestrictionIsSet() public {
-        TokenRoles memory restrictions = TokenRoles({
-            disableMint: false,
-            disableBurn: false,
-            disablePartialFreeze: false,
-            disableAddressFreeze: false,
-            disableRecovery: false,
-            disableForceTransfer: false,
-            disablePause: true
-        });
-
-        token.setAgentRestrictions(agent, restrictions);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "pause disabled"));
-        vm.prank(agent);
-        token.unpause();
     }
 
 }

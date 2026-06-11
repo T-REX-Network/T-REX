@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -17,11 +18,26 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         vm.mockCall(newCompliance, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector, address(token)), "");
     }
 
-    function testTokenSetComplianceRevertsWhenNotOwner(address caller) public {
-        vm.assume(caller != token.owner());
+    function setUp() public override {
+        super.setUp();
 
-        vm.expectPartialRevert(OwnableUpgradeable.OwnableUnauthorizedAccount.selector);
+        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(this), 0);
+    }
+
+    function testTokenSetComplianceRevertsWhenUnauthorized(address caller) public {
+        vm.assume(caller != address(this));
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         vm.prank(caller);
+        token.setCompliance(makeAddr("NewCompliance"));
+    }
+
+    function testTokenSetComplianceRevertsWhenCallerOnlyTokenAdmin() public {
+        address tokenAdmin = makeAddr("TokenAdmin");
+        accessManager.grantRole(RolesLib.TOKEN_ADMIN, tokenAdmin, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, tokenAdmin));
+        vm.prank(tokenAdmin);
         token.setCompliance(makeAddr("NewCompliance"));
     }
 

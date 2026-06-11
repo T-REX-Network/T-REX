@@ -68,11 +68,11 @@ import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interfac
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
+import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
-import { IToken } from "../token/IToken.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
 contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable {
@@ -92,7 +92,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (bool _freezeStatus, bool _eligibilityStatus, bool _complianceStatus)
     {
-        IToken token = IToken(_token);
+        IERC3643 token = IERC3643(_token);
 
         _freezeStatus = !token.paused();
 
@@ -118,7 +118,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (EligibilityCheckDetails[] memory _details)
     {
-        IERC3643IdentityRegistry identityRegistry = IToken(_token).identityRegistry();
+        IERC3643IdentityRegistry identityRegistry = IERC3643(_token).identityRegistry();
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
         IIdentity identity = identityRegistry.identity(_userAddress);
 
@@ -164,7 +164,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (bool _frozen, uint256 _availableBalance)
     {
-        IToken token = IToken(_token);
+        IERC3643 token = IERC3643(_token);
 
         if (token.isFrozen(_from) || token.isFrozen(_to)) {
             _availableBalance = 0;
@@ -181,7 +181,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (ComplianceCheckDetails[] memory _details)
     {
-        IModularCompliance compliance = IModularCompliance(address(IToken(_token).compliance()));
+        IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
         address[] memory modules = compliance.getModules();
         uint256 length = modules.length;
         _details = new ComplianceCheckDetails[](length);
@@ -193,7 +193,6 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
     }
 
-    // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(
         address /*newImplementation*/
     )

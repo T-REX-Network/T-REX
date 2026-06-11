@@ -4,8 +4,12 @@ pragma solidity 0.8.30;
 import { Test } from "@forge-std/Test.sol";
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { TrustedIssuersRegistryProxy } from "contracts/proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
@@ -13,13 +17,15 @@ import { TrustedIssuersRegistry } from "contracts/registry/implementation/Truste
 contract TrustedIssuersRegistryInitUnitTest is Test {
 
     TrustedIssuersRegistry private tirImplementation;
+    AccessManager private accessManager;
     address private implementationAuthority = makeAddr("ImplementationAuthorityMock");
 
-    address private owner = makeAddr("Owner");
     address private notOwner = makeAddr("NotOwner");
 
     function setUp() public {
         tirImplementation = new TrustedIssuersRegistry();
+        accessManager = new AccessManager(address(this));
+        accessManager.grantRole(RolesLib.OWNER, address(this), 0);
         vm.mockCall(
             implementationAuthority,
             abi.encodeWithSelector(ITREXImplementationAuthority.getTIRImplementation.selector),
@@ -28,9 +34,9 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
     }
 
     function test_init_SetsOwnerFromArgument_NotDeployer() public {
-        TrustedIssuersRegistry tir = _deployProxy(owner, new address[](0), new uint256[][](0));
+        TrustedIssuersRegistry tir = _deployProxy(new address[](0), new uint256[][](0));
 
-        assertEq(tir.owner(), owner);
+        assertEq(tir.owner(), address(accessManager));
         assertNotEq(tir.owner(), address(this));
     }
 
@@ -53,7 +59,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         topics2[0] = 3;
         issuerClaims[1] = topics2;
 
-        TrustedIssuersRegistry tir = _deployProxy(owner, issuers, issuerClaims);
+        TrustedIssuersRegistry tir = _deployProxy(issuers, issuerClaims);
 
         assertTrue(tir.isTrustedIssuer(address(issuer1)));
         assertTrue(tir.isTrustedIssuer(address(issuer2)));
@@ -72,27 +78,26 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
     }
 
     function test_init_OwnerCanStillAddTrustedIssuerAfterInit() public {
-        TrustedIssuersRegistry tir = _deployProxy(owner, new address[](0), new uint256[][](0));
+        TrustedIssuersRegistry tir = _deployProxy(new address[](0), new uint256[][](0));
 
         ClaimIssuer issuer = new ClaimIssuer(makeAddr("issuerMgmt"));
         uint256[] memory topics = new uint256[](1);
         topics[0] = 5;
 
-        vm.prank(owner);
         tir.addTrustedIssuer(address(issuer), topics);
 
         assertTrue(tir.isTrustedIssuer(address(issuer)));
     }
 
     function test_addTrustedIssuer_RevertWhen_NotOwner() public {
-        TrustedIssuersRegistry tir = _deployProxy(owner, new address[](0), new uint256[][](0));
+        TrustedIssuersRegistry tir = _deployProxy(new address[](0), new uint256[][](0));
 
         ClaimIssuer issuer = new ClaimIssuer(makeAddr("issuerMgmt"));
         uint256[] memory topics = new uint256[](1);
         topics[0] = 5;
 
         vm.prank(notOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, notOwner));
         tir.addTrustedIssuer(address(issuer), topics);
     }
 
@@ -107,16 +112,22 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         uint256[][] memory issuerClaims = new uint256[][](0);
 
         vm.expectRevert(ErrorsLib.InvalidClaimPattern.selector);
-        new TrustedIssuersRegistryProxy(implementationAuthority, owner, issuers, issuerClaims);
+        new TrustedIssuersRegistryProxy(implementationAuthority, address(accessManager), issuers, issuerClaims);
     }
 
-    function _deployProxy(address _owner, address[] memory _issuers, uint256[][] memory _issuerClaims)
+    function _deployProxy(address[] memory _issuers, uint256[][] memory _issuerClaims)
         private
         returns (TrustedIssuersRegistry)
     {
-        return TrustedIssuersRegistry(
-            address(new TrustedIssuersRegistryProxy(implementationAuthority, _owner, _issuers, _issuerClaims))
+        TrustedIssuersRegistry tir = TrustedIssuersRegistry(
+            address(
+                new TrustedIssuersRegistryProxy(
+                    implementationAuthority, address(accessManager), _issuers, _issuerClaims
+                )
+            )
         );
+        AccessManagerSetupLib.setupTrustedIssuersRegistryRoles(accessManager, address(tir));
+        return tir;
     }
 
 }

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Test } from "@forge-std/Test.sol";
-
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 
-abstract contract TokenBaseUnitTest is Test {
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
+
+abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
     Token tokenImplementation;
     Token token;
@@ -34,8 +35,9 @@ abstract contract TokenBaseUnitTest is Test {
     }
 
     function setUp() public virtual {
-        address[] memory initialAgents = new address[](1);
-        initialAgents[0] = agent;
+        // the AccessManager cannot be mocked: AccessManaged calls canCall on it for every restricted function
+        _deployAccessManager();
+
         token = Token(
             address(
                 new TokenProxy(
@@ -46,11 +48,13 @@ abstract contract TokenBaseUnitTest is Test {
                     "TKN",
                     18,
                     address(onchainId),
-                    address(this),
-                    initialAgents
+                    address(accessManager)
                 )
             )
         );
+
+        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token));
+        _grantAllAgentRoles(agent);
     }
 
     function mockImplementationAuthority() internal {

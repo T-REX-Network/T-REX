@@ -64,6 +64,10 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {
     ERC20PermitUpgradeable,
     ERC20Upgradeable,
@@ -81,12 +85,16 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
-import { AgentRoleUpgradeable } from "../roles/AgentRoleUpgradeable.sol";
-import { IERC173 } from "../roles/IERC173.sol";
-import { IToken } from "./IToken.sol";
-import { TokenRoles } from "./TokenStructs.sol";
+import { IERC173 } from "../vendor/IERC173.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradeable, IToken, IERC165 {
+contract Token is
+    ERC20PermitUpgradeable,
+    PausableUpgradeable,
+    AccessManagedUpgradeable,
+    OwnableUpgradeable,
+    IERC3643,
+    IERC165
+{
 
     string internal constant VERSION = "5.0.0";
 
@@ -106,8 +114,6 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
         address trustedForwarder;
 
         mapping(address user => FrozenStatus) frozenStatus;
-
-        mapping(address agent => TokenRoles) agentsRestrictions;
     }
 
     // keccak256(abi.encode(uint256(keccak256("token.storage.main")) - 1)) & ~bytes32(uint256(0xff));
@@ -118,23 +124,6 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
         _disableInitializers();
     }
 
-    /// @dev the constructor initiates the token contract
-    /// @param tokenName the name of the token
-    /// @param tokenSymbol the symbol of the token
-    /// @param tokenDecimals the decimals of the token
-    /// @param identityRegistryAddress the address of the Identity registry linked to the token
-    /// @param complianceAddress the address of the compliance contract linked to the token
-    ///     The factory pre-binds the predicted Token CREATE3 address in MC.init, so Token.init does NOT
-    ///     call `bindToken` itself — the wiring is already in place by the time this code runs.
-    /// @param onchainIdAddress the address of the onchainID of the token
-    ///     onchainID can be zero address if not set, can be set later by the owner
-    /// @param owner final owner of the token, applied directly via `__Ownable_init(owner)` — no transient
-    ///     factory ownership
-    /// @param tokenAgents addresses to grant the agent role at init time; capped at 5
-    /// emits an `UpdatedTokenInformation` event
-    /// emits an `IdentityRegistryAdded` event
-    /// emits a `ComplianceAdded` event
-    /// emits an `AgentAdded` event for each entry in `tokenAgents`
     function init(
         string memory tokenName,
         string memory tokenSymbol,
@@ -142,21 +131,21 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
         address identityRegistryAddress,
         address complianceAddress,
         address onchainIdAddress,
-        address owner,
-        address[] calldata tokenAgents
+        address accessManagerAddress
     ) external initializer {
         require(
-            identityRegistryAddress != address(0) && complianceAddress != address(0) && owner != address(0),
+            identityRegistryAddress != address(0) && complianceAddress != address(0)
+                && accessManagerAddress != address(0),
             ErrorsLib.ZeroAddress()
         );
         require(bytes(tokenName).length > 0 && bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         require(tokenDecimals <= 18, ErrorsLib.DecimalsOutOfRange(tokenDecimals));
-        require(tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5));
 
         __ERC20_init(tokenName, tokenSymbol);
         __ERC20Permit_init(tokenName);
         __Pausable_init();
-        __Ownable_init(owner);
+        __Ownable_init(accessManagerAddress);
+        __AccessManaged_init(accessManagerAddress);
 
         TokenStorage storage s = _tokenStorage();
         s.name = tokenName;
@@ -168,10 +157,6 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
         s.compliance = IERC3643Compliance(complianceAddress);
         _emitUpdatedTokenInformation();
 
-        for (uint256 i = 0; i < tokenAgents.length; i++) {
-            _addAgent(tokenAgents[i]);
-        }
-
         _pause();
     }
 
@@ -180,14 +165,14 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     /// @inheritdoc IERC3643
     /// @dev The EIP-712 domain separator is derived from `name()` (see `_EIP712Name`), so changing the name
     ///      rotates the domain separator and invalidates any outstanding (unused) ERC-2612 permit signatures.
-    function setName(string calldata tokenName) external onlyOwner {
+    function setName(string calldata tokenName) external restricted {
         require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
         _tokenStorage().name = tokenName;
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setSymbol(string calldata tokenSymbol) external onlyOwner {
+    function setSymbol(string calldata tokenSymbol) external restricted {
         require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         _tokenStorage().symbol = tokenSymbol;
         _emitUpdatedTokenInformation();
@@ -195,13 +180,13 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
 
     /// @inheritdoc IERC3643
     /// @dev if _onchainID is set at zero address it means no ONCHAINID is bound to this token
-    function setOnchainID(address onchainIdAddress) external onlyOwner {
+    function setOnchainID(address onchainIdAddress) external restricted {
         _tokenStorage().onchainId = onchainIdAddress;
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setIdentityRegistry(address _identityRegistry) public onlyOwner {
+    function setIdentityRegistry(address _identityRegistry) public restricted {
         require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
 
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(_identityRegistry);
@@ -209,7 +194,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     }
 
     /// @inheritdoc IERC3643
-    function setCompliance(address _compliance) public onlyOwner {
+    function setCompliance(address _compliance) public restricted {
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
 
         TokenStorage storage s = _tokenStorage();
@@ -263,22 +248,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     /* ----- Pause Functions ----- */
 
     /// @inheritdoc IERC3643
-    function pause() external onlyAgent whenNotPaused {
-        require(
-            !getAgentRestrictions(_msgSender()).disablePause,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "pause disabled")
-        );
-
+    function pause() external restricted whenNotPaused {
         _pause();
     }
 
     /// @inheritdoc IERC3643
-    function unpause() external onlyAgent whenPaused {
-        require(
-            !getAgentRestrictions(_msgSender()).disablePause,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "pause disabled")
-        );
-
+    function unpause() external restricted whenPaused {
         _unpause();
     }
 
@@ -290,44 +265,33 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     /* ----- Minting & Burning Functions ----- */
 
     /// @inheritdoc IERC3643
-    function mint(address to, uint256 amount) public onlyAgent {
-        require(
-            !getAgentRestrictions(_msgSender()).disableMint, ErrorsLib.AgentNotAuthorized(_msgSender(), "mint disabled")
-        );
+    function mint(address to, uint256 amount) external restricted {
         _mint(to, amount);
     }
 
     /// @inheritdoc IERC3643
-    function burn(address from, uint256 amount) public onlyAgent {
-        require(
-            !getAgentRestrictions(_msgSender()).disableBurn, ErrorsLib.AgentNotAuthorized(_msgSender(), "burn disabled")
-        );
+    function burn(address from, uint256 amount) external restricted {
         _burn(from, amount);
     }
 
     /// @inheritdoc IERC3643
-    function batchMint(address[] calldata tos, uint256[] calldata amounts) external {
+    function batchMint(address[] calldata tos, uint256[] calldata amounts) external restricted {
         for (uint256 i = 0; i < tos.length; i++) {
-            mint(tos[i], amounts[i]);
+            _mint(tos[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchBurn(address[] calldata froms, uint256[] calldata amounts) external {
+    function batchBurn(address[] calldata froms, uint256[] calldata amounts) external restricted {
         for (uint256 i = 0; i < froms.length; i++) {
-            burn(froms[i], amounts[i]);
+            _burn(froms[i], amounts[i]);
         }
     }
 
     /* ----- Freezing Functions ----- */
 
     /// @inheritdoc IERC3643
-    function freezePartialTokens(address user, uint256 amount) public onlyAgent {
-        require(
-            !getAgentRestrictions(_msgSender()).disablePartialFreeze,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "partial freeze disabled")
-        );
-
+    function freezePartialTokens(address user, uint256 amount) public restricted {
         TokenStorage storage s = _tokenStorage();
         uint256 balance = balanceOf(user);
         require(
@@ -339,12 +303,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     }
 
     /// @inheritdoc IERC3643
-    function unfreezePartialTokens(address user, uint256 amount) public onlyAgent {
-        require(
-            !getAgentRestrictions(_msgSender()).disablePartialFreeze,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "partial freeze disabled")
-        );
-
+    function unfreezePartialTokens(address user, uint256 amount) public restricted {
         TokenStorage storage s = _tokenStorage();
 
         require(
@@ -356,12 +315,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     }
 
     /// @inheritdoc IERC3643
-    function setAddressFrozen(address user, bool freeze) public onlyAgent {
-        require(
-            !getAgentRestrictions(_msgSender()).disableAddressFreeze,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "address freeze disabled")
-        );
-
+    function setAddressFrozen(address user, bool freeze) public restricted {
         _tokenStorage().frozenStatus[user].addressFrozen = freeze;
 
         emit ERC3643EventsLib.AddressFrozen(user, freeze, _msgSender());
@@ -403,14 +357,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     /// @inheritdoc IERC3643
     function recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         external
-        onlyAgent
+        restricted
         returns (bool)
     {
-        require(
-            !getAgentRestrictions(_msgSender()).disableRecovery,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "recovery disabled")
-        );
-
         TokenStorage storage s = _tokenStorage();
 
         uint256 investorTokens = balanceOf(lostWallet);
@@ -481,11 +430,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
     /* ----- Transfer Functions ----- */
 
     /// @inheritdoc IERC3643
-    function forcedTransfer(address from, address to, uint256 amount) public onlyAgent returns (bool) {
-        require(
-            !getAgentRestrictions(_msgSender()).disableForceTransfer,
-            ErrorsLib.AgentNotAuthorized(_msgSender(), "force transfer disabled")
-        );
+    function forcedTransfer(address from, address to, uint256 amount) public restricted returns (bool) {
         TokenStorage storage s = _tokenStorage();
         require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
@@ -509,36 +454,11 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AgentRoleUpgradea
         }
     }
 
-    /* ----- Agent Restrictions Functions ----- */
-
-    /// @inheritdoc IToken
-    function setAgentRestrictions(address agent, TokenRoles memory restrictions) external onlyOwner {
-        if (!isAgent(agent)) {
-            revert ErrorsLib.AddressNotAgent(agent);
-        }
-        _tokenStorage().agentsRestrictions[agent] = restrictions;
-        emit EventsLib.AgentRestrictionsSet(
-            agent,
-            restrictions.disableMint,
-            restrictions.disableBurn,
-            restrictions.disableAddressFreeze,
-            restrictions.disableForceTransfer,
-            restrictions.disablePartialFreeze,
-            restrictions.disablePause,
-            restrictions.disableRecovery
-        );
-    }
-
-    /// @inheritdoc IToken
-    function getAgentRestrictions(address agent) public view returns (TokenRoles memory) {
-        return _tokenStorage().agentsRestrictions[agent];
-    }
-
     /* ----- Utility Functions ----- */
 
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IERC20).interfaceId || interfaceId == type(IToken).interfaceId
+        return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId
             || interfaceId == type(IERC3643).interfaceId || interfaceId == type(IERC20Permit).interfaceId;
     }

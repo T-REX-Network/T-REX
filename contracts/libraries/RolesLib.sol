@@ -61,14 +61,29 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity 0.8.30;
+pragma solidity ^0.8.30;
 
-struct TokenRoles {
-    bool disableMint;
-    bool disableBurn;
-    bool disablePartialFreeze;
-    bool disableAddressFreeze;
-    bool disableRecovery;
-    bool disableForceTransfer;
-    bool disablePause;
+library RolesLib {
+
+    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
+
+    uint64 constant OWNER = ROLE_PREFIX + 1;
+
+    uint64 constant AGENT = ROLE_PREFIX + 2;
+    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
+    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
+    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
+    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
+    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
+    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
+    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
+
+    // TODO maybe rename *_ADMIN to *_MANAGER, and keep *_ADMIN for roles giving roles.
+
+    uint64 constant TOKEN_ADMIN = ROLE_PREFIX + 10;
+    uint64 constant IDENTITY_ADMIN = ROLE_PREFIX + 11;
+
+    // admin role of AGENT (grant/revoke AGENT without the AccessManager ADMIN_ROLE)
+    uint64 constant AGENT_MANAGER = ROLE_PREFIX + 14;
+
 }

@@ -3,14 +3,19 @@ pragma solidity 0.8.30;
 
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TrustedIssuersRegistryProxy } from "contracts/proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import {
+    IERC3643TrustedIssuersRegistry,
+    TrustedIssuersRegistry
+} from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -48,7 +53,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         ClaimIssuer anotherClaimIssuer = new ClaimIssuer(another);
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.addTrustedIssuer(address(anotherClaimIssuer), claimTopics);
     }
 
@@ -124,7 +129,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         ClaimIssuer anotherClaimIssuerForRemove = new ClaimIssuer(another);
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.removeTrustedIssuer(address(anotherClaimIssuerForRemove));
     }
 
@@ -203,7 +208,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         claimTopics[0] = CLAIM_TOPIC_1;
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.updateIssuerClaimTopics(address(anotherClaimIssuerForUpdate), claimTopics);
     }
 
@@ -328,23 +333,17 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should correctly identify the IERC3643TrustedIssuersRegistry interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC3643TrustedIssuersRegistry() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC3643TrustedIssuersRegistryInterfaceId();
-        assertTrue(trustedIssuersRegistry.supportsInterface(interfaceId));
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC3643TrustedIssuersRegistry).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(trustedIssuersRegistry.supportsInterface(interfaceId));
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(trustedIssuersRegistry.supportsInterface(interfaceId));
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ Constructor Tests ============

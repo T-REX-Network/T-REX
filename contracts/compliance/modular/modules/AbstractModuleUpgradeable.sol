@@ -70,7 +70,7 @@ import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
-import { IERC173 } from "../../../roles/IERC173.sol";
+import { IERC173 } from "../../../vendor/IERC173.sol";
 import { IModule } from "./IModule.sol";
 
 abstract contract AbstractModuleUpgradeable is
@@ -164,16 +164,13 @@ abstract contract AbstractModuleUpgradeable is
             || interfaceId == type(IERC165).interfaceId;
     }
 
-    // solhint-disable-next-line func-name-mixedcase
     function __AbstractModule_init() internal onlyInitializing {
         __Ownable_init(msg.sender);
         __AbstractModule_init_unchained();
     }
 
-    // solhint-disable-next-line no-empty-blocks, func-name-mixedcase
     function __AbstractModule_init_unchained() internal onlyInitializing { }
 
-    // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(
         address /*newImplementation*/
     )
@@ -184,7 +181,6 @@ abstract contract AbstractModuleUpgradeable is
     { }
 
     function _getAbstractModuleStorage() private pure returns (AbstractModuleStorage storage s) {
-        // solhint-disable-next-line no-inline-assembly
         assembly {
             s.slot := _ABSTRACT_MODULE_STORAGE_LOCATION
         }

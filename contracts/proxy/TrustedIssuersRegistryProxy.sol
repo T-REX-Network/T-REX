@@ -73,12 +73,12 @@ contract TrustedIssuersRegistryProxy is AbstractProxy {
 
     constructor(
         address implementationAuthority,
-        address _owner,
-        address[] memory _issuers,
-        uint256[][] memory _issuerClaims
+        address accessManager,
+        address[] memory issuers,
+        uint256[][] memory issuerClaims
     ) AbstractProxy(implementationAuthority) {
         if (!LowLevelCall.delegatecallNoReturn(
-                getLogic(), abi.encodeCall(TrustedIssuersRegistry.init, (_owner, _issuers, _issuerClaims))
+                getLogic(), abi.encodeCall(TrustedIssuersRegistry.init, (accessManager, issuers, issuerClaims))
             )) {
             LowLevelCall.bubbleRevert();
         }

@@ -62,17 +62,20 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { IERC173 } from "../../roles/IERC173.sol";
+import { IERC173 } from "../../vendor/IERC173.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
-contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, IERC165 {
+contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, OwnableUpgradeable, IERC165 {
 
     using EnumerableSet for EnumerableSet.UintSet;
 
@@ -88,24 +91,26 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
         _disableInitializers();
     }
 
-    function init(address _owner, uint256[] calldata _initialTopics) external initializer {
-        __Ownable_init(_owner);
-        for (uint256 i = 0; i < _initialTopics.length; i++) {
-            _addClaimTopic(_initialTopics[i]);
+    function init(address accessManagerAddress, uint256[] calldata initialTopics) external initializer {
+        __Ownable_init(accessManagerAddress);
+        __AccessManaged_init(accessManagerAddress);
+
+        for (uint256 i = 0; i < initialTopics.length; i++) {
+            _addClaimTopic(initialTopics[i]);
         }
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-addClaimTopic}.
      */
-    function addClaimTopic(uint256 claimTopic) external onlyOwner {
+    function addClaimTopic(uint256 claimTopic) external restricted {
         _addClaimTopic(claimTopic);
     }
 
     /**
      *  @dev See {IClaimTopicsRegistry-removeClaimTopic}.
      */
-    function removeClaimTopic(uint256 claimTopic) external onlyOwner {
+    function removeClaimTopic(uint256 claimTopic) external restricted {
         if (_getStorage().claimTopics.remove(claimTopic)) {
             emit ERC3643EventsLib.ClaimTopicRemoved(claimTopic);
         }
@@ -129,12 +134,13 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, Ownable2StepUpgradeable, I
     function _addClaimTopic(uint256 claimTopic) internal {
         Storage storage s = _getStorage();
         require(s.claimTopics.length() < 15, ErrorsLib.MaxClaimTopicsReached(15));
+
         require(s.claimTopics.add(claimTopic), ErrorsLib.ClaimTopicAlreadyExists());
+
         emit ERC3643EventsLib.ClaimTopicAdded(claimTopic);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
-        // solhint-disable-next-line no-inline-assembly
         assembly {
             s.slot := STORAGE_LOCATION
         }

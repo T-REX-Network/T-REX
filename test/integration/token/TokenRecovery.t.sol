@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
-import { TokenRoles } from "contracts/token/TokenStructs.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -34,33 +35,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
         bobIdentity.addKey(keyHash, 1, 1);
 
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
-        token.recoveryAddress(bob, another, address(bobIdentity));
-    }
-
-    /// @notice Should revert when agent permission is restricted
-    function test_recoveryAddress_RevertWhen_AgentRestricted() public {
-        // Add key to bobIdentity for another address
-        bytes32 keyHash = keccak256(abi.encode(another));
-        vm.prank(bob);
-        bobIdentity.addKey(keyHash, 1, 1);
-
-        // Set agent restrictions
-        TokenRoles memory restrictions = TokenRoles({
-            disableMint: false,
-            disableBurn: false,
-            disablePartialFreeze: false,
-            disableAddressFreeze: false,
-            disableRecovery: true,
-            disableForceTransfer: false,
-            disablePause: false
-        });
-
-        vm.prank(deployer);
-        token.setAgentRestrictions(agent, restrictions);
-
-        vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "recovery disabled"));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         token.recoveryAddress(bob, another, address(bobIdentity));
     }
 

@@ -2,11 +2,14 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 
@@ -15,14 +18,16 @@ import { TestModule } from "test/integration/mocks/TestModule.sol";
 contract ModularComplianceInitUnitTest is Test {
 
     ModularCompliance private mcImplementation;
+    AccessManager private accessManager;
     address private implementationAuthority = makeAddr("ImplementationAuthorityMock");
 
-    address private owner = makeAddr("Owner");
     address private notOwner = makeAddr("NotOwner");
     address private token = makeAddr("Token");
 
     function setUp() public {
         mcImplementation = new ModularCompliance();
+        accessManager = new AccessManager(address(this));
+        accessManager.grantRole(RolesLib.OWNER, address(this), 0);
         vm.mockCall(
             implementationAuthority,
             abi.encodeWithSelector(ITREXImplementationAuthority.getMCImplementation.selector),
@@ -31,14 +36,14 @@ contract ModularComplianceInitUnitTest is Test {
     }
 
     function test_init_SetsOwnerFromArgument_NotDeployer() public {
-        ModularCompliance mc = _deployProxy(token, owner, _emptyModules(), _emptySettings());
+        ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
 
-        assertEq(mc.owner(), owner);
+        assertEq(mc.owner(), address(accessManager));
         assertNotEq(mc.owner(), address(this));
     }
 
     function test_init_BindsTokenFromArgument() public {
-        ModularCompliance mc = _deployProxy(token, owner, _emptyModules(), _emptySettings());
+        ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
 
         assertEq(mc.getTokenBound(), token);
         assertTrue(mc.isTokenBound(token));
@@ -56,7 +61,7 @@ contract ModularComplianceInitUnitTest is Test {
         settings[0] = abi.encodeWithSignature("doSomething(uint256)", 42);
         settings[1] = abi.encodeWithSignature("blockModule(bool)", true);
 
-        ModularCompliance mc = _deployProxy(token, owner, modules, settings);
+        ModularCompliance mc = _deployProxy(token, modules, settings);
 
         assertTrue(mc.isModuleBound(moduleA));
         assertTrue(mc.isModuleBound(moduleB));
@@ -75,7 +80,7 @@ contract ModularComplianceInitUnitTest is Test {
         bytes[] memory settings = new bytes[](1);
         settings[0] = abi.encodeWithSignature("blockModule(bool)", true);
 
-        ModularCompliance mc = _deployProxy(token, owner, modules, settings);
+        ModularCompliance mc = _deployProxy(token, modules, settings);
 
         assertTrue(mc.isModuleBound(moduleA));
         assertTrue(mc.isModuleBound(moduleB));
@@ -84,27 +89,28 @@ contract ModularComplianceInitUnitTest is Test {
     }
 
     function test_init_OwnerCanStillAddModuleAfterInit() public {
-        ModularCompliance mc = _deployProxy(token, owner, _emptyModules(), _emptySettings());
+        ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
         address moduleA = _deployTestModuleWithProxy();
 
-        vm.prank(owner);
         mc.addModule(moduleA);
 
         assertTrue(mc.isModuleBound(moduleA));
     }
 
     function test_addModule_RevertWhen_NotOwner() public {
-        ModularCompliance mc = _deployProxy(token, owner, _emptyModules(), _emptySettings());
+        ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
         address moduleA = _deployTestModuleWithProxy();
 
         vm.prank(notOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, notOwner));
         mc.addModule(moduleA);
     }
 
     function test_init_RevertWhen_TokenIsZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new ModularComplianceProxy(implementationAuthority, address(0), owner, _emptyModules(), _emptySettings());
+        new ModularComplianceProxy(
+            implementationAuthority, address(0), address(accessManager), _emptyModules(), _emptySettings()
+        );
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
@@ -121,7 +127,7 @@ contract ModularComplianceInitUnitTest is Test {
         settings[1] = abi.encodeWithSignature("blockModule(bool)", false);
 
         vm.expectRevert(ErrorsLib.InvalidCompliancePattern.selector);
-        new ModularComplianceProxy(implementationAuthority, token, owner, modules, settings);
+        new ModularComplianceProxy(implementationAuthority, token, address(accessManager), modules, settings);
     }
 
     function test_init_RevertWhen_MoreThan25Modules() public {
@@ -131,11 +137,11 @@ contract ModularComplianceInitUnitTest is Test {
         }
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxModulesReached.selector, 25));
-        new ModularComplianceProxy(implementationAuthority, token, owner, modules, _emptySettings());
+        new ModularComplianceProxy(implementationAuthority, token, address(accessManager), modules, _emptySettings());
     }
 
     function test_bindToken_RevertWhen_DifferentTokenTriesToBindOverExistingBinding() public {
-        ModularCompliance mc = _deployProxy(token, owner, _emptyModules(), _emptySettings());
+        ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
         address otherToken = makeAddr("OtherToken");
 
         vm.prank(otherToken);
@@ -143,13 +149,19 @@ contract ModularComplianceInitUnitTest is Test {
         mc.bindToken(otherToken);
     }
 
-    function _deployProxy(address _token, address _owner, address[] memory _modules, bytes[] memory _moduleSettings)
+    function _deployProxy(address _token, address[] memory _modules, bytes[] memory _moduleSettings)
         private
         returns (ModularCompliance)
     {
-        return ModularCompliance(
-            address(new ModularComplianceProxy(implementationAuthority, _token, _owner, _modules, _moduleSettings))
+        ModularCompliance mc = ModularCompliance(
+            address(
+                new ModularComplianceProxy(
+                    implementationAuthority, _token, address(accessManager), _modules, _moduleSettings
+                )
+            )
         );
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc));
+        return mc;
     }
 
     function _deployTestModuleWithProxy() private returns (address) {

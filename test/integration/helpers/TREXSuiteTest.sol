@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Test } from "@forge-std/Test.sol";
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { IIdentity, Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
 import { ImplementationAuthority } from "@onchain-id/solidity/contracts/proxy/ImplementationAuthority.sol";
-import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
-import { TREXGateway } from "contracts/factory/TREXGateway.sol";
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import {
     ITREXImplementationAuthority,
@@ -21,12 +19,12 @@ import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopi
 import { IERC3643IdentityRegistry, IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
-import { AbstractAgentRole } from "contracts/roles/AbstractAgentRole.sol";
 import { Token } from "contracts/token/Token.sol";
 
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 
-contract TREXSuiteTest is Test {
+contract TREXSuiteTest is AccessManagerHelper {
 
     uint256 public constant CLAIM_TOPIC_1 = uint256(keccak256(abi.encode("CLAIM_TOPIC_1")));
     uint32 public constant NO_DELAY = 0;
@@ -46,7 +44,6 @@ contract TREXSuiteTest is Test {
 
     // Factories
     TREXFactory public trexFactory;
-    TREXGateway public trexGateway;
     TREXImplementationAuthority public trexImplementationAuthority;
 
     // TREX Suite
@@ -73,9 +70,15 @@ contract TREXSuiteTest is Test {
     Account public bobSigner = makeAccount("bobSigner");
 
     function setUp() public virtual {
+        _deployAccessManager();
         _deployOnchainId(deployer);
         _deployImplementations();
         _deployFactories();
+
+        _grantOwnerRole(deployer);
+        _grantOwnerRole(address(this));
+        _grantAdminRoles(deployer);
+        _grantAllAgentRoles(agent);
 
         token = _deployToken("salt", "Token", "TKN");
 
@@ -107,14 +110,16 @@ contract TREXSuiteTest is Test {
 
         trexImplementationAuthority = _deployTREXImplementationAuthority(true);
 
-        trexFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory));
+        trexFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
         idFactory.addTokenFactory(address(trexFactory));
-
-        trexGateway = new TREXGateway(address(trexFactory), false);
 
         trexImplementationAuthority.setTREXFactory(address(trexFactory));
 
         vm.stopPrank();
+
+        _setupFactoryRoles(address(trexFactory));
+        // deployTREXSuite grants the AGENT role, which is administered by AGENT_MANAGER
+        _grantAgentManagerRole(address(trexFactory));
     }
 
     function _deployTREXImplementationAuthority(bool isReference) internal returns (TREXImplementationAuthority) {
@@ -139,7 +144,6 @@ contract TREXSuiteTest is Test {
         agents[0] = agent;
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
-            owner: deployer,
             name: name,
             symbol: symbol,
             decimals: 0,
@@ -148,20 +152,23 @@ contract TREXSuiteTest is Test {
             irAgents: agents,
             tokenAgents: agents,
             complianceModules: new address[](0),
-            complianceSettings: new bytes[](0)
+            complianceSettings: new bytes[](0),
+            accessManager: address(accessManager)
         });
 
         ITREXFactory.ClaimDetails memory claimDetails = ITREXFactory.ClaimDetails({
             claimTopics: new uint256[](0), issuers: new address[](0), issuerClaims: new uint256[][](0)
         });
 
-        vm.prank(deployer);
-        trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
+        _deploySuite(salt, tokenDetails, claimDetails);
 
         address tokenAddress = trexFactory.getToken(salt);
         vm.label(tokenAddress, symbol);
 
-        return Token(tokenAddress);
+        Token deployedToken = Token(tokenAddress);
+        _setupTokenSuiteRoles(deployedToken);
+
+        return deployedToken;
     }
 
     function _deployTokenWithClaimTopic(string memory salt, string memory name, string memory symbol)
@@ -172,7 +179,6 @@ contract TREXSuiteTest is Test {
         agents[0] = agent;
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
-            owner: deployer,
             name: name,
             symbol: symbol,
             decimals: 0,
@@ -181,7 +187,8 @@ contract TREXSuiteTest is Test {
             irAgents: agents,
             tokenAgents: agents,
             complianceModules: new address[](0),
-            complianceSettings: new bytes[](0)
+            complianceSettings: new bytes[](0),
+            accessManager: address(accessManager)
         });
 
         uint256[] memory claimTopics = new uint256[](1);
@@ -198,25 +205,53 @@ contract TREXSuiteTest is Test {
         ITREXFactory.ClaimDetails memory claimDetails =
             ITREXFactory.ClaimDetails({ claimTopics: claimTopics, issuers: issuers, issuerClaims: issuerClaims });
 
-        vm.prank(deployer);
-        trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
+        _deploySuite(salt, tokenDetails, claimDetails);
 
         address tokenAddress = trexFactory.getToken(salt);
         vm.label(tokenAddress, symbol);
 
-        return Token(tokenAddress);
+        Token deployedToken = Token(tokenAddress);
+        _setupTokenSuiteRoles(deployedToken);
+
+        return deployedToken;
     }
 
-    /// @notice Deploys a fresh ModularCompliance proxy with no token bound and ownership held by `address(this)`.
-    ///         Initializes with a sentinel token then unbinds it so the resulting MC is in a clean unbound state,
-    ///         ready to be wired to a token via `setCompliance` (Token-self-bind path) by the caller.
+    /// @notice Deploys a TREX suite as `deployer`.
+    function _deploySuite(
+        string memory salt,
+        ITREXFactory.TokenDetails memory tokenDetails,
+        ITREXFactory.ClaimDetails memory claimDetails
+    ) internal {
+        vm.prank(deployer);
+        trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
+    }
+
+    /// @notice Wires the selector-to-role mappings on the AccessManager for every contract of `_token`'s suite.
+    function _setupTokenSuiteRoles(Token _token) internal {
+        IERC3643IdentityRegistry ir = _token.identityRegistry();
+        _setupSuiteRoles(
+            address(_token),
+            address(ir),
+            address(ir.identityStorage()),
+            address(ir.topicsRegistry()),
+            address(ir.issuersRegistry()),
+            address(_token.compliance())
+        );
+    }
+
+    /// @notice Deploys a fresh ModularCompliance proxy with no token bound, managed by the test AccessManager
+    ///         (`address(this)` holds the OWNER role). Initializes with a sentinel token then unbinds it so the
+    ///         resulting MC is in a clean unbound state, ready to be wired to a token via `setCompliance`
+    ///         (Token-self-bind path) by the caller.
     function _newUnboundComplianceProxy(address implementationAuthority_) internal returns (ModularCompliance) {
         address sentinel = address(uint160(uint256(keccak256("trex.test.unboundMC.sentinel"))));
         address[] memory noModules = new address[](0);
         bytes[] memory noSettings = new bytes[](0);
-        ModularComplianceProxy proxy =
-            new ModularComplianceProxy(implementationAuthority_, sentinel, address(this), noModules, noSettings);
+        ModularComplianceProxy proxy = new ModularComplianceProxy(
+            implementationAuthority_, sentinel, address(accessManager), noModules, noSettings
+        );
         ModularCompliance freshCompliance = ModularCompliance(address(proxy));
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance));
         freshCompliance.unbindToken(sentinel);
         return freshCompliance;
     }
@@ -266,39 +301,6 @@ contract TREXSuiteTest is Test {
 
         vm.prank(_caller);
         _identity.addClaim(_claimTopic, 1, _claimIssuer, signature, _claimData, "uri");
-    }
-
-    /// @notice Regression guard for the part-1..7 refactor: after `deployTREXSuite` returns, the factory
-    ///         must hold no role on any suite contract. None of the 6 suite contracts may be owned by the
-    ///         factory or have a pending-owner state, and the factory must not be an agent on any of the
-    ///         three AgentRole-bearing contracts (IR, IRS, Token).
-    function _assertFactoryHoldsNothing(
-        address factory_,
-        address ctr,
-        address tir,
-        address irs,
-        address ir,
-        address mc,
-        address token_
-    ) internal view {
-        // ownership: none of the 6 suite contracts should be factory-owned
-        assertNotEq(Ownable2Step(ctr).owner(), factory_, "CTR.owner must not be the factory");
-        assertNotEq(Ownable2Step(tir).owner(), factory_, "TIR.owner must not be the factory");
-        assertNotEq(Ownable2Step(irs).owner(), factory_, "IRS.owner must not be the factory");
-        assertNotEq(Ownable2Step(ir).owner(), factory_, "IR.owner must not be the factory");
-        assertNotEq(Ownable2Step(mc).owner(), factory_, "MC.owner must not be the factory");
-        assertNotEq(Ownable2Step(token_).owner(), factory_, "Token.owner must not be the factory");
-        // no pending-owner state on any suite contract
-        assertEq(Ownable2Step(ctr).pendingOwner(), address(0), "CTR must have no pending owner");
-        assertEq(Ownable2Step(tir).pendingOwner(), address(0), "TIR must have no pending owner");
-        assertEq(Ownable2Step(irs).pendingOwner(), address(0), "IRS must have no pending owner");
-        assertEq(Ownable2Step(ir).pendingOwner(), address(0), "IR must have no pending owner");
-        assertEq(Ownable2Step(mc).pendingOwner(), address(0), "MC must have no pending owner");
-        assertEq(Ownable2Step(token_).pendingOwner(), address(0), "Token must have no pending owner");
-        // factory must not hold the agent role on any AgentRole-bearing contract
-        assertFalse(AbstractAgentRole(ir).isAgent(factory_), "Factory must not be agent on IR");
-        assertFalse(AbstractAgentRole(irs).isAgent(factory_), "Factory must not be agent on IRS");
-        assertFalse(AbstractAgentRole(token_).isAgent(factory_), "Factory must not be agent on Token");
     }
 
 }

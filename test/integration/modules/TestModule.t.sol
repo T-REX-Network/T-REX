@@ -8,7 +8,7 @@ import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { IERC173 } from "contracts/roles/IERC173.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TestModule } from "../mocks/TestModule.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";

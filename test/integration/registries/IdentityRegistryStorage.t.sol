@@ -3,7 +3,9 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -15,9 +17,12 @@ import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImp
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
-import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+import {
+    IERC3643IdentityRegistryStorage,
+    IdentityRegistryStorage
+} from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
@@ -33,9 +38,6 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         super.setUp();
 
         identityRegistryStorage = IdentityRegistryStorage(address(token.identityRegistry().identityStorage()));
-
-        vm.prank(deployer);
-        identityRegistryStorage.addAgent(agent);
 
         // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
         // For Foundry, we start with 0 bound registries (tests will bind as needed)
@@ -55,7 +57,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_addIdentityToStorage_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.addIdentityToStorage(charlie, charlieIdentity, Countries.UNITED_STATES);
     }
 
@@ -86,7 +88,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_modifyStoredIdentity_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
     }
 
@@ -119,7 +121,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_modifyStoredInvestorCountry_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
     }
 
@@ -145,7 +147,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_removeIdentityFromStorage_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.removeIdentityFromStorage(charlie);
     }
 
@@ -171,7 +173,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not owner
     function test_bindIdentityRegistry_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
     }
 
@@ -208,7 +210,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.unbindIdentityRegistry(address(charlieIdentity));
     }
 
@@ -251,23 +253,17 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     /// @notice Should correctly identify the IERC3643IdentityRegistryStorage interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistryStorage() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC3643IdentityRegistryStorageInterfaceId();
-        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+        assertTrue(identityRegistryStorage.supportsInterface(type(IERC3643IdentityRegistryStorage).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+        assertTrue(identityRegistryStorage.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
     function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+        assertTrue(identityRegistryStorage.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ Constructor Tests ============

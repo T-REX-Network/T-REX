@@ -62,7 +62,11 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {
+    AccessManagedUpgradeable,
+    IAccessManager
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -71,11 +75,12 @@ import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
-import { IERC173 } from "../../roles/IERC173.sol";
+import { RolesLib } from "../../libraries/RolesLib.sol";
+import { IERC173 } from "../../vendor/IERC173.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC165 {
+contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessManagedUpgradeable, IERC165 {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -103,35 +108,24 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         _disableInitializers();
     }
 
-    /**
-     *  @dev Initializes the modular compliance with its final owner, the bound token, the initial set of
-     *       modules and matching module settings.
-     *  @param _token address of the token bound to this compliance — pre-computed via CREATE3 by the factory so
-     *         the compliance never needs the deprecated `Token-self-bind` indirection
-     *  @param _owner final owner of the compliance (no intermediate factory ownership)
-     *  @param _modules initial set of modules to bind (capped at 25 — matches the existing post-init cap)
-     *  @param _moduleSettings optional per-module settings forwarded via `_callModuleFunction` after each module is
-     *         bound. `_moduleSettings.length` must be `<= _modules.length`; settings beyond `_modules.length` are
-     *         not accepted
-     *  emits a `TokenBound` event
-     *  emits a `ModuleAdded` event for each module
-     *  emits a `ModuleInteraction` event for each `_moduleSettings[i]` applied
-     */
-    function init(address _token, address _owner, address[] calldata _modules, bytes[] calldata _moduleSettings)
-        external
-        initializer
-    {
-        require(_token != address(0) && _owner != address(0), ErrorsLib.ZeroAddress());
-        require(_modules.length >= _moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
-        require(_modules.length <= 25, ErrorsLib.MaxModulesReached(25));
+    function init(
+        address tokenAddress,
+        address accessManagerAddress,
+        address[] calldata modules,
+        bytes[] calldata moduleSettings
+    ) external initializer {
+        require(tokenAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        require(modules.length >= moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
 
-        __Ownable_init(_owner);
-        _bindToken(_token);
+        __Ownable_init(accessManagerAddress);
+        __AccessManaged_init(accessManagerAddress);
 
-        for (uint256 i = 0; i < _modules.length; i++) {
-            _addModule(_modules[i]);
-            if (i < _moduleSettings.length) {
-                _callModuleFunction(_moduleSettings[i], _modules[i]);
+        _bindToken(tokenAddress);
+
+        for (uint256 i = 0; i < modules.length; i++) {
+            _addModule(modules[i]);
+            if (i < moduleSettings.length) {
+                _callModuleFunction(moduleSettings[i], modules[i]);
             }
         }
     }
@@ -142,7 +136,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     function bindToken(address _token) external {
         Storage storage s = _getStorage();
         require(
-            owner() == msg.sender || (s.tokenBound == address(0) && msg.sender == _token),
+            _isOwner(msg.sender) || (s.tokenBound == address(0) && msg.sender == _token),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         _bindToken(_token);
@@ -152,7 +146,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      *  @dev See {IERC3643Compliance-unbindToken}.
      */
     function unbindToken(address _token) external {
-        require(owner() == msg.sender || msg.sender == _token, ErrorsLib.OnlyOwnerOrTokenCanCall());
+        require(_isOwner(msg.sender) || msg.sender == _token, ErrorsLib.OnlyOwnerOrTokenCanCall());
 
         Storage storage s = _getStorage();
         require(_token != address(0), ErrorsLib.ZeroAddress());
@@ -164,7 +158,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-removeModule}.
      */
-    function removeModule(address _module) external onlyOwner {
+    function removeModule(address _module) external restricted {
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
@@ -215,7 +209,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */
-    function addAndSetModule(address _module, bytes[] calldata _interactions) external onlyOwner {
+    function addAndSetModule(address _module, bytes[] calldata _interactions) external restricted {
         require(_interactions.length <= 5, ErrorsLib.ArraySizeLimited(5));
         _addModule(_module);
         for (uint256 i = 0; i < _interactions.length; i++) {
@@ -269,14 +263,14 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-addModule}.
      */
-    function addModule(address _module) public onlyOwner {
+    function addModule(address _module) public restricted {
         _addModule(_module);
     }
 
     /**
      *  @dev see {IModularCompliance-callModuleFunction}.
      */
-    function callModuleFunction(bytes calldata callData, address _module) public onlyOwner {
+    function callModuleFunction(bytes calldata callData, address _module) public restricted {
         _callModuleFunction(callData, _module);
     }
 
@@ -327,6 +321,11 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         // For calldata shorter than 4 bytes the emitted "selector" is a zero-padded partial value rather than a real selector.
         // forge-lint: disable-next-line(unsafe-typecast)
         emit EventsLib.ModuleInteraction(_module, bytes4(callData));
+    }
+
+    function _isOwner(address sender) internal view returns (bool) {
+        (bool isOwner,) = IAccessManager(authority()).hasRole(RolesLib.OWNER, sender);
+        return isOwner;
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
