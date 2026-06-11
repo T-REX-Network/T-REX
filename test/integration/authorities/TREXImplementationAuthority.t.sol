@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "contracts/factory/TREXFactory.sol";
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IAFactory, IIAFactory } from "contracts/proxy/authority/IAFactory.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
 } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
+import { IProxy } from "contracts/proxy/interface/IProxy.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -24,7 +28,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     /// @notice Should revert when called by not owner
     function test_setTREXFactory_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trexImplementationAuthority.setTREXFactory(address(0));
     }
 
@@ -58,7 +62,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     /// @notice Should revert when called by not owner
     function test_setIAFactory_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trexImplementationAuthority.setIAFactory(address(0));
     }
 
@@ -90,8 +94,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         TREXImplementationAuthority newIA = new TREXImplementationAuthority(
             true, // is reference
             address(otherFactory), // factory that references a different IA
-            address(0) // no IAFactory
+            address(0), // no IAFactory
+            address(accessManager)
         );
+        _authorizeIAGovernance(address(newIA));
 
         // Now try to set IAFactory - should revert because otherFactory.getImplementationAuthority() != address(newIA)
         IAFactory iaFactory = new IAFactory(address(otherFactory));
@@ -114,47 +120,45 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     }
 
     /// @notice Should revert when version was already fetched
+    /// @dev The auxiliary IA already pins the reference's current version (5.0.0) at construction,
+    ///      so fetching that same version again reverts.
     function test_fetchVersion_RevertWhen_AlreadyFetched() public {
         TREXFactory factory =
             new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
-        // Deploy non-reference IA
-        TREXImplementationAuthority otherIA =
-            new TREXImplementationAuthority(false, address(factory), address(trexImplementationAuthority));
-        Ownable(address(otherIA)).transferOwnership(deployer);
+        // Deploy non-reference IA (auto-fetches and uses version 5.0.0 at construction)
+        TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
+            false, address(factory), address(trexImplementationAuthority), address(accessManager)
+        );
 
         ITREXImplementationAuthority.Version memory version =
             ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
 
-        // Fetch version first time
-        vm.prank(deployer);
-        otherIA.fetchVersion(version);
-
-        // Try to fetch again
-        vm.prank(deployer);
         vm.expectRevert(ErrorsLib.VersionAlreadyFetched.selector);
         otherIA.fetchVersion(version);
     }
 
-    /// @notice Should fetch and set the versions from the reference contract
+    /// @notice Should fetch a non-current version from the reference contract
     function test_fetchVersion_Success() public {
+        // Add a second, non-current version on the reference contract
+        ITREXImplementationAuthority.Version memory extraVersion =
+            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
+        vm.prank(deployer);
+        trexImplementationAuthority.addTREXVersion(extraVersion, getTREXContracts());
+
         TREXFactory factory =
             new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
-        // Deploy non-reference IA
-        TREXImplementationAuthority otherIA =
-            new TREXImplementationAuthority(false, address(factory), address(trexImplementationAuthority));
+        // Deploy non-reference IA (auto-fetches current 5.0.0 at construction)
+        TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
+            false, address(factory), address(trexImplementationAuthority), address(accessManager)
+        );
 
-        Ownable(address(otherIA)).transferOwnership(deployer);
-
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
-
-        vm.prank(deployer);
-        otherIA.fetchVersion(version);
+        // Explicitly fetch the extra version (fetchVersion has no access control)
+        otherIA.fetchVersion(extraVersion);
 
         // Verify version was fetched by checking it exists
-        ITREXImplementationAuthority.TREXContracts memory fetchedContracts = otherIA.getContracts(version);
+        ITREXImplementationAuthority.TREXContracts memory fetchedContracts = otherIA.getContracts(extraVersion);
         assertNotEq(fetchedContracts.tokenImplementation, address(0), "Version should be fetched");
     }
 
@@ -167,7 +171,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         ITREXImplementationAuthority.TREXContracts memory contracts = getTREXContracts();
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trexImplementationAuthority.addTREXVersion(version, contracts);
     }
 
@@ -176,10 +180,11 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         TREXFactory factory =
             new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
-        // Deploy non-reference IA
-        TREXImplementationAuthority otherIA =
-            new TREXImplementationAuthority(false, address(factory), address(trexImplementationAuthority));
-        Ownable(address(otherIA)).transferOwnership(deployer);
+        // Deploy non-reference IA and wire its governance so the restricted check passes
+        TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
+            false, address(factory), address(trexImplementationAuthority), address(accessManager)
+        );
+        _authorizeIAGovernance(address(otherIA));
 
         ITREXImplementationAuthority.Version memory version =
             ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
@@ -221,7 +226,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
             ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trexImplementationAuthority.useTREXVersion(version);
     }
 
@@ -259,10 +264,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         TREXFactory factory =
             new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
-        // Deploy non-reference IA
-        TREXImplementationAuthority otherIA =
-            new TREXImplementationAuthority(false, address(factory), address(trexImplementationAuthority));
-        Ownable(address(otherIA)).transferOwnership(deployer);
+        // Deploy non-reference IA (changeImplementationAuthority has no access-control modifier)
+        TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
+            false, address(factory), address(trexImplementationAuthority), address(accessManager)
+        );
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.OnlyReferenceContractCanCall.selector);
@@ -308,8 +313,9 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         token.setCompliance(address(compliance));
 
         // Deploy another reference IA with different version
-        vm.prank(deployer);
-        TREXImplementationAuthority otherIA = new TREXImplementationAuthority(true, address(0), address(0));
+        TREXImplementationAuthority otherIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
+        _authorizeIAGovernance(address(otherIA));
 
         ITREXImplementationAuthority.Version memory version =
             ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
@@ -374,16 +380,10 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         TREXFactory factory =
             new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
-        TREXImplementationAuthority otherIA =
-            new TREXImplementationAuthority(false, address(factory), address(trexImplementationAuthority));
-        Ownable(address(otherIA)).transferOwnership(deployer);
-
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
-        vm.prank(deployer);
-        otherIA.fetchVersion(version);
-        vm.prank(deployer);
-        otherIA.useTREXVersion(version);
+        // Auxiliary IA pins version 5.0.0 at construction but is not deployed by the IAFactory
+        TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
+            false, address(factory), address(trexImplementationAuthority), address(accessManager)
+        );
 
         vm.prank(address(accessManager));
         vm.expectRevert(ErrorsLib.InvalidImplementationAuthority.selector);
@@ -489,6 +489,76 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         vm.prank(nonReferenceIA);
         vm.expectRevert(IAFactory.OnlyReferenceIACanDeploy.selector);
         iaFactory.deployIA(address(token));
+    }
+
+    // ============ Cross-AccessManager isolation Tests ============
+
+    /// @notice A reference IA governed by a second, independent AccessManager is isolated: an OWNER
+    ///         holder of the suite's manager cannot drive it; only an OWNER holder of that second
+    ///         manager can.
+    function test_governance_IsolatedAcrossAccessManagers() public {
+        address otherAdmin = makeAddr("otherAdmin");
+        address otherOwner = makeAddr("otherOwner");
+        AccessManager otherAccessManager = new AccessManager(otherAdmin);
+
+        // Reference IA governed by the second, independent AccessManager
+        TREXImplementationAuthority otherIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(otherAccessManager));
+
+        assertEq(IAccessManaged(address(otherIA)).authority(), address(otherAccessManager));
+        assertTrue(
+            IAccessManaged(address(otherIA)).authority() != address(accessManager),
+            "IA must not be governed by the suite manager"
+        );
+
+        // Wire the IA governance selectors to OWNER on the second manager and grant OWNER to otherOwner
+        vm.startPrank(otherAdmin);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(otherAccessManager, address(otherIA));
+        otherAccessManager.grantRole(RolesLib.OWNER, otherOwner, NO_DELAY);
+        vm.stopPrank();
+
+        ITREXImplementationAuthority.Version memory version =
+            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
+        ITREXImplementationAuthority.TREXContracts memory contracts = getTREXContracts();
+
+        // The suite OWNER (deployer holds OWNER on `accessManager`) cannot govern an IA under another manager
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, deployer));
+        otherIA.addAndUseTREXVersion(version, contracts);
+
+        // The second manager's OWNER can
+        vm.prank(otherOwner);
+        otherIA.addAndUseTREXVersion(version, contracts);
+
+        assertEq(otherIA.getTokenImplementation(), address(tokenImplementation), "Version should be set");
+    }
+
+    /// @notice An auxiliary IA deployed through the IAFactory inherits the token's AccessManager,
+    ///         not necessarily the reference IA's manager.
+    function test_changeImplementationAuthority_AuxiliaryIAInheritsTokenAccessManager() public {
+        vm.prank(deployer);
+        trexImplementationAuthority.setTREXFactory(address(trexFactory));
+
+        IAFactory iaFactory = new IAFactory(address(trexFactory));
+        vm.prank(deployer);
+        trexImplementationAuthority.setIAFactory(address(iaFactory));
+
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        vm.prank(deployer);
+        token.setCompliance(address(compliance));
+
+        // Deploy a fresh auxiliary IA for the token (newImplementationAuthority == address(0))
+        vm.prank(address(accessManager));
+        trexImplementationAuthority.changeImplementationAuthority(address(token), address(0));
+
+        address auxIA = IProxy(address(token)).getImplementationAuthority();
+        assertTrue(auxIA != address(trexImplementationAuthority), "Token should use a new auxiliary IA");
+        assertEq(
+            IAccessManaged(auxIA).authority(),
+            IAccessManaged(address(token)).authority(),
+            "Auxiliary IA must inherit the token's AccessManager"
+        );
+        assertEq(IAccessManaged(auxIA).authority(), address(accessManager), "Token is governed by the suite manager");
     }
 
 }

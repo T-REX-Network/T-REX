@@ -107,7 +107,7 @@ interface ITREXImplementationAuthority {
      *  deployed before the TREXFactory.
      *  @param trexFactory the address of TREXFactory contract
      *  emits a TREXFactorySet event
-     *  only Owner can call
+     *  restricted to the OWNER role
      *  can be called only on main contract, auxiliary contracts cannot call
      */
     function setTREXFactory(address trexFactory) external;
@@ -119,7 +119,7 @@ interface ITREXImplementationAuthority {
      *  in the constructor
      *  @param iaFactory the address of IAFactory contract
      *  emits a IAFactorySet event
-     *  only Owner can call
+     *  restricted to the OWNER role
      *  can be called only on main contract, auxiliary contracts cannot call
      */
     function setIAFactory(address iaFactory) external;
@@ -127,7 +127,7 @@ interface ITREXImplementationAuthority {
     /**
      *  @dev adds a new Version of TREXContracts to the mapping
      *  only callable on the reference contract
-     *  only Owner can call this function
+     *  restricted to the OWNER role
      *  @param _version the new version to add to the mapping
      *  @param _trex the list of contracts corresponding to the new version
      *  _trex cannot contain zero addresses
@@ -142,7 +142,7 @@ interface ITREXImplementationAuthority {
      *  and the `useTREXVersion` using an existing version
      *  @param _version the version to use
      *  @param _trex the set of contracts corresponding to the version
-     *  only Owner can call (check performed in addTREXVersion)
+     *  restricted to the OWNER role
      *  only reference contract can call (check performed in addTREXVersion)
      *  emits a `TREXVersionAdded`event
      *  emits a `VersionUpdated` event
@@ -153,7 +153,7 @@ interface ITREXImplementationAuthority {
      *  @dev updates the current version in use by the proxies
      *  @param _version the version to use
      *  reverts if _version is already used or if version does not exist
-     *  only Owner can call
+     *  restricted to the OWNER role
      *  emits a `VersionUpdated` event
      */
     function useTREXVersion(Version calldata _version) external;

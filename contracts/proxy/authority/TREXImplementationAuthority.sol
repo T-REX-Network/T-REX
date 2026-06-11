@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
@@ -75,9 +76,8 @@ import { IProxy } from "../interface/IProxy.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 
-contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, IERC165 {
+contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, AccessManaged, IERC165 {
 
-    /// variables
     /// current version
     Version private _currentVersion;
 
@@ -93,8 +93,6 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /// address of factory for TREXImplementationAuthority contracts
     address private _iaFactory;
 
-    /// functions
-
     /**
      *  @dev Constructor of the ImplementationAuthority contract
      *  @param referenceStatus boolean value determining if the contract
@@ -103,21 +101,33 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
      *  if `referenceStatus` is true then `trexFactory` at deployment is set
      *  on zero address. In that scenario, call `setTREXFactory` post-deployment
      *  @param iaFactory the address for the factory of IA contracts
+     *  @param accessManager the AccessManager governing the restricted functions
      *  emits `ImplementationAuthoritySet` event
      *  emits a `IAFactorySet` event
      */
-    constructor(bool referenceStatus, address trexFactory, address iaFactory) Ownable(msg.sender) {
+    constructor(bool referenceStatus, address trexFactory, address iaFactory, address accessManager)
+        Ownable(accessManager)
+        AccessManaged(accessManager)
+    {
         _reference = referenceStatus;
         _trexFactory = trexFactory;
         _iaFactory = iaFactory;
         emit EventsLib.ImplementationAuthoritySetWithStatus(referenceStatus, trexFactory);
         emit EventsLib.IAFactorySet(iaFactory);
+
+        // Auxiliary contracts pin the reference contract's current version at deployment,
+        // so the version is set without an external (restricted) call from the IAFactory.
+        if (!referenceStatus) {
+            Version memory version = ITREXImplementationAuthority(getReferenceContract()).getCurrentVersion();
+            _fetchVersion(version);
+            _useTREXVersion(version);
+        }
     }
 
     /**
      *  @dev See {ITREXImplementationAuthority-setTREXFactory}.
      */
-    function setTREXFactory(address trexFactory) external onlyOwner {
+    function setTREXFactory(address trexFactory) external restricted {
         require(
             isReferenceContract() && ITREXFactory(trexFactory).getImplementationAuthority() == address(this),
             ErrorsLib.OnlyReferenceContractCanCall()
@@ -129,7 +139,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /**
      *  @dev See {ITREXImplementationAuthority-setIAFactory}.
      */
-    function setIAFactory(address iaFactory) external onlyOwner {
+    function setIAFactory(address iaFactory) external restricted {
         require(
             isReferenceContract() && ITREXFactory(_trexFactory).getImplementationAuthority() == address(this),
             ErrorsLib.OnlyReferenceContractCanCall()
@@ -141,7 +151,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /**
      *  @dev See {ITREXImplementationAuthority-useTREXVersion}.
      */
-    function addAndUseTREXVersion(Version calldata _version, TREXContracts calldata _trex) external onlyOwner {
+    function addAndUseTREXVersion(Version calldata _version, TREXContracts calldata _trex) external restricted {
         _addTREXVersion(_version, _trex);
         _useTREXVersion(_version);
     }
@@ -150,6 +160,10 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
      *  @dev See {ITREXImplementationAuthority-fetchVersion}.
      */
     function fetchVersion(Version calldata _version) external {
+        _fetchVersion(_version);
+    }
+
+    function _fetchVersion(Version memory _version) internal {
         require(!isReferenceContract(), ErrorsLib.CannotCallOnReferenceContract());
         require(
             _contracts[_versionToBytes(_version)].tokenImplementation == address(0), ErrorsLib.VersionAlreadyFetched()
@@ -281,7 +295,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /**
      *  @dev See {ITREXImplementationAuthority-addTREXVersion}.
      */
-    function addTREXVersion(Version calldata _version, TREXContracts calldata _trex) public onlyOwner {
+    function addTREXVersion(Version calldata _version, TREXContracts calldata _trex) public restricted {
         _addTREXVersion(_version, _trex);
     }
 
@@ -305,11 +319,11 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, I
     /**
      *  @dev See {ITREXImplementationAuthority-useTREXVersion}.
      */
-    function useTREXVersion(Version calldata _version) public onlyOwner {
+    function useTREXVersion(Version calldata _version) public restricted {
         _useTREXVersion(_version);
     }
 
-    function _useTREXVersion(Version calldata _version) internal {
+    function _useTREXVersion(Version memory _version) internal {
         require(_versionToBytes(_version) != _versionToBytes(_currentVersion), ErrorsLib.VersionAlreadyInUse());
         require(_contracts[_versionToBytes(_version)].tokenImplementation != address(0), ErrorsLib.NonExistingVersion());
 

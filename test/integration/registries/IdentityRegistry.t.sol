@@ -5,7 +5,6 @@ import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIss
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
@@ -145,7 +144,8 @@ contract IdentityRegistryTest is TREXSuiteTest {
         MockContract mockImpl = new MockContract();
 
         // Deploy an IA and manually set an invalid IR implementation
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
         // Create a version with invalid IR implementation (mock contract without init())
         ITREXImplementationAuthority.Version memory version =
@@ -161,7 +161,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
         });
 
         // Add version to IA (need to be owner)
-        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        _authorizeIAGovernance(address(incompleteIA));
         vm.prank(deployer);
         incompleteIA.addAndUseTREXVersion(version, contracts);
 

@@ -106,35 +106,45 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     function _deployFactories() internal {
-        vm.startPrank(deployer);
-
         trexImplementationAuthority = _deployTREXImplementationAuthority(true);
 
+        vm.startPrank(deployer);
         trexFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
         idFactory.addTokenFactory(address(trexFactory));
-
-        trexImplementationAuthority.setTREXFactory(address(trexFactory));
-
         vm.stopPrank();
+
+        // setTREXFactory is restricted to the OWNER role on the reference IA
+        vm.prank(deployer);
+        trexImplementationAuthority.setTREXFactory(address(trexFactory));
 
         _setupFactoryRoles(address(trexFactory));
         // deployTREXSuite grants the AGENT role, which is administered by AGENT_ADMIN
         _grantAgentAdminRole(address(trexFactory));
     }
 
+    /// @dev Deploys a reference IA, wires its governance selectors to the OWNER role and pins
+    ///      version 5.0.0 through the restricted entrypoint, called as the OWNER-holding deployer.
     function _deployTREXImplementationAuthority(bool isReference) internal returns (TREXImplementationAuthority) {
-        TREXImplementationAuthority ia = new TREXImplementationAuthority(isReference, address(0), address(0));
-        ia.addAndUseTREXVersion(
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
-            ITREXImplementationAuthority.TREXContracts({
-                tokenImplementation: address(tokenImplementation),
-                irImplementation: address(identityRegistryImplementation),
-                irsImplementation: address(identityRegistryStorageImplementation),
-                ctrImplementation: address(claimTopicsRegistryImplementation),
-                tirImplementation: address(trustedIssuersRegistryImplementation),
-                mcImplementation: address(modularComplianceImplementation)
-            })
-        );
+        TREXImplementationAuthority ia =
+            new TREXImplementationAuthority(isReference, address(0), address(0), address(accessManager));
+
+        if (isReference) {
+            _authorizeIAGovernance(address(ia));
+            _grantOwnerRole(deployer);
+
+            vm.prank(deployer);
+            ia.addAndUseTREXVersion(
+                ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
+                ITREXImplementationAuthority.TREXContracts({
+                    tokenImplementation: address(tokenImplementation),
+                    irImplementation: address(identityRegistryImplementation),
+                    irsImplementation: address(identityRegistryStorageImplementation),
+                    ctrImplementation: address(claimTopicsRegistryImplementation),
+                    tirImplementation: address(trustedIssuersRegistryImplementation),
+                    mcImplementation: address(modularComplianceImplementation)
+                })
+            );
+        }
 
         return ia;
     }

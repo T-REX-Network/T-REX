@@ -35,6 +35,11 @@ abstract contract AccessManagerHelper is Test {
         AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, trexFactory);
     }
 
+    /// @notice Wires the TREXImplementationAuthority governance selectors to the OWNER role for `ia`.
+    function _authorizeIAGovernance(address ia) internal {
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia);
+    }
+
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
     function _setupSuiteRoles(address token, address ir, address irs, address ctr, address tir, address mc) internal {
         AccessManagerSetupLib.setupTokenRoles(accessManager, token);

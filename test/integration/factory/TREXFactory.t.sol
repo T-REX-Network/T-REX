@@ -841,8 +841,9 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_setImplementationAuthority_RevertWhen_IncompleteIA() public {
         // Deploy a new IA but don't add any version (incomplete)
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
-        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
+        _authorizeIAGovernance(address(incompleteIA));
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.InvalidImplementationAuthority.selector);
