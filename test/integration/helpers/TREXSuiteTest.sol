@@ -77,7 +77,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         _grantOwnerRole(deployer);
         _grantOwnerRole(address(this));
-        _grantAdminRoles(deployer);
+        _grantManagerRoles(deployer);
         _grantAllAgentRoles(agent);
 
         token = _deployToken("salt", "Token", "TKN");
@@ -118,8 +118,8 @@ contract TREXSuiteTest is AccessManagerHelper {
         vm.stopPrank();
 
         _setupFactoryRoles(address(trexFactory));
-        // deployTREXSuite grants the AGENT role, which is administered by AGENT_MANAGER
-        _grantAgentManagerRole(address(trexFactory));
+        // deployTREXSuite grants the AGENT role, which is administered by AGENT_ADMIN
+        _grantAgentAdminRole(address(trexFactory));
     }
 
     function _deployTREXImplementationAuthority(bool isReference) internal returns (TREXImplementationAuthority) {

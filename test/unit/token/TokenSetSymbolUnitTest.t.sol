@@ -14,7 +14,7 @@ contract TokenSetSymbolUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.TOKEN_ADMIN, address(this), 0);
+        accessManager.grantRole(RolesLib.TOKEN_MANAGER, address(this), 0);
     }
 
     function testTokenSetSymbolRevertsIfSymbolIsEmpty() public {

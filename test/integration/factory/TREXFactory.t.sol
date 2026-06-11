@@ -744,7 +744,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     }
 
     /// @notice deployTREXSuite must grant the AGENT role to the token, the IR and every configured
-    ///         agent, with the factory holding only the AGENT_MANAGER role on the AccessManager
+    ///         agent, with the factory holding only the AGENT_ADMIN role on the AccessManager
     function test_deployTREXSuite_GrantsAgentRoles() public {
         address[] memory irAgents = new address[](1);
         irAgents[0] = alice;

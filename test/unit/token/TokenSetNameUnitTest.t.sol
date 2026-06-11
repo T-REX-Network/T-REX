@@ -14,7 +14,7 @@ contract TokenSetNameUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.TOKEN_ADMIN, address(this), 0);
+        accessManager.grantRole(RolesLib.TOKEN_MANAGER, address(this), 0);
     }
 
     function testTokenSetNameRevertsIfNameIsEmpty() public {
@@ -32,7 +32,7 @@ contract TokenSetNameUnitTest is TokenBaseUnitTest {
 
     function testTokenSetNameRevertsWhenCallerOnlyIdentityAdmin() public {
         address identityAdmin = makeAddr("IdentityAdmin");
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, identityAdmin, 0);
+        accessManager.grantRole(RolesLib.IDENTITY_MANAGER, identityAdmin, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, identityAdmin));
         vm.prank(identityAdmin);

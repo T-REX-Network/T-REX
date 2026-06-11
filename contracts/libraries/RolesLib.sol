@@ -67,6 +67,8 @@ library RolesLib {
 
     uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
 
+    // ---- Operational roles (gate contract functions: "what you can do") ----
+
     uint64 constant OWNER = ROLE_PREFIX + 1;
 
     uint64 constant AGENT = ROLE_PREFIX + 2;
@@ -78,12 +80,18 @@ library RolesLib {
     uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
     uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
 
-    // TODO maybe rename *_ADMIN to *_MANAGER, and keep *_ADMIN for roles giving roles.
+    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
+    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
 
-    uint64 constant TOKEN_ADMIN = ROLE_PREFIX + 10;
-    uint64 constant IDENTITY_ADMIN = ROLE_PREFIX + 11;
+    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
+    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
+    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
+    // handing out the AccessManager ADMIN_ROLE (0).
 
-    // admin role of AGENT (grant/revoke AGENT without the AccessManager ADMIN_ROLE)
-    uint64 constant AGENT_MANAGER = ROLE_PREFIX + 14;
+    // Admin of AGENT and every granular AGENT_* role.
+    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
+
+    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
+    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
 
 }

@@ -16,14 +16,17 @@ abstract contract AccessManagerHelper is Test {
 
     AccessManager public accessManager;
 
-    /// @notice Deploys the AccessManager with the test contract as admin, makes AGENT_MANAGER the
-    ///         admin role of AGENT and labels the roles.
+    /// @notice Deploys the AccessManager with the test contract as admin, wires the role-giver
+    ///         hierarchy (AGENT_ADMIN over the AGENT family, SUITE_ADMIN over the config roles)
+    ///         and labels the roles.
     function _deployAccessManager() internal returns (AccessManager) {
         accessManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupAgentManagerRole(accessManager);
+        AccessManagerSetupLib.setupRoleAdmins(accessManager);
         AccessManagerSetupLib.setupLabels(accessManager);
-        // AGENT is administered by AGENT_MANAGER; the test admin needs it to grant AGENT
-        _grantAgentManagerRole(address(this));
+        // Operational roles are now administered by the giver roles, not ADMIN_ROLE(0); the test
+        // admin needs the givers to be able to grant AGENT/AGENT_* and TOKEN_MANAGER/IDENTITY_MANAGER.
+        _grantAgentAdminRole(address(this));
+        _grantSuiteAdminRole(address(this));
         return accessManager;
     }
 
@@ -50,8 +53,12 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.AGENT, account, NO_EXECUTION_DELAY);
     }
 
-    function _grantAgentManagerRole(address account) internal {
-        accessManager.grantRole(RolesLib.AGENT_MANAGER, account, NO_EXECUTION_DELAY);
+    function _grantAgentAdminRole(address account) internal {
+        accessManager.grantRole(RolesLib.AGENT_ADMIN, account, NO_EXECUTION_DELAY);
+    }
+
+    function _grantSuiteAdminRole(address account) internal {
+        accessManager.grantRole(RolesLib.SUITE_ADMIN, account, NO_EXECUTION_DELAY);
     }
 
     /// @notice Grants AGENT plus every granular AGENT_* role to `account`.
@@ -66,10 +73,10 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.AGENT_PAUSER, account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants the TOKEN_ADMIN and IDENTITY_ADMIN roles to `account`.
-    function _grantAdminRoles(address account) internal {
-        accessManager.grantRole(RolesLib.TOKEN_ADMIN, account, NO_EXECUTION_DELAY);
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, account, NO_EXECUTION_DELAY);
+    /// @notice Grants the TOKEN_MANAGER and IDENTITY_MANAGER roles to `account`.
+    function _grantManagerRoles(address account) internal {
+        accessManager.grantRole(RolesLib.TOKEN_MANAGER, account, NO_EXECUTION_DELAY);
+        accessManager.grantRole(RolesLib.IDENTITY_MANAGER, account, NO_EXECUTION_DELAY);
     }
 
     /// @notice Returns true when `account` holds the AGENT role on the manager.

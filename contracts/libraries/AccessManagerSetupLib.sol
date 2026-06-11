@@ -80,18 +80,18 @@ import { RolesLib } from "./RolesLib.sol";
 library AccessManagerSetupLib {
 
     function setupTokenRoles(IAccessManager accessManager, address token) internal {
-        // ------ TOKEN_ADMIN role ------
+        // ------ TOKEN_MANAGER role ------
         bytes4[] memory functions = new bytes4[](2);
         functions[0] = Token.setName.selector;
         functions[1] = Token.setSymbol.selector;
-        accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_ADMIN);
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
-        // ------ IDENTITY_ADMIN role ------
+        // ------ IDENTITY_MANAGER role ------
         functions = new bytes4[](3);
         functions[0] = Token.setOnchainID.selector;
         functions[1] = Token.setIdentityRegistry.selector;
         functions[2] = Token.setCompliance.selector;
-        accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_ADMIN);
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
 
         // ------ AGENT_MINTER role ------
         functions = new bytes4[](2);
@@ -221,16 +221,30 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
     }
 
-    /// @notice Makes AGENT_MANAGER the admin of AGENT. Call once, before any AGENT grant.
-    function setupAgentManagerRole(IAccessManager accessManager) internal {
-        accessManager.setRoleAdmin(RolesLib.AGENT, RolesLib.AGENT_MANAGER);
+    /// @notice Wires the role-giver hierarchy. Call once, before any operational grant.
+    ///         AGENT_ADMIN administers AGENT and every granular AGENT_* role; SUITE_ADMIN
+    ///         administers TOKEN_MANAGER and IDENTITY_MANAGER. OWNER is intentionally left
+    ///         under ADMIN_ROLE (0) so only the governance multisig can grant it.
+    function setupRoleAdmins(IAccessManager accessManager) internal {
+        // ------ AGENT_ADMIN administers the AGENT family ------
+        accessManager.setRoleAdmin(RolesLib.AGENT, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_MINTER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_BURNER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_PARTIAL_FREEZER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_ADDRESS_FREEZER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_RECOVERY_ADDRESS, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_FORCED_TRANSFER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.AGENT_PAUSER, RolesLib.AGENT_ADMIN);
+
+        // ------ SUITE_ADMIN administers the token-config roles ------
+        accessManager.setRoleAdmin(RolesLib.TOKEN_MANAGER, RolesLib.SUITE_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.IDENTITY_MANAGER, RolesLib.SUITE_ADMIN);
     }
 
     function setupLabels(IAccessManager accessManager) internal {
         accessManager.labelRole(RolesLib.OWNER, "TREX-Suite Owner");
 
         accessManager.labelRole(RolesLib.AGENT, "TREX-Suite Agent");
-        accessManager.labelRole(RolesLib.AGENT_MANAGER, "TREX-Suite Agent: Manager");
         accessManager.labelRole(RolesLib.AGENT_MINTER, "TREX-Suite Agent: Minter");
         accessManager.labelRole(RolesLib.AGENT_BURNER, "TREX-Suite Agent: Burner");
         accessManager.labelRole(RolesLib.AGENT_PARTIAL_FREEZER, "TREX-Suite Agent: Partial Freezer");
@@ -239,8 +253,12 @@ library AccessManagerSetupLib {
         accessManager.labelRole(RolesLib.AGENT_FORCED_TRANSFER, "TREX-Suite Agent: Forced Transfer");
         accessManager.labelRole(RolesLib.AGENT_PAUSER, "TREX-Suite Agent: Pauser");
 
-        accessManager.labelRole(RolesLib.TOKEN_ADMIN, "TREX-Suite Admin: Token");
-        accessManager.labelRole(RolesLib.IDENTITY_ADMIN, "TREX-Suite Admin: Identity");
+        accessManager.labelRole(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
+        accessManager.labelRole(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
+
+        // Role-givers
+        accessManager.labelRole(RolesLib.AGENT_ADMIN, "TREX-Suite Admin: Agent");
+        accessManager.labelRole(RolesLib.SUITE_ADMIN, "TREX-Suite Admin: Suite");
     }
 
 }

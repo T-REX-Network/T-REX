@@ -21,7 +21,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.IDENTITY_ADMIN, address(this), 0);
+        accessManager.grantRole(RolesLib.IDENTITY_MANAGER, address(this), 0);
     }
 
     function testTokenSetComplianceRevertsWhenUnauthorized(address caller) public {
@@ -34,7 +34,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
 
     function testTokenSetComplianceRevertsWhenCallerOnlyTokenAdmin() public {
         address tokenAdmin = makeAddr("TokenAdmin");
-        accessManager.grantRole(RolesLib.TOKEN_ADMIN, tokenAdmin, 0);
+        accessManager.grantRole(RolesLib.TOKEN_MANAGER, tokenAdmin, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, tokenAdmin));
         vm.prank(tokenAdmin);
