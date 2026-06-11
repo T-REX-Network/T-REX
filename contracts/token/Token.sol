@@ -292,53 +292,37 @@ contract Token is
 
     /// @inheritdoc IERC3643
     function freezePartialTokens(address user, uint256 amount) public restricted {
-        TokenStorage storage s = _tokenStorage();
-        uint256 balance = balanceOf(user);
-        require(
-            balance >= s.frozenStatus[user].amount + amount,
-            IERC20Errors.ERC20InsufficientBalance(user, balance, amount)
-        );
-        s.frozenStatus[user].amount += amount;
-        emit ERC3643EventsLib.TokensFrozen(user, amount);
+        _freezePartialTokens(user, amount);
     }
 
     /// @inheritdoc IERC3643
     function unfreezePartialTokens(address user, uint256 amount) public restricted {
-        TokenStorage storage s = _tokenStorage();
-
-        require(
-            s.frozenStatus[user].amount >= amount,
-            ErrorsLib.AmountAboveFrozenTokens(amount, s.frozenStatus[user].amount)
-        );
-        s.frozenStatus[user].amount -= amount;
-        emit ERC3643EventsLib.TokensUnfrozen(user, amount);
+        _unfreezePartialTokens(user, amount);
     }
 
     /// @inheritdoc IERC3643
     function setAddressFrozen(address user, bool freeze) public restricted {
-        _tokenStorage().frozenStatus[user].addressFrozen = freeze;
-
-        emit ERC3643EventsLib.AddressFrozen(user, freeze, _msgSender());
+        _setAddressFrozen(user, freeze);
     }
 
     /// @inheritdoc IERC3643
-    function batchFreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external {
+    function batchFreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external restricted {
         for (uint256 i = 0; i < users.length; i++) {
-            freezePartialTokens(users[i], amounts[i]);
+            _freezePartialTokens(users[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external {
+    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external restricted {
         for (uint256 i = 0; i < users.length; i++) {
-            unfreezePartialTokens(users[i], amounts[i]);
+            _unfreezePartialTokens(users[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes) external {
+    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes) external restricted {
         for (uint256 i = 0; i < users.length; i++) {
-            setAddressFrozen(users[i], freezes[i]);
+            _setAddressFrozen(users[i], freezes[i]);
         }
     }
 
@@ -350,6 +334,34 @@ contract Token is
     /// @inheritdoc IERC3643
     function getFrozenTokens(address user) external view returns (uint256) {
         return _tokenStorage().frozenStatus[user].amount;
+    }
+
+    function _freezePartialTokens(address user, uint256 amount) internal {
+        TokenStorage storage s = _tokenStorage();
+        uint256 balance = balanceOf(user);
+        require(
+            balance >= s.frozenStatus[user].amount + amount,
+            IERC20Errors.ERC20InsufficientBalance(user, balance, amount)
+        );
+        s.frozenStatus[user].amount += amount;
+        emit ERC3643EventsLib.TokensFrozen(user, amount);
+    }
+
+    function _unfreezePartialTokens(address user, uint256 amount) internal {
+        TokenStorage storage s = _tokenStorage();
+
+        require(
+            s.frozenStatus[user].amount >= amount,
+            ErrorsLib.AmountAboveFrozenTokens(amount, s.frozenStatus[user].amount)
+        );
+        s.frozenStatus[user].amount -= amount;
+        emit ERC3643EventsLib.TokensUnfrozen(user, amount);
+    }
+
+    function _setAddressFrozen(address user, bool freeze) internal {
+        _tokenStorage().frozenStatus[user].addressFrozen = freeze;
+
+        emit ERC3643EventsLib.AddressFrozen(user, freeze, _msgSender());
     }
 
     /* ----- Recovery Functions ----- */
@@ -431,11 +443,7 @@ contract Token is
 
     /// @inheritdoc IERC3643
     function forcedTransfer(address from, address to, uint256 amount) public restricted returns (bool) {
-        TokenStorage storage s = _tokenStorage();
-        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
-        _forceUpdate(from, to, amount);
-        s.compliance.transferred(from, to, amount);
-        return true;
+        return _forcedTransfer(from, to, amount);
     }
 
     /// @inheritdoc IERC3643
@@ -448,10 +456,19 @@ contract Token is
     /// @inheritdoc IERC3643
     function batchForcedTransfer(address[] calldata froms, address[] calldata tos, uint256[] calldata amounts)
         external
+        restricted
     {
         for (uint256 i = 0; i < froms.length; i++) {
-            forcedTransfer(froms[i], tos[i], amounts[i]);
+            _forcedTransfer(froms[i], tos[i], amounts[i]);
         }
+    }
+
+    function _forcedTransfer(address from, address to, uint256 amount) internal returns (bool) {
+        TokenStorage storage s = _tokenStorage();
+        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+        _forceUpdate(from, to, amount);
+        s.compliance.transferred(from, to, amount);
+        return true;
     }
 
     /* ----- Utility Functions ----- */
