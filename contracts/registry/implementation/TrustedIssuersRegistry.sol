@@ -146,15 +146,16 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgrade
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
-        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopicsReached(15));
         require(_claimTopics.length > 0, ErrorsLib.ClaimTopicsCannotBeEmpty());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         uint256[] memory oldTopics = issuerTopics.values();
         for (uint256 i = 0; i < oldTopics.length; i++) {
             s.claimTopicsToTrustedIssuers[oldTopics[i]].remove(_trustedIssuer);
-            issuerTopics.remove(oldTopics[i]);
         }
+        issuerTopics.clear();
+
         for (uint256 i = 0; i < _claimTopics.length; i++) {
             issuerTopics.add(_claimTopics[i]);
             s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
@@ -213,7 +214,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgrade
         Storage storage s = _getStorage();
         require(!s.trustedIssuers.contains(address(_trustedIssuer)), ErrorsLib.TrustedIssuerAlreadyExists());
         require(_claimTopics.length > 0, ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
-        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopicsReached(15));
         require(s.trustedIssuers.length() < 50, ErrorsLib.MaxTrustedIssuersReached(50));
         s.trustedIssuers.add(address(_trustedIssuer));
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];

@@ -4,20 +4,25 @@ pragma solidity 0.8.30;
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
+import { Create3 } from "contracts/vendor/openzeppelin/Create3.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import { TestModule } from "test/integration/mocks/TestModule.sol";
@@ -52,6 +57,13 @@ contract TREXFactoryTest is TREXSuiteTest {
         uint256[][] memory emptyClaims;
 
         return ITREXFactory.ClaimDetails({ claimTopics: emptyTopics, issuers: emptyIssuers, issuerClaims: emptyClaims });
+    }
+
+    // Re-derives the factory's CREATE3 address prediction for a given (salt, contractType), mirroring
+    // TREXFactory._saltBytes / _predictAddress. Lets tests assert that deployed == predicted.
+    function _predictSuiteAddress(string memory salt, string memory contractType) internal view returns (address) {
+        bytes32 saltBytes = bytes20(address(trexFactory)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
+        return Create3.computeAddress(saltBytes, address(trexFactory));
     }
 
     // ============ Existing Basic Tests ============
@@ -180,6 +192,11 @@ contract TREXFactoryTest is TREXSuiteTest {
         address[] memory complianceModules = new address[](26); // 26 modules > 25
         for (uint256 i = 0; i < 26; i++) {
             complianceModules[i] = address(uint160(i + 200));
+            // make each address behave like a bindable plug-and-play module so init binds the first
+            // 25 and reaches ModularCompliance's own 25-module cap on the 26th, instead of failing
+            // earlier on a call to a non-contract address
+            vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.isPlugAndPlay.selector), abi.encode(true));
+            vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.bindCompliance.selector), abi.encode());
         }
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
@@ -239,6 +256,30 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertNotEq(tokenAddress, address(0), "Token should be deployed");
 
         _assertDeployTREXSuiteSuccess(tokenAddress, claimTopic, address(claimIssuer));
+    }
+
+    // Replaces the removed AddressPredictionMismatch require: CREATE3 makes each suite contract's
+    // address a pure function of (factory, salt, contractType). These assertions lock in that the
+    // factory deploys Token and IR at the exact addresses it predicted and wired into dependents
+    // (the predicted Token address into its OnchainID, the predicted IR address into the IRS proxy).
+    function test_deployTREXSuite_DeployedAddressesMatchPredicted() public {
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        _deploySuite("predict-salt", tokenDetails, claimDetails);
+
+        Token deployedToken = Token(trexFactory.getToken("predict-salt"));
+
+        assertEq(
+            address(deployedToken),
+            _predictSuiteAddress("predict-salt", "Token"),
+            "Token must deploy at its predicted CREATE3 address"
+        );
+        assertEq(
+            address(deployedToken.identityRegistry()),
+            _predictSuiteAddress("predict-salt", "IR"),
+            "IR must deploy at its predicted CREATE3 address"
+        );
     }
 
     function _runDeployTREXSuiteSuccess(ClaimIssuer claimIssuer, uint256 claimTopic) internal {
@@ -912,6 +953,72 @@ contract TREXFactoryTest is TREXSuiteTest {
         }
         assertTrue(sawOld, "Reused IRS should still have the old IR bound");
         assertTrue(sawNew, "Reused IRS should have the new IR bound");
+    }
+
+    // ============ AccessManagerSetupLib.setupTREXImplementationAuthorityRoles() Tests ============
+
+    /// @notice Wires the 5 TREXImplementationAuthority governance selectors to the OWNER role.
+    function test_setupTREXImplementationAuthorityRoles_MapsSelectorsToOwner() public {
+        address authority = address(trexImplementationAuthority);
+
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority);
+
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.setTREXFactory.selector),
+            RolesLib.OWNER,
+            "setTREXFactory must be mapped to OWNER"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.setIAFactory.selector),
+            RolesLib.OWNER,
+            "setIAFactory must be mapped to OWNER"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.addTREXVersion.selector),
+            RolesLib.OWNER,
+            "addTREXVersion must be mapped to OWNER"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.useTREXVersion.selector),
+            RolesLib.OWNER,
+            "useTREXVersion must be mapped to OWNER"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.addAndUseTREXVersion.selector),
+            RolesLib.OWNER,
+            "addAndUseTREXVersion must be mapped to OWNER"
+        );
+    }
+
+    // ============ deployTREXSuite() branch Tests ============
+
+    /// @notice Should revert when tokenDetails.accessManager is the zero address
+    function test_deployTREXSuite_RevertWhen_AccessManagerZeroAddress() public {
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.accessManager = address(0);
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        trexFactory.deployTREXSuite("salt-zero-am", tokenDetails, claimDetails);
+    }
+
+    /// @notice Should revert when a reused IRS is governed by a different AccessManager than the suite
+    function test_deployTREXSuite_RevertWhen_ReusedIRS_AuthorityMismatch() public {
+        // Deploy a standalone IRS proxy governed by a DIFFERENT AccessManager than the suite's accessManager
+        AccessManager otherAccessManager = new AccessManager(address(this));
+        IdentityRegistryStorageProxy foreignIRSProxy = new IdentityRegistryStorageProxy(
+            address(trexImplementationAuthority), address(otherAccessManager), address(0)
+        );
+        address foreignIRS = address(foreignIRSProxy);
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.irs = foreignIRS;
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
+        trexFactory.deployTREXSuite("salt-authority-mismatch", tokenDetails, claimDetails);
     }
 
 }

@@ -236,6 +236,39 @@ contract IdentityRegistryTest is TREXSuiteTest {
         assertTrue(identityRegistry.contains(david));
     }
 
+    // ============ batchRegisterIdentity() Tests ============
+
+    /// @notice Should register multiple identities in a single call. `batchRegisterIdentity` is not
+    ///         itself wired to a role, so the inner `registerIdentity` restricted check resolves the
+    ///         outer selector to the default ADMIN role; the test contract holds it as manager admin.
+    function test_batchRegisterIdentity_Success() public {
+        vm.startPrank(deployer);
+        IIdentity davidIdentity = IIdentity(idFactory.createIdentity(david, "david"));
+        IIdentity anotherIdentity = IIdentity(idFactory.createIdentity(another, "another"));
+        vm.stopPrank();
+
+        address[] memory userAddresses = new address[](2);
+        userAddresses[0] = david;
+        userAddresses[1] = another;
+
+        IIdentity[] memory identities = new IIdentity[](2);
+        identities[0] = davidIdentity;
+        identities[1] = anotherIdentity;
+
+        uint16[] memory countries = new uint16[](2);
+        countries[0] = Countries.FRANCE;
+        countries[1] = Countries.SPAIN;
+
+        identityRegistry.batchRegisterIdentity(userAddresses, identities, countries);
+
+        assertTrue(identityRegistry.contains(david));
+        assertTrue(identityRegistry.contains(another));
+        assertEq(address(identityRegistry.identity(david)), address(davidIdentity));
+        assertEq(address(identityRegistry.identity(another)), address(anotherIdentity));
+        assertEq(identityRegistry.investorCountry(david), Countries.FRANCE);
+        assertEq(identityRegistry.investorCountry(another), Countries.SPAIN);
+    }
+
     // ============ setIdentityRegistryStorage() Tests ============
 
     /// @notice Should revert when sender is not the owner

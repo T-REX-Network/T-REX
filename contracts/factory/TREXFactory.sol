@@ -109,14 +109,13 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
         restricted
     {
         require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
-
         require(tokenDetails.accessManager != address(0), ErrorsLib.ZeroAddress());
+
         require(claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
         require(claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
         require(
             tokenDetails.irAgents.length <= 5 && tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
         );
-        require(tokenDetails.complianceModules.length <= 25, ErrorsLib.MaxModulesReached(25));
 
         address tir = _deployTIR(salt, tokenDetails.accessManager, claimDetails.issuers, claimDetails.issuerClaims);
         address ctr = _deployCTR(salt, tokenDetails.accessManager, claimDetails.claimTopics);
@@ -127,7 +126,6 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
         }
 
         address ir = _deployIR(salt, tokenDetails, tir, ctr, irs);
-        require(ir == _predictAddress(salt, "IR"), ErrorsLib.AddressPredictionMismatch());
         address mc = _deployMC(salt, tokenDetails);
 
         // a reused IRS must be governed by the same AccessManager as the rest of the suite
@@ -341,7 +339,6 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
             oid = IIdFactory(_idFactory).createTokenIdentity(predictedToken, tokenDetails.accessManager, salt);
         }
         address token = _deploy(salt, "Token", _tokenBytecode(tokenDetails, identityRegistry, compliance, oid));
-        require(token == predictedToken, ErrorsLib.AddressPredictionMismatch());
         return token;
     }
 

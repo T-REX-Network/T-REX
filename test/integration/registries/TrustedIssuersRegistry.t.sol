@@ -96,7 +96,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         }
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopcisReached.selector, 15));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 15));
         trustedIssuersRegistry.addTrustedIssuer(address(newClaimIssuer), claimTopics);
     }
 
@@ -241,7 +241,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         }
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopcisReached.selector, 15));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 15));
         trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), claimTopics);
     }
 
