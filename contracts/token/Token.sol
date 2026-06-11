@@ -74,6 +74,8 @@ import {
     IERC20Permit
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -188,6 +190,15 @@ contract Token is
     /// @inheritdoc IERC3643
     function setIdentityRegistry(address _identityRegistry) public restricted {
         require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
+
+        // The new Identity Registry must already authorize this Token (through its AccessManager) to call
+        // registerIdentity/deleteIdentity, otherwise wallet recovery would silently revert the first time it is needed.
+        IAccessManager manager = IAccessManager(IAccessManaged(_identityRegistry).authority());
+        (bool canRegister,) =
+            manager.canCall(address(this), _identityRegistry, IERC3643IdentityRegistry.registerIdentity.selector);
+        (bool canDelete,) =
+            manager.canCall(address(this), _identityRegistry, IERC3643IdentityRegistry.deleteIdentity.selector);
+        require(canRegister && canDelete, ErrorsLib.TokenNotAgentOfIdentityRegistry());
 
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryAdded(_identityRegistry);

@@ -141,6 +141,10 @@ interface IERC3643 is IERC20, IERC20Metadata {
      *  @param _identityRegistry the address of the Identity Registry to set
      *  Only the owner of the token smart contract can call this function
      *  emits an `IdentityRegistryAdded` event
+     *  @notice The provided Identity Registry must already authorize this Token (through the suite
+     *  AccessManager) to call `registerIdentity` and `deleteIdentity`; otherwise the call reverts
+     *  with `TokenNotAgentOfIdentityRegistry`. This keeps wallet recovery from silently breaking
+     *  after an Identity Registry swap.
      */
     function setIdentityRegistry(address _identityRegistry) external;
 

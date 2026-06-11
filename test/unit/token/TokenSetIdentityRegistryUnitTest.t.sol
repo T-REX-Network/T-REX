@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -33,11 +34,30 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenSetIdentityRegistryNominal() public {
+        vm.mockCall(
+            newIdentityRegistry,
+            abi.encodeWithSelector(IAccessManaged.authority.selector),
+            abi.encode(address(accessManager))
+        );
+        AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, newIdentityRegistry);
+        accessManager.grantRole(RolesLib.AGENT, address(token), 0);
+
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.IdentityRegistryAdded(newIdentityRegistry);
         token.setIdentityRegistry(newIdentityRegistry);
 
         assertEq(address(token.identityRegistry()), newIdentityRegistry);
+    }
+
+    function testTokenSetIdentityRegistryRevertsWhenTokenNotAgent() public {
+        vm.mockCall(
+            newIdentityRegistry,
+            abi.encodeWithSelector(IAccessManaged.authority.selector),
+            abi.encode(address(accessManager))
+        );
+
+        vm.expectRevert(ErrorsLib.TokenNotAgentOfIdentityRegistry.selector);
+        token.setIdentityRegistry(newIdentityRegistry);
     }
 
 }
