@@ -81,6 +81,7 @@ library ErrorsLib {
     error DecimalsOutOfRange(uint256 decimals);
     error EmptyString();
     error FrozenWallet(address user);
+    error ComplianceAlreadyBoundToToken();
     error NoTokenToRecover();
     error RecoveryNotPossible();
     error TokenNotAgentOfIdentityRegistry();

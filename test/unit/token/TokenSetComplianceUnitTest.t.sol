@@ -17,6 +17,10 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     constructor() {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.unbindToken.selector, address(token)), "");
         vm.mockCall(newCompliance, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector, address(token)), "");
+        // By default the new compliance reports itself as unbound, so it is free to bind to this Token.
+        vm.mockCall(
+            newCompliance, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(0))
+        );
     }
 
     function setUp() public override {
@@ -45,6 +49,28 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     function testTokenSetComplianceRevertsWhenZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         token.setCompliance(address(0));
+    }
+
+    function testTokenSetComplianceRevertsWhenAlreadyBoundToAnotherToken() public {
+        address foreignToken = makeAddr("ForeignToken");
+        vm.mockCall(
+            newCompliance, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(foreignToken)
+        );
+
+        vm.expectRevert(ErrorsLib.ComplianceAlreadyBoundToToken.selector);
+        token.setCompliance(newCompliance);
+    }
+
+    function testTokenSetComplianceSucceedsWhenAlreadyBoundToThisToken() public {
+        vm.mockCall(
+            newCompliance, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(token))
+        );
+
+        vm.expectEmit(true, true, true, true, address(token));
+        emit ERC3643EventsLib.ComplianceAdded(newCompliance);
+        token.setCompliance(newCompliance);
+
+        assertEq(address(token.compliance()), newCompliance);
     }
 
     function testTokenSetComplianceNominal() public {

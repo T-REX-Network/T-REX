@@ -206,6 +206,12 @@ contract Token is
     function setCompliance(address _compliance) public restricted {
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
 
+        // The new compliance must be free to bind to this Token: either unbound, or already bound to it.
+        // A compliance already bound to a different token would make every transferred/created/destroyed
+        // hook revert (onlyBoundedToken), silently breaking transfers after the swap.
+        address boundToken = IERC3643Compliance(_compliance).getTokenBound();
+        require(boundToken == address(0) || boundToken == address(this), ErrorsLib.ComplianceAlreadyBoundToToken());
+
         TokenStorage storage s = _tokenStorage();
         if (address(s.compliance) != address(0)) {
             s.compliance.unbindToken(address(this));

@@ -161,6 +161,30 @@ contract TokenInformationTest is TREXSuiteTest {
         token.setCompliance(address(0));
     }
 
+    /// @notice Should swap to a fresh, unbound compliance
+    function test_setCompliance_Success() public {
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+
+        vm.expectEmit(true, true, true, true, address(token));
+        emit ERC3643EventsLib.ComplianceAdded(address(complianceProxy));
+
+        vm.prank(deployer);
+        token.setCompliance(address(complianceProxy));
+
+        assertEq(address(token.compliance()), address(complianceProxy));
+    }
+
+    /// @notice Should revert when the new compliance is already bound to another token
+    function test_setCompliance_RevertWhen_ComplianceBoundToAnotherToken() public {
+        // A second suite's compliance is bound to its own token, not to `token`.
+        Token secondToken = _deployToken("token2", "Second Token", "TK2");
+        address foreignBoundCompliance = address(secondToken.compliance());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ComplianceAlreadyBoundToToken.selector);
+        token.setCompliance(foreignBoundCompliance);
+    }
+
     // ============ compliance() Tests ============
 
     /// @notice Should return the compliance address
