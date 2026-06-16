@@ -972,9 +972,16 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         require(deployedIRS != address(0), "IRS should be deployed");
 
-        // binding the new IR onto the reused IRS requires the factory to hold the OWNER role on it
+        // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory does NOT get any
+        // standing role here: it self-grants IRS_BINDER (admin = AGENT_ADMIN, which it already holds)
+        // for the bind window during deployTREXSuite and revokes it before returning.
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS);
-        _grantOwnerRole(address(trexFactory));
+
+        // Sanity: the factory holds neither OWNER nor IRS_BINDER going into the reused-IRS deploy.
+        (bool hasOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
+        (bool hasBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        assertFalse(hasOwner, "Factory must not hold standing OWNER");
+        assertFalse(hasBinder, "Factory must not hold standing IRS_BINDER before deploy");
 
         // Now use the deployed IRS in a new deployment
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
@@ -1019,6 +1026,43 @@ contract TREXFactoryTest is TREXSuiteTest {
         }
         assertTrue(sawOld, "Reused IRS should still have the old IR bound");
         assertTrue(sawNew, "Reused IRS should have the new IR bound");
+
+        // Transient-grant invariant: the factory must hold no standing privilege over the IRS after
+        // the deploy. IRS_BINDER was self-granted only for the bind call and revoked before return.
+        (bool stillBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        assertFalse(stillBinder, "Factory must not retain IRS_BINDER after deploy");
+        (bool stillOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
+        assertFalse(stillOwner, "Factory must not hold standing OWNER on the IRS");
+    }
+
+    /// @notice The reused-IRS bind must fail closed when the factory cannot obtain IRS_BINDER, proving
+    ///         the bind is genuinely gated and not reachable without the transient grant. Stripping the
+    ///         factory's AGENT_ADMIN removes its ability to self-grant IRS_BINDER, so deployTREXSuite
+    ///         reverts at the bind step.
+    function test_deployTREXSuite_RevertWhen_ProvidedIRS_FactoryCannotSelfGrantBinder() public {
+        // Deploy a first suite to obtain a properly initialized IRS to reuse.
+        ITREXFactory.TokenDetails memory tempTokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory tempClaimDetails = _createEmptyClaimDetails();
+        _deploySuite("temp-salt-2", tempTokenDetails, tempClaimDetails);
+
+        address tempTokenAddress = trexFactory.getToken("temp-salt-2");
+        Token tempToken = Token(tempTokenAddress);
+        address irAddress = address(tempToken.identityRegistry());
+        address deployedIRS = address(IERC3643IdentityRegistry(irAddress).identityStorage());
+
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS);
+
+        // Remove the factory's ability to administer IRS_BINDER (admin = AGENT_ADMIN). Without it,
+        // the self-grant inside deployTREXSuite reverts and the reused-IRS bind cannot proceed.
+        accessManager.revokeRole(RolesLib.AGENT_ADMIN, address(trexFactory));
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.irs = deployedIRS;
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        vm.prank(deployer);
+        vm.expectRevert();
+        trexFactory.deployTREXSuite("salt-irs-revert", tokenDetails, claimDetails);
     }
 
     // ============ AccessManagerSetupLib.setupTREXImplementationAuthorityRoles() Tests ============

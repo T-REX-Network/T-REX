@@ -84,18 +84,25 @@ interface IERC3643IdentityRegistryStorage {
     function modifyStoredIdentity(address _userAddress, IIdentity _identity) external;
 
     /**
-     *  @notice Adds an identity registry as agent of the Identity Registry Storage Contract.
-     *  This function can only be called by the wallet set as owner of the smart contract
-     *  This function adds the identity registry to the list of identityRegistries linked to the storage contract
-     *  cannot bind more than 300 IR to 1 IRS
+     *  @notice Adds an identity registry to the list of identityRegistries linked to the storage contract.
+     *  Gated by the IRS_BINDER role (see AccessManagerSetupLib): a transient role the TREXFactory
+     *  self-grants for the bind window when attaching an IR onto a reused IRS, and revokes immediately.
+     *  cannot bind more than 300 IR to 1 IRS.
+     *
+     *  @dev The bound set (`linkedIdentityRegistries`) is enumeration only, NOT authorization. Write
+     *  access to the IRS (addIdentityToStorage / modify* / remove*) is gated solely by the AGENT role
+     *  on the AccessManager and is never checked against this set. Consequently an IR holding AGENT may
+     *  write to the IRS without being bound, and an unbound IR keeps AGENT until the AccessManager
+     *  revokes it. Bind/unbind deliberately carry no grantRole/revokeRole of AGENT.
      *  @param _identityRegistry The identity registry address to add.
      */
     function bindIdentityRegistry(address _identityRegistry) external;
 
     /**
-     *  @notice Removes an identity registry from being agent of the Identity Registry Storage Contract.
-     *  This function can only be called by the wallet set as owner of the smart contract
-     *  This function removes the identity registry from the list of identityRegistries linked to the storage contract
+     *  @notice Removes an identity registry from the list of identityRegistries linked to the storage contract.
+     *  Gated by the OWNER role: unbinding is a governance operation, not a deploy-time action.
+     *  @dev See {bindIdentityRegistry} — the bound set is enumeration only; unbinding does not revoke any
+     *  AGENT authorization the IR may hold on the AccessManager.
      *  @param _identityRegistry The identity registry address to remove.
      */
     function unbindIdentityRegistry(address _identityRegistry) external;

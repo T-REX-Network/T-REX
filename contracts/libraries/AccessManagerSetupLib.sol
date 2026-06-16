@@ -100,7 +100,6 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_MINTER);
 
         // ------ AGENT_BURNER role ------
-        functions = new bytes4[](2);
         functions[0] = Token.burn.selector;
         functions[1] = Token.batchBurn.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_BURNER);
@@ -131,7 +130,6 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_FORCED_TRANSFER);
 
         // ------ AGENT_PAUSER role ------
-        functions = new bytes4[](2);
         functions[0] = Token.pause.selector;
         functions[1] = Token.unpause.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);
@@ -165,10 +163,20 @@ library AccessManagerSetupLib {
     }
 
     function setupIdentityRegistryStorageRoles(IAccessManager accessManager, address identityRegistryStorage) internal {
-        // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](2);
+        // ------ IRS_BINDER role ------
+        // bindIdentityRegistry is gated to IRS_BINDER, NOT OWNER: the factory must attach a new IR
+        // onto a reused IRS during deployTREXSuite without holding standing OWNER. IRS_BINDER is a
+        // transient role the factory self-grants (admin = AGENT_ADMIN, which the factory holds) for
+        // the bind window and revokes before returning. Governance (OWNER/ADMIN_ROLE) can still bind
+        // by granting itself IRS_BINDER if ever needed.
+        bytes4[] memory functions = new bytes4[](1);
         functions[0] = IdentityRegistryStorage.bindIdentityRegistry.selector;
-        functions[1] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
+        accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.IRS_BINDER);
+
+        // ------ OWNER role ------
+        // unbindIdentityRegistry stays a governance operation: removing an IR from the bound set is
+        // not a deploy-time action and must not be reachable through the transient bind path.
+        functions[0] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
@@ -240,6 +248,9 @@ library AccessManagerSetupLib {
         // ------ SUITE_ADMIN administers the token-config roles ------
         accessManager.setRoleAdmin(RolesLib.TOKEN_MANAGER, RolesLib.SUITE_ADMIN);
         accessManager.setRoleAdmin(RolesLib.IDENTITY_MANAGER, RolesLib.SUITE_ADMIN);
+
+        // ------ AGENT_ADMIN administers the transient IRS_BINDER role ------
+        accessManager.setRoleAdmin(RolesLib.IRS_BINDER, RolesLib.AGENT_ADMIN);
     }
 
     function setupLabels(IAccessManager accessManager) internal {
@@ -260,6 +271,9 @@ library AccessManagerSetupLib {
         // Role-givers
         accessManager.labelRole(RolesLib.AGENT_ADMIN, "TREX-Suite Admin: Agent");
         accessManager.labelRole(RolesLib.SUITE_ADMIN, "TREX-Suite Admin: Suite");
+
+        // Transient deploy-time role
+        accessManager.labelRole(RolesLib.IRS_BINDER, "TREX-Suite IRS Binder (transient)");
     }
 
 }

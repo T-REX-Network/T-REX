@@ -131,7 +131,7 @@ contract TREXFactory is ITREXFactory, AccessManaged, AccessManagerOwnable {
         // a reused IRS must be governed by the same AccessManager as the rest of the suite
         if (tokenDetails.irs != address(0)) {
             require(IAccessManaged(irs).authority() == tokenDetails.accessManager, ErrorsLib.AuthorityMismatch());
-            IIdentityRegistryStorage(irs).bindIdentityRegistry(ir);
+            _bindReusedIRS(IAccessManager(tokenDetails.accessManager), irs, ir);
         }
 
         address token = _deployToken(salt, tokenDetails, ir, mc);
@@ -361,6 +361,17 @@ contract TREXFactory is ITREXFactory, AccessManaged, AccessManagerOwnable {
                 tokenDetails.accessManager
             )
         );
+    }
+
+    /// Binds a new IR onto a reused IRS using a transient IRS_BINDER grant.
+    /// bindIdentityRegistry is gated to IRS_BINDER (see AccessManagerSetupLib): the factory holds no
+    /// standing privilege over the IRS, so it self-grants IRS_BINDER for the single bind call and
+    /// revokes it immediately after, leaving no residual authority. Requires the factory to hold the
+    /// admin of IRS_BINDER (AGENT_ADMIN) on `accessManager`.
+    function _bindReusedIRS(IAccessManager accessManager, address irs, address identityRegistry) private {
+        accessManager.grantRole(RolesLib.IRS_BINDER, address(this), 0);
+        IIdentityRegistryStorage(irs).bindIdentityRegistry(identityRegistry);
+        accessManager.revokeRole(RolesLib.IRS_BINDER, address(this));
     }
 
     /// Grants the AGENT role to the token, the identity registry and the configured agents.

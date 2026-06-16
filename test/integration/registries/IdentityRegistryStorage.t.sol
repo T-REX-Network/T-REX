@@ -38,6 +38,10 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         identityRegistryStorage = IdentityRegistryStorage(address(token.identityRegistry().identityStorage()));
 
+        // bindIdentityRegistry is now gated by the transient IRS_BINDER role (not OWNER). deployer
+        // already holds OWNER for the suite; grant it IRS_BINDER too so the bind-path tests can run.
+        _grantIRSBinderRole(deployer);
+
         // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
         // For Foundry, we start with 0 bound registries (tests will bind as needed)
     }
@@ -169,10 +173,20 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     // ============ bindIdentityRegistry() Tests ============
 
-    /// @notice Should revert when sender is not owner
-    function test_bindIdentityRegistry_RevertWhen_NotOwner() public {
+    /// @notice Should revert when sender lacks the IRS_BINDER role
+    function test_bindIdentityRegistry_RevertWhen_NotBinder() public {
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+    }
+
+    /// @notice bind is gated by IRS_BINDER, not OWNER: holding OWNER alone must not authorize a bind.
+    function test_bindIdentityRegistry_RevertWhen_OwnerWithoutBinderRole() public {
+        address ownerOnly = makeAddr("ownerOnly");
+        _grantOwnerRole(ownerOnly);
+
+        vm.prank(ownerOnly);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ownerOnly));
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
     }
 

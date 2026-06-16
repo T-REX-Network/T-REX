@@ -24,6 +24,8 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         irsImplementation = new IdentityRegistryStorage();
         accessManager = new AccessManager(address(this));
         accessManager.grantRole(RolesLib.OWNER, address(this), 0);
+        // bindIdentityRegistry is gated by IRS_BINDER (not OWNER); the test acts as the binder here.
+        accessManager.grantRole(RolesLib.IRS_BINDER, address(this), 0);
         vm.mockCall(
             implementationAuthority,
             abi.encodeWithSelector(ITREXImplementationAuthority.getIRSImplementation.selector),
@@ -56,7 +58,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         assertFalse(_hasAgentRole(ir));
     }
 
-    function test_init_OwnerCanStillBindAdditionalIRAfterInit() public {
+    function test_init_BinderCanStillBindAdditionalIRAfterInit() public {
         address ir1 = makeAddr("ir1");
         IdentityRegistryStorage storageContract = _deployProxy(ir1);
 
@@ -78,7 +80,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         assertTrue(_hasAgentRole(ir));
     }
 
-    function test_bindIdentityRegistry_RevertWhen_NotOwner() public {
+    function test_bindIdentityRegistry_RevertWhen_NotBinder() public {
         IdentityRegistryStorage storageContract = _deployProxy(address(0));
 
         vm.prank(notOwner);
