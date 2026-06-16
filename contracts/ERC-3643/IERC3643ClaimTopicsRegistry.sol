@@ -42,7 +42,7 @@ interface IERC3643ClaimTopicsRegistry {
 
     /**
      * @dev Add a trusted claim topic (For example: KYC=1, AML=2).
-     * Only owner can call.
+     * Restricted to the configured AccessManager role (OWNER).
      * emits `ClaimTopicAdded` event
      * cannot add more than 15 topics for 1 token as adding more could create gas issues
      * @param _claimTopic The claim topic index
@@ -51,7 +51,7 @@ interface IERC3643ClaimTopicsRegistry {
 
     /**
      *  @dev Remove a trusted claim topic (For example: KYC=1, AML=2).
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `ClaimTopicRemoved` event
      *  @param _claimTopic The claim topic index
      */

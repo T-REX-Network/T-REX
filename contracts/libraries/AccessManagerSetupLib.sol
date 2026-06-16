@@ -212,12 +212,13 @@ library AccessManagerSetupLib {
         internal
     {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](5);
+        bytes4[] memory functions = new bytes4[](6);
         functions[0] = TREXImplementationAuthority.setTREXFactory.selector;
         functions[1] = TREXImplementationAuthority.setIAFactory.selector;
         functions[2] = TREXImplementationAuthority.addTREXVersion.selector;
         functions[3] = TREXImplementationAuthority.useTREXVersion.selector;
         functions[4] = TREXImplementationAuthority.addAndUseTREXVersion.selector;
+        functions[5] = TREXImplementationAuthority.changeImplementationAuthority.selector;
         accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
     }
 

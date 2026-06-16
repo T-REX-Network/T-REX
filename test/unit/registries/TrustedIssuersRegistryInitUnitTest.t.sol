@@ -3,7 +3,6 @@ pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
@@ -33,11 +32,11 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         );
     }
 
-    function test_init_SetsOwnerFromArgument_NotDeployer() public {
+    function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         TrustedIssuersRegistry tir = _deployProxy(new address[](0), new uint256[][](0));
 
-        assertEq(tir.owner(), address(accessManager));
-        assertNotEq(tir.owner(), address(this));
+        assertEq(IAccessManaged(address(tir)).authority(), address(accessManager));
+        assertNotEq(IAccessManaged(address(tir)).authority(), address(this));
     }
 
     function test_init_RegistersAllProvidedIssuersWithTopics() public {
@@ -101,8 +100,8 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
         tir.addTrustedIssuer(address(issuer), topics);
     }
 
-    function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+    function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new TrustedIssuersRegistryProxy(implementationAuthority, address(0), new address[](0), new uint256[][](0));
     }
 

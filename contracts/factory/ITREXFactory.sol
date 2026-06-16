@@ -106,7 +106,7 @@ interface ITREXFactory {
      *  the implementation authority contract contains the addresses of all implementation contracts
      *  the proxies created by the factory will use the different implementations available
      *  in the implementation authority contract
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `ImplementationAuthoritySet` event
      *  @param _implementationAuthority The address of the implementation authority smart contract
      */
@@ -116,7 +116,7 @@ interface ITREXFactory {
      *  @dev setter for identity factory contract address
      *  the identity factory contract is used by the TREX Factory to deploy the ONCHAINID
      *  of the token in case the ONCHAINID is not specified
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `IdFactorySet` event
      *  @param _idFactory The address of the identity factory contract
      */
@@ -136,7 +136,7 @@ interface ITREXFactory {
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `TREXSuiteDeployed` event
      *  @param _salt the salt used to make the contracts deployments with CREATE2
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)

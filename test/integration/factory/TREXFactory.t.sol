@@ -3,7 +3,6 @@ pragma solidity 0.8.30;
 
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
@@ -345,7 +344,11 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // Verify CTR is owned by the suite AccessManager
         ClaimTopicsRegistry ctr = ClaimTopicsRegistry(address(deployedToken.identityRegistry().topicsRegistry()));
-        assertEq(ctr.owner(), address(accessManager), "CTR owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(ctr)).authority(),
+            address(accessManager),
+            "CTR owner must be the suite AccessManager"
+        );
 
         uint256[] memory storedTopics = ctr.getClaimTopics();
         assertEq(storedTopics.length, 1, "CTR should have 1 initial topic");
@@ -353,13 +356,21 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // Verify TIR is owned by the suite AccessManager
         TrustedIssuersRegistry tir = TrustedIssuersRegistry(address(deployedToken.identityRegistry().issuersRegistry()));
-        assertEq(tir.owner(), address(accessManager), "TIR owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(tir)).authority(),
+            address(accessManager),
+            "TIR owner must be the suite AccessManager"
+        );
         assertTrue(tir.isTrustedIssuer(claimIssuerAddress), "Claim issuer should be registered in TIR");
 
         // Verify IRS is owned by the suite AccessManager and the IR is pre-bound at init time
         IdentityRegistryStorage irs =
             IdentityRegistryStorage(address(deployedToken.identityRegistry().identityStorage()));
-        assertEq(irs.owner(), address(accessManager), "IRS owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(irs)).authority(),
+            address(accessManager),
+            "IRS owner must be the suite AccessManager"
+        );
         address irAddress = address(deployedToken.identityRegistry());
         address[] memory linkedIRs = irs.linkedIdentityRegistries();
         assertEq(linkedIRs.length, 1, "IRS must have exactly one linked IR after deploy");
@@ -368,19 +379,27 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Verify IR is owned by the suite AccessManager, with the Token and configured irAgents holding
         // the AGENT role from deploy time.
         IdentityRegistry ir = IdentityRegistry(irAddress);
-        assertEq(ir.owner(), address(accessManager), "IR owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(ir)).authority(), address(accessManager), "IR owner must be the suite AccessManager"
+        );
         assertTrue(_hasAgentRole(tokenAddress), "Deployed Token must be agent on IR");
         assertTrue(_hasAgentRole(alice), "Configured irAgent (alice) must be agent on IR");
 
         // Verify MC is owned by the suite AccessManager, bound to the deployed Token at init time, with
         // every configured complianceModule already bound.
         ModularCompliance mc = ModularCompliance(address(deployedToken.compliance()));
-        assertEq(mc.owner(), address(accessManager), "MC owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(mc)).authority(), address(accessManager), "MC owner must be the suite AccessManager"
+        );
         assertEq(mc.getTokenBound(), tokenAddress, "MC must be bound to the deployed Token at init time");
 
         // Verify Token is owned by the suite AccessManager, its OID was wired in via init (the auto-OID
         // path), the configured tokenAgents hold the AGENT role, and the factory holds no AGENT role.
-        assertEq(deployedToken.owner(), address(accessManager), "Token owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(deployedToken)).authority(),
+            address(accessManager),
+            "Token owner must be the suite AccessManager"
+        );
         assertNotEq(deployedToken.onchainID(), address(0), "Token OID must be wired in at init time");
         assertEq(
             idFactory.getIdentity(tokenAddress),
@@ -430,7 +449,11 @@ contract TREXFactoryTest is TREXSuiteTest {
         Token deployedToken = Token(trexFactory.getToken("tir-init-salt"));
         TrustedIssuersRegistry tir = TrustedIssuersRegistry(address(deployedToken.identityRegistry().issuersRegistry()));
 
-        assertEq(tir.owner(), address(accessManager), "TIR owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(tir)).authority(),
+            address(accessManager),
+            "TIR owner must be the suite AccessManager"
+        );
 
         assertTrue(tir.isTrustedIssuer(address(issuerA)), "issuerA must be registered after init");
         assertTrue(tir.isTrustedIssuer(address(issuerB)), "issuerB must be registered after init");
@@ -473,7 +496,11 @@ contract TREXFactoryTest is TREXSuiteTest {
         Token deployedToken = Token(trexFactory.getToken("ctr-init-salt"));
         ClaimTopicsRegistry ctr = ClaimTopicsRegistry(address(deployedToken.identityRegistry().topicsRegistry()));
 
-        assertEq(ctr.owner(), address(accessManager), "CTR owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(ctr)).authority(),
+            address(accessManager),
+            "CTR owner must be the suite AccessManager"
+        );
 
         uint256[] memory storedTopics = ctr.getClaimTopics();
         assertEq(storedTopics.length, 2, "CTR.getClaimTopics length must match _claimDetails.claimTopics");
@@ -504,7 +531,11 @@ contract TREXFactoryTest is TREXSuiteTest {
             IdentityRegistryStorage(address(deployedToken.identityRegistry().identityStorage()));
         address irAddress = address(deployedToken.identityRegistry());
 
-        assertEq(irs.owner(), address(accessManager), "IRS owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(irs)).authority(),
+            address(accessManager),
+            "IRS owner must be the suite AccessManager"
+        );
 
         address[] memory linkedIRs = irs.linkedIdentityRegistries();
         assertEq(linkedIRs.length, 1, "IRS.linkedIdentityRegistries must contain exactly one IR after deploy");
@@ -545,7 +576,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         Token deployedToken = Token(trexFactory.getToken("mc-init-salt"));
         ModularCompliance mc = ModularCompliance(address(deployedToken.compliance()));
 
-        assertEq(mc.owner(), address(accessManager), "MC owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(mc)).authority(), address(accessManager), "MC owner must be the suite AccessManager"
+        );
         assertEq(
             mc.getTokenBound(),
             address(deployedToken),
@@ -584,7 +617,11 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         Token deployedToken = Token(trexFactory.getToken("token-init-salt"));
 
-        assertEq(deployedToken.owner(), address(accessManager), "Token owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(deployedToken)).authority(),
+            address(accessManager),
+            "Token owner must be the suite AccessManager"
+        );
 
         assertNotEq(deployedToken.onchainID(), address(0), "Token OID must be wired in at init time");
         assertEq(
@@ -655,7 +692,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         Token deployedToken = Token(trexFactory.getToken("ir-init-salt"));
         IdentityRegistry ir = IdentityRegistry(address(deployedToken.identityRegistry()));
 
-        assertEq(ir.owner(), address(accessManager), "IR owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(ir)).authority(), address(accessManager), "IR owner must be the suite AccessManager"
+        );
 
         assertTrue(_hasAgentRole(address(deployedToken)), "Token must be agent on IR after init");
         assertTrue(_hasAgentRole(bob), "Configured irAgent bob must be agent on IR after init");
@@ -729,19 +768,38 @@ contract TREXFactoryTest is TREXSuiteTest {
         _assertFullConfigInitState(deployedToken, ir, testModuleAddr, issuerAddr);
     }
 
-    /// @notice All 6 suite contracts must be owned by the suite AccessManager.
+    /// @notice All 6 suite contracts must report the suite AccessManager as their authority.
     function _assertFullConfigOwnership(Token deployedToken, IdentityRegistry ir) internal view {
-        Ownable ctr = Ownable(address(ir.topicsRegistry()));
-        Ownable tir = Ownable(address(ir.issuersRegistry()));
-        Ownable irs = Ownable(address(ir.identityStorage()));
-        Ownable mc = Ownable(address(deployedToken.compliance()));
-
-        assertEq(ctr.owner(), address(accessManager), "CTR owner must be the suite AccessManager");
-        assertEq(tir.owner(), address(accessManager), "TIR owner must be the suite AccessManager");
-        assertEq(irs.owner(), address(accessManager), "IRS owner must be the suite AccessManager");
-        assertEq(ir.owner(), address(accessManager), "IR owner must be the suite AccessManager");
-        assertEq(mc.owner(), address(accessManager), "MC owner must be the suite AccessManager");
-        assertEq(deployedToken.owner(), address(accessManager), "Token owner must be the suite AccessManager");
+        assertEq(
+            IAccessManaged(address(ir.topicsRegistry())).authority(),
+            address(accessManager),
+            "CTR authority must be the suite AccessManager"
+        );
+        assertEq(
+            IAccessManaged(address(ir.issuersRegistry())).authority(),
+            address(accessManager),
+            "TIR authority must be the suite AccessManager"
+        );
+        assertEq(
+            IAccessManaged(address(ir.identityStorage())).authority(),
+            address(accessManager),
+            "IRS authority must be the suite AccessManager"
+        );
+        assertEq(
+            IAccessManaged(address(ir)).authority(),
+            address(accessManager),
+            "IR authority must be the suite AccessManager"
+        );
+        assertEq(
+            IAccessManaged(address(deployedToken.compliance())).authority(),
+            address(accessManager),
+            "MC authority must be the suite AccessManager"
+        );
+        assertEq(
+            IAccessManaged(address(deployedToken)).authority(),
+            address(accessManager),
+            "Token authority must be the suite AccessManager"
+        );
     }
 
     /// @notice Topics, issuers, agents, modules, settings, OID, IRS binding all in place at init time.
@@ -829,6 +887,13 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         address tokenAddress = trexFactory.getToken("salt2");
         assertNotEq(tokenAddress, address(0), "Token address should not be zero");
+    }
+
+    // ============ constructor() Tests ============
+
+    function test_constructor_RevertWhen_AccessManagerZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(0));
     }
 
     // ============ setImplementationAuthority() Tests ============

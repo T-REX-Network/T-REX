@@ -64,7 +64,6 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
@@ -74,12 +73,12 @@ import {
     IERC20Permit
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
@@ -87,16 +86,8 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
-import { IERC173 } from "../vendor/IERC173.sol";
 
-contract Token is
-    ERC20PermitUpgradeable,
-    PausableUpgradeable,
-    AccessManagedUpgradeable,
-    OwnableUpgradeable,
-    ERC165Upgradeable,
-    IERC3643
-{
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedUpgradeable, ERC165Upgradeable, IERC3643 {
 
     string internal constant VERSION = "5.0.0";
 
@@ -144,7 +135,6 @@ contract Token is
         __ERC20_init(tokenName, tokenSymbol);
         __ERC20Permit_init(tokenName);
         __Pausable_init();
-        __Ownable_init(accessManagerAddress);
         __AccessManaged_init(accessManagerAddress);
         __ERC165_init();
 
@@ -492,8 +482,7 @@ contract Token is
     /// @inheritdoc ERC165Upgradeable
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
-            || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC20Permit).interfaceId
-            || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC20Permit).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _tokenStorage() private pure returns (TokenStorage storage $) {

@@ -63,7 +63,6 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
@@ -72,15 +71,9 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { IERC173 } from "../../vendor/IERC173.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
-contract IdentityRegistryStorage is
-    IIdentityRegistryStorage,
-    AccessManagedUpgradeable,
-    OwnableUpgradeable,
-    ERC165Upgradeable
-{
+contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgradeable, ERC165Upgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -107,8 +100,8 @@ contract IdentityRegistryStorage is
     }
 
     function init(address accessManagerAddress, address initialIRAddress) external initializer {
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
-        __Ownable_init(accessManagerAddress);
         __ERC165_init();
 
         if (initialIRAddress != address(0)) {
@@ -207,8 +200,7 @@ contract IdentityRegistryStorage is
      *  @dev See {IERC165-supportsInterface}.
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
-        return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId
-            || interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
+        return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _bindIdentityRegistry(address _identityRegistry) internal {

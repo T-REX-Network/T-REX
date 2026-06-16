@@ -45,7 +45,7 @@ interface IERC3643Compliance {
     /**
      *  @dev binds a token to the compliance contract
      *  @param _token address of the token to bind
-     *  This function can be called ONLY by the owner of the compliance contract
+     *  Callable by the AccessManager-configured role or by the bound token itself.
      *  Emits a TokenBound event
      */
     function bindToken(address _token) external;
@@ -53,7 +53,7 @@ interface IERC3643Compliance {
     /**
      *  @dev unbinds a token from the compliance contract
      *  @param _token address of the token to unbind
-     *  This function can be called ONLY by the owner of the compliance contract
+     *  Callable by the AccessManager-configured role or by the bound token itself.
      *  Emits a TokenUnbound event
      */
     function unbindToken(address _token) external;

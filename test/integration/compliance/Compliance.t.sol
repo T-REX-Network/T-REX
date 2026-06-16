@@ -694,9 +694,9 @@ contract ComplianceTest is TREXSuiteTest {
         assertTrue(compliance.supportsInterface(type(IERC3643Compliance).interfaceId));
     }
 
-    /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
-        assertTrue(compliance.supportsInterface(type(IERC173).interfaceId));
+    /// @notice IERC173 is intentionally NOT part of the public interface (ERC-173 ownership dropped in favour of AccessManager)
+    function test_supportsInterface_ReturnsFalse_ForIERC173() public view {
+        assertFalse(compliance.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID

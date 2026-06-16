@@ -64,12 +64,11 @@ pragma solidity 0.8.30;
 
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
@@ -78,13 +77,12 @@ import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643Identity
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
-import { IERC173 } from "../../vendor/IERC173.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 import { IIdentityRegistry } from "../interface/IIdentityRegistry.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, OwnableUpgradeable, ERC165Upgradeable {
+contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, ERC165Upgradeable {
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistry
     struct Storage {
@@ -109,7 +107,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, Ownabl
     ) external initializer {
         require(
             trustedIssuersRegistryAddress != address(0) && claimTopicsRegistryAddress != address(0)
-                && identityStorageAddress != address(0),
+                && identityStorageAddress != address(0) && accessManagerAddress != address(0),
             ErrorsLib.ZeroAddress()
         );
 
@@ -125,7 +123,6 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, Ownabl
         emit EventsLib.EligibilityChecksEnabled();
 
         __AccessManaged_init(accessManagerAddress);
-        __Ownable_init(accessManagerAddress);
         __ERC165_init();
     }
 
@@ -322,8 +319,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, Ownabl
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IIdentityRegistry).interfaceId
-            || interfaceId == type(IERC3643IdentityRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
-            || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643IdentityRegistry).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

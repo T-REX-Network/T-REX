@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
@@ -77,8 +77,6 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
 
     function testTokenInitNominal() public {
         vm.expectEmit(true, true, true, true);
-        emit OwnableUpgradeable.OwnershipTransferred(address(0), pOwner);
-        vm.expectEmit(true, true, true, true);
         emit ERC3643EventsLib.UpdatedTokenInformation(pName, pSymbol, pTokenDecimals, "5.0.0", address(pOnchainId));
         Token newToken = initCall();
 
@@ -88,7 +86,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
         assertEq(address(newToken.identityRegistry()), address(pIdentityRegistry));
         assertEq(address(newToken.compliance()), address(pCompliance));
         assertEq(address(newToken.onchainID()), address(pOnchainId));
-        assertEq(newToken.owner(), pOwner);
+        assertEq(IAccessManaged(address(newToken)).authority(), pOwner);
 
         assertTrue(newToken.paused());
     }

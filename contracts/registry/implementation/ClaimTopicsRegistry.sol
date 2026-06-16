@@ -62,7 +62,6 @@
 
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
@@ -72,10 +71,9 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { IERC173 } from "../../vendor/IERC173.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
-contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, OwnableUpgradeable, ERC165Upgradeable {
+contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, ERC165Upgradeable {
 
     using EnumerableSet for EnumerableSet.UintSet;
 
@@ -92,7 +90,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, 
     }
 
     function init(address accessManagerAddress, uint256[] calldata initialTopics) external initializer {
-        __Ownable_init(accessManagerAddress);
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
         __ERC165_init();
 
@@ -128,8 +126,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, 
      *  @dev See {IERC165-supportsInterface}.
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
-        return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
-            || super.supportsInterface(interfaceId);
+        return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _addClaimTopic(uint256 claimTopic) internal {

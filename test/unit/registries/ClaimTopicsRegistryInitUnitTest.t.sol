@@ -2,7 +2,6 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
@@ -32,11 +31,11 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         );
     }
 
-    function test_init_SetsOwnerFromArgument_NotDeployer() public {
+    function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         ClaimTopicsRegistry ctr = _deployProxy(new uint256[](0));
 
-        assertEq(ctr.owner(), address(accessManager));
-        assertNotEq(ctr.owner(), address(this));
+        assertEq(IAccessManaged(address(ctr)).authority(), address(accessManager));
+        assertNotEq(IAccessManaged(address(ctr)).authority(), address(this));
     }
 
     function test_init_AppliesInitialTopics() public {
@@ -75,8 +74,8 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         ctr.addClaimTopic(1);
     }
 
-    function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+    function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ClaimTopicsRegistryProxy(implementationAuthority, address(0), new uint256[](0));
     }
 

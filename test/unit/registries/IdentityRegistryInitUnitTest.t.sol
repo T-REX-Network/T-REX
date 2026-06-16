@@ -2,8 +2,8 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistryProxy } from "contracts/proxy/IdentityRegistryProxy.sol";
@@ -30,11 +30,11 @@ contract IdentityRegistryInitUnitTest is Test {
         );
     }
 
-    function test_init_SetsOwnerFromArgument_NotDeployer() public {
+    function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         IdentityRegistry ir = _deployProxy();
 
-        assertEq(ir.owner(), address(accessManager));
-        assertNotEq(ir.owner(), address(this));
+        assertEq(IAccessManaged(address(ir)).authority(), address(accessManager));
+        assertNotEq(IAccessManaged(address(ir)).authority(), address(this));
     }
 
     function test_init_SetsDependencies() public {
@@ -45,8 +45,8 @@ contract IdentityRegistryInitUnitTest is Test {
         assertEq(address(ir.identityStorage()), irs);
     }
 
-    function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+    function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryProxy(implementationAuthority, tir, ctr, irs, address(0));
     }
 

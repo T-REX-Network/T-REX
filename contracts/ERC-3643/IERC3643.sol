@@ -51,7 +51,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the token name
      *  @param _name the name of token to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (TOKEN_MANAGER).
      *  emits a `UpdatedTokenInformation` event
      */
     function setName(string calldata _name) external;
@@ -59,7 +59,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the token symbol
      *  @param _symbol the token symbol to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (TOKEN_MANAGER).
      *  emits a `UpdatedTokenInformation` event
      */
     function setSymbol(string calldata _symbol) external;
@@ -67,7 +67,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the onchain ID of the token
      *  @param _onchainID the address of the onchain ID to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  emits a `UpdatedTokenInformation` event
      */
     function setOnchainID(address _onchainID) external;
@@ -139,7 +139,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the Identity Registry for the token
      *  @param _identityRegistry the address of the Identity Registry to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  emits an `IdentityRegistryAdded` event
      *  @notice The provided Identity Registry must already authorize this Token (through the suite
      *  AccessManager) to call `registerIdentity` and `deleteIdentity`; otherwise the call reverts
@@ -151,7 +151,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the compliance contract of the token
      *  @param _compliance the address of the compliance contract to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  calls bindToken on the compliance contract
      *  emits a `ComplianceAdded` event
      */

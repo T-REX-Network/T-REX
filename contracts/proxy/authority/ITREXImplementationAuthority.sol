@@ -160,10 +160,9 @@ interface ITREXImplementationAuthority {
 
     /**
      *  @dev change the implementationAuthority address of all proxy contracts linked to a given token
-     *  only the owner of all proxy contracts can call this function
+     *  Restricted to the configured AccessManager role (OWNER).
      *  @param _token the address of the token proxy
      *  @param _newImplementationAuthority the address of the new IA contract
-     *  caller has to be owner of all contracts linked to the token and impacted by the change
      *  Set _newImplementationAuthority on zero address to deploy a new IA contract
      *  New IA contracts can only be deployed ONCE per token and only if current IA is the main IA
      *  if _newImplementationAuthority is not a new contract it must be using the same version

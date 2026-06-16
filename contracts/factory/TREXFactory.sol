@@ -63,7 +63,6 @@ pragma solidity 0.8.30;
 
 import { IIdFactory } from "@onchain-id/solidity/contracts/factory/IIdFactory.sol";
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
@@ -82,7 +81,7 @@ import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistr
 import { Create3 } from "../vendor/openzeppelin/Create3.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
-contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
+contract TREXFactory is ITREXFactory, AccessManaged {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
     address private _implementationAuthority;
@@ -94,9 +93,9 @@ contract TREXFactory is ITREXFactory, Ownable, AccessManaged {
     mapping(string => address) public tokenDeployed;
 
     constructor(address implementationAuthority, address idFactory, address accessManager)
-        Ownable(accessManager)
         AccessManaged(accessManager)
     {
+        require(accessManager != address(0), ErrorsLib.ZeroAddress());
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
     }

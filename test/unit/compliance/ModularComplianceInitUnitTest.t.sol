@@ -35,11 +35,11 @@ contract ModularComplianceInitUnitTest is Test {
         );
     }
 
-    function test_init_SetsOwnerFromArgument_NotDeployer() public {
+    function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
 
-        assertEq(mc.owner(), address(accessManager));
-        assertNotEq(mc.owner(), address(this));
+        assertEq(IAccessManaged(address(mc)).authority(), address(accessManager));
+        assertNotEq(IAccessManaged(address(mc)).authority(), address(this));
     }
 
     function test_init_BindsTokenFromArgument() public {

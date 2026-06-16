@@ -2,11 +2,11 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
@@ -31,11 +31,11 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         );
     }
 
-    function test_init_SetsOwnerFromArgument_NotDeployer() public {
+    function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         IdentityRegistryStorage irs = _deployProxy(address(0));
 
-        assertEq(irs.owner(), address(accessManager));
-        assertNotEq(irs.owner(), address(this));
+        assertEq(IAccessManaged(address(irs)).authority(), address(accessManager));
+        assertNotEq(IAccessManaged(address(irs)).authority(), address(this));
     }
 
     function test_init_WithZeroInitialIR_DoesNotBindAnything() public {
@@ -86,8 +86,8 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         storageContract.bindIdentityRegistry(makeAddr("ir"));
     }
 
-    function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+    function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new IdentityRegistryStorageProxy(implementationAuthority, address(0), address(0));
     }
 

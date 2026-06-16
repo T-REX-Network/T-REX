@@ -62,13 +62,12 @@
 
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {
     AccessManagedUpgradeable,
     IAccessManager
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -76,11 +75,10 @@ import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
-import { IERC173 } from "../../vendor/IERC173.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessManagedUpgradeable, ERC165Upgradeable {
+contract ModularCompliance is IModularCompliance, AccessManagedUpgradeable, ERC165Upgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -117,7 +115,6 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
         require(tokenAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         require(modules.length >= moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
 
-        __Ownable_init(accessManagerAddress);
         __AccessManaged_init(accessManagerAddress);
         __ERC165_init();
 
@@ -280,12 +277,11 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
-            || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643Compliance).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
-    ///      No caller check — the public `bindToken` wrapper enforces the owner/Token-self-bind policy.
+    ///      No caller check — the public `bindToken` wrapper enforces the Token-self-bind policy.
     function _bindToken(address _token) internal {
         require(_token != address(0), ErrorsLib.ZeroAddress());
         _getStorage().tokenBound = _token;

@@ -62,7 +62,6 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
@@ -70,13 +69,11 @@ import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/int
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
-import { IERC173 } from "../../../vendor/IERC173.sol";
 import { IModule } from "./IModule.sol";
 
 abstract contract AbstractModuleUpgradeable is
     IModule,
     Initializable,
-    Ownable2StepUpgradeable,
     UUPSUpgradeable,
     MulticallUpgradeable,
     ERC165Upgradeable
@@ -160,25 +157,23 @@ abstract contract AbstractModuleUpgradeable is
      *  @dev See {IERC165-supportsInterface}.
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
-        return interfaceId == type(IModule).interfaceId || interfaceId == type(IERC173).interfaceId
-            || super.supportsInterface(interfaceId);
+        return interfaceId == type(IModule).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function __AbstractModule_init() internal onlyInitializing {
-        __Ownable_init(msg.sender);
         __ERC165_init();
         __AbstractModule_init_unchained();
     }
 
     function __AbstractModule_init_unchained() internal onlyInitializing { }
 
+    /// @dev UUPS upgrade guard. Concrete modules must override this and enforce their own access control.
     function _authorizeUpgrade(
         address /*newImplementation*/
     )
         internal
         virtual
         override
-        onlyOwner
     { }
 
     function _getAbstractModuleStorage() private pure returns (AbstractModuleStorage storage s) {

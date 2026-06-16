@@ -264,20 +264,23 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         TREXFactory factory =
             new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
-        // Deploy non-reference IA (changeImplementationAuthority has no access-control modifier)
+        // Deploy non-reference IA and wire its changeImplementationAuthority to the OWNER role
         TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
             false, address(factory), address(trexImplementationAuthority), address(accessManager)
         );
+        _authorizeIAGovernance(address(otherIA));
 
+        // deployer holds OWNER; the call must reach and fail at OnlyReferenceContractCanCall
+        // (non-reference IAs may not deploy a new auxiliary IA via the zero-address path)
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.OnlyReferenceContractCanCall.selector);
         otherIA.changeImplementationAuthority(address(token), address(0));
     }
 
-    /// @notice Should revert when caller is not owner of all impacted contracts
-    function test_changeImplementationAuthority_RevertWhen_NotOwnerOfAllContracts() public {
+    /// @notice Should revert when caller does not hold the required AccessManager role
+    function test_changeImplementationAuthority_RevertWhen_Unauthorized() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerNotOwnerOfAllImpactedContracts.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(0));
     }
 
@@ -293,7 +296,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         vm.expectEmit(true, false, false, false);
         emit EventsLib.ImplementationAuthorityChanged(address(token), address(0));
-        vm.prank(address(accessManager));
+        vm.prank(deployer);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(0));
     }
 
@@ -331,7 +334,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         otherIA.addAndUseTREXVersion(version, contracts);
 
         vm.expectRevert(ErrorsLib.VersionOfNewIAMustBeTheSameAsCurrentIA.selector);
-        vm.prank(address(accessManager));
+        vm.prank(deployer);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(otherIA));
     }
 
@@ -356,7 +359,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         // Note: otherIASetup already has version 4.0.0 added and in use from deploy(),
         // so we don't need to call addAndUseTREXVersion again
 
-        vm.prank(address(accessManager));
+        vm.prank(deployer);
         vm.expectRevert(ErrorsLib.NewIAIsNotAReferenceContract.selector);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(otherIA));
     }
@@ -385,7 +388,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
             false, address(factory), address(trexImplementationAuthority), address(accessManager)
         );
 
-        vm.prank(address(accessManager));
+        vm.prank(deployer);
         vm.expectRevert(ErrorsLib.InvalidImplementationAuthority.selector);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(otherIA));
     }
@@ -410,7 +413,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         address referenceContract = trexImplementationAuthority.getReferenceContract();
         assertEq(referenceContract, address(trexImplementationAuthority), "Should be the reference contract");
 
-        vm.prank(address(accessManager));
+        vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
         emit EventsLib.ImplementationAuthorityChanged(address(token), referenceContract);
         trexImplementationAuthority.changeImplementationAuthority(address(token), referenceContract);
@@ -429,9 +432,9 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         assertTrue(trexImplementationAuthority.supportsInterface(type(ITREXImplementationAuthority).interfaceId));
     }
 
-    /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
-        assertTrue(trexImplementationAuthority.supportsInterface(type(IERC173).interfaceId));
+    /// @notice IERC173 is intentionally NOT part of the public interface (ERC-173 ownership dropped in favour of AccessManager)
+    function test_supportsInterface_ReturnsFalse_ForIERC173() public view {
+        assertFalse(trexImplementationAuthority.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
@@ -548,7 +551,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         token.setCompliance(address(compliance));
 
         // Deploy a fresh auxiliary IA for the token (newImplementationAuthority == address(0))
-        vm.prank(address(accessManager));
+        vm.prank(deployer);
         trexImplementationAuthority.changeImplementationAuthority(address(token), address(0));
 
         address auxIA = IProxy(address(token)).getImplementationAuthority();
