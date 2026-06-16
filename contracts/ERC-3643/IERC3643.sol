@@ -101,6 +101,10 @@ interface IERC3643 is IERC20, IERC20Metadata {
      * either freezing or unfreezing the address based on the provided boolean value.
      * This function can be called by an agent of the token, assuming the agent is not restricted from freezing addresses.
      * emits an `AddressFrozen` event upon successful execution.
+     * @notice The `_owner` field of the emitted `AddressFrozen` event is `_msgSender()`. When this
+     * function is invoked through `AccessManager.execute`, `_msgSender()` is the AccessManager, so the
+     * event records the executing contract, not the originator address. This is intentional; read the
+     * AccessManager execution context if you need the originator address (the EOA or contract).
      * @param _userAddress The address for which to update the frozen status.
      * @param _freeze The frozen status to be applied: `true` to freeze, `false` to unfreeze.
      * @notice To change an address's frozen status, the calling agent must have the capability to freeze addresses enabled.
@@ -145,6 +149,11 @@ interface IERC3643 is IERC20, IERC20Metadata {
      *  AccessManager) to call `registerIdentity` and `deleteIdentity`; otherwise the call reverts
      *  with `TokenNotAgentOfIdentityRegistry`. This keeps wallet recovery from silently breaking
      *  after an Identity Registry swap.
+     *  @notice Threat model: this guard protects against accidental MISCONFIGURATION only, not against
+     *  a malicious caller. A caller authorized for this function (IDENTITY_MANAGER) could still point
+     *  the Token at a sham Identity Registry whose own AccessManager returns `true` from `canCall`,
+     *  defeating the check. Authorization for this function is therefore the real trust boundary; the
+     *  guard merely catches honest wiring mistakes.
      */
     function setIdentityRegistry(address _identityRegistry) external;
 

@@ -232,6 +232,10 @@ interface ITREXImplementationAuthority {
 
     /**
      *  @dev getter for reference contract address
+     *  @notice Returns `address(0)` until the reference contract is wired by the factory
+     *  (`setImplementationAuthority`). Call sites that dereference the result before it is set
+     *  (e.g. `fetchVersion`, which calls into the reference contract) will revert; this is the
+     *  intended fail-closed behavior, not a missing guard.
      */
     function getReferenceContract() external view returns (address);
 
