@@ -142,7 +142,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, 
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
-        assembly {
+        assembly ("memory-safe") {
             s.slot := STORAGE_LOCATION
         }
     }

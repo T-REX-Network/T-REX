@@ -101,7 +101,7 @@ abstract contract AbstractProxy is IProxy, Initializable {
      */
     function getImplementationAuthority() public view returns (address) {
         address implemAuth;
-        assembly {
+        assembly ("memory-safe") {
             implemAuth := sload(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc)
         }
         return implemAuth;
@@ -112,7 +112,7 @@ abstract contract AbstractProxy is IProxy, Initializable {
      *  the slot storage is the result of `keccak256("ERC-3643.proxy.beacon")`
      */
     function _storeImplementationAuthority(address implementationAuthority) internal {
-        assembly {
+        assembly ("memory-safe") {
             sstore(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc, implementationAuthority)
         }
     }
