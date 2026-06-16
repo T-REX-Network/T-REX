@@ -66,7 +66,6 @@ import {
     AccessManagedUpgradeable,
     IAccessManager
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -75,10 +74,11 @@ import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
+import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, AccessManagedUpgradeable, ERC165Upgradeable {
+contract ModularCompliance is IModularCompliance, AccessManagedUpgradeable, AccessManagerOwnable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -116,7 +116,6 @@ contract ModularCompliance is IModularCompliance, AccessManagedUpgradeable, ERC1
         require(modules.length >= moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
 
         __AccessManaged_init(accessManagerAddress);
-        __ERC165_init();
 
         _bindToken(tokenAddress);
 

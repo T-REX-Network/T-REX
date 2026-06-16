@@ -66,15 +66,15 @@ pragma solidity 0.8.30;
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgradeable, ERC165Upgradeable {
+contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgradeable, AccessManagerOwnable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -106,7 +106,6 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgrade
         require(issuers.length == issuerClaims.length, ErrorsLib.InvalidClaimPattern());
 
         __AccessManaged_init(accessManagerAddress);
-        __ERC165_init();
 
         for (uint256 i = 0; i < issuers.length; i++) {
             _addTrustedIssuer(issuers[i], issuerClaims[i]);

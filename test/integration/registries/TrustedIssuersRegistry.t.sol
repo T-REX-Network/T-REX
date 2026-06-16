@@ -335,9 +335,9 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC3643TrustedIssuersRegistry).interfaceId));
     }
 
-    /// @notice IERC173 is intentionally NOT part of the public interface (ERC-173 ownership dropped in favour of AccessManager)
-    function test_supportsInterface_ReturnsFalse_ForIERC173() public view {
-        assertFalse(trustedIssuersRegistry.supportsInterface(type(IERC173).interfaceId));
+    /// @notice IERC173 is part of the public interface via the AccessManagerOwnable ERC-173 ownership shim
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID

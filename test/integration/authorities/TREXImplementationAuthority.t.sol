@@ -432,9 +432,9 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         assertTrue(trexImplementationAuthority.supportsInterface(type(ITREXImplementationAuthority).interfaceId));
     }
 
-    /// @notice IERC173 is intentionally NOT part of the public interface (ERC-173 ownership dropped in favour of AccessManager)
-    function test_supportsInterface_ReturnsFalse_ForIERC173() public view {
-        assertFalse(trexImplementationAuthority.supportsInterface(type(IERC173).interfaceId));
+    /// @notice IERC173 is part of the public interface via the AccessManagerOwnable ERC-173 ownership shim
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
+        assertTrue(trexImplementationAuthority.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID

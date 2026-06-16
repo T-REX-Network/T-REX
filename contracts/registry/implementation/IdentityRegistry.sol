@@ -67,7 +67,6 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -77,12 +76,13 @@ import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643Identity
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 import { IIdentityRegistry } from "../interface/IIdentityRegistry.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, ERC165Upgradeable {
+contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, AccessManagerOwnable {
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistry
     struct Storage {
@@ -123,7 +123,6 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, ERC165
         emit EventsLib.EligibilityChecksEnabled();
 
         __AccessManaged_init(accessManagerAddress);
-        __ERC165_init();
     }
 
     /**

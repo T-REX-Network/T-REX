@@ -65,15 +65,15 @@ pragma solidity 0.8.30;
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
-contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, ERC165Upgradeable {
+contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, AccessManagerOwnable {
 
     using EnumerableSet for EnumerableSet.UintSet;
 
@@ -92,7 +92,6 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, 
     function init(address accessManagerAddress, uint256[] calldata initialTopics) external initializer {
         require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
-        __ERC165_init();
 
         for (uint256 i = 0; i < initialTopics.length; i++) {
             _addClaimTopic(initialTopics[i]);

@@ -66,14 +66,14 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
-contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgradeable, ERC165Upgradeable {
+contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgradeable, AccessManagerOwnable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -102,7 +102,6 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgra
     function init(address accessManagerAddress, address initialIRAddress) external initializer {
         require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
-        __ERC165_init();
 
         if (initialIRAddress != address(0)) {
             _bindIdentityRegistry(initialIRAddress);

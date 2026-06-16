@@ -73,7 +73,6 @@ import {
     IERC20Permit
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
@@ -86,8 +85,15 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
+import { AccessManagerOwnable } from "../utils/AccessManagerOwnable.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedUpgradeable, ERC165Upgradeable, IERC3643 {
+contract Token is
+    ERC20PermitUpgradeable,
+    PausableUpgradeable,
+    AccessManagedUpgradeable,
+    AccessManagerOwnable,
+    IERC3643
+{
 
     string internal constant VERSION = "5.0.0";
 
@@ -136,7 +142,6 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedUpgr
         __ERC20Permit_init(tokenName);
         __Pausable_init();
         __AccessManaged_init(accessManagerAddress);
-        __ERC165_init();
 
         TokenStorage storage s = _tokenStorage();
         s.name = tokenName;
@@ -479,7 +484,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedUpgr
 
     /* ----- Utility Functions ----- */
 
-    /// @inheritdoc ERC165Upgradeable
+    /// @inheritdoc AccessManagerOwnable
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
             || interfaceId == type(IERC20Permit).interfaceId || super.supportsInterface(interfaceId);

@@ -63,18 +63,18 @@
 pragma solidity 0.8.30;
 
 import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
-import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
 import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ITREXFactory } from "../../factory/ITREXFactory.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { IProxy } from "../interface/IProxy.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 
-contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessManaged, ERC165 {
+contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessManaged, AccessManagerOwnable {
 
     /// current version
     Version private _currentVersion;

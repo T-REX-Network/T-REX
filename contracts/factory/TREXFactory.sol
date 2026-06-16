@@ -78,10 +78,11 @@ import { TokenProxy } from "../proxy/TokenProxy.sol";
 import { TrustedIssuersRegistryProxy } from "../proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
+import { AccessManagerOwnable } from "../utils/AccessManagerOwnable.sol";
 import { Create3 } from "../vendor/openzeppelin/Create3.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
-contract TREXFactory is ITREXFactory, AccessManaged {
+contract TREXFactory is ITREXFactory, AccessManaged, AccessManagerOwnable {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
     address private _implementationAuthority;

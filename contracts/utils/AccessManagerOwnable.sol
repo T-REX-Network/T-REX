@@ -63,106 +63,28 @@
 
 pragma solidity 0.8.30;
 
-library ErrorsLib {
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error InvalidImplementationAuthority();
-    error UnsupportedOperation();
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { IERC173 } from "../vendor/IERC173.sol";
 
-    // Token Errors
-    error AddressNotAgent(address agent);
-    error AgentNotAuthorized(address agent, string reason);
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DefaultAllowanceOptOutAlreadySet(address user, bool optOut);
-    error DefaultAllowanceAlreadySet(address spender, bool allowed);
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error NoTokenToRecover();
-    error RecoveryNotPossible();
-    error TokenNotAgentOfIdentityRegistry();
-    error UnverifiedIdentity();
+contract AccessManagerOwnable is IERC173, ERC165 {
 
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
+    /// @inheritdoc IERC173
+    /// @notice Cannot drive AccessManaged.setAuthority from a self-call
+    function transferOwnership(address) external pure {
+        revert ErrorsLib.UnsupportedOperation();
+    }
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
+    /// @inheritdoc IERC173
+    function owner() external view returns (address) {
+        return IAccessManaged(address(this)).authority();
+    }
 
-    // TREXGateway Errors
-    error SenderIsNotAdmin();
-    error PublicDeploymentAlreadyEnabled();
-    error PublicDeploymentAlreadyDisabled();
-    error DeploymentFeesAlreadyEnabled();
-    error DeploymentFeesAlreadyDisabled();
-    error DeployerAlreadyExists(address deployer);
-    error DeployerDoesNotExist(address deployer);
-    error PublicDeploymentsNotAllowed();
-    error PublicCannotDeployOnBehalf();
-    error DiscountOutOfRange();
-
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    error TokenAlreadyDeployed();
-
-    // Roles Errors
-    error AccountAlreadyHasRole();
-    error AccountDoesNotHaveRole();
-    error CallerDoesNotHaveAgentRole();
-
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
-
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
-
-    // TREXImplementationAuthority Errors
-    error CallerNotOwnerOfAllImpactedContracts();
-    error CannotCallOnReferenceContract();
-    error NewIAIsNotAReferenceContract();
-    error NonExistingVersion();
-    error OnlyReferenceContractCanCall();
-    error VersionAlreadyFetched();
-    error VersionAlreadyExists();
-    error VersionAlreadyInUse();
-    error VersionOfNewIAMustBeTheSameAsCurrentIA();
-
-    // AbstractProxy Errors
-    error OnlyCurrentImplementationAuthorityCanCall();
+    /// @inheritdoc ERC165
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
+    }
 
 }
