@@ -66,7 +66,7 @@ import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/acc
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
@@ -79,7 +79,7 @@ abstract contract AbstractModuleUpgradeable is
     Ownable2StepUpgradeable,
     UUPSUpgradeable,
     MulticallUpgradeable,
-    IERC165
+    ERC165Upgradeable
 {
 
     /// @custom:storage-location erc7201:ERC3643.storage.AbstractModule
@@ -159,13 +159,14 @@ abstract contract AbstractModuleUpgradeable is
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModule).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+            || super.supportsInterface(interfaceId);
     }
 
     function __AbstractModule_init() internal onlyInitializing {
         __Ownable_init(msg.sender);
+        __ERC165_init();
         __AbstractModule_init_unchained();
     }
 

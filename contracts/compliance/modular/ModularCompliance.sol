@@ -68,7 +68,7 @@ import {
     IAccessManager
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -80,7 +80,7 @@ import { IERC173 } from "../../vendor/IERC173.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessManagedUpgradeable, IERC165 {
+contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessManagedUpgradeable, ERC165Upgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -119,6 +119,7 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
 
         __Ownable_init(accessManagerAddress);
         __AccessManaged_init(accessManagerAddress);
+        __ERC165_init();
 
         _bindToken(tokenAddress);
 
@@ -277,10 +278,10 @@ contract ModularCompliance is IModularCompliance, OwnableUpgradeable, AccessMana
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
             || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+            || super.supportsInterface(interfaceId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.

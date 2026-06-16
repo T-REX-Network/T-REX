@@ -66,7 +66,7 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -75,7 +75,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { IERC173 } from "../../vendor/IERC173.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
-contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, OwnableUpgradeable, IERC165 {
+contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, OwnableUpgradeable, ERC165Upgradeable {
 
     using EnumerableSet for EnumerableSet.UintSet;
 
@@ -94,6 +94,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, 
     function init(address accessManagerAddress, uint256[] calldata initialTopics) external initializer {
         __Ownable_init(accessManagerAddress);
         __AccessManaged_init(accessManagerAddress);
+        __ERC165_init();
 
         for (uint256 i = 0; i < initialTopics.length; i++) {
             _addClaimTopic(initialTopics[i]);
@@ -126,9 +127,9 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedUpgradeable, 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+            || super.supportsInterface(interfaceId);
     }
 
     function _addClaimTopic(uint256 claimTopic) internal {

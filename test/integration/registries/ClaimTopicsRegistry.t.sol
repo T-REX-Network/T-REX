@@ -112,17 +112,17 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IERC3643ClaimTopicsRegistry interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643ClaimTopicsRegistry() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC3643ClaimTopicsRegistry() public view {
         assertTrue(claimTopicsRegistry.supportsInterface(type(IERC3643ClaimTopicsRegistry).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
         assertTrue(claimTopicsRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
         assertTrue(claimTopicsRegistry.supportsInterface(type(IERC165).interfaceId));
     }
 

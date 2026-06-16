@@ -68,9 +68,9 @@ import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "./TREXImplementationAuthority.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-contract IAFactory is IIAFactory, IERC165 {
+contract IAFactory is IIAFactory, ERC165 {
 
     /// variables
     /// address of the trex factory
@@ -117,8 +117,8 @@ contract IAFactory is IIAFactory, IERC165 {
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IIAFactory).interfaceId || interfaceId == type(IERC165).interfaceId;
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IIAFactory).interfaceId || super.supportsInterface(interfaceId);
     }
 
 }

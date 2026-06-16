@@ -69,7 +69,7 @@ import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
@@ -84,7 +84,7 @@ import { IIdentityRegistry } from "../interface/IIdentityRegistry.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, OwnableUpgradeable, IERC165 {
+contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, OwnableUpgradeable, ERC165Upgradeable {
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistry
     struct Storage {
@@ -126,6 +126,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, Ownabl
 
         __AccessManaged_init(accessManagerAddress);
         __Ownable_init(accessManagerAddress);
+        __ERC165_init();
     }
 
     /**
@@ -319,10 +320,10 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, Ownabl
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IIdentityRegistry).interfaceId
             || interfaceId == type(IERC3643IdentityRegistry).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+            || super.supportsInterface(interfaceId);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

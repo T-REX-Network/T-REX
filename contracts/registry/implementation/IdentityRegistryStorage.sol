@@ -67,7 +67,7 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -75,7 +75,12 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { IERC173 } from "../../vendor/IERC173.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
-contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgradeable, OwnableUpgradeable, IERC165 {
+contract IdentityRegistryStorage is
+    IIdentityRegistryStorage,
+    AccessManagedUpgradeable,
+    OwnableUpgradeable,
+    ERC165Upgradeable
+{
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -104,6 +109,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgra
     function init(address accessManagerAddress, address initialIRAddress) external initializer {
         __AccessManaged_init(accessManagerAddress);
         __Ownable_init(accessManagerAddress);
+        __ERC165_init();
 
         if (initialIRAddress != address(0)) {
             _bindIdentityRegistry(initialIRAddress);
@@ -200,9 +206,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgra
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId
-            || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
+            || interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _bindIdentityRegistry(address _identityRegistry) internal {

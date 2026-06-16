@@ -331,17 +331,17 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IERC3643TrustedIssuersRegistry interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643TrustedIssuersRegistry() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC3643TrustedIssuersRegistry() public view {
         assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC3643TrustedIssuersRegistry).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
         assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
         assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC165).interfaceId));
     }
 

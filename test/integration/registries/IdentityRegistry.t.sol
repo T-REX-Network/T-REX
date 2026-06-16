@@ -335,22 +335,22 @@ contract IdentityRegistryTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IIdentityRegistry interface ID
-    function test_supportsInterface_ReturnsTrue_ForIIdentityRegistry() public {
+    function test_supportsInterface_ReturnsTrue_ForIIdentityRegistry() public view {
         assertTrue(identityRegistry.supportsInterface(type(IIdentityRegistry).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC3643IdentityRegistry interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistry() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistry() public view {
         assertTrue(identityRegistry.supportsInterface(type(IERC3643IdentityRegistry).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
         assertTrue(identityRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
         assertTrue(identityRegistry.supportsInterface(type(IERC165).interfaceId));
     }
 

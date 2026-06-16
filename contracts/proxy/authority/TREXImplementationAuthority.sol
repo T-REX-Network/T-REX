@@ -64,7 +64,7 @@ pragma solidity 0.8.30;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
 import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
@@ -76,7 +76,7 @@ import { IProxy } from "../interface/IProxy.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 
-contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, AccessManaged, IERC165 {
+contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, AccessManaged, ERC165 {
 
     /// current version
     Version private _currentVersion;
@@ -348,9 +348,9 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, Ownable, A
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(ITREXImplementationAuthority).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+            || super.supportsInterface(interfaceId);
     }
 
     /**

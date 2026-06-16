@@ -685,22 +685,22 @@ contract ComplianceTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IModularCompliance interface ID
-    function test_supportsInterface_ReturnsTrue_ForIModularCompliance() public {
+    function test_supportsInterface_ReturnsTrue_ForIModularCompliance() public view {
         assertTrue(compliance.supportsInterface(type(IModularCompliance).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC3643Compliance interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643Compliance() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC3643Compliance() public view {
         assertTrue(compliance.supportsInterface(type(IERC3643Compliance).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
         assertTrue(compliance.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
         assertTrue(compliance.supportsInterface(type(IERC165).interfaceId));
     }
 

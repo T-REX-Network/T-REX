@@ -79,7 +79,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
@@ -94,8 +94,8 @@ contract Token is
     PausableUpgradeable,
     AccessManagedUpgradeable,
     OwnableUpgradeable,
-    IERC3643,
-    IERC165
+    ERC165Upgradeable,
+    IERC3643
 {
 
     string internal constant VERSION = "5.0.0";
@@ -146,6 +146,7 @@ contract Token is
         __Pausable_init();
         __Ownable_init(accessManagerAddress);
         __AccessManaged_init(accessManagerAddress);
+        __ERC165_init();
 
         TokenStorage storage s = _tokenStorage();
         s.name = tokenName;
@@ -488,11 +489,11 @@ contract Token is
 
     /* ----- Utility Functions ----- */
 
-    /// @inheritdoc IERC165
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    /// @inheritdoc ERC165Upgradeable
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
-            || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId
-            || interfaceId == type(IERC20Permit).interfaceId;
+            || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC20Permit).interfaceId
+            || super.supportsInterface(interfaceId);
     }
 
     function _tokenStorage() private pure returns (TokenStorage storage $) {

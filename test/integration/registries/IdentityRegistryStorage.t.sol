@@ -251,17 +251,17 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IERC3643IdentityRegistryStorage interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistryStorage() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistryStorage() public view {
         assertTrue(identityRegistryStorage.supportsInterface(type(IERC3643IdentityRegistryStorage).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
         assertTrue(identityRegistryStorage.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
         assertTrue(identityRegistryStorage.supportsInterface(type(IERC165).interfaceId));
     }
 
