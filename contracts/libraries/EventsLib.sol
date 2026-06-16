@@ -89,7 +89,6 @@ library EventsLib {
     );
     event DefaultAllowanceUpdated(address to, bool allowance, address updater);
     event DefaultAllowanceOptOutUpdated(address user, bool optOut);
-    event TrustedForwarderSet(address indexed trustedForwarder);
 
     // ModularCompliance Events
 

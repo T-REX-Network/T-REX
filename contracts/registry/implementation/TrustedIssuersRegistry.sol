@@ -129,10 +129,10 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgrade
         Storage storage s = _getStorage();
         require(s.trustedIssuers.remove(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
 
-        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         uint256[] memory claimTopics = issuerTopics.values();
         for (uint256 i = 0; i < claimTopics.length; i++) {
-            s.claimTopicsToTrustedIssuers[claimTopics[i]].remove(address(_trustedIssuer));
+            s.claimTopicsToTrustedIssuers[claimTopics[i]].remove(_trustedIssuer);
         }
         issuerTopics.clear();
 
@@ -212,15 +212,15 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgrade
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
-        require(!s.trustedIssuers.contains(address(_trustedIssuer)), ErrorsLib.TrustedIssuerAlreadyExists());
+        require(!s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.TrustedIssuerAlreadyExists());
         require(_claimTopics.length > 0, ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
         require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopicsReached(15));
         require(s.trustedIssuers.length() < 50, ErrorsLib.MaxTrustedIssuersReached(50));
-        s.trustedIssuers.add(address(_trustedIssuer));
-        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        s.trustedIssuers.add(_trustedIssuer);
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         for (uint256 i = 0; i < _claimTopics.length; i++) {
             issuerTopics.add(_claimTopics[i]);
-            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(address(_trustedIssuer));
+            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
         }
 
         // This event will re-emit eventual duplicated _claimTopics.
@@ -229,7 +229,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgrade
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
-        assembly {
+        assembly ("memory-safe") {
             s.slot := STORAGE_LOCATION
         }
     }

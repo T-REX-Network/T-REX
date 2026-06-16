@@ -113,8 +113,6 @@ contract Token is
         address onchainId;
         IERC3643Compliance compliance;
         IERC3643IdentityRegistry identityRegistry;
-        address trustedForwarder;
-
         mapping(address user => FrozenStatus) frozenStatus;
     }
 
@@ -488,11 +486,11 @@ contract Token is
     function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
             || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId
-            || interfaceId == type(IERC3643).interfaceId || interfaceId == type(IERC20Permit).interfaceId;
+            || interfaceId == type(IERC20Permit).interfaceId;
     }
 
     function _tokenStorage() private pure returns (TokenStorage storage $) {
-        assembly {
+        assembly ("memory-safe") {
             $.slot := TOKEN_STORAGE_LOCATION
         }
     }

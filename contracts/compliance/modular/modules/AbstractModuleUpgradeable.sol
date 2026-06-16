@@ -181,7 +181,7 @@ abstract contract AbstractModuleUpgradeable is
     { }
 
     function _getAbstractModuleStorage() private pure returns (AbstractModuleStorage storage s) {
-        assembly {
+        assembly ("memory-safe") {
             s.slot := _ABSTRACT_MODULE_STORAGE_LOCATION
         }
     }
