@@ -70,26 +70,6 @@ library EventsLib {
 
     event ImplementationAuthoritySet(address implementationAuthority);
 
-    // AgentRole / AgentRoleUpgradeable Events
-
-    event AgentAdded(address indexed agent);
-    event AgentRemoved(address indexed agent);
-
-    // Token Events
-
-    event AgentRestrictionsSet(
-        address indexed agent,
-        bool disableMint,
-        bool disableBurn,
-        bool disableAddressFreeze,
-        bool disableForceTransfer,
-        bool disablePartialFreeze,
-        bool disablePause,
-        bool disableRecovery
-    );
-    event DefaultAllowanceUpdated(address to, bool allowance, address updater);
-    event DefaultAllowanceOptOutUpdated(address user, bool optOut);
-
     // ModularCompliance Events
 
     event ModuleInteraction(address indexed target, bytes4 selector);
@@ -113,17 +93,6 @@ library EventsLib {
     event TREXSuiteDeployed(
         address indexed token, address ir, address irs, address tir, address ctr, address mc, string salt
     );
-
-    // TREXGateway Events
-
-    event FactorySet(address indexed factory);
-    event PublicDeploymentStatusSet(bool indexed publicDeploymentStatus);
-    event DeploymentFeeSet(uint256 indexed fee, address indexed feeToken, address indexed feeCollector);
-    event DeploymentFeeEnabled(bool indexed isEnabled);
-    event DeployerAdded(address indexed deployer);
-    event DeployerRemoved(address indexed deployer);
-    event FeeDiscountApplied(address indexed deployer, uint16 discount);
-    event GatewaySuiteDeploymentProcessed(address indexed requester, address intendedOwner, uint256 feeApplied);
 
     // TREXImplementationAuthority Events
 

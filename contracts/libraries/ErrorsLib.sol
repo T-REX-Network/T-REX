@@ -70,15 +70,10 @@ library ErrorsLib {
     error ZeroValue();
     error ArraySizeLimited(uint256 maxSize);
     error InvalidImplementationAuthority();
-    error UnsupportedOperation();
 
     // Token Errors
-    error AddressNotAgent(address agent);
-    error AgentNotAuthorized(address agent, string reason);
     error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
     error ComplianceNotFollowed();
-    error DefaultAllowanceOptOutAlreadySet(address user, bool optOut);
-    error DefaultAllowanceAlreadySet(address spender, bool allowed);
     error DecimalsOutOfRange(uint256 decimals);
     error EmptyString();
     error FrozenWallet(address user);
@@ -104,18 +99,6 @@ library ErrorsLib {
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
 
-    // TREXGateway Errors
-    error SenderIsNotAdmin();
-    error PublicDeploymentAlreadyEnabled();
-    error PublicDeploymentAlreadyDisabled();
-    error DeploymentFeesAlreadyEnabled();
-    error DeploymentFeesAlreadyDisabled();
-    error DeployerAlreadyExists(address deployer);
-    error DeployerDoesNotExist(address deployer);
-    error PublicDeploymentsNotAllowed();
-    error PublicCannotDeployOnBehalf();
-    error DiscountOutOfRange();
-
     // TREXFactory Errors
     error AuthorityMismatch();
     error InvalidClaimPattern();
@@ -123,11 +106,6 @@ library ErrorsLib {
     error MaxClaimIssuersReached(uint256 max);
     error MaxAgentsReached(uint256 max);
     error TokenAlreadyDeployed();
-
-    // Roles Errors
-    error AccountAlreadyHasRole();
-    error AccountDoesNotHaveRole();
-    error CallerDoesNotHaveAgentRole();
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
@@ -152,7 +130,6 @@ library ErrorsLib {
     error TrustedIssuerDoesNotExist();
 
     // TREXImplementationAuthority Errors
-    error CallerNotOwnerOfAllImpactedContracts();
     error CannotCallOnReferenceContract();
     error NewIAIsNotAReferenceContract();
     error NonExistingVersion();
