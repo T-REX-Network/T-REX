@@ -186,9 +186,8 @@ contract TestModule is AbstractModuleUpgradeable {
     function invokeOnlyBoundCompliance(address _compliance) external onlyBoundCompliance(_compliance) { }
 
     /// @dev Upgrade guard: only the upgrade admin may authorize an upgrade.
-    function _authorizeUpgrade(address newImplementation) internal virtual override {
+    function _authorizeUpgrade(address) internal virtual override {
         require(msg.sender == _upgradeAdmin, ErrorsLib.NotUpgradeAdmin());
-        super._authorizeUpgrade(newImplementation);
     }
 
     // Fallback function to accept any callData (used for testing _selector with short callData)

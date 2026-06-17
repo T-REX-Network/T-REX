@@ -153,4 +153,7 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
         return "ModuleNotPnP";
     }
 
+    /// @dev Upgrade guard: no-op in this test mock.
+    function _authorizeUpgrade(address) internal override { }
+
 }

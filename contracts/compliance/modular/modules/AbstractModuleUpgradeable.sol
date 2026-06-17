@@ -167,15 +167,6 @@ abstract contract AbstractModuleUpgradeable is
 
     function __AbstractModule_init_unchained() internal onlyInitializing { }
 
-    /// @dev UUPS upgrade guard. Concrete modules must override this and enforce their own access control.
-    function _authorizeUpgrade(
-        address /*newImplementation*/
-    )
-        internal
-        virtual
-        override
-    { }
-
     function _getAbstractModuleStorage() private pure returns (AbstractModuleStorage storage s) {
         assembly ("memory-safe") {
             s.slot := _ABSTRACT_MODULE_STORAGE_LOCATION
