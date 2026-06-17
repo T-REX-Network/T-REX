@@ -190,10 +190,11 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
     }
 
-    /// @notice Should revert when identity registry is zero address
+    /// @notice Should revert when identity registry is zero address. The onlySharedAuthority guard rejects
+    ///         address(0) (it cannot share the storage's authority) before the in-body ZeroAddress check.
     function test_bindIdentityRegistry_RevertWhen_ZeroAddress() public {
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         identityRegistryStorage.bindIdentityRegistry(address(0));
     }
 
@@ -204,21 +205,39 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // When length is 300, we cannot add more (301st should fail)
         for (uint256 i = 1; i < 300; i++) {
             address registryAddress = vm.addr(i + 1000);
+            // bindIdentityRegistry is gated by onlySharedAuthority: each registry must report the storage's
+            // AccessManager as its authority.
+            vm.mockCall(
+                registryAddress,
+                abi.encodeWithSelector(IAccessManaged.authority.selector),
+                abi.encode(address(accessManager))
+            );
             vm.prank(deployer);
             identityRegistryStorage.bindIdentityRegistry(registryAddress);
         }
 
-        // Try to add 301st registry (should fail, length is now 300, not < 300)
+        // Try to add 301st registry (should fail, length is now 300, not < 300). It must also share the
+        // authority so it reaches the count check rather than reverting on onlySharedAuthority first.
+        address extraRegistry = vm.addr(2000);
+        vm.mockCall(
+            extraRegistry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, 300));
-        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+        identityRegistryStorage.bindIdentityRegistry(extraRegistry);
     }
 
     // ============ unbindIdentityRegistry() Tests ============
 
     /// @notice Should revert when sender is not owner
     function test_unbindIdentityRegistry_RevertWhen_NotOwner() public {
-        // Bind first
+        // Bind first. bindIdentityRegistry is gated by onlySharedAuthority, so the bound address must report
+        // the storage's AccessManager as its authority.
+        vm.mockCall(
+            address(charlieIdentity),
+            abi.encodeWithSelector(IAccessManaged.authority.selector),
+            abi.encode(address(accessManager))
+        );
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
 

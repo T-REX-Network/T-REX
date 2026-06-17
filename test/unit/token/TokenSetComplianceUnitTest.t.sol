@@ -27,6 +27,12 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         super.setUp();
 
         accessManager.grantRole(RolesLib.IDENTITY_MANAGER, address(this), 0);
+
+        // setCompliance is guarded by onlySharedAuthority(compliance): the new compliance must report the
+        // same AccessManager authority as the Token, so the mock advertises the suite's AccessManager.
+        vm.mockCall(
+            newCompliance, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
     }
 
     function testTokenSetComplianceRevertsWhenUnauthorized(address caller) public {
@@ -47,7 +53,9 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenSetComplianceRevertsWhenZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        // The onlySharedAuthority guard rejects the zero address before the in-body ZeroAddress check,
+        // since address(0) cannot share the Token's authority.
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         token.setCompliance(address(0));
     }
 
@@ -61,16 +69,15 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         token.setCompliance(newCompliance);
     }
 
-    function testTokenSetComplianceSucceedsWhenAlreadyBoundToThisToken() public {
+    function testTokenSetComplianceRevertsWhenAlreadyBoundToThisToken() public {
+        // A compliance already bound to a token is rejected even when that token is this one: the new
+        // compliance must be completely unbound (getTokenBound() == address(0)).
         vm.mockCall(
             newCompliance, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(token))
         );
 
-        vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.ComplianceAdded(newCompliance);
+        vm.expectRevert(ErrorsLib.ComplianceAlreadyBoundToToken.selector);
         token.setCompliance(newCompliance);
-
-        assertEq(address(token.compliance()), newCompliance);
     }
 
     function testTokenSetComplianceNominal() public {

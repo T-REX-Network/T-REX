@@ -13,7 +13,10 @@ import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { ClaimTopicsRegistryProxy } from "contracts/proxy/ClaimTopicsRegistryProxy.sol";
 import { IdentityRegistryProxy } from "contracts/proxy/IdentityRegistryProxy.sol";
+import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
+import { TrustedIssuersRegistryProxy } from "contracts/proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
@@ -278,14 +281,19 @@ contract IdentityRegistryTest is TREXSuiteTest {
         identityRegistry.setIdentityRegistryStorage(address(0));
     }
 
-    /// @notice Should set the identity registry storage
+    /// @notice Should set the identity registry storage. The replacement must share the registry's
+    ///         AccessManager authority (onlySharedAuthority), so a sibling IRS proxy is deployed against it.
     function test_setIdentityRegistryStorage_Success() public {
+        address newStorage = address(
+            new IdentityRegistryStorageProxy(address(trexImplementationAuthority), address(accessManager), address(0))
+        );
+
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.IdentityStorageSet(address(0));
-        identityRegistry.setIdentityRegistryStorage(address(0));
+        emit ERC3643EventsLib.IdentityStorageSet(newStorage);
+        identityRegistry.setIdentityRegistryStorage(newStorage);
 
-        assertEq(address(identityRegistry.identityStorage()), address(0));
+        assertEq(address(identityRegistry.identityStorage()), newStorage);
     }
 
     // ============ setClaimTopicsRegistry() Tests ============
@@ -297,14 +305,19 @@ contract IdentityRegistryTest is TREXSuiteTest {
         identityRegistry.setClaimTopicsRegistry(address(0));
     }
 
-    /// @notice Should set the claim topics registry
+    /// @notice Should set the claim topics registry. The replacement must share the registry's AccessManager
+    ///         authority (onlySharedAuthority), so a sibling CTR proxy is deployed against it.
     function test_setClaimTopicsRegistry_Success() public {
+        address newRegistry = address(
+            new ClaimTopicsRegistryProxy(address(trexImplementationAuthority), address(accessManager), new uint256[](0))
+        );
+
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.ClaimTopicsRegistrySet(address(0));
-        identityRegistry.setClaimTopicsRegistry(address(0));
+        emit ERC3643EventsLib.ClaimTopicsRegistrySet(newRegistry);
+        identityRegistry.setClaimTopicsRegistry(newRegistry);
 
-        assertEq(address(identityRegistry.topicsRegistry()), address(0));
+        assertEq(address(identityRegistry.topicsRegistry()), newRegistry);
     }
 
     // ============ setTrustedIssuersRegistry() Tests ============
@@ -316,14 +329,21 @@ contract IdentityRegistryTest is TREXSuiteTest {
         identityRegistry.setTrustedIssuersRegistry(address(0));
     }
 
-    /// @notice Should set the trusted issuers registry
+    /// @notice Should set the trusted issuers registry. The replacement must share the registry's
+    ///         AccessManager authority (onlySharedAuthority), so a sibling TIR proxy is deployed against it.
     function test_setTrustedIssuersRegistry_Success() public {
+        address newRegistry = address(
+            new TrustedIssuersRegistryProxy(
+                address(trexImplementationAuthority), address(accessManager), new address[](0), new uint256[][](0)
+            )
+        );
+
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.TrustedIssuersRegistrySet(address(0));
-        identityRegistry.setTrustedIssuersRegistry(address(0));
+        emit ERC3643EventsLib.TrustedIssuersRegistrySet(newRegistry);
+        identityRegistry.setTrustedIssuersRegistry(newRegistry);
 
-        assertEq(address(identityRegistry.issuersRegistry()), address(0));
+        assertEq(address(identityRegistry.issuersRegistry()), newRegistry);
     }
 
     // ============ supportsInterface() Tests ============

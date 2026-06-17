@@ -29,7 +29,9 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenSetIdentityRegistryRevertsWhenZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        // The onlySharedAuthority guard rejects the zero address before the in-body ZeroAddress check,
+        // since address(0) cannot share the Token's authority.
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         token.setIdentityRegistry(address(0));
     }
 

@@ -40,8 +40,10 @@ contract TokenTransferTest is TREXSuiteTest {
         ModuleProxy testModuleProxy = new ModuleProxy(address(testModuleImplementation), moduleInitData);
         TestModule testModule = TestModule(address(testModuleProxy));
 
-        // Add module to compliance
-        ModularCompliance compliance = ModularCompliance(address(token.compliance()));
+        // Deploy a fresh, unbound compliance (sharing the suite AccessManager) and add the module to it.
+        // The token's existing compliance is already bound, so setCompliance would reject it; an unbound
+        // compliance lets the caller perform a real compliance swap via setCompliance.
+        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         vm.prank(deployer);
         compliance.addModule(address(testModule));
 

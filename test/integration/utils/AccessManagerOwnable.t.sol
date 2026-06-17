@@ -4,7 +4,6 @@ pragma solidity 0.8.30;
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -52,25 +51,27 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
 
     // ============ transferOwnership() Tests ============
 
-    /// @notice transferOwnership() is unsupported: authority changes flow through the AccessManager,
-    ///         so any call reverts with UnsupportedOperation regardless of the argument or caller.
-    function test_transferOwnership_RevertWhen_Called() public {
+    /// @notice transferOwnership() forwards to AccessManaged.setAuthority, which only the current authority
+    ///         (the AccessManager) may drive. A call from anyone else reverts with AccessManagedUnauthorized.
+    function test_transferOwnership_RevertWhen_NotAuthority() public {
         AccessManager newAuthority = new AccessManager(address(this));
         IERC173[] memory contractsList = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
             vm.prank(deployer);
-            vm.expectRevert(ErrorsLib.UnsupportedOperation.selector);
+            vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, deployer));
             contractsList[i].transferOwnership(address(newAuthority));
         }
     }
 
-    /// @notice transferOwnership() reverts even with the zero address, before touching any authority.
-    function test_transferOwnership_RevertWhen_ZeroAddress() public {
+    /// @notice When the current authority drives transferOwnership, the authority is rotated and owner()
+    ///         reflects the new AccessManager.
+    function test_transferOwnership_Success_WhenCalledByAuthority() public {
+        AccessManager newAuthority = new AccessManager(address(this));
         IERC173[] memory contractsList = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
-            vm.prank(deployer);
-            vm.expectRevert(ErrorsLib.UnsupportedOperation.selector);
-            contractsList[i].transferOwnership(address(0));
+            vm.prank(address(accessManager));
+            contractsList[i].transferOwnership(address(newAuthority));
+            assertEq(contractsList[i].owner(), address(newAuthority));
         }
     }
 
