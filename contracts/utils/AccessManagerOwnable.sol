@@ -63,28 +63,39 @@
 
 pragma solidity 0.8.30;
 
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { IERC173 } from "../vendor/IERC173.sol";
 
-contract AccessManagerOwnable is IERC173, ERC165 {
+abstract contract AccessManagerOwnable is AccessManagedUpgradeable, IERC173, ERC165 {
+
+    modifier onlySharedAuthority(address other) {
+        _checkSharedAuthority(other);
+        _;
+    }
 
     /// @inheritdoc IERC173
-    /// @notice Cannot drive AccessManaged.setAuthority from a self-call
-    function transferOwnership(address) external pure {
-        revert ErrorsLib.UnsupportedOperation();
+    function transferOwnership(address newAuthority) external {
+        super.setAuthority(newAuthority);
     }
 
     /// @inheritdoc IERC173
     function owner() external view returns (address) {
-        return IAccessManaged(address(this)).authority();
+        return authority();
     }
 
     /// @inheritdoc ERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    function _checkSharedAuthority(address other) internal view {
+        require(other != address(0) && IAccessManaged(other).authority() == authority(), ErrorsLib.AuthorityMismatch());
     }
 
 }

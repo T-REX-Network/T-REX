@@ -63,9 +63,6 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import {
-    AccessManagedUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -73,7 +70,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
-contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgradeable, AccessManagerOwnable {
+contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagerOwnable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -159,8 +156,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedUpgra
     /**
      *  @dev See {IIdentityRegistryStorage-bindIdentityRegistry}.
      */
-    function bindIdentityRegistry(address _identityRegistry) external restricted {
-        _bindIdentityRegistry(_identityRegistry);
+    function bindIdentityRegistry(address identityRegistry) external restricted onlySharedAuthority(identityRegistry) {
+        _bindIdentityRegistry(identityRegistry);
     }
 
     /**

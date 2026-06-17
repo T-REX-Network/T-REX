@@ -63,9 +63,6 @@
 
 pragma solidity 0.8.30;
 
-import {
-    AccessManagedUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -74,7 +71,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedUpgradeable, AccessManagerOwnable {
+contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagerOwnable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.UintSet;

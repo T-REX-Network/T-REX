@@ -65,9 +65,6 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import {
-    AccessManagedUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import {
     ERC20PermitUpgradeable,
     ERC20Upgradeable,
     IERC20Permit
@@ -84,16 +81,9 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
-import { EventsLib } from "../libraries/EventsLib.sol";
 import { AccessManagerOwnable } from "../utils/AccessManagerOwnable.sol";
 
-contract Token is
-    ERC20PermitUpgradeable,
-    PausableUpgradeable,
-    AccessManagedUpgradeable,
-    AccessManagerOwnable,
-    IERC3643
-{
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwnable, IERC3643 {
 
     string internal constant VERSION = "5.0.0";
 
@@ -182,39 +172,42 @@ contract Token is
     }
 
     /// @inheritdoc IERC3643
-    function setIdentityRegistry(address _identityRegistry) public restricted {
-        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
+    function setIdentityRegistry(address identityRegistryAddress)
+        public
+        restricted
+        onlySharedAuthority(identityRegistryAddress)
+    {
+        require(identityRegistryAddress != address(0), ErrorsLib.ZeroAddress());
 
         // The new Identity Registry must already authorize this Token (through its AccessManager) to call
         // registerIdentity/deleteIdentity, otherwise wallet recovery would silently revert the first time it is needed.
-        IAccessManager manager = IAccessManager(IAccessManaged(_identityRegistry).authority());
+        IAccessManager manager = IAccessManager(IAccessManaged(identityRegistryAddress).authority());
         (bool canRegister,) =
-            manager.canCall(address(this), _identityRegistry, IERC3643IdentityRegistry.registerIdentity.selector);
+            manager.canCall(address(this), identityRegistryAddress, IERC3643IdentityRegistry.registerIdentity.selector);
         (bool canDelete,) =
-            manager.canCall(address(this), _identityRegistry, IERC3643IdentityRegistry.deleteIdentity.selector);
+            manager.canCall(address(this), identityRegistryAddress, IERC3643IdentityRegistry.deleteIdentity.selector);
         require(canRegister && canDelete, ErrorsLib.TokenNotAgentOfIdentityRegistry());
 
-        _tokenStorage().identityRegistry = IERC3643IdentityRegistry(_identityRegistry);
-        emit ERC3643EventsLib.IdentityRegistryAdded(_identityRegistry);
+        _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
     /// @inheritdoc IERC3643
-    function setCompliance(address _compliance) public restricted {
-        require(_compliance != address(0), ErrorsLib.ZeroAddress());
+    function setCompliance(address complianceAddress) public restricted onlySharedAuthority(complianceAddress) {
+        require(complianceAddress != address(0), ErrorsLib.ZeroAddress());
 
-        // The new compliance must be free to bind to this Token: either unbound, or already bound to it.
         // A compliance already bound to a different token would make every transferred/created/destroyed
         // hook revert (onlyBoundedToken), silently breaking transfers after the swap.
-        address boundToken = IERC3643Compliance(_compliance).getTokenBound();
-        require(boundToken == address(0) || boundToken == address(this), ErrorsLib.ComplianceAlreadyBoundToToken());
+        address boundToken = IERC3643Compliance(complianceAddress).getTokenBound();
+        require(boundToken == address(0), ErrorsLib.ComplianceAlreadyBoundToToken());
 
         TokenStorage storage s = _tokenStorage();
         if (address(s.compliance) != address(0)) {
             s.compliance.unbindToken(address(this));
         }
-        s.compliance = IERC3643Compliance(_compliance);
+        s.compliance = IERC3643Compliance(complianceAddress);
         s.compliance.bindToken(address(this));
-        emit ERC3643EventsLib.ComplianceAdded(_compliance);
+        emit ERC3643EventsLib.ComplianceAdded(complianceAddress);
     }
 
     /// @inheritdoc IERC20Metadata

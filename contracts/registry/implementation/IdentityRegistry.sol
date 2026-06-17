@@ -64,9 +64,6 @@ pragma solidity 0.8.30;
 
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import {
-    AccessManagedUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -82,7 +79,7 @@ import { IIdentityRegistry } from "../interface/IIdentityRegistry.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, AccessManagerOwnable {
+contract IdentityRegistry is IIdentityRegistry, AccessManagerOwnable {
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistry
     struct Storage {
@@ -167,25 +164,37 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedUpgradeable, Access
     /**
      *  @dev See {IIdentityRegistry-setIdentityRegistryStorage}.
      */
-    function setIdentityRegistryStorage(address _identityRegistryStorage) external restricted {
-        _getStorage().tokenIdentityStorage = IIdentityRegistryStorage(_identityRegistryStorage);
-        emit ERC3643EventsLib.IdentityStorageSet(_identityRegistryStorage);
+    function setIdentityRegistryStorage(address identityRegistryStorage)
+        external
+        restricted
+        onlySharedAuthority(identityRegistryStorage)
+    {
+        _getStorage().tokenIdentityStorage = IIdentityRegistryStorage(identityRegistryStorage);
+        emit ERC3643EventsLib.IdentityStorageSet(identityRegistryStorage);
     }
 
     /**
      *  @dev See {IIdentityRegistry-setClaimTopicsRegistry}.
      */
-    function setClaimTopicsRegistry(address _claimTopicsRegistry) external restricted {
-        _getStorage().tokenTopicsRegistry = IClaimTopicsRegistry(_claimTopicsRegistry);
-        emit ERC3643EventsLib.ClaimTopicsRegistrySet(_claimTopicsRegistry);
+    function setClaimTopicsRegistry(address claimTopicsRegistry)
+        external
+        restricted
+        onlySharedAuthority(claimTopicsRegistry)
+    {
+        _getStorage().tokenTopicsRegistry = IClaimTopicsRegistry(claimTopicsRegistry);
+        emit ERC3643EventsLib.ClaimTopicsRegistrySet(claimTopicsRegistry);
     }
 
     /**
      *  @dev See {IIdentityRegistry-setTrustedIssuersRegistry}.
      */
-    function setTrustedIssuersRegistry(address _trustedIssuersRegistry) external restricted {
-        _getStorage().tokenIssuersRegistry = ITrustedIssuersRegistry(_trustedIssuersRegistry);
-        emit ERC3643EventsLib.TrustedIssuersRegistrySet(_trustedIssuersRegistry);
+    function setTrustedIssuersRegistry(address trustedIssuersRegistry)
+        external
+        restricted
+        onlySharedAuthority(trustedIssuersRegistry)
+    {
+        _getStorage().tokenIssuersRegistry = ITrustedIssuersRegistry(trustedIssuersRegistry);
+        emit ERC3643EventsLib.TrustedIssuersRegistrySet(trustedIssuersRegistry);
     }
 
     /**

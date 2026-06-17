@@ -62,8 +62,6 @@
 
 pragma solidity 0.8.30;
 
-import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
-
 import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ITREXFactory } from "../../factory/ITREXFactory.sol";
@@ -74,7 +72,7 @@ import { IProxy } from "../interface/IProxy.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 
-contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessManaged, AccessManagerOwnable {
+contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessManagerOwnable {
 
     /// current version
     Version private _currentVersion;
@@ -103,9 +101,8 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
      *  emits `ImplementationAuthoritySet` event
      *  emits a `IAFactorySet` event
      */
-    constructor(bool referenceStatus, address trexFactory, address iaFactory, address accessManager)
-        AccessManaged(accessManager)
-    {
+    constructor(bool referenceStatus, address trexFactory, address iaFactory, address accessManager) {
+        _setAuthority(accessManager);
         _reference = referenceStatus;
         _trexFactory = trexFactory;
         _iaFactory = iaFactory;
