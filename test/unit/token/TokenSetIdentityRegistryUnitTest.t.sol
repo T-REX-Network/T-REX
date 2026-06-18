@@ -51,15 +51,4 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
         assertEq(address(token.identityRegistry()), newIdentityRegistry);
     }
 
-    function testTokenSetIdentityRegistryRevertsWhenTokenNotAgent() public {
-        vm.mockCall(
-            newIdentityRegistry,
-            abi.encodeWithSelector(IAccessManaged.authority.selector),
-            abi.encode(address(accessManager))
-        );
-
-        vm.expectRevert(ErrorsLib.TokenNotAgentOfIdentityRegistry.selector);
-        token.setIdentityRegistry(newIdentityRegistry);
-    }
-
 }

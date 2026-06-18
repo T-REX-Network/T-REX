@@ -119,17 +119,6 @@ contract TokenInformationTest is TREXSuiteTest {
     }
 
     /// @notice Should revert when the new Identity Registry does not authorize the token for recovery calls
-    function test_setIdentityRegistry_RevertWhen_TokenNotAgentOfNewIR() public {
-        address fakeIR = makeAddr("fakeIR");
-        vm.mockCall(
-            fakeIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TokenNotAgentOfIdentityRegistry.selector);
-        token.setIdentityRegistry(fakeIR);
-    }
-
     /// @notice Should swap to a new Identity Registry that authorizes the token through the shared AccessManager
     function test_setIdentityRegistry_Success() public {
         Token secondToken = _deployToken("token2", "Second Token", "TK2");

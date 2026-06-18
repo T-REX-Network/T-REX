@@ -63,82 +63,48 @@
 
 pragma solidity 0.8.30;
 
-library ErrorsLib {
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error InvalidImplementationAuthority();
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { IERC173 } from "../vendor/IERC173.sol";
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error NoTokenToRecover();
-    error RecoveryNotPossible();
-    error UnverifiedIdentity();
+/// @dev Shared IERC173 ownership surface layered on top of an AccessManager-backed authority.
+///      Concrete contracts mix this with either `AccessManaged` or `AccessManagedUpgradeable`,
+///      which supply `authority()` and the public `setAuthority` routed through `_updateAuthority`.
+abstract contract AccessManagerOwnableBase is IERC173, ERC165 {
 
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
+    modifier onlySharedAuthority(address other) {
+        _checkSharedAuthority(other);
+        _;
+    }
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
+    /// @inheritdoc IERC173
+    function transferOwnership(address newAuthority) external {
+        address oldAuthority = authority();
+        _updateAuthority(newAuthority);
 
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    error TokenAlreadyDeployed();
+        emit OwnershipTransferred(oldAuthority, newAuthority);
+    }
 
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
+    /// @inheritdoc IERC173
+    function owner() external view returns (address) {
+        return authority();
+    }
 
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
+    /// @inheritdoc ERC165
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
+    }
 
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
+    function _checkSharedAuthority(address other) internal view {
+        require(other != address(0) && IAccessManaged(other).authority() == authority(), ErrorsLib.AuthorityMismatch());
+    }
 
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
+    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not).
+    function authority() public view virtual returns (address);
 
-    // TREXImplementationAuthority Errors
-    error CannotCallOnReferenceContract();
-    error NewIAIsNotAReferenceContract();
-    error NonExistingVersion();
-    error OnlyReferenceContractCanCall();
-    error VersionAlreadyFetched();
-    error VersionAlreadyExists();
-    error VersionAlreadyInUse();
-    error VersionOfNewIAMustBeTheSameAsCurrentIA();
-
-    // AbstractProxy Errors
-    error OnlyCurrentImplementationAuthorityCanCall();
+    /// @dev Routed to the AccessManaged public `setAuthority` so its caller/code checks still apply.
+    function _updateAuthority(address newAuthority) internal virtual;
 
 }

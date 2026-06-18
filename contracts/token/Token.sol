@@ -81,9 +81,10 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
-import { AccessManagerOwnable } from "../utils/AccessManagerOwnable.sol";
+import { AccessManagerOwnableBase } from "../utils/AccessManagerOwnableBase.sol";
+import { AccessManagerOwnableUpgradeable } from "../utils/AccessManagerOwnableUpgradeable.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwnable, IERC3643 {
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwnableUpgradeable, IERC3643 {
 
     string internal constant VERSION = "5.0.0";
 
@@ -177,25 +178,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwna
         restricted
         onlySharedAuthority(identityRegistryAddress)
     {
-        require(identityRegistryAddress != address(0), ErrorsLib.ZeroAddress());
-
-        // The new Identity Registry must already authorize this Token (through its AccessManager) to call
-        // registerIdentity/deleteIdentity, otherwise wallet recovery would silently revert the first time it is needed.
-        IAccessManager manager = IAccessManager(IAccessManaged(identityRegistryAddress).authority());
-        (bool canRegister,) =
-            manager.canCall(address(this), identityRegistryAddress, IERC3643IdentityRegistry.registerIdentity.selector);
-        (bool canDelete,) =
-            manager.canCall(address(this), identityRegistryAddress, IERC3643IdentityRegistry.deleteIdentity.selector);
-        require(canRegister && canDelete, ErrorsLib.TokenNotAgentOfIdentityRegistry());
-
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
         emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
     /// @inheritdoc IERC3643
     function setCompliance(address complianceAddress) public restricted onlySharedAuthority(complianceAddress) {
-        require(complianceAddress != address(0), ErrorsLib.ZeroAddress());
-
         // A compliance already bound to a different token would make every transferred/created/destroyed
         // hook revert (onlyBoundedToken), silently breaking transfers after the swap.
         address boundToken = IERC3643Compliance(complianceAddress).getTokenBound();
@@ -477,7 +465,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwna
 
     /* ----- Utility Functions ----- */
 
-    /// @inheritdoc AccessManagerOwnable
+    /// @inheritdoc AccessManagerOwnableBase
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
             || interfaceId == type(IERC20Permit).interfaceId || super.supportsInterface(interfaceId);

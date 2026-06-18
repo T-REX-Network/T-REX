@@ -63,39 +63,22 @@
 
 pragma solidity 0.8.30;
 
-import {
-    AccessManagedUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
-import { IERC173 } from "../vendor/IERC173.sol";
+import { AccessManagerOwnableBase } from "./AccessManagerOwnableBase.sol";
 
-abstract contract AccessManagerOwnable is AccessManagedUpgradeable, IERC173, ERC165 {
+abstract contract AccessManagerOwnable is AccessManaged, AccessManagerOwnableBase {
 
-    modifier onlySharedAuthority(address other) {
-        _checkSharedAuthority(other);
-        _;
+    constructor(address initialAuthority) AccessManaged(initialAuthority) { }
+
+    /// @inheritdoc AccessManagerOwnableBase
+    function authority() public view virtual override(AccessManaged, AccessManagerOwnableBase) returns (address) {
+        return super.authority();
     }
 
-    /// @inheritdoc IERC173
-    function transferOwnership(address newAuthority) external {
-        super.setAuthority(newAuthority);
-    }
-
-    /// @inheritdoc IERC173
-    function owner() external view returns (address) {
-        return authority();
-    }
-
-    /// @inheritdoc ERC165
-    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
-        return interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
-    }
-
-    function _checkSharedAuthority(address other) internal view {
-        require(other != address(0) && IAccessManaged(other).authority() == authority(), ErrorsLib.AuthorityMismatch());
+    /// @inheritdoc AccessManagerOwnableBase
+    function _updateAuthority(address newAuthority) internal override {
+        setAuthority(newAuthority);
     }
 
 }

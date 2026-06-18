@@ -67,10 +67,10 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
+import { AccessManagerOwnableUpgradeable } from "../../utils/AccessManagerOwnableUpgradeable.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
-contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagerOwnable {
+contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagerOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -200,7 +200,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagerOwnab
     }
 
     function _bindIdentityRegistry(address _identityRegistry) internal {
-        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
+        // Note: callers (init and bindIdentityRegistry) already reject the zero address before reaching
+        // here -- init via its `if (initialIRAddress != address(0))` guard, and the public
+        // bindIdentityRegistry via its `onlySharedAuthority` modifier -- so no zero-address check is needed.
         Storage storage s = _getStorage();
         require(s.identityRegistries.length() < 300, ErrorsLib.MaxIRByIRSReached(300));
 

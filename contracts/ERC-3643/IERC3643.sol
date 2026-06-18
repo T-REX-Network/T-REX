@@ -145,15 +145,9 @@ interface IERC3643 is IERC20, IERC20Metadata {
      *  @param _identityRegistry the address of the Identity Registry to set
      *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  emits an `IdentityRegistryAdded` event
-     *  @notice The provided Identity Registry must already authorize this Token (through the suite
-     *  AccessManager) to call `registerIdentity` and `deleteIdentity`; otherwise the call reverts
-     *  with `TokenNotAgentOfIdentityRegistry`. This keeps wallet recovery from silently breaking
-     *  after an Identity Registry swap.
-     *  @notice Threat model: this guard protects against accidental MISCONFIGURATION only, not against
-     *  a malicious caller. A caller authorized for this function (IDENTITY_MANAGER) could still point
-     *  the Token at a sham Identity Registry whose own AccessManager returns `true` from `canCall`,
-     *  defeating the check. Authorization for this function is therefore the real trust boundary; the
-     *  guard merely catches honest wiring mistakes.
+     *  @notice The provided Identity Registry must share the Token's AccessManager authority, otherwise
+     *  reverts with `AuthorityMismatch`. This guards against misconfiguration only, not a malicious caller:
+     *  authorization (IDENTITY_MANAGER) remains the real trust boundary.
      */
     function setIdentityRegistry(address _identityRegistry) external;
 

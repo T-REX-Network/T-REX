@@ -191,7 +191,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     }
 
     /// @notice Should revert when identity registry is zero address. The onlySharedAuthority guard rejects
-    ///         address(0) (it cannot share the storage's authority) before the in-body ZeroAddress check.
+    ///         address(0) (it cannot share the storage's authority), so the bind never proceeds.
     function test_bindIdentityRegistry_RevertWhen_ZeroAddress() public {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);

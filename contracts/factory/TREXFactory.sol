@@ -63,7 +63,6 @@ pragma solidity 0.8.30;
 
 import { IIdFactory } from "@onchain-id/solidity/contracts/factory/IIdFactory.sol";
 
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
@@ -92,7 +91,9 @@ contract TREXFactory is ITREXFactory, AccessManagerOwnable {
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
-    constructor(address implementationAuthority, address idFactory, address accessManager) {
+    constructor(address implementationAuthority, address idFactory, address accessManager)
+        AccessManagerOwnable(accessManager)
+    {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
         _setAuthority(accessManager);
         _setImplementationAuthority(implementationAuthority);
@@ -126,9 +127,8 @@ contract TREXFactory is ITREXFactory, AccessManagerOwnable {
         address ir = _deployIR(salt, tokenDetails, tir, ctr, irs);
         address mc = _deployMC(salt, tokenDetails);
 
-        // a reused IRS must be governed by the same AccessManager as the rest of the suite
+        // a reused IRS must share the suite's AccessManager; the bind reverts otherwise (restricted guard)
         if (tokenDetails.irs != address(0)) {
-            require(IAccessManaged(irs).authority() == tokenDetails.accessManager, ErrorsLib.AuthorityMismatch());
             _bindReusedIRS(IAccessManager(tokenDetails.accessManager), irs, ir);
         }
 

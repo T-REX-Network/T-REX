@@ -62,10 +62,7 @@
 
 pragma solidity 0.8.30;
 
-import {
-    AccessManagedUpgradeable,
-    IAccessManager
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -74,11 +71,11 @@ import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
-import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
+import { AccessManagerOwnableUpgradeable } from "../../utils/AccessManagerOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, AccessManagedUpgradeable, AccessManagerOwnable {
+contract ModularCompliance is IModularCompliance, AccessManagerOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 

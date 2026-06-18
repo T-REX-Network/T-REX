@@ -101,7 +101,11 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
      *  emits `ImplementationAuthoritySet` event
      *  emits a `IAFactorySet` event
      */
-    constructor(bool referenceStatus, address trexFactory, address iaFactory, address accessManager) {
+    constructor(bool referenceStatus, address trexFactory, address iaFactory, address accessManager)
+        AccessManagerOwnable(accessManager)
+    {
+        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+
         _setAuthority(accessManager);
         _reference = referenceStatus;
         _trexFactory = trexFactory;

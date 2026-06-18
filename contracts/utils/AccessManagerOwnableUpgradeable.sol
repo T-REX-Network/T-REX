@@ -63,82 +63,28 @@
 
 pragma solidity 0.8.30;
 
-library ErrorsLib {
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error InvalidImplementationAuthority();
+import { AccessManagerOwnableBase } from "./AccessManagerOwnableBase.sol";
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error NoTokenToRecover();
-    error RecoveryNotPossible();
-    error UnverifiedIdentity();
+abstract contract AccessManagerOwnableUpgradeable is AccessManagedUpgradeable, AccessManagerOwnableBase {
 
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
+    /// @inheritdoc AccessManagerOwnableBase
+    function authority()
+        public
+        view
+        virtual
+        override(AccessManagedUpgradeable, AccessManagerOwnableBase)
+        returns (address)
+    {
+        return super.authority();
+    }
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    error TokenAlreadyDeployed();
-
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
-
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
-
-    // TREXImplementationAuthority Errors
-    error CannotCallOnReferenceContract();
-    error NewIAIsNotAReferenceContract();
-    error NonExistingVersion();
-    error OnlyReferenceContractCanCall();
-    error VersionAlreadyFetched();
-    error VersionAlreadyExists();
-    error VersionAlreadyInUse();
-    error VersionOfNewIAMustBeTheSameAsCurrentIA();
-
-    // AbstractProxy Errors
-    error OnlyCurrentImplementationAuthorityCanCall();
+    /// @inheritdoc AccessManagerOwnableBase
+    function _updateAuthority(address newAuthority) internal override {
+        setAuthority(newAuthority);
+    }
 
 }

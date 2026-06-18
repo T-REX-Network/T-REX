@@ -23,6 +23,21 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
+    // ============ constructor() Tests ============
+
+    /// @notice Should revert when the AccessManager (authority) is the zero address
+    /// @dev OZ's AccessManaged constructor does not validate a zero authority, so the in-body
+    ///      ZeroAddress guard is what rejects it.
+    function test_constructor_RevertWhen_AccessManagerIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new TREXImplementationAuthority(
+            true, // is reference
+            address(0), // trex factory
+            address(0), // ia factory
+            address(0) // access manager (zero -> revert)
+        );
+    }
+
     // ============ setTREXFactory() Tests ============
 
     /// @notice Should revert when called by not owner

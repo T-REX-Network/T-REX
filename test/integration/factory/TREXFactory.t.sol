@@ -1114,7 +1114,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     }
 
     /// @notice Should revert when a reused IRS is governed by a different AccessManager than the suite
-    function test_deployTREXSuite_RevertWhen_ReusedIRS_AuthorityMismatch() public {
+    function test_deployTREXSuite_RevertWhen_ReusedIRS_ForeignAuthority() public {
         // Deploy a standalone IRS proxy governed by a DIFFERENT AccessManager than the suite's accessManager
         AccessManager otherAccessManager = new AccessManager(address(this));
         IdentityRegistryStorageProxy foreignIRSProxy = new IdentityRegistryStorageProxy(
@@ -1126,8 +1126,10 @@ contract TREXFactoryTest is TREXSuiteTest {
         tokenDetails.irs = foreignIRS;
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
+        // bindIdentityRegistry's `restricted` guard rejects the factory: it holds no IRS_BINDER on the
+        // foreign AccessManager, so the revert is AccessManagedUnauthorized, not AuthorityMismatch.
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(trexFactory)));
         trexFactory.deployTREXSuite("salt-authority-mismatch", tokenDetails, claimDetails);
     }
 
