@@ -80,6 +80,8 @@ abstract contract AccessManagerOwnableBase is IERC173, ERC165 {
     }
 
     /// @inheritdoc IERC173
+    /// @dev Rotates this contract's authority only; a suite migration must rotate every contract together
+    ///      or the shared-authority invariant breaks.
     function transferOwnership(address newAuthority) external {
         address oldAuthority = authority();
         _updateAuthority(newAuthority);
