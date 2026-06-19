@@ -17,6 +17,9 @@ node_modules/
 .storage_delta_cache
 storage_delta
 
+# Gambit mutation testing output
+gambit_out/
+
 # Environment variables
 .env
 .env.local

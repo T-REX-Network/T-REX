@@ -1,0 +1,41 @@
+[
+  {
+    "filename": "contracts/token/Token.sol",
+    "sourceroot": ".",
+    "solc": "solc8.30",
+    "solc_optimize": true,
+    "solc_remappings": [
+      "@forge-std/=dependencies/forge-std-1.16.1/src/",
+      "@onchain-id/solidity/=dependencies/onchain-id-2.2.2-beta3/",
+      "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.6.1/",
+      "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.6.1/"
+    ],
+    "solc_allow_paths": ["."]
+  },
+  {
+    "filename": "contracts/compliance/modular/ModularCompliance.sol",
+    "sourceroot": ".",
+    "solc": "solc8.30",
+    "solc_optimize": true,
+    "solc_remappings": [
+      "@forge-std/=dependencies/forge-std-1.16.1/src/",
+      "@onchain-id/solidity/=dependencies/onchain-id-2.2.2-beta3/",
+      "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.6.1/",
+      "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.6.1/"
+    ],
+    "solc_allow_paths": ["."]
+  },
+  {
+    "filename": "contracts/registry/implementation/IdentityRegistry.sol",
+    "sourceroot": ".",
+    "solc": "solc8.30",
+    "solc_optimize": true,
+    "solc_remappings": [
+      "@forge-std/=dependencies/forge-std-1.16.1/src/",
+      "@onchain-id/solidity/=dependencies/onchain-id-2.2.2-beta3/",
+      "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.6.1/",
+      "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.6.1/"
+    ],
+    "solc_allow_paths": ["."]
+  }
+]
