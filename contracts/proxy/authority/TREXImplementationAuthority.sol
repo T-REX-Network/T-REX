@@ -106,7 +106,6 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 
-        _setAuthority(accessManager);
         _reference = referenceStatus;
         _trexFactory = trexFactory;
         _iaFactory = iaFactory;

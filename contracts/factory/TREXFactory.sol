@@ -95,7 +95,7 @@ contract TREXFactory is ITREXFactory, AccessManagerOwnable {
         AccessManagerOwnable(accessManager)
     {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
-        _setAuthority(accessManager);
+
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
     }
