@@ -504,6 +504,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
         if (!isMint && !isBurn) {
             _requireNotPaused();
+            require(s.identityRegistry.isVerified(_msgSender()), ErrorsLib.UnverifiedIdentity());
             require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
             require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
             uint256 freeBalance = balanceOf(from) - s.frozenStatus[from].amount;

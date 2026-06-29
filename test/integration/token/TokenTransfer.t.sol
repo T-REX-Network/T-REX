@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
@@ -14,18 +15,25 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 
 import { TestModule } from "../mocks/TestModule.sol";
+import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenTransferTest is TREXSuiteTest {
 
     IdentityRegistry public identityRegistry;
 
+    address verified = makeAddr("verified");
+
     function setUp() public override {
         super.setUp();
 
         identityRegistry = IdentityRegistry(address(token.identityRegistry()));
 
+        vm.prank(deployer);
+        IIdentity verifiedIdentity = IIdentity(idFactory.createIdentity(verified, "verified"));
+
         vm.startPrank(agent);
+        identityRegistry.registerIdentity(verified, verifiedIdentity, Countries.FRANCE);
         token.mint(alice, 1000);
         token.mint(bob, 500);
         token.unpause();
@@ -274,27 +282,26 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should transfer tokens and reduce allowance of transferred value
     function test_transferFrom_Success() public {
         vm.prank(alice);
-        token.approve(another, 100);
+        token.approve(verified, 100);
 
-        vm.prank(another);
+        vm.prank(verified);
         vm.expectEmit(true, true, false, false, address(token));
         emit IERC20.Transfer(alice, bob, 100);
         token.transferFrom(alice, bob, 100);
 
-        assertEq(token.allowance(alice, another), 0);
+        assertEq(token.allowance(alice, verified), 0);
     }
 
-    /// @notice Should decrease allowance when default allowance is NOT enabled (first part of OR condition)
-    function test_transferFrom_DecreasesAllowance_WhenDefaultAllowanceNotEnabled() public {
-        // Ensure default allowance is NOT enabled for another
+    /// @notice Should decrease allowance by the transferred value
+    function test_transferFrom_DecreasesAllowance() public {
         vm.prank(alice);
-        token.approve(another, 200);
+        token.approve(verified, 200);
 
-        vm.prank(another);
+        vm.prank(verified);
         token.transferFrom(alice, bob, 100);
 
         // Allowance should be decreased
-        assertEq(token.allowance(alice, another), 100);
+        assertEq(token.allowance(alice, verified), 100);
     }
 
     // ============ forcedTransfer() Tests ============

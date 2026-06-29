@@ -181,6 +181,21 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         token.transferFrom(from, to, transferAmount);
     }
 
+    function testTokenTransferFromRevertsWhenSenderNotVerified() public {
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(IERC3643IdentityRegistry.isVerified.selector, spender),
+            abi.encode(false)
+        );
+
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
+    }
+
     function testTokenTransferFromNominal() public {
         // Approve spender
         vm.prank(from);
