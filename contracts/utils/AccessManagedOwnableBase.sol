@@ -74,6 +74,8 @@ import { IERC173 } from "../vendor/IERC173.sol";
 ///      which supply `authority()` and the public `setAuthority`.
 abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
+    /// @dev Misconfiguration guard, NOT a trust boundary: `other.authority()` is spoofable, so always
+    ///      pair with `restricted`. Only the `other != address(0)` clause is not spoofable.
     modifier onlySharedAuthority(address other) {
         _checkSharedAuthority(other);
         _;
