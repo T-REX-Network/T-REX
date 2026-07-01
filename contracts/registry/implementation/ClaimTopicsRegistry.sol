@@ -67,10 +67,10 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { AccessManagerOwnableUpgradeable } from "../../utils/AccessManagerOwnableUpgradeable.sol";
+import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
-contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagerOwnableUpgradeable {
+contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.UintSet;
 

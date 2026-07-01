@@ -67,22 +67,22 @@ import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 
-import { AccessManagerOwnableBase } from "./AccessManagerOwnableBase.sol";
+import { AccessManagedOwnableBase } from "./AccessManagedOwnableBase.sol";
 
-abstract contract AccessManagerOwnableUpgradeable is AccessManagedUpgradeable, AccessManagerOwnableBase {
+abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, AccessManagedOwnableBase {
 
-    /// @inheritdoc AccessManagerOwnableBase
+    /// @inheritdoc AccessManagedOwnableBase
     function authority()
         public
         view
         virtual
-        override(AccessManagedUpgradeable, AccessManagerOwnableBase)
+        override(AccessManagedUpgradeable, AccessManagedOwnableBase)
         returns (address)
     {
         return super.authority();
     }
 
-    /// @inheritdoc AccessManagerOwnableBase
+    /// @inheritdoc AccessManagedOwnableBase
     function _updateAuthority(address newAuthority) internal override {
         setAuthority(newAuthority);
     }

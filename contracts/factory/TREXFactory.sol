@@ -76,11 +76,11 @@ import { TokenProxy } from "../proxy/TokenProxy.sol";
 import { TrustedIssuersRegistryProxy } from "../proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
-import { AccessManagerOwnable } from "../utils/AccessManagerOwnable.sol";
+import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { Create3 } from "../vendor/openzeppelin/Create3.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
-contract TREXFactory is ITREXFactory, AccessManagerOwnable {
+contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
     address private _implementationAuthority;
@@ -92,7 +92,7 @@ contract TREXFactory is ITREXFactory, AccessManagerOwnable {
     mapping(string => address) public tokenDeployed;
 
     constructor(address implementationAuthority, address idFactory, address accessManager)
-        AccessManagerOwnable(accessManager)
+        AccessManagedOwnable(accessManager)
     {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 

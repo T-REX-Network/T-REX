@@ -63,22 +63,50 @@
 
 pragma solidity 0.8.30;
 
-import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-import { AccessManagerOwnableBase } from "./AccessManagerOwnableBase.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { IERC173 } from "../vendor/IERC173.sol";
 
-abstract contract AccessManagerOwnable is AccessManaged, AccessManagerOwnableBase {
+/// @dev Shared IERC173 ownership surface layered on top of an AccessManager-backed authority.
+///      Concrete contracts mix this with either `AccessManaged` or `AccessManagedUpgradeable`,
+///      which supply `authority()` and the public `setAuthority` routed through `_updateAuthority`.
+abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
-    constructor(address initialAuthority) AccessManaged(initialAuthority) { }
-
-    /// @inheritdoc AccessManagerOwnableBase
-    function authority() public view virtual override(AccessManaged, AccessManagerOwnableBase) returns (address) {
-        return super.authority();
+    modifier onlySharedAuthority(address other) {
+        _checkSharedAuthority(other);
+        _;
     }
 
-    /// @inheritdoc AccessManagerOwnableBase
-    function _updateAuthority(address newAuthority) internal override {
-        setAuthority(newAuthority);
+    /// @inheritdoc IERC173
+    /// @dev Rotates this contract's authority only; a suite migration must rotate every contract together
+    ///      or the shared-authority invariant breaks.
+    function transferOwnership(address newAuthority) external {
+        address oldAuthority = authority();
+        _updateAuthority(newAuthority);
+
+        emit OwnershipTransferred(oldAuthority, newAuthority);
     }
+
+    /// @inheritdoc IERC173
+    function owner() external view returns (address) {
+        return authority();
+    }
+
+    /// @inheritdoc ERC165
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    function _checkSharedAuthority(address other) internal view {
+        require(other != address(0) && IAccessManaged(other).authority() == authority(), ErrorsLib.AuthorityMismatch());
+    }
+
+    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not).
+    function authority() public view virtual returns (address);
+
+    /// @dev Routed to the AccessManaged public `setAuthority` so its caller/code checks still apply.
+    function _updateAuthority(address newAuthority) internal virtual;
 
 }

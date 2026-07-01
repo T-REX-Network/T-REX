@@ -67,12 +67,12 @@ import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistr
 import { ITREXFactory } from "../../factory/ITREXFactory.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
-import { AccessManagerOwnable } from "../../utils/AccessManagerOwnable.sol";
+import { AccessManagedOwnable } from "../../utils/AccessManagedOwnable.sol";
 import { IProxy } from "../interface/IProxy.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 
-contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessManagerOwnable {
+contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessManagedOwnable {
 
     /// current version
     Version private _currentVersion;
@@ -102,7 +102,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
      *  emits a `IAFactorySet` event
      */
     constructor(bool referenceStatus, address trexFactory, address iaFactory, address accessManager)
-        AccessManagerOwnable(accessManager)
+        AccessManagedOwnable(accessManager)
     {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 

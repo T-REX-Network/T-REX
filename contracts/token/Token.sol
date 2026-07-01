@@ -81,10 +81,12 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
-import { AccessManagerOwnableBase } from "../utils/AccessManagerOwnableBase.sol";
-import { AccessManagerOwnableUpgradeable } from "../utils/AccessManagerOwnableUpgradeable.sol";
+import {
+    AccessManagedOwnableBase,
+    AccessManagedOwnableUpgradeable
+} from "../utils/AccessManagedOwnableUpgradeable.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwnableUpgradeable, IERC3643 {
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, IERC3643 {
 
     string internal constant VERSION = "5.0.0";
 
@@ -465,7 +467,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagerOwna
 
     /* ----- Utility Functions ----- */
 
-    /// @inheritdoc AccessManagerOwnableBase
+    /// @inheritdoc AccessManagedOwnableBase
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC20).interfaceId || interfaceId == type(IERC3643).interfaceId
             || interfaceId == type(IERC20Permit).interfaceId || super.supportsInterface(interfaceId);
