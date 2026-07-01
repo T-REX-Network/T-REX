@@ -71,7 +71,7 @@ import { IERC173 } from "../vendor/IERC173.sol";
 
 /// @dev Shared IERC173 ownership surface layered on top of an AccessManager-backed authority.
 ///      Concrete contracts mix this with either `AccessManaged` or `AccessManagedUpgradeable`,
-///      which supply `authority()` and the public `setAuthority` routed through `_updateAuthority`.
+///      which supply `authority()` and the public `setAuthority`.
 abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
     modifier onlySharedAuthority(address other) {
@@ -84,7 +84,7 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
     ///      or the shared-authority invariant breaks.
     function transferOwnership(address newAuthority) external {
         address oldAuthority = authority();
-        _updateAuthority(newAuthority);
+        setAuthority(newAuthority);
 
         emit OwnershipTransferred(oldAuthority, newAuthority);
     }
@@ -106,7 +106,7 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
     /// @dev Supplied by the concrete AccessManaged base (upgradeable or not).
     function authority() public view virtual returns (address);
 
-    /// @dev Routed to the AccessManaged public `setAuthority` so its caller/code checks still apply.
-    function _updateAuthority(address newAuthority) internal virtual;
+    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not); its caller/code checks still apply.
+    function setAuthority(address newAuthority) public virtual;
 
 }

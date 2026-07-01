@@ -83,8 +83,12 @@ abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, A
     }
 
     /// @inheritdoc AccessManagedOwnableBase
-    function _updateAuthority(address newAuthority) internal override {
-        setAuthority(newAuthority);
+    function setAuthority(address newAuthority)
+        public
+        virtual
+        override(AccessManagedUpgradeable, AccessManagedOwnableBase)
+    {
+        super.setAuthority(newAuthority);
     }
 
 }
