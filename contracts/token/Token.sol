@@ -242,12 +242,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /* ----- Pause Functions ----- */
 
     /// @inheritdoc IERC3643
-    function pause() external restricted whenNotPaused {
+    function pause() external restricted {
         _pause();
     }
 
     /// @inheritdoc IERC3643
-    function unpause() external restricted whenPaused {
+    function unpause() external restricted {
         _unpause();
     }
 
