@@ -94,42 +94,35 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
 
         // ------ AGENT_MINTER role ------
-        functions = new bytes4[](2);
+        functions = new bytes4[](1);
         functions[0] = Token.mint.selector;
-        functions[1] = Token.batchMint.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_MINTER);
 
         // ------ AGENT_BURNER role ------
         functions[0] = Token.burn.selector;
-        functions[1] = Token.batchBurn.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_BURNER);
 
         // ------ AGENT_PARTIAL_FREEZER role ------
-        functions = new bytes4[](4);
+        functions = new bytes4[](2);
         functions[0] = Token.freezePartialTokens.selector;
-        functions[1] = Token.batchFreezePartialTokens.selector;
-        functions[2] = Token.unfreezePartialTokens.selector;
-        functions[3] = Token.batchUnfreezePartialTokens.selector;
+        functions[1] = Token.unfreezePartialTokens.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PARTIAL_FREEZER);
 
         // ------ AGENT_ADDRESS_FREEZER role ------
-        functions = new bytes4[](2);
+        functions = new bytes4[](1);
         functions[0] = Token.setAddressFrozen.selector;
-        functions[1] = Token.batchSetAddressFrozen.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_ADDRESS_FREEZER);
 
         // ------ AGENT_RECOVERY_ADDRESS role ------
-        functions = new bytes4[](1);
         functions[0] = Token.recoveryAddress.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_RECOVERY_ADDRESS);
 
         // ------ AGENT_FORCED_TRANSFER role ------
-        functions = new bytes4[](2);
         functions[0] = Token.forcedTransfer.selector;
-        functions[1] = Token.batchForcedTransfer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_FORCED_TRANSFER);
 
         // ------ AGENT_PAUSER role ------
+        functions = new bytes4[](2);
         functions[0] = Token.pause.selector;
         functions[1] = Token.unpause.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);

@@ -70,6 +70,7 @@ import {
     IERC20Permit
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
@@ -109,6 +110,11 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     // keccak256(abi.encode(uint256(keccak256("token.storage.main")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant TOKEN_STORAGE_LOCATION =
         0x3eb201768b0b55c18fa93955aeb38c6bf0f381d8227d53e1b0e5b066883d4e00;
+
+    modifier restrictedFor(bytes4 selector) {
+        _checkCanCall(_msgSender(), selector);
+        _;
+    }
 
     constructor() {
         _disableInitializers();
@@ -269,14 +275,17 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     }
 
     /// @inheritdoc IERC3643
-    function batchMint(address[] calldata tos, uint256[] calldata amounts) external restricted {
+    function batchMint(address[] calldata tos, uint256[] calldata amounts) external restrictedFor(this.mint.selector) {
         for (uint256 i = 0; i < tos.length; i++) {
             _mint(tos[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchBurn(address[] calldata froms, uint256[] calldata amounts) external restricted {
+    function batchBurn(address[] calldata froms, uint256[] calldata amounts)
+        external
+        restrictedFor(this.burn.selector)
+    {
         for (uint256 i = 0; i < froms.length; i++) {
             _burn(froms[i], amounts[i]);
         }
@@ -300,21 +309,30 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     }
 
     /// @inheritdoc IERC3643
-    function batchFreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external restricted {
+    function batchFreezePartialTokens(address[] calldata users, uint256[] calldata amounts)
+        external
+        restrictedFor(this.freezePartialTokens.selector)
+    {
         for (uint256 i = 0; i < users.length; i++) {
             _freezePartialTokens(users[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts) external restricted {
+    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts)
+        external
+        restrictedFor(this.unfreezePartialTokens.selector)
+    {
         for (uint256 i = 0; i < users.length; i++) {
             _unfreezePartialTokens(users[i], amounts[i]);
         }
     }
 
     /// @inheritdoc IERC3643
-    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes) external restricted {
+    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes)
+        external
+        restrictedFor(this.setAddressFrozen.selector)
+    {
         for (uint256 i = 0; i < users.length; i++) {
             _setAddressFrozen(users[i], freezes[i]);
         }
@@ -450,7 +468,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /// @inheritdoc IERC3643
     function batchForcedTransfer(address[] calldata froms, address[] calldata tos, uint256[] calldata amounts)
         external
-        restricted
+        restrictedFor(this.forcedTransfer.selector)
     {
         for (uint256 i = 0; i < froms.length; i++) {
             _forcedTransfer(froms[i], tos[i], amounts[i]);
@@ -525,6 +543,11 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
     function _emitUpdatedTokenInformation() internal {
         emit ERC3643EventsLib.UpdatedTokenInformation(name(), symbol(), decimals(), VERSION, _tokenStorage().onchainId);
+    }
+
+    function _checkCanCall(address caller, bytes4 selector) internal virtual {
+        (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
+        require(immediate, IAccessManaged.AccessManagedUnauthorized(caller));
     }
 
 }
