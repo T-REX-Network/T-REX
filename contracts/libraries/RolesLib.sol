@@ -65,6 +65,8 @@ pragma solidity ^0.8.30;
 
 library RolesLib {
 
+    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
+
     uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
 
     // ---- Operational roles (gate contract functions: "what you can do") ----

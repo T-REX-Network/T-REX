@@ -62,6 +62,7 @@
 
 pragma solidity 0.8.30;
 
+import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -130,7 +131,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     function bindToken(address _token) external {
         Storage storage s = _getStorage();
         require(
-            _isOwner(msg.sender) || (s.tokenBound == address(0) && msg.sender == _token),
+            (s.tokenBound == address(0) && msg.sender == _token) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         _bindToken(_token);
@@ -140,7 +141,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
      *  @dev See {IERC3643Compliance-unbindToken}.
      */
     function unbindToken(address _token) external {
-        require(_isOwner(msg.sender) || msg.sender == _token, ErrorsLib.OnlyOwnerOrTokenCanCall());
+        require(msg.sender == _token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
 
         Storage storage s = _getStorage();
         require(_token != address(0), ErrorsLib.ZeroAddress());
@@ -316,8 +317,9 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         emit EventsLib.ModuleInteraction(_module, bytes4(callData));
     }
 
-    function _isOwner(address sender) internal view returns (bool) {
-        (bool isOwner,) = IAccessManager(authority()).hasRole(RolesLib.OWNER, sender);
+    function _isOwner(address caller) internal view returns (bool) {
+        (bool isOwner,) =
+            AuthorityUtils.canCallWithDelay(authority(), caller, address(this), RolesLib.BIND_UNBIND_TOKEN);
         return isOwner;
     }
 
