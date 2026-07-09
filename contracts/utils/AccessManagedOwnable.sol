@@ -63,40 +63,22 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { AccessManaged } from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 
-/**
- * @title Roles
- * @dev Library for managing addresses assigned to a Role.
- */
-library Roles {
+import { AccessManagedOwnableBase } from "./AccessManagedOwnableBase.sol";
 
-    struct Role {
-        mapping(address => bool) bearer;
+abstract contract AccessManagedOwnable is AccessManaged, AccessManagedOwnableBase {
+
+    constructor(address initialAuthority) AccessManaged(initialAuthority) { }
+
+    /// @inheritdoc AccessManagedOwnableBase
+    function authority() public view virtual override(AccessManaged, AccessManagedOwnableBase) returns (address) {
+        return super.authority();
     }
 
-    /**
-     * @dev Give an account access to this role.
-     */
-    function add(Role storage role, address account) internal {
-        require(!has(role, account), ErrorsLib.AccountAlreadyHasRole());
-        role.bearer[account] = true;
-    }
-
-    /**
-     * @dev Remove an account's access to this role.
-     */
-    function remove(Role storage role, address account) internal {
-        require(has(role, account), ErrorsLib.AccountDoesNotHaveRole());
-        role.bearer[account] = false;
-    }
-
-    /**
-     * @dev Check if an account has this role.
-     * @return bool
-     */
-    function has(Role storage role, address account) internal view returns (bool) {
-        return account != address(0) && role.bearer[account];
+    /// @inheritdoc AccessManagedOwnableBase
+    function setAuthority(address newAuthority) public virtual override(AccessManaged, AccessManagedOwnableBase) {
+        super.setAuthority(newAuthority);
     }
 
 }

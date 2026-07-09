@@ -63,54 +63,52 @@
 
 pragma solidity 0.8.30;
 
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
-import { Roles } from "./Roles.sol";
+import { IERC173 } from "../vendor/IERC173.sol";
 
-import { EventsLib } from "../libraries/EventsLib.sol";
+/// @dev Shared IERC173 ownership surface layered on top of an AccessManager-backed authority.
+///      Concrete contracts mix this with either `AccessManaged` or `AccessManagedUpgradeable`,
+///      which supply `authority()` and the public `setAuthority`.
+abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
-abstract contract AbstractAgentRole {
-
-    using Roles for Roles.Role;
-
-    /// @custom:storage-location erc7201:ERC3643.storage.AgentRole
-    struct AgentRoleStorage {
-        Roles.Role agents;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.AgentRole")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x1e3195b8d2a4626e1f6dd484afac3ed959bc521de9afcb616b51af07f6f85100;
-
-    modifier onlyAgent() {
-        _checkIsAgent();
+    /// @dev Misconfiguration guard, NOT a trust boundary: `other.authority()` is spoofable, so always
+    ///      pair with `restricted`. Only the `other != address(0)` clause is not spoofable.
+    modifier onlySharedAuthority(address other) {
+        _checkSharedAuthority(other);
         _;
     }
 
-    function isAgent(address _agent) public view returns (bool) {
-        return _getAgentRoleStorage().agents.has(_agent);
+    /// @inheritdoc IERC173
+    /// @dev Rotates this contract's authority only; a suite migration must rotate every contract together
+    ///      or the shared-authority invariant breaks.
+    function transferOwnership(address newAuthority) external {
+        address oldAuthority = authority();
+        setAuthority(newAuthority);
+
+        emit OwnershipTransferred(oldAuthority, newAuthority);
     }
 
-    function _addAgent(address agent) internal {
-        require(agent != address(0), ErrorsLib.ZeroAddress());
-
-        _getAgentRoleStorage().agents.add(agent);
-        emit EventsLib.AgentAdded(agent);
+    /// @inheritdoc IERC173
+    function owner() external view returns (address) {
+        return authority();
     }
 
-    function _removeAgent(address agent) internal {
-        require(agent != address(0), ErrorsLib.ZeroAddress());
-
-        _getAgentRoleStorage().agents.remove(agent);
-        emit EventsLib.AgentRemoved(agent);
+    /// @inheritdoc ERC165
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC173).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    function _checkIsAgent() internal view virtual {
-        require(isAgent(msg.sender), ErrorsLib.CallerDoesNotHaveAgentRole());
+    function _checkSharedAuthority(address other) internal view {
+        require(other != address(0) && IAccessManaged(other).authority() == authority(), ErrorsLib.AuthorityMismatch());
     }
 
-    function _getAgentRoleStorage() private pure returns (AgentRoleStorage storage $) {
-        assembly {
-            $.slot := STORAGE_LOCATION
-        }
-    }
+    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not).
+    function authority() public view virtual returns (address);
+
+    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not); its caller/code checks still apply.
+    function setAuthority(address newAuthority) public virtual;
 
 }

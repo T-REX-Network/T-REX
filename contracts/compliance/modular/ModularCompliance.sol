@@ -62,20 +62,21 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
-import { IERC173 } from "../../roles/IERC173.sol";
+import { RolesLib } from "../../libraries/RolesLib.sol";
+import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC165 {
+contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -103,35 +104,23 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         _disableInitializers();
     }
 
-    /**
-     *  @dev Initializes the modular compliance with its final owner, the bound token, the initial set of
-     *       modules and matching module settings.
-     *  @param _token address of the token bound to this compliance — pre-computed via CREATE3 by the factory so
-     *         the compliance never needs the deprecated `Token-self-bind` indirection
-     *  @param _owner final owner of the compliance (no intermediate factory ownership)
-     *  @param _modules initial set of modules to bind (capped at 25 — matches the existing post-init cap)
-     *  @param _moduleSettings optional per-module settings forwarded via `_callModuleFunction` after each module is
-     *         bound. `_moduleSettings.length` must be `<= _modules.length`; settings beyond `_modules.length` are
-     *         not accepted
-     *  emits a `TokenBound` event
-     *  emits a `ModuleAdded` event for each module
-     *  emits a `ModuleInteraction` event for each `_moduleSettings[i]` applied
-     */
-    function init(address _token, address _owner, address[] calldata _modules, bytes[] calldata _moduleSettings)
-        external
-        initializer
-    {
-        require(_token != address(0) && _owner != address(0), ErrorsLib.ZeroAddress());
-        require(_modules.length >= _moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
-        require(_modules.length <= 25, ErrorsLib.MaxModulesReached(25));
+    function init(
+        address tokenAddress,
+        address accessManagerAddress,
+        address[] calldata modules,
+        bytes[] calldata moduleSettings
+    ) external initializer {
+        require(tokenAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        require(modules.length >= moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
 
-        __Ownable_init(_owner);
-        _bindToken(_token);
+        __AccessManaged_init(accessManagerAddress);
 
-        for (uint256 i = 0; i < _modules.length; i++) {
-            _addModule(_modules[i]);
-            if (i < _moduleSettings.length) {
-                _callModuleFunction(_moduleSettings[i], _modules[i]);
+        _bindToken(tokenAddress);
+
+        for (uint256 i = 0; i < modules.length; i++) {
+            _addModule(modules[i]);
+            if (i < moduleSettings.length) {
+                _callModuleFunction(moduleSettings[i], modules[i]);
             }
         }
     }
@@ -142,7 +131,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     function bindToken(address _token) external {
         Storage storage s = _getStorage();
         require(
-            owner() == msg.sender || (s.tokenBound == address(0) && msg.sender == _token),
+            (s.tokenBound == address(0) && msg.sender == _token) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         _bindToken(_token);
@@ -152,7 +141,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
      *  @dev See {IERC3643Compliance-unbindToken}.
      */
     function unbindToken(address _token) external {
-        require(owner() == msg.sender || msg.sender == _token, ErrorsLib.OnlyOwnerOrTokenCanCall());
+        require(msg.sender == _token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
 
         Storage storage s = _getStorage();
         require(_token != address(0), ErrorsLib.ZeroAddress());
@@ -164,7 +153,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-removeModule}.
      */
-    function removeModule(address _module) external onlyOwner {
+    function removeModule(address _module) external restricted {
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
@@ -215,7 +204,7 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */
-    function addAndSetModule(address _module, bytes[] calldata _interactions) external onlyOwner {
+    function addAndSetModule(address _module, bytes[] calldata _interactions) external restricted {
         require(_interactions.length <= 5, ErrorsLib.ArraySizeLimited(5));
         _addModule(_module);
         for (uint256 i = 0; i < _interactions.length; i++) {
@@ -269,28 +258,27 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
     /**
      *  @dev See {IModularCompliance-addModule}.
      */
-    function addModule(address _module) public onlyOwner {
+    function addModule(address _module) public restricted {
         _addModule(_module);
     }
 
     /**
      *  @dev see {IModularCompliance-callModuleFunction}.
      */
-    function callModuleFunction(bytes calldata callData, address _module) public onlyOwner {
+    function callModuleFunction(bytes calldata callData, address _module) public restricted {
         _callModuleFunction(callData, _module);
     }
 
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+            || interfaceId == type(IERC3643Compliance).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
-    ///      No caller check — the public `bindToken` wrapper enforces the owner/Token-self-bind policy.
+    ///      No caller check — the public `bindToken` wrapper enforces the Token-self-bind policy.
     function _bindToken(address _token) internal {
         require(_token != address(0), ErrorsLib.ZeroAddress());
         _getStorage().tokenBound = _token;
@@ -329,8 +317,14 @@ contract ModularCompliance is IModularCompliance, Ownable2StepUpgradeable, IERC1
         emit EventsLib.ModuleInteraction(_module, bytes4(callData));
     }
 
+    function _isOwner(address caller) internal view returns (bool) {
+        (bool isOwner,) =
+            AuthorityUtils.canCallWithDelay(authority(), caller, address(this), RolesLib.BIND_UNBIND_TOKEN);
+        return isOwner;
+    }
+
     function _getStorage() internal pure returns (Storage storage s) {
-        assembly {
+        assembly ("memory-safe") {
             s.slot := STORAGE_LOCATION
         }
     }

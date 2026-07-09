@@ -2,9 +2,9 @@
 pragma solidity 0.8.30;
 
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { TokenRoles } from "contracts/token/TokenStructs.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -20,8 +20,17 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
     function testTokenPauseRevertsWhenNotAgent(address caller) public {
         vm.assume(caller != agent);
 
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         vm.prank(caller);
+        token.pause();
+    }
+
+    function testTokenPauseRevertsWhenCallerOnlyMinter() public {
+        address minter = makeAddr("Minter");
+        accessManager.grantRole(RolesLib.AGENT_MINTER, minter, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
+        vm.prank(minter);
         token.pause();
     }
 
@@ -44,24 +53,6 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
         token.pause();
 
         assertTrue(token.paused());
-    }
-
-    function testTokenPauseRevertsWhenDisablePauseRestrictionIsSet() public {
-        TokenRoles memory restrictions = TokenRoles({
-            disableMint: false,
-            disableBurn: false,
-            disablePartialFreeze: false,
-            disableAddressFreeze: false,
-            disableRecovery: false,
-            disableForceTransfer: false,
-            disablePause: true
-        });
-
-        token.setAgentRestrictions(agent, restrictions);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "pause disabled"));
-        vm.prank(agent);
-        token.pause();
     }
 
 }

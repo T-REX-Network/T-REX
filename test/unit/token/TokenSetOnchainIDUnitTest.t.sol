@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -11,10 +12,16 @@ contract TokenSetOnchainIDUnitTest is TokenBaseUnitTest {
 
     address newOnchainId = makeAddr("NewOnchainId");
 
-    function testTokenSetOnchainIDRevertsWhenNotOwner(address caller) public {
+    function setUp() public override {
+        super.setUp();
+
+        accessManager.grantRole(RolesLib.IDENTITY_MANAGER, address(this), 0);
+    }
+
+    function testTokenSetOnchainIDRevertsWhenUnauthorized(address caller) public {
         vm.assume(caller != address(this));
 
-        vm.expectPartialRevert(OwnableUpgradeable.OwnableUnauthorizedAccount.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         vm.prank(caller);
         token.setOnchainID(newOnchainId);
     }

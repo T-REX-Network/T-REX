@@ -2,10 +2,12 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { ClaimTopicsRegistryProxy } from "contracts/proxy/ClaimTopicsRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
@@ -13,13 +15,15 @@ import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopi
 contract ClaimTopicsRegistryInitUnitTest is Test {
 
     ClaimTopicsRegistry private ctrImplementation;
+    AccessManager private accessManager;
     address private implementationAuthority = makeAddr("ImplementationAuthorityMock");
 
-    address private owner = makeAddr("Owner");
     address private notOwner = makeAddr("NotOwner");
 
     function setUp() public {
         ctrImplementation = new ClaimTopicsRegistry();
+        accessManager = new AccessManager(address(this));
+        accessManager.grantRole(RolesLib.OWNER, address(this), 0);
         vm.mockCall(
             implementationAuthority,
             abi.encodeWithSelector(ITREXImplementationAuthority.getCTRImplementation.selector),
@@ -27,11 +31,11 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         );
     }
 
-    function test_init_SetsOwnerFromArgument_NotDeployer() public {
-        ClaimTopicsRegistry ctr = _deployProxy(owner, new uint256[](0));
+    function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
+        ClaimTopicsRegistry ctr = _deployProxy(new uint256[](0));
 
-        assertEq(ctr.owner(), owner);
-        assertNotEq(ctr.owner(), address(this));
+        assertEq(IAccessManaged(address(ctr)).authority(), address(accessManager));
+        assertNotEq(IAccessManaged(address(ctr)).authority(), address(this));
     }
 
     function test_init_AppliesInitialTopics() public {
@@ -40,7 +44,7 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         topics[1] = 22;
         topics[2] = 33;
 
-        ClaimTopicsRegistry ctr = _deployProxy(owner, topics);
+        ClaimTopicsRegistry ctr = _deployProxy(topics);
 
         uint256[] memory stored = ctr.getClaimTopics();
         assertEq(stored.length, 3);
@@ -53,9 +57,8 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         uint256[] memory topics = new uint256[](1);
         topics[0] = 1;
 
-        ClaimTopicsRegistry ctr = _deployProxy(owner, topics);
+        ClaimTopicsRegistry ctr = _deployProxy(topics);
 
-        vm.prank(owner);
         ctr.addClaimTopic(2);
 
         uint256[] memory stored = ctr.getClaimTopics();
@@ -64,15 +67,15 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
     }
 
     function test_addClaimTopic_RevertWhen_NotOwner() public {
-        ClaimTopicsRegistry ctr = _deployProxy(owner, new uint256[](0));
+        ClaimTopicsRegistry ctr = _deployProxy(new uint256[](0));
 
         vm.prank(notOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, notOwner));
         ctr.addClaimTopic(1);
     }
 
-    function test_init_RevertWhen_OwnerIsZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+    function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ClaimTopicsRegistryProxy(implementationAuthority, address(0), new uint256[](0));
     }
 
@@ -82,11 +85,15 @@ contract ClaimTopicsRegistryInitUnitTest is Test {
         topics[1] = 7;
 
         vm.expectRevert(ErrorsLib.ClaimTopicAlreadyExists.selector);
-        new ClaimTopicsRegistryProxy(implementationAuthority, owner, topics);
+        new ClaimTopicsRegistryProxy(implementationAuthority, address(accessManager), topics);
     }
 
-    function _deployProxy(address _owner, uint256[] memory _topics) private returns (ClaimTopicsRegistry) {
-        return ClaimTopicsRegistry(address(new ClaimTopicsRegistryProxy(implementationAuthority, _owner, _topics)));
+    function _deployProxy(uint256[] memory _topics) private returns (ClaimTopicsRegistry) {
+        ClaimTopicsRegistry ctr = ClaimTopicsRegistry(
+            address(new ClaimTopicsRegistryProxy(implementationAuthority, address(accessManager), _topics))
+        );
+        AccessManagerSetupLib.setupClaimTopicsRegistryRoles(accessManager, address(ctr));
+        return ctr;
     }
 
 }

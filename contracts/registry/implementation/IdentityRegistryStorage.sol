@@ -63,16 +63,14 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { AgentRoleUpgradeable } from "../../roles/AgentRoleUpgradeable.sol";
-import { IERC173 } from "../../roles/IERC173.sol";
+import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
-contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeable, IERC165 {
+contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -98,17 +96,19 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
         _disableInitializers();
     }
 
-    function init(address _owner, address _initialIR) external initializer {
-        __Ownable_init(_owner);
-        if (_initialIR != address(0)) {
-            _bindIdentityRegistry(_initialIR);
+    function init(address accessManagerAddress, address initialIRAddress) external initializer {
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        __AccessManaged_init(accessManagerAddress);
+
+        if (initialIRAddress != address(0)) {
+            _bindIdentityRegistry(initialIRAddress);
         }
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
      */
-    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external onlyAgent {
+    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
@@ -121,7 +121,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredIdentity}.
      */
-    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external onlyAgent {
+    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
@@ -133,7 +133,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
      */
-    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external onlyAgent {
+    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external restricted {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
@@ -144,7 +144,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-removeIdentityFromStorage}.
      */
-    function removeIdentityFromStorage(address _userAddress) external onlyAgent {
+    function removeIdentityFromStorage(address _userAddress) external restricted {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
@@ -156,19 +156,18 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IIdentityRegistryStorage-bindIdentityRegistry}.
      */
-    function bindIdentityRegistry(address _identityRegistry) external onlyOwner {
-        _bindIdentityRegistry(_identityRegistry);
+    function bindIdentityRegistry(address identityRegistry) external restricted onlySharedAuthority(identityRegistry) {
+        _bindIdentityRegistry(identityRegistry);
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-unbindIdentityRegistry}.
      */
-    function unbindIdentityRegistry(address _identityRegistry) external onlyOwner {
+    function unbindIdentityRegistry(address _identityRegistry) external restricted {
         require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.identityRegistries.remove(_identityRegistry), ErrorsLib.IdentityRegistryNotStored());
 
-        _removeAgent(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryUnbound(_identityRegistry);
     }
 
@@ -196,25 +195,23 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AgentRoleUpgradeab
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId
-            || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev Internal helper shared between the public `bindIdentityRegistry` (gated by `onlyOwner`) and the
-    ///      `init` flow where the factory pre-binds the identity registry it predicted via CREATE3.
     function _bindIdentityRegistry(address _identityRegistry) internal {
-        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
+        // Note: callers (init and bindIdentityRegistry) already reject the zero address before reaching
+        // here -- init via its `if (initialIRAddress != address(0))` guard, and the public
+        // bindIdentityRegistry via its `onlySharedAuthority` modifier -- so no zero-address check is needed.
         Storage storage s = _getStorage();
         require(s.identityRegistries.length() < 300, ErrorsLib.MaxIRByIRSReached(300));
-        _addAgent(_identityRegistry);
+
         s.identityRegistries.add(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
+        assembly ("memory-safe") {
             s.slot := STORAGE_LOCATION
         }
     }

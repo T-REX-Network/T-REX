@@ -70,11 +70,11 @@ import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAut
 
 contract IdentityRegistryStorageProxy is AbstractProxy {
 
-    constructor(address implementationAuthority, address _owner, address _initialIR)
+    constructor(address implementationAuthority, address accessManager, address initialIR)
         AbstractProxy(implementationAuthority)
     {
         if (!LowLevelCall.delegatecallNoReturn(
-                getLogic(), abi.encodeCall(IdentityRegistryStorage.init, (_owner, _initialIR))
+                getLogic(), abi.encodeCall(IdentityRegistryStorage.init, (accessManager, initialIR))
             )) {
             LowLevelCall.bubbleRevert();
         }

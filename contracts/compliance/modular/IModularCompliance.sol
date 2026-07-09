@@ -71,7 +71,7 @@ interface IModularCompliance is IERC3643Compliance {
      *  @dev adds a module to the list of compliance modules
      *  @param _module address of the module to add
      *  there cannot be more than 25 modules bound to the modular compliance for gas cost reasons
-     *  This function can be called ONLY by the owner of the compliance contract
+     *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleAdded event
      */
     function addModule(address _module) external;
@@ -79,7 +79,7 @@ interface IModularCompliance is IERC3643Compliance {
     /**
      *  @dev removes a module from the list of compliance modules
      *  @param _module address of the module to remove
-     *  This function can be called ONLY by the owner of the compliance contract
+     *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleRemoved event
      */
     function removeModule(address _module) external;
@@ -89,7 +89,7 @@ interface IModularCompliance is IERC3643Compliance {
      *  can be called only on bound modules
      *  @param callData the bytecode for interaction with the module, abi encoded
      *  @param _module The address of the module
-     *  This function can be called only by the modular compliance owner
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits a `ModuleInteraction` event
      */
     function callModuleFunction(bytes calldata callData, address _module) external;
@@ -107,7 +107,7 @@ interface IModularCompliance is IERC3643Compliance {
      * These interactions are performed after the module is added.
      *
      * Requirements:
-     * - The caller must be the owner of the `ModularCompliance` contract.
+     * - The caller must hold the required AccessManager role (OWNER).
      * - The `_module` address must not be a zero address.
      * - The `_module` must not already be bound to the contract.
      * - The total number of modules must not exceed 25 after adding the new module.

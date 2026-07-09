@@ -62,24 +62,21 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
-import { IERC173 } from "../../../roles/IERC173.sol";
 import { IModule } from "./IModule.sol";
 
 abstract contract AbstractModuleUpgradeable is
     IModule,
     Initializable,
-    Ownable2StepUpgradeable,
     UUPSUpgradeable,
     MulticallUpgradeable,
-    IERC165
+    ERC165Upgradeable
 {
 
     /// @custom:storage-location erc7201:ERC3643.storage.AbstractModule
@@ -159,33 +156,19 @@ abstract contract AbstractModuleUpgradeable is
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IModule).interfaceId || interfaceId == type(IERC173).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IModule).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    // solhint-disable-next-line func-name-mixedcase
     function __AbstractModule_init() internal onlyInitializing {
-        __Ownable_init(msg.sender);
+        __ERC165_init();
         __AbstractModule_init_unchained();
     }
 
-    // solhint-disable-next-line no-empty-blocks, func-name-mixedcase
     function __AbstractModule_init_unchained() internal onlyInitializing { }
 
-    // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(
-        address /*newImplementation*/
-    )
-        internal
-        virtual
-        override
-        onlyOwner
-    { }
-
     function _getAbstractModuleStorage() private pure returns (AbstractModuleStorage storage s) {
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
+        assembly ("memory-safe") {
             s.slot := _ABSTRACT_MODULE_STORAGE_LOCATION
         }
     }

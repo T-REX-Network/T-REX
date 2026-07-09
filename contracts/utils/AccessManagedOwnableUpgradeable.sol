@@ -63,12 +63,32 @@
 
 pragma solidity 0.8.30;
 
-struct TokenRoles {
-    bool disableMint;
-    bool disableBurn;
-    bool disablePartialFreeze;
-    bool disableAddressFreeze;
-    bool disableRecovery;
-    bool disableForceTransfer;
-    bool disablePause;
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+
+import { AccessManagedOwnableBase } from "./AccessManagedOwnableBase.sol";
+
+abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, AccessManagedOwnableBase {
+
+    /// @inheritdoc AccessManagedOwnableBase
+    function authority()
+        public
+        view
+        virtual
+        override(AccessManagedUpgradeable, AccessManagedOwnableBase)
+        returns (address)
+    {
+        return super.authority();
+    }
+
+    /// @inheritdoc AccessManagedOwnableBase
+    function setAuthority(address newAuthority)
+        public
+        virtual
+        override(AccessManagedUpgradeable, AccessManagedOwnableBase)
+    {
+        super.setAuthority(newAuthority);
+    }
+
 }

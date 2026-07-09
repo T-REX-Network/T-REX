@@ -63,17 +63,15 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { IERC173 } from "../../roles/IERC173.sol";
+import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { ITrustedIssuersRegistry } from "../interface/ITrustedIssuersRegistry.sol";
 
-contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradeable, IERC165 {
+contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -97,38 +95,39 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
         _disableInitializers();
     }
 
-    /// Functions
-
-    function init(address _owner, address[] calldata _issuers, uint256[][] calldata _issuerClaims)
+    function init(address accessManagerAddress, address[] calldata issuers, uint256[][] calldata issuerClaims)
         external
         initializer
     {
-        require(_issuers.length == _issuerClaims.length, ErrorsLib.InvalidClaimPattern());
-        __Ownable_init(_owner);
-        for (uint256 i = 0; i < _issuers.length; i++) {
-            _addTrustedIssuer(_issuers[i], _issuerClaims[i]);
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        require(issuers.length == issuerClaims.length, ErrorsLib.InvalidClaimPattern());
+
+        __AccessManaged_init(accessManagerAddress);
+
+        for (uint256 i = 0; i < issuers.length; i++) {
+            _addTrustedIssuer(issuers[i], issuerClaims[i]);
         }
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-addTrustedIssuer}.
      */
-    function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external onlyOwner {
+    function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external restricted {
         _addTrustedIssuer(_trustedIssuer, _claimTopics);
     }
 
     /**
      *  @dev See {ITrustedIssuersRegistry-removeTrustedIssuer}.
      */
-    function removeTrustedIssuer(address _trustedIssuer) external onlyOwner {
+    function removeTrustedIssuer(address _trustedIssuer) external restricted {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.trustedIssuers.remove(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
 
-        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         uint256[] memory claimTopics = issuerTopics.values();
         for (uint256 i = 0; i < claimTopics.length; i++) {
-            s.claimTopicsToTrustedIssuers[claimTopics[i]].remove(address(_trustedIssuer));
+            s.claimTopicsToTrustedIssuers[claimTopics[i]].remove(_trustedIssuer);
         }
         issuerTopics.clear();
 
@@ -138,19 +137,20 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     /**
      *  @dev See {ITrustedIssuersRegistry-updateIssuerClaimTopics}.
      */
-    function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external onlyOwner {
+    function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external restricted {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.NotATrustedIssuer());
-        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopicsReached(15));
         require(_claimTopics.length > 0, ErrorsLib.ClaimTopicsCannotBeEmpty());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         uint256[] memory oldTopics = issuerTopics.values();
         for (uint256 i = 0; i < oldTopics.length; i++) {
             s.claimTopicsToTrustedIssuers[oldTopics[i]].remove(_trustedIssuer);
-            issuerTopics.remove(oldTopics[i]);
         }
+        issuerTopics.clear();
+
         for (uint256 i = 0; i < _claimTopics.length; i++) {
             issuerTopics.add(_claimTopics[i]);
             s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
@@ -198,24 +198,23 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IERC3643TrustedIssuersRegistry).interfaceId
-            || interfaceId == type(IERC173).interfaceId || interfaceId == type(IERC165).interfaceId;
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC3643TrustedIssuersRegistry).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _addTrustedIssuer(address _trustedIssuer, uint256[] memory _claimTopics) internal {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
-        require(!s.trustedIssuers.contains(address(_trustedIssuer)), ErrorsLib.TrustedIssuerAlreadyExists());
+        require(!s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.TrustedIssuerAlreadyExists());
         require(_claimTopics.length > 0, ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
-        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopcisReached(15));
+        require(_claimTopics.length <= 15, ErrorsLib.MaxClaimTopicsReached(15));
         require(s.trustedIssuers.length() < 50, ErrorsLib.MaxTrustedIssuersReached(50));
-        s.trustedIssuers.add(address(_trustedIssuer));
-        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[address(_trustedIssuer)];
+        s.trustedIssuers.add(_trustedIssuer);
+        EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         for (uint256 i = 0; i < _claimTopics.length; i++) {
             issuerTopics.add(_claimTopics[i]);
-            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(address(_trustedIssuer));
+            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
         }
 
         // This event will re-emit eventual duplicated _claimTopics.
@@ -224,8 +223,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, Ownable2StepUpgradea
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
+        assembly ("memory-safe") {
             s.slot := STORAGE_LOCATION
         }
     }

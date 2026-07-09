@@ -72,15 +72,12 @@ library ErrorsLib {
     error InvalidImplementationAuthority();
 
     // Token Errors
-    error AddressNotAgent(address agent);
-    error AgentNotAuthorized(address agent, string reason);
     error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
     error ComplianceNotFollowed();
-    error DefaultAllowanceOptOutAlreadySet(address user, bool optOut);
-    error DefaultAllowanceAlreadySet(address spender, bool allowed);
     error DecimalsOutOfRange(uint256 decimals);
     error EmptyString();
     error FrozenWallet(address user);
+    error ComplianceAlreadyBoundToToken();
     error NoTokenToRecover();
     error RecoveryNotPossible();
     error UnverifiedIdentity();
@@ -97,34 +94,17 @@ library ErrorsLib {
     // Module Errors
     error ComplianceNotBound();
     error ComplianceAlreadyBound();
+    error NotUpgradeAdmin();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
 
-    // TREXGateway Errors
-    error SenderIsNotAdmin();
-    error PublicDeploymentAlreadyEnabled();
-    error PublicDeploymentAlreadyDisabled();
-    error DeploymentFeesAlreadyEnabled();
-    error DeploymentFeesAlreadyDisabled();
-    error DeployerAlreadyExists(address deployer);
-    error DeployerDoesNotExist(address deployer);
-    error PublicDeploymentsNotAllowed();
-    error PublicCannotDeployOnBehalf();
-    error DiscountOutOfRange();
-
     // TREXFactory Errors
-    error AddressPredictionMismatch();
+    error AuthorityMismatch();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    error MaxClaimTopicsReached(uint256 max);
     error MaxAgentsReached(uint256 max);
     error TokenAlreadyDeployed();
-
-    // Roles Errors
-    error AccountAlreadyHasRole();
-    error AccountDoesNotHaveRole();
-    error CallerDoesNotHaveAgentRole();
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
@@ -141,7 +121,7 @@ library ErrorsLib {
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopcisReached(uint256 max);
+    error MaxClaimTopicsReached(uint256 max);
     error MaxTrustedIssuersReached(uint256 max);
     error NotATrustedIssuer();
     error TrustedClaimTopicsCannotBeEmpty();
@@ -149,7 +129,6 @@ library ErrorsLib {
     error TrustedIssuerDoesNotExist();
 
     // TREXImplementationAuthority Errors
-    error CallerNotOwnerOfAllImpactedContracts();
     error CannotCallOnReferenceContract();
     error NewIAIsNotAReferenceContract();
     error NonExistingVersion();

@@ -2,11 +2,17 @@
 
 pragma solidity 0.8.30;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
-import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import {
+    IERC3643Compliance,
+    IModularCompliance,
+    IModule,
+    ModularCompliance
+} from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -14,7 +20,7 @@ import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.s
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { ModuleNotPnP } from "../mocks/ModuleNotPnP.sol";
@@ -42,15 +48,10 @@ contract ComplianceTest is TREXSuiteTest {
         moduleAddress = address(moduleProxy);
     }
 
-    /// @notice Helper to deploy ModularCompliance with proxy in a fresh, unbound state owned by `deployer`.
+    /// @notice Helper to deploy ModularCompliance with proxy in a fresh, unbound state managed by the
+    ///         test AccessManager (`deployer` holds the OWNER role).
     function _deployModularComplianceWithProxy(address implementationAuthority) internal returns (ModularCompliance) {
-        ModularCompliance newCompliance = _newUnboundComplianceProxy(implementationAuthority);
-
-        newCompliance.transferOwnership(deployer);
-        vm.prank(deployer);
-        newCompliance.acceptOwnership();
-
-        return newCompliance;
+        return _newUnboundComplianceProxy(implementationAuthority);
     }
 
     function setUp() public override {
@@ -91,7 +92,8 @@ contract ComplianceTest is TREXSuiteTest {
         MockContract mockImpl = new MockContract();
 
         // Deploy an IA and manually set an invalid MC implementation
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
         // Create a version with invalid MC implementation (mock contract without init())
         ITREXImplementationAuthority.Version memory version =
@@ -107,7 +109,7 @@ contract ComplianceTest is TREXSuiteTest {
         });
 
         // Add version to IA (need to be owner)
-        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        _authorizeIAGovernance(address(incompleteIA));
         vm.prank(deployer);
         incompleteIA.addAndUseTREXVersion(version, contracts);
 
@@ -236,7 +238,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should revert when not calling as the owner
     function test_addModule_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         compliance.addModule(address(0));
     }
 
@@ -342,7 +344,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should revert when not calling as owner
     function test_removeModule_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         compliance.removeModule(address(0));
     }
 
@@ -532,7 +534,7 @@ contract ComplianceTest is TREXSuiteTest {
     function test_callModuleFunction_RevertWhen_NotOwner() public {
         vm.prank(another);
         bytes memory randomData = new bytes(32);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         compliance.callModuleFunction(randomData, address(0));
     }
 
@@ -622,7 +624,7 @@ contract ComplianceTest is TREXSuiteTest {
         bytes[] memory interactions = new bytes[](0);
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         compliance.addAndSetModule(moduleAddress, interactions);
     }
 
@@ -683,42 +685,31 @@ contract ComplianceTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IModularCompliance interface ID
-    function test_supportsInterface_ReturnsTrue_ForIModularCompliance() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIModularComplianceInterfaceId();
-        assertTrue(compliance.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIModularCompliance() public view {
+        assertTrue(compliance.supportsInterface(type(IModularCompliance).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC3643Compliance interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643Compliance() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC3643ComplianceInterfaceId();
-        assertTrue(compliance.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC3643Compliance() public view {
+        assertTrue(compliance.supportsInterface(type(IERC3643Compliance).interfaceId));
     }
 
-    /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(compliance.supportsInterface(interfaceId));
+    /// @notice IERC173 is part of the public interface via the AccessManagerOwnable ERC-173 ownership shim
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
+        assertTrue(compliance.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(compliance.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
+        assertTrue(compliance.supportsInterface(type(IERC165).interfaceId));
     }
 
     /// @notice Should correctly identify the IModule interface ID
     function test_getIModuleInterfaceId_ReturnsCorrectId() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIModuleInterfaceId();
-
         // Deploy a test module to verify the interface ID
         address moduleAddress = _deployTestModuleWithProxy();
         TestModule testModule = TestModule(moduleAddress);
-        assertTrue(testModule.supportsInterface(interfaceId));
+        assertTrue(testModule.supportsInterface(type(IModule).interfaceId));
     }
 
     // ============================================
@@ -791,10 +782,6 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Helper to setup compliance bound to token
     /// @return testToken The deployed token bound to the compliance
     function _setupComplianceBoundToWallet() internal returns (Token) {
-        // Deploy new compliance for this test
-        //compliance = _deployModularComplianceWithProxy(address(trexImplementationAuthority));
-        //compliance.transferOwnership(deployer);
-
         // Deploy and add modules
         address moduleA = _deployTestModuleWithProxy();
         address moduleB = _deployTestModuleWithProxy();

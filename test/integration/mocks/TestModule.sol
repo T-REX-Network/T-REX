@@ -63,8 +63,12 @@
 pragma solidity 0.8.30;
 
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 contract TestModule is AbstractModuleUpgradeable {
+
+    /// @dev address authorized to upgrade this test module
+    address private _upgradeAdmin;
 
     /// state variables
     mapping(address => uint256) private _complianceData;
@@ -78,6 +82,25 @@ contract TestModule is AbstractModuleUpgradeable {
      */
     function initialize() external initializer {
         __AbstractModule_init();
+        _upgradeAdmin = msg.sender;
+    }
+
+    /// @dev Transfers upgrade authority to a pending admin (two-step: pendingAdmin must call acceptUpgradeAdmin).
+    address private _pendingUpgradeAdmin;
+
+    function transferUpgradeAdmin(address newAdmin) external {
+        require(msg.sender == _upgradeAdmin, ErrorsLib.NotUpgradeAdmin());
+        _pendingUpgradeAdmin = newAdmin;
+    }
+
+    function acceptUpgradeAdmin() external {
+        require(msg.sender == _pendingUpgradeAdmin, ErrorsLib.NotUpgradeAdmin());
+        _upgradeAdmin = _pendingUpgradeAdmin;
+        _pendingUpgradeAdmin = address(0);
+    }
+
+    function upgradeAdmin() external view returns (address) {
+        return _upgradeAdmin;
     }
 
     function doSomething(uint256 _value) external onlyComplianceCall {
@@ -161,6 +184,11 @@ contract TestModule is AbstractModuleUpgradeable {
      *  @dev Test function to cover onlyBoundCompliance modifier
      */
     function invokeOnlyBoundCompliance(address _compliance) external onlyBoundCompliance(_compliance) { }
+
+    /// @dev Upgrade guard: only the upgrade admin may authorize an upgrade.
+    function _authorizeUpgrade(address) internal virtual override {
+        require(msg.sender == _upgradeAdmin, ErrorsLib.NotUpgradeAdmin());
+    }
 
     // Fallback function to accept any callData (used for testing _selector with short callData)
     fallback() external { }

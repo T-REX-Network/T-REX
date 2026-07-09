@@ -61,22 +61,46 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity 0.8.30;
+pragma solidity ^0.8.30;
 
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+library RolesLib {
 
-import { AbstractAgentRole } from "./AbstractAgentRole.sol";
+    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
 
-contract AgentRoleUpgradeable is AbstractAgentRole, Ownable2StepUpgradeable {
+    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
 
-    constructor() Ownable2StepUpgradeable() { }
+    // ---- Operational roles (gate contract functions: "what you can do") ----
 
-    function addAgent(address _agent) public onlyOwner {
-        super._addAgent(_agent);
-    }
+    uint64 constant OWNER = ROLE_PREFIX + 1;
 
-    function removeAgent(address _agent) public onlyOwner {
-        super._removeAgent(_agent);
-    }
+    uint64 constant AGENT = ROLE_PREFIX + 2;
+    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
+    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
+    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
+    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
+    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
+    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
+    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
+
+    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
+    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
+
+    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
+    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
+    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
+    // handing out the AccessManager ADMIN_ROLE (0).
+
+    // Admin of AGENT and every granular AGENT_* role.
+    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
+
+    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
+    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
+
+    // ---- Deploy-time transient roles (self-granted for a single call, revoked before returning) ----
+
+    // Gates IdentityRegistryStorage.bindIdentityRegistry so the factory can bind a new IR onto a reused
+    // IRS during deployTREXSuite without standing OWNER. Unassigned at rest, self-granted for the bind call
+    // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
+    uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
 
 }

@@ -50,8 +50,9 @@ contract AbstractProxyTest is TREXSuiteTest {
 
     /// @notice Should revert when new implementation authority is incomplete
     function test_setImplementationAuthority_RevertWhen_IncompleteIA() public {
-        // Deploy an incomplete IA (no implementations set)
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(false, address(0), address(0));
+        // Deploy an incomplete IA: a reference IA with no version set has zero implementations
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
         vm.prank(address(trexImplementationAuthority));
         vm.expectRevert(ErrorsLib.InvalidImplementationAuthority.selector);

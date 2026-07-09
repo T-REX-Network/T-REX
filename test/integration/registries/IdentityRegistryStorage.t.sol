@@ -2,8 +2,9 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -15,9 +16,12 @@ import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImp
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
-import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+import {
+    IERC3643IdentityRegistryStorage,
+    IdentityRegistryStorage
+} from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
@@ -34,8 +38,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         identityRegistryStorage = IdentityRegistryStorage(address(token.identityRegistry().identityStorage()));
 
-        vm.prank(deployer);
-        identityRegistryStorage.addAgent(agent);
+        // bindIdentityRegistry is now gated by the transient IRS_BINDER role (not OWNER). deployer
+        // already holds OWNER for the suite; grant it IRS_BINDER too so the bind-path tests can run.
+        _grantIRSBinderRole(deployer);
 
         // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
         // For Foundry, we start with 0 bound registries (tests will bind as needed)
@@ -55,7 +60,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_addIdentityToStorage_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.addIdentityToStorage(charlie, charlieIdentity, Countries.UNITED_STATES);
     }
 
@@ -86,7 +91,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_modifyStoredIdentity_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
     }
 
@@ -119,7 +124,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_modifyStoredInvestorCountry_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
     }
 
@@ -145,7 +150,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when sender is not agent
     function test_removeIdentityFromStorage_RevertWhen_NotAgent() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.removeIdentityFromStorage(charlie);
     }
 
@@ -168,17 +173,28 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     // ============ bindIdentityRegistry() Tests ============
 
-    /// @notice Should revert when sender is not owner
-    function test_bindIdentityRegistry_RevertWhen_NotOwner() public {
+    /// @notice Should revert when sender lacks the IRS_BINDER role
+    function test_bindIdentityRegistry_RevertWhen_NotBinder() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
     }
 
-    /// @notice Should revert when identity registry is zero address
+    /// @notice bind is gated by IRS_BINDER, not OWNER: holding OWNER alone must not authorize a bind.
+    function test_bindIdentityRegistry_RevertWhen_OwnerWithoutBinderRole() public {
+        address ownerOnly = makeAddr("ownerOnly");
+        _grantOwnerRole(ownerOnly);
+
+        vm.prank(ownerOnly);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ownerOnly));
+        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+    }
+
+    /// @notice Should revert when identity registry is zero address. The onlySharedAuthority guard rejects
+    ///         address(0) (it cannot share the storage's authority), so the bind never proceeds.
     function test_bindIdentityRegistry_RevertWhen_ZeroAddress() public {
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         identityRegistryStorage.bindIdentityRegistry(address(0));
     }
 
@@ -189,26 +205,44 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // When length is 300, we cannot add more (301st should fail)
         for (uint256 i = 1; i < 300; i++) {
             address registryAddress = vm.addr(i + 1000);
+            // bindIdentityRegistry is gated by onlySharedAuthority: each registry must report the storage's
+            // AccessManager as its authority.
+            vm.mockCall(
+                registryAddress,
+                abi.encodeWithSelector(IAccessManaged.authority.selector),
+                abi.encode(address(accessManager))
+            );
             vm.prank(deployer);
             identityRegistryStorage.bindIdentityRegistry(registryAddress);
         }
 
-        // Try to add 301st registry (should fail, length is now 300, not < 300)
+        // Try to add 301st registry (should fail, length is now 300, not < 300). It must also share the
+        // authority so it reaches the count check rather than reverting on onlySharedAuthority first.
+        address extraRegistry = vm.addr(2000);
+        vm.mockCall(
+            extraRegistry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, 300));
-        identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
+        identityRegistryStorage.bindIdentityRegistry(extraRegistry);
     }
 
     // ============ unbindIdentityRegistry() Tests ============
 
     /// @notice Should revert when sender is not owner
     function test_unbindIdentityRegistry_RevertWhen_NotOwner() public {
-        // Bind first
+        // Bind first. bindIdentityRegistry is gated by onlySharedAuthority, so the bound address must report
+        // the storage's AccessManager as its authority.
+        vm.mockCall(
+            address(charlieIdentity),
+            abi.encodeWithSelector(IAccessManaged.authority.selector),
+            abi.encode(address(accessManager))
+        );
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         identityRegistryStorage.unbindIdentityRegistry(address(charlieIdentity));
     }
 
@@ -250,24 +284,18 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IERC3643IdentityRegistryStorage interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistryStorage() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC3643IdentityRegistryStorageInterfaceId();
-        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC3643IdentityRegistryStorage() public view {
+        assertTrue(identityRegistryStorage.supportsInterface(type(IERC3643IdentityRegistryStorage).interfaceId));
     }
 
-    /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+    /// @notice IERC173 is part of the public interface via the AccessManagerOwnable ERC-173 ownership shim
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
+        assertTrue(identityRegistryStorage.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(identityRegistryStorage.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
+        assertTrue(identityRegistryStorage.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ Constructor Tests ============
@@ -284,7 +312,8 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         MockContract mockImpl = new MockContract();
 
         // Deploy an IA and manually set an invalid IRS implementation
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
         // Create a version with invalid IRS implementation (mock contract without init())
         ITREXImplementationAuthority.Version memory version =
@@ -300,7 +329,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         });
 
         // Add version to IA (need to be owner)
-        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        _authorizeIAGovernance(address(incompleteIA));
         vm.prank(deployer);
         incompleteIA.addAndUseTREXVersion(version, contracts);
 

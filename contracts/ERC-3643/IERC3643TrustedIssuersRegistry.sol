@@ -51,7 +51,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  Requires that there is no more than 50 Trusted issuers
      *  @param _trustedIssuer The ClaimIssuer contract address of the trusted claim issuer.
      *  @param _claimTopics the set of claim topics that the trusted issuer is allowed to emit
-     *  This function can only be called by the owner of the Trusted Issuers Registry contract
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits a `TrustedIssuerAdded` event
      */
     function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external;
@@ -60,7 +60,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  @dev Removes the ClaimIssuer contract of a trusted claim issuer.
      *  Requires that the claim issuer contract to be registered first
      *  @param _trustedIssuer the claim issuer to remove.
-     *  This function can only be called by the owner of the Trusted Issuers Registry contract
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits a `TrustedIssuerRemoved` event
      */
     function removeTrustedIssuer(address _trustedIssuer) external;
@@ -72,7 +72,7 @@ interface IERC3643TrustedIssuersRegistry {
      *  Requires that there is no more than 15 claimTopics
      *  @param _trustedIssuer the claim issuer to update.
      *  @param _claimTopics the set of claim topics that the trusted issuer is allowed to emit
-     *  This function can only be called by the owner of the Trusted Issuers Registry contract
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits a `ClaimTopicsUpdated` event
      */
     function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external;

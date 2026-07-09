@@ -24,7 +24,11 @@
     "format": "forge fmt --check",
     "format:fix": "forge fmt",
     "test": "forge test --gas-report",
-    "coverage": "forge coverage --no-match-coverage \"(test|dependencies|scripts|vendor)\"",
+    "test:core": "forge test --gas-report --no-match-path \"test/{fuzz,integration/mocks}/**/*.sol\"",
+    "test:mutation:generate": "gambit mutate --json mutation/gambit_conf.json",
+    "test:mutation": "bash mutation/run_mutation.sh",
+    "verify": "certora/run.sh Token && certora/run.sh ModularCompliance && certora/run.sh IdentityRegistry",
+    "coverage": "forge coverage --no-match-coverage \"(test|dependencies|scripts|vendor)\" --no-match-path \"test/{fuzz,integration/mocks}/**/*.sol\"",
     "coverage:report": "mkdir -p coverage && forge coverage --no-match-coverage \"(test|scripts|dependencies|vendor)\" --report lcov --report-file coverage/lcov.info && genhtml coverage/lcov.info -o coverage/report --branch-coverage && open coverage/report/index.html",
     "clean": "forge clean"
   },

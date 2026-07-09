@@ -8,7 +8,7 @@ import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { IERC173 } from "contracts/roles/IERC173.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TestModule } from "../mocks/TestModule.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -182,9 +182,9 @@ contract TestModuleTest is TREXSuiteTest {
         assertTrue(testModule.supportsInterface(type(IModule).interfaceId));
     }
 
-    /// @notice Should return true for IERC173 interface
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
-        assertTrue(testModule.supportsInterface(type(IERC173).interfaceId));
+    /// @notice IERC173 is intentionally NOT part of the public interface (ERC-173 ownership dropped in favour of AccessManager)
+    function test_supportsInterface_ReturnsFalse_ForIERC173() public view {
+        assertFalse(testModule.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should return true for IERC165 interface
@@ -196,11 +196,12 @@ contract TestModuleTest is TREXSuiteTest {
     // _authorizeUpgrade Tests (via upgradeToAndCall)
     // ============================================
 
-    /// @notice Should upgrade module when called by owner (covers _authorizeUpgrade)
+    /// @notice Should upgrade module when called by the upgrade admin (covers _authorizeUpgrade)
     function test_upgradeToAndCall_Success_CoversAuthorizeUpgrade() public {
-        testModule.transferOwnership(deployer);
+        // Transfer upgrade admin from deployer (address(this) - proxy deployer) to `deployer` test address
+        testModule.transferUpgradeAdmin(deployer);
         vm.prank(deployer);
-        testModule.acceptOwnership();
+        testModule.acceptUpgradeAdmin();
 
         TestModule newImplementation = new TestModule();
 
@@ -217,14 +218,13 @@ contract TestModuleTest is TREXSuiteTest {
         assertNotEq(actualImplementation, oldImplementation);
     }
 
-    /// @notice Should revert upgrade when not called by owner
-    function test_upgradeToAndCall_RevertWhen_NotOwner() public {
-        testModule.transferOwnership(deployer);
-
+    /// @notice Should revert upgrade when not called by the upgrade admin
+    function test_upgradeToAndCall_RevertWhen_NotUpgradeAdmin() public {
+        // Upgrade admin is address(this) (the proxy deployer); alice is not the admin
         TestModule newImplementation = new TestModule();
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(ErrorsLib.NotUpgradeAdmin.selector);
         UUPSUpgradeable(address(testModule)).upgradeToAndCall(address(newImplementation), "");
     }
 

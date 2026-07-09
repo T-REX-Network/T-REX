@@ -17,6 +17,14 @@ node_modules/
 .storage_delta_cache
 storage_delta
 
+# Gambit mutation testing output
+gambit_out/
+
 # Environment variables
 .env
 .env.local
+.audit-cache/
+.certora_internal/
+emv-*/
+.last_confs/
+certora_internal/

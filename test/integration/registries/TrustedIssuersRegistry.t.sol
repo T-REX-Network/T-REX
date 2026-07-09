@@ -2,15 +2,19 @@
 pragma solidity 0.8.30;
 
 import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TrustedIssuersRegistryProxy } from "contracts/proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import {
+    IERC3643TrustedIssuersRegistry,
+    TrustedIssuersRegistry
+} from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -48,7 +52,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
         ClaimIssuer anotherClaimIssuer = new ClaimIssuer(another);
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.addTrustedIssuer(address(anotherClaimIssuer), claimTopics);
     }
 
@@ -91,7 +95,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         }
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopcisReached.selector, 15));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 15));
         trustedIssuersRegistry.addTrustedIssuer(address(newClaimIssuer), claimTopics);
     }
 
@@ -124,7 +128,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         ClaimIssuer anotherClaimIssuerForRemove = new ClaimIssuer(another);
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.removeTrustedIssuer(address(anotherClaimIssuerForRemove));
     }
 
@@ -203,7 +207,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         claimTopics[0] = CLAIM_TOPIC_1;
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.updateIssuerClaimTopics(address(anotherClaimIssuerForUpdate), claimTopics);
     }
 
@@ -236,7 +240,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         }
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopcisReached.selector, 15));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxClaimTopicsReached.selector, 15));
         trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), claimTopics);
     }
 
@@ -327,24 +331,18 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IERC3643TrustedIssuersRegistry interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643TrustedIssuersRegistry() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC3643TrustedIssuersRegistryInterfaceId();
-        assertTrue(trustedIssuersRegistry.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC3643TrustedIssuersRegistry() public view {
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC3643TrustedIssuersRegistry).interfaceId));
     }
 
-    /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(trustedIssuersRegistry.supportsInterface(interfaceId));
+    /// @notice IERC173 is part of the public interface via the AccessManagerOwnable ERC-173 ownership shim
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(trustedIssuersRegistry.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
+        assertTrue(trustedIssuersRegistry.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ Constructor Tests ============
@@ -361,7 +359,8 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         MockContract mockImpl = new MockContract();
 
         // Deploy an IA and manually set an invalid TIR implementation
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
         // Create a version with invalid TIR implementation (mock contract without init())
         ITREXImplementationAuthority.Version memory version =
@@ -377,7 +376,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         });
 
         // Add version to IA (need to be owner)
-        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        _authorizeIAGovernance(address(incompleteIA));
         vm.prank(deployer);
         incompleteIA.addAndUseTREXVersion(version, contracts);
 

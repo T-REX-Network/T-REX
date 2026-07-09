@@ -80,6 +80,11 @@ library ERC3643EventsLib {
 
     event RecoverySuccess(address indexed _lostWallet, address indexed _newWallet, address indexed _investorOnchainID);
 
+    /// @dev `_owner` records the actor that set the frozen status (`_msgSender()`). When the call is
+    /// routed through `AccessManager.execute`, `_msgSender()` is the AccessManager, so this field
+    /// reflects the executing contract rather than the originator address (the EOA or contract behind
+    /// the role). Consumers that need the originator address must read it from the AccessManager
+    /// execution context, not here.
     event AddressFrozen(address indexed _userAddress, bool indexed _isFrozen, address indexed _owner);
 
     event TokensFrozen(address indexed _userAddress, uint256 _amount);

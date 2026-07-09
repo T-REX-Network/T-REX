@@ -70,11 +70,11 @@ import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAut
 
 contract ClaimTopicsRegistryProxy is AbstractProxy {
 
-    constructor(address implementationAuthority, address _owner, uint256[] memory _initialTopics)
+    constructor(address implementationAuthority, address accessManager, uint256[] memory initialTopics)
         AbstractProxy(implementationAuthority)
     {
         if (!LowLevelCall.delegatecallNoReturn(
-                getLogic(), abi.encodeCall(ClaimTopicsRegistry.init, (_owner, _initialTopics))
+                getLogic(), abi.encodeCall(ClaimTopicsRegistry.init, (accessManager, initialTopics))
             )) {
             LowLevelCall.bubbleRevert();
         }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
-import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { TokenRoles } from "contracts/token/TokenStructs.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -24,8 +25,17 @@ contract TokenBurnUnitTest is TokenBaseUnitTest {
     function testTokenBurnRevertsWhenNotAgent(address caller) public {
         vm.assume(caller != agent);
 
-        vm.expectRevert(ErrorsLib.CallerDoesNotHaveAgentRole.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         vm.prank(caller);
+        token.burn(user1, burnAmount);
+    }
+
+    function testTokenBurnRevertsWhenCallerOnlyMinter() public {
+        address minter = makeAddr("Minter");
+        accessManager.grantRole(RolesLib.AGENT_MINTER, minter, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
+        vm.prank(minter);
         token.burn(user1, burnAmount);
     }
 
@@ -83,25 +93,6 @@ contract TokenBurnUnitTest is TokenBaseUnitTest {
         assertEq(token.balanceOf(user1), user1BalanceBefore - burnAmount1);
         assertEq(token.balanceOf(user2), user2BalanceBefore - burnAmount2);
         assertEq(token.totalSupply(), mintAmount + amount1 + amount2 - burnAmount1 - burnAmount2);
-    }
-
-    function testTokenBurnRevertsWhenDisableBurnRestrictionIsSet() public {
-        // Set restriction to disable burn
-        TokenRoles memory restrictions = TokenRoles({
-            disableMint: false,
-            disableBurn: true,
-            disablePartialFreeze: false,
-            disableAddressFreeze: false,
-            disableRecovery: false,
-            disableForceTransfer: false,
-            disablePause: false
-        });
-
-        token.setAgentRestrictions(agent, restrictions);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AgentNotAuthorized.selector, agent, "burn disabled"));
-        vm.prank(agent);
-        token.burn(user1, burnAmount);
     }
 
 }

@@ -65,8 +65,6 @@ interface ITREXFactory {
 
     /// Types
     struct TokenDetails {
-        // address of the owner of all contracts
-        address owner;
         // name of the token
         string name;
         // symbol / ticker of the token
@@ -78,7 +76,6 @@ interface ITREXFactory {
         // if an address is provided, please ensure that the factory is set as owner of the contract
         address irs;
         // ONCHAINID of the token
-        // solhint-disable-next-line var-name-mixedcase
         address ONCHAINID;
         // list of agents of the identity registry (can be set to an AgentManager contract)
         address[] irAgents;
@@ -89,6 +86,8 @@ interface ITREXFactory {
         address[] complianceModules;
         // settings calls for compliance modules
         bytes[] complianceSettings;
+        // access manager address
+        address accessManager;
     }
 
     struct ClaimDetails {
@@ -107,7 +106,7 @@ interface ITREXFactory {
      *  the implementation authority contract contains the addresses of all implementation contracts
      *  the proxies created by the factory will use the different implementations available
      *  in the implementation authority contract
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `ImplementationAuthoritySet` event
      *  @param _implementationAuthority The address of the implementation authority smart contract
      */
@@ -117,7 +116,7 @@ interface ITREXFactory {
      *  @dev setter for identity factory contract address
      *  the identity factory contract is used by the TREX Factory to deploy the ONCHAINID
      *  of the token in case the ONCHAINID is not specified
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `IdFactorySet` event
      *  @param _idFactory The address of the identity factory contract
      */
@@ -137,7 +136,7 @@ interface ITREXFactory {
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
-     *  Only owner can call.
+     *  Restricted to the configured AccessManager role (OWNER).
      *  emits `TREXSuiteDeployed` event
      *  @param _salt the salt used to make the contracts deployments with CREATE2
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)
@@ -151,15 +150,6 @@ interface ITREXFactory {
         TokenDetails calldata _tokenDetails,
         ClaimDetails calldata _claimDetails
     ) external;
-
-    /**
-     *  @dev function that can be used to recover the ownership of contracts owned by the factory
-     *  typically used for IRS contracts owned by the factory (ownership of IRS is mandatory to call bind function)
-     *  @param _contract The smart contract address
-     *  @param _newOwner The address to transfer ownership to
-     *  Only owner can call.
-     */
-    function recoverContractOwnership(address _contract, address _newOwner) external;
 
     /**
      *  @dev getter for implementation authority address

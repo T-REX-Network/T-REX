@@ -51,7 +51,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the token name
      *  @param _name the name of token to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (TOKEN_MANAGER).
      *  emits a `UpdatedTokenInformation` event
      */
     function setName(string calldata _name) external;
@@ -59,7 +59,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the token symbol
      *  @param _symbol the token symbol to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (TOKEN_MANAGER).
      *  emits a `UpdatedTokenInformation` event
      */
     function setSymbol(string calldata _symbol) external;
@@ -67,7 +67,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the onchain ID of the token
      *  @param _onchainID the address of the onchain ID to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  emits a `UpdatedTokenInformation` event
      */
     function setOnchainID(address _onchainID) external;
@@ -101,6 +101,10 @@ interface IERC3643 is IERC20, IERC20Metadata {
      * either freezing or unfreezing the address based on the provided boolean value.
      * This function can be called by an agent of the token, assuming the agent is not restricted from freezing addresses.
      * emits an `AddressFrozen` event upon successful execution.
+     * @notice The `_owner` field of the emitted `AddressFrozen` event is `_msgSender()`. When this
+     * function is invoked through `AccessManager.execute`, `_msgSender()` is the AccessManager, so the
+     * event records the executing contract, not the originator address. This is intentional; read the
+     * AccessManager execution context if you need the originator address (the EOA or contract).
      * @param _userAddress The address for which to update the frozen status.
      * @param _freeze The frozen status to be applied: `true` to freeze, `false` to unfreeze.
      * @notice To change an address's frozen status, the calling agent must have the capability to freeze addresses enabled.
@@ -139,15 +143,18 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /**
      *  @dev sets the Identity Registry for the token
      *  @param _identityRegistry the address of the Identity Registry to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  emits an `IdentityRegistryAdded` event
+     *  @notice The provided Identity Registry must share the Token's AccessManager authority, otherwise
+     *  reverts with `AuthorityMismatch`. This guards against misconfiguration only, not a malicious caller:
+     *  authorization (IDENTITY_MANAGER) remains the real trust boundary.
      */
     function setIdentityRegistry(address _identityRegistry) external;
 
     /**
      *  @dev sets the compliance contract of the token
      *  @param _compliance the address of the compliance contract to set
-     *  Only the owner of the token smart contract can call this function
+     *  Restricted to the configured AccessManager role (IDENTITY_MANAGER).
      *  calls bindToken on the compliance contract
      *  emits a `ComplianceAdded` event
      */

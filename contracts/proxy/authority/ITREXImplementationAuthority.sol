@@ -107,7 +107,7 @@ interface ITREXImplementationAuthority {
      *  deployed before the TREXFactory.
      *  @param trexFactory the address of TREXFactory contract
      *  emits a TREXFactorySet event
-     *  only Owner can call
+     *  restricted to the OWNER role
      *  can be called only on main contract, auxiliary contracts cannot call
      */
     function setTREXFactory(address trexFactory) external;
@@ -119,7 +119,7 @@ interface ITREXImplementationAuthority {
      *  in the constructor
      *  @param iaFactory the address of IAFactory contract
      *  emits a IAFactorySet event
-     *  only Owner can call
+     *  restricted to the OWNER role
      *  can be called only on main contract, auxiliary contracts cannot call
      */
     function setIAFactory(address iaFactory) external;
@@ -127,7 +127,7 @@ interface ITREXImplementationAuthority {
     /**
      *  @dev adds a new Version of TREXContracts to the mapping
      *  only callable on the reference contract
-     *  only Owner can call this function
+     *  restricted to the OWNER role
      *  @param _version the new version to add to the mapping
      *  @param _trex the list of contracts corresponding to the new version
      *  _trex cannot contain zero addresses
@@ -142,7 +142,7 @@ interface ITREXImplementationAuthority {
      *  and the `useTREXVersion` using an existing version
      *  @param _version the version to use
      *  @param _trex the set of contracts corresponding to the version
-     *  only Owner can call (check performed in addTREXVersion)
+     *  restricted to the OWNER role
      *  only reference contract can call (check performed in addTREXVersion)
      *  emits a `TREXVersionAdded`event
      *  emits a `VersionUpdated` event
@@ -153,17 +153,16 @@ interface ITREXImplementationAuthority {
      *  @dev updates the current version in use by the proxies
      *  @param _version the version to use
      *  reverts if _version is already used or if version does not exist
-     *  only Owner can call
+     *  restricted to the OWNER role
      *  emits a `VersionUpdated` event
      */
     function useTREXVersion(Version calldata _version) external;
 
     /**
      *  @dev change the implementationAuthority address of all proxy contracts linked to a given token
-     *  only the owner of all proxy contracts can call this function
+     *  Restricted to the configured AccessManager role (OWNER).
      *  @param _token the address of the token proxy
      *  @param _newImplementationAuthority the address of the new IA contract
-     *  caller has to be owner of all contracts linked to the token and impacted by the change
      *  Set _newImplementationAuthority on zero address to deploy a new IA contract
      *  New IA contracts can only be deployed ONCE per token and only if current IA is the main IA
      *  if _newImplementationAuthority is not a new contract it must be using the same version
@@ -233,6 +232,10 @@ interface ITREXImplementationAuthority {
 
     /**
      *  @dev getter for reference contract address
+     *  @notice Returns `address(0)` until the reference contract is wired by the factory
+     *  (`setImplementationAuthority`). Call sites that dereference the result before it is set
+     *  (e.g. `fetchVersion`, which calls into the reference contract) will revert; this is the
+     *  intended fail-closed behavior, not a missing guard.
      */
     function getReferenceContract() external view returns (address);
 

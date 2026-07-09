@@ -75,7 +75,7 @@ interface IIdentityRegistry is IERC3643IdentityRegistry {
      * to interact with the token without requiring specific claims or issuer validation.
      *
      * Requirements:
-     * - The caller must be the owner of the contract.
+     * - The caller must hold the required AccessManager role (OWNER).
      * - The eligibility checks must not already be disabled; otherwise, the function will revert with an
      *   `EligibilityChecksDisabledAlready` error.
      *
@@ -91,7 +91,7 @@ interface IIdentityRegistry is IERC3643IdentityRegistry {
      * process, checking for the required claims and validating them through trusted issuers.
      *
      * Requirements:
-     * - The caller must be the owner of the contract.
+     * - The caller must hold the required AccessManager role (OWNER).
      * - The eligibility checks must currently be disabled; otherwise, the function will revert with an
      *   `EligibilityChecksEnabledAlready` error.
      *

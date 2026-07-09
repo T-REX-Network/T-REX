@@ -67,10 +67,10 @@ import { EventsLib } from "../../libraries/EventsLib.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "./TREXImplementationAuthority.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-contract IAFactory is IIAFactory, IERC165 {
+contract IAFactory is IIAFactory, ERC165 {
 
     /// variables
     /// address of the trex factory
@@ -94,12 +94,14 @@ contract IAFactory is IIAFactory, IERC165 {
      */
     function deployIA(address _token) external returns (address) {
         require(ITREXFactory(_trexFactory).getImplementationAuthority() == msg.sender, OnlyReferenceIACanDeploy());
+        // The new IA is governed by the token's AccessManager and pins the reference contract's
+        // current version at construction, so no restricted call is needed here.
         TREXImplementationAuthority _newIA = new TREXImplementationAuthority(
-            false, ITREXImplementationAuthority(msg.sender).getTREXFactory(), address(this)
+            false,
+            ITREXImplementationAuthority(msg.sender).getTREXFactory(),
+            address(this),
+            IAccessManaged(_token).authority()
         );
-        _newIA.fetchVersion(ITREXImplementationAuthority(msg.sender).getCurrentVersion());
-        _newIA.useTREXVersion(ITREXImplementationAuthority(msg.sender).getCurrentVersion());
-        Ownable(_newIA).transferOwnership(Ownable(_token).owner());
         _deployedByFactory[address(_newIA)] = true;
         emit EventsLib.ImplementationAuthorityDeployed(address(_newIA));
         return address(_newIA);
@@ -115,8 +117,8 @@ contract IAFactory is IIAFactory, IERC165 {
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IIAFactory).interfaceId || interfaceId == type(IERC165).interfaceId;
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IIAFactory).interfaceId || super.supportsInterface(interfaceId);
     }
 
 }

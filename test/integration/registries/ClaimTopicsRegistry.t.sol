@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { ClaimTopicsRegistryProxy } from "contracts/proxy/ClaimTopicsRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
-import { InterfaceIdCalculator } from "contracts/utils/InterfaceIdCalculator.sol";
+import {
+    ClaimTopicsRegistry,
+    IERC3643ClaimTopicsRegistry
+} from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
+import { IERC173 } from "contracts/vendor/IERC173.sol";
 
+import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { MockContract } from "../mocks/MockContract.sol";
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract ClaimTopicsRegistryTest is TREXSuiteTest {
 
@@ -40,7 +44,7 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
     /// @notice Should revert when sender is not owner
     function test_addClaimTopic_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         claimTopicsRegistry.addClaimTopic(1);
     }
 
@@ -78,7 +82,7 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
     /// @notice Should revert when sender is not owner
     function test_removeClaimTopic_RevertWhen_NotOwner() public {
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         claimTopicsRegistry.removeClaimTopic(1);
     }
 
@@ -108,24 +112,18 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
     }
 
     /// @notice Should correctly identify the IERC3643ClaimTopicsRegistry interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC3643ClaimTopicsRegistry() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC3643ClaimTopicsRegistryInterfaceId();
-        assertTrue(claimTopicsRegistry.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC3643ClaimTopicsRegistry() public view {
+        assertTrue(claimTopicsRegistry.supportsInterface(type(IERC3643ClaimTopicsRegistry).interfaceId));
     }
 
-    /// @notice Should correctly identify the IERC173 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC173() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC173InterfaceId();
-        assertTrue(claimTopicsRegistry.supportsInterface(interfaceId));
+    /// @notice IERC173 is part of the public interface via the AccessManagerOwnable ERC-173 ownership shim
+    function test_supportsInterface_ReturnsTrue_ForIERC173() public view {
+        assertTrue(claimTopicsRegistry.supportsInterface(type(IERC173).interfaceId));
     }
 
     /// @notice Should correctly identify the IERC165 interface ID
-    function test_supportsInterface_ReturnsTrue_ForIERC165() public {
-        InterfaceIdCalculator calculator = new InterfaceIdCalculator();
-        bytes4 interfaceId = calculator.getIERC165InterfaceId();
-        assertTrue(claimTopicsRegistry.supportsInterface(interfaceId));
+    function test_supportsInterface_ReturnsTrue_ForIERC165() public view {
+        assertTrue(claimTopicsRegistry.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ============ Constructor Tests ============
@@ -142,7 +140,8 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
         MockContract mockImpl = new MockContract();
 
         // Deploy an IA and manually set an invalid CTR implementation
-        TREXImplementationAuthority incompleteIA = new TREXImplementationAuthority(true, address(0), address(0));
+        TREXImplementationAuthority incompleteIA =
+            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
 
         // Create a version with invalid CTR implementation (mock contract without init())
         ITREXImplementationAuthority.Version memory version =
@@ -158,7 +157,7 @@ contract ClaimTopicsRegistryTest is TREXSuiteTest {
         });
 
         // Add version to IA (need to be owner)
-        Ownable(address(incompleteIA)).transferOwnership(deployer);
+        _authorizeIAGovernance(address(incompleteIA));
         vm.prank(deployer);
         incompleteIA.addAndUseTREXVersion(version, contracts);
 
