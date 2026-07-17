@@ -1,15 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { IIdentity, Identity } from "@onchain-id/solidity/contracts/Identity.sol";
-import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
-import { ImplementationAuthority } from "@onchain-id/solidity/contracts/proxy/ImplementationAuthority.sol";
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
+import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
+import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
+import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
+import { ClaimsModule } from "@onchain-id/solidity/contracts/modules/claims/ClaimsModule.sol";
+import { KeyApprovalModule } from "@onchain-id/solidity/contracts/modules/executors/KeyApprovalModule.sol";
+import { ERC7579Signature } from "@onchain-id/solidity/contracts/modules/validators/ERC7579Signature.sol";
+import { ReputationRegistry } from "@onchain-id/solidity/contracts/reputation/ReputationRegistry.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
+import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
+import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import {
     ITREXImplementationAuthority,
@@ -31,8 +40,15 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // OnchainID
     Identity public identityImplementation;
-    ImplementationAuthority public implementationAuthority;
-    IdFactory public idFactory;
+    UpgradeableBeacon public identityBeacon;
+    IdentityFactory public idFactory;
+
+    // ONCHAINID module singletons. Identity is an ERC-7579 account with no native ERC-734/735
+    // surface, so every identity installs these to hold keys and claims.
+    KeyApprovalModule public keyApprovalModule;
+    ClaimsModule public claimsModule;
+    ERC7579Signature public signatureValidator;
+    ReputationRegistry public reputationRegistry;
 
     // Implementations
     Token tokenImplementation;
@@ -48,7 +64,9 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // TREX Suite
     Token public token;
-    ClaimIssuer public claimIssuer;
+    /// @dev A claim issuer is now just an Identity of type CLAIM_ISSUER with the ClaimsModule
+    ///      installed; ONCHAINID no longer ships a standalone ClaimIssuer contract.
+    Identity public claimIssuer;
 
     // Admin roles
     address public deployer = makeAddr("deployer");
@@ -86,14 +104,133 @@ contract TREXSuiteTest is AccessManagerHelper {
         _registerIdentities(token);
     }
 
-    function _deployOnchainId(address initialManagementKey) internal {
+    /// @dev Deploys the ONCHAINID stack: identity implementation behind an upgradeable beacon, the
+    ///      IdentityFactory governed by the suite's AccessManager, and the module singletons every
+    ///      identity installs. Identity types are registered with the factory here because it rejects
+    ///      unregistered types from both deploy paths.
+    function _deployOnchainId(address) internal {
         vm.startPrank(deployer);
-        identityImplementation = new Identity(initialManagementKey, true);
-        implementationAuthority = new ImplementationAuthority(address(identityImplementation));
-        idFactory = new IdFactory(address(implementationAuthority));
+        signatureValidator = new ERC7579Signature();
+        keyApprovalModule = new KeyApprovalModule();
 
-        claimIssuer = new ClaimIssuer(claimIssuerSigner.addr);
+        identityImplementation = new Identity(false);
+        identityBeacon = new UpgradeableBeacon(address(identityImplementation), deployer);
         vm.stopPrank();
+
+        idFactory = _newIdentityFactory();
+
+        vm.startPrank(deployer);
+        reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
+        claimsModule = new ClaimsModule(address(idFactory), address(reputationRegistry));
+        vm.stopPrank();
+
+        claimIssuer = _deployClaimIssuer();
+    }
+
+    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory and ONCHAINID module singletons.
+    ///      The modules are constructor config because a token OID minted without them could not hold
+    ///      claims.
+    function _newTREXFactory(address implementationAuthority, address accessManagerAddress)
+        internal
+        returns (TREXFactory factory)
+    {
+        vm.prank(deployer);
+        factory = new TREXFactory(
+            implementationAuthority,
+            address(idFactory),
+            address(keyApprovalModule),
+            address(claimsModule),
+            accessManagerAddress
+        );
+    }
+
+    /// @dev Deploys an IdentityFactory against the shared beacon and registers the identity types the
+    ///      suite mints. Tests that need a second, independent global registry call this directly.
+    function _newIdentityFactory() internal returns (IdentityFactory factory) {
+        vm.prank(deployer);
+        factory = new IdentityFactory(address(identityBeacon), address(accessManager));
+        _registerIdentityTypePolicies(factory);
+    }
+
+    /// @dev Registers the identity types the suite mints; the factory rejects unregistered types from
+    ///      both deploy paths. INDIVIDUAL and CLAIM_ISSUER are open (PUBLIC_ROLE, self-deployable) for
+    ///      test convenience. ASSET is gated behind TOKEN_OID_MINTER with self-deploy off, mirroring
+    ///      production: only a registered token factory mints token OIDs, and a token cannot sign for
+    ///      itself.
+    /// @dev Called as the test contract, which is the AccessManager admin (see AccessManagerHelper);
+    ///      `setIdentityTypePolicy` is restricted and its selector defaults to ADMIN_ROLE.
+    function _registerIdentityTypePolicies(IdentityFactory factory) internal {
+        uint64 publicRole = accessManager.PUBLIC_ROLE();
+
+        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true);
+        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true);
+        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.TOKEN_OID_MINTER, false);
+    }
+
+    /// @dev A claim issuer is an Identity of type CLAIM_ISSUER holding a CLAIM_SIGNER key. The
+    ///      MANAGEMENT key satisfies the factory's post-deploy shape check; CLAIM_SIGNER is the key
+    ///      ClaimsModule verifies claim signatures against.
+    function _deployClaimIssuer() internal returns (Identity) {
+        return _deployClaimIssuer(claimIssuerSigner.addr, "claimIssuer");
+    }
+
+    /// @dev Deploys a claim issuer whose CLAIM_SIGNER (and management) key is `signer`.
+    function _deployClaimIssuer(address signer, string memory salt) internal returns (Identity) {
+        Structs.KeyParam[] memory issuerKeys = new Structs.KeyParam[](2);
+        issuerKeys[0] = _ecdsaKey(signer, KeyPurposes.MANAGEMENT);
+        issuerKeys[1] = _ecdsaKey(signer, KeyPurposes.CLAIM_SIGNER);
+
+        vm.prank(deployer);
+        address issuer = idFactory.createIdentityFor(
+            signer,
+            IdentityTypes.CLAIM_ISSUER,
+            salt,
+            issuerKeys,
+            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(claimsModule))
+        );
+        return Identity(payable(issuer));
+    }
+
+    /// @dev Deploys an INDIVIDUAL identity in the suite's factory whose sole wallet and management
+    ///      key is `wallet`.
+    function _deployIdentity(address wallet, string memory salt) internal returns (IIdentity) {
+        return _deployIdentityIn(idFactory, wallet, salt);
+    }
+
+    /// @dev Deploys an INDIVIDUAL identity in `factory`. Separate from {_deployIdentity} so tests can
+    ///      register a wallet in a second global registry.
+    function _deployIdentityIn(IdentityFactory factory, address wallet, string memory salt)
+        internal
+        returns (IIdentity)
+    {
+        Structs.KeyParam[] memory keys = new Structs.KeyParam[](1);
+        keys[0] = _ecdsaKey(wallet, KeyPurposes.MANAGEMENT);
+
+        vm.prank(deployer);
+        address identity = factory.createIdentityFor(
+            wallet,
+            IdentityTypes.INDIVIDUAL,
+            salt,
+            keys,
+            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(claimsModule))
+        );
+        return IIdentity(identity);
+    }
+
+    /// @dev Resolves a wallet's identity in the global registry. The factory keys wallets by ERC-7930
+    ///      interoperable address, so the wallet is wrapped in an EVM envelope for this chain.
+    function _identityOf(address wallet) internal view returns (address) {
+        return idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, wallet));
+    }
+
+    function _ecdsaKey(address addr, uint256 purpose) internal pure returns (Structs.KeyParam memory) {
+        return Structs.KeyParam({
+            keyHash: keccak256(abi.encodePacked(addr)),
+            purpose: purpose,
+            keyType: KeyTypes.ECDSA,
+            signerData: abi.encodePacked(addr),
+            clientData: ""
+        });
     }
 
     function _deployImplementations() internal {
@@ -108,10 +245,11 @@ contract TREXSuiteTest is AccessManagerHelper {
     function _deployFactories() internal {
         trexImplementationAuthority = _deployTREXImplementationAuthority(true);
 
-        vm.startPrank(deployer);
-        trexFactory = new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
-        idFactory.addTokenFactory(address(trexFactory));
-        vm.stopPrank();
+        trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
+
+        // The IdentityFactory gates ASSET minting on TOKEN_OID_MINTER, resolved against its own
+        // authority (the suite AccessManager here). Without this the auto-mint path reverts.
+        _grantTokenOidMinterRole(address(trexFactory));
 
         // setTREXFactory is restricted to the OWNER role on the reference IA
         vm.prank(deployer);
@@ -278,11 +416,9 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     function _deployIdentities() internal {
-        vm.startPrank(deployer);
-        aliceIdentity = IIdentity(idFactory.createIdentity(alice, "alice"));
-        bobIdentity = IIdentity(idFactory.createIdentity(bob, "bob"));
-        charlieIdentity = IIdentity(idFactory.createIdentity(charlie, "charlie"));
-        vm.stopPrank();
+        aliceIdentity = _deployIdentity(alice, "alice");
+        bobIdentity = _deployIdentity(bob, "bob");
+        charlieIdentity = _deployIdentity(charlie, "charlie");
     }
 
     function _registerIdentities(Token _token) internal {
@@ -295,6 +431,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     /// @notice Helper function to create and add a claim to an identity
+    /// @notice Adds a claim signed now with no expiry. See {_addClaimWithValidity} for the windowed form.
     function _addClaim(
         IIdentity _identity,
         uint256 _claimTopic,
@@ -303,14 +440,35 @@ contract TREXSuiteTest is AccessManagerHelper {
         address _claimIssuer,
         address _caller
     ) internal {
-        // Compute dataHash = keccak256(abi.encode(identity, topic, data))
-        bytes32 dataHash = keccak256(abi.encode(address(_identity), _claimTopic, _claimData));
+        _addClaimWithValidity(
+            _identity,
+            _claimTopic,
+            Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: _claimData }),
+            _signerPrivateKey,
+            _claimIssuer,
+            _caller
+        );
+    }
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(_signerPrivateKey, MessageHashUtils.toEthSignedMessageHash(dataHash));
-        bytes memory signature = abi.encodePacked(r, s, v);
+    /// @notice Adds a claim with an explicit validity envelope.
+    /// @dev The claim is signed over the issuer's EIP-712 digest rather than a bare hash: the digest
+    ///      is fetched from the issuer itself (`getClaimHash`, served by its ClaimsModule) so the
+    ///      issuer's domain separator is baked in. The signature is an ERC-7913 envelope,
+    ///      `abi.encode(signer, rawSig)`, which is how ClaimsModule dispatches to SignatureChecker.
+    function _addClaimWithValidity(
+        IIdentity _identity,
+        uint256 _claimTopic,
+        Structs.ClaimData memory _data,
+        uint256 _signerPrivateKey,
+        address _claimIssuer,
+        address _caller
+    ) internal {
+        bytes32 digest = IIdentity(_claimIssuer).getClaimHash(address(_identity), _claimTopic, _data);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(_signerPrivateKey, digest);
+        bytes memory signature = abi.encode(abi.encodePacked(vm.addr(_signerPrivateKey)), abi.encodePacked(r, s, v));
 
         vm.prank(_caller);
-        _identity.addClaim(_claimTopic, 1, _claimIssuer, signature, _claimData, "uri");
+        _identity.addClaim(_claimTopic, 1, _claimIssuer, signature, _data, "uri");
     }
 
 }

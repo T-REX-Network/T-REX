@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
@@ -50,7 +49,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         uint256[] memory claimTopics = new uint256[](1);
         claimTopics[0] = CLAIM_TOPIC_1;
 
-        ClaimIssuer anotherClaimIssuer = new ClaimIssuer(another);
+        address anotherClaimIssuer = makeAddr("anotherClaimIssuer");
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         trustedIssuersRegistry.addTrustedIssuer(address(anotherClaimIssuer), claimTopics);
@@ -78,7 +77,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when claim topics array is empty
     function test_addTrustedIssuer_RevertWhen_ClaimTopicsEmpty() public {
-        ClaimIssuer newClaimIssuer = new ClaimIssuer(bob);
+        address newClaimIssuer = makeAddr("newClaimIssuer");
         uint256[] memory emptyClaimTopics = new uint256[](0);
 
         vm.prank(deployer);
@@ -88,7 +87,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when claim topics array exceeds 15 topics
     function test_addTrustedIssuer_RevertWhen_MoreThan15ClaimTopics() public {
-        ClaimIssuer newClaimIssuer = new ClaimIssuer(bob);
+        address newClaimIssuer = makeAddr("newClaimIssuer");
         uint256[] memory claimTopics = new uint256[](16); // 16 topics > 15
         for (uint256 i = 0; i < 16; i++) {
             claimTopics[i] = i;
@@ -109,13 +108,12 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
         // After adding 49 more, we'll have 50 total, then trying to add 51st should fail
         for (uint256 i = 0; i < 49; i++) {
             address issuerAddress = address(uint160(uint256(keccak256(abi.encodePacked("issuer", i)))));
-            ClaimIssuer newClaimIssuer = new ClaimIssuer(issuerAddress);
             vm.prank(deployer);
-            trustedIssuersRegistry.addTrustedIssuer(address(newClaimIssuer), claimTopics);
+            trustedIssuersRegistry.addTrustedIssuer(issuerAddress, claimTopics);
         }
 
         // Try to add 51st issuer (50 already exist, so this should fail)
-        ClaimIssuer fiftyFirstClaimIssuer = new ClaimIssuer(another);
+        address fiftyFirstClaimIssuer = makeAddr("fiftyFirstClaimIssuer");
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxTrustedIssuersReached.selector, 50));
         trustedIssuersRegistry.addTrustedIssuer(address(fiftyFirstClaimIssuer), claimTopics);
@@ -125,7 +123,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when sender is not the owner
     function test_removeTrustedIssuer_RevertWhen_NotOwner() public {
-        ClaimIssuer anotherClaimIssuerForRemove = new ClaimIssuer(another);
+        address anotherClaimIssuerForRemove = makeAddr("anotherClaimIssuerForRemove");
 
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
@@ -141,7 +139,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when issuer is not registered
     function test_removeTrustedIssuer_RevertWhen_NotRegistered() public {
-        ClaimIssuer newClaimIssuer = new ClaimIssuer(deployer);
+        address newClaimIssuer = makeAddr("newClaimIssuer");
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.NotATrustedIssuer.selector);
@@ -151,9 +149,9 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
     /// @notice Should remove the issuer from trusted list
     function test_removeTrustedIssuer_Success() public {
         // Add more issuers first
-        ClaimIssuer bobClaimIssuer = new ClaimIssuer(bob);
-        ClaimIssuer anotherClaimIssuer = new ClaimIssuer(another);
-        ClaimIssuer charlieClaimIssuer = new ClaimIssuer(charlie);
+        address bobClaimIssuer = makeAddr("bobClaimIssuer");
+        address anotherClaimIssuer = makeAddr("anotherClaimIssuer");
+        address charlieClaimIssuer = makeAddr("charlieClaimIssuer");
 
         uint256[] memory topicsBob = new uint256[](3);
         topicsBob[0] = CLAIM_TOPIC_3;
@@ -202,7 +200,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when sender is not the owner
     function test_updateIssuerClaimTopics_RevertWhen_NotOwner() public {
-        ClaimIssuer anotherClaimIssuerForUpdate = new ClaimIssuer(another);
+        address anotherClaimIssuerForUpdate = makeAddr("anotherClaimIssuerForUpdate");
         uint256[] memory claimTopics = new uint256[](1);
         claimTopics[0] = CLAIM_TOPIC_1;
 
@@ -223,7 +221,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when issuer is not registered
     function test_updateIssuerClaimTopics_RevertWhen_NotRegistered() public {
-        ClaimIssuer newClaimIssuer = new ClaimIssuer(deployer);
+        address newClaimIssuer = makeAddr("newClaimIssuer");
         uint256[] memory claimTopics = new uint256[](1);
         claimTopics[0] = CLAIM_TOPIC_1;
 
@@ -287,8 +285,8 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
     function test_updateIssuerClaimTopics_CoversInnerLoopIncrement() public {
         // Add two more issuers with the same initial claim topic to ensure the
         // issuer being updated is not at index 0 in the claimTopic array
-        ClaimIssuer firstIssuer = new ClaimIssuer(bob);
-        ClaimIssuer secondIssuer = new ClaimIssuer(another);
+        address firstIssuer = makeAddr("firstIssuer");
+        address secondIssuer = makeAddr("secondIssuer");
 
         uint256[] memory topics = new uint256[](1);
         topics[0] = CLAIM_TOPIC_1;
@@ -316,7 +314,7 @@ contract TrustedIssuersRegistryTest is TREXSuiteTest {
 
     /// @notice Should revert when issuer is not registered
     function test_getTrustedIssuerClaimTopics_RevertWhen_NotRegistered() public {
-        ClaimIssuer newClaimIssuer = new ClaimIssuer(deployer);
+        address newClaimIssuer = makeAddr("newClaimIssuer");
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.TrustedIssuerDoesNotExist.selector);
         trustedIssuersRegistry.getTrustedIssuerClaimTopics(address(newClaimIssuer));

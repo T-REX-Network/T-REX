@@ -1,4 +1,4 @@
 @forge-std/=dependencies/forge-std-1.16.1/src/
-@onchain-id/solidity/=dependencies/onchain-id-2.2.2-beta3/
+@onchain-id/solidity/=dependencies/onchain-id-develop/
 @openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.6.1/
 @openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.6.1/

@@ -205,10 +205,11 @@ library AccessManagerSetupLib {
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](3);
+        bytes4[] memory functions = new bytes4[](4);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
-        functions[2] = TREXFactory.deployTREXSuite.selector;
+        functions[2] = TREXFactory.setIdentityModules.selector;
+        functions[3] = TREXFactory.deployTREXSuite.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
     }
 
@@ -270,6 +271,9 @@ library AccessManagerSetupLib {
 
         // Transient deploy-time role
         accessManager.labelRole(RolesLib.IRS_BINDER, "TREX-Suite IRS Binder (transient)");
+
+        // Resolved by the ONCHAINID IdentityFactory, not by any TREX selector mapping
+        accessManager.labelRole(RolesLib.TOKEN_OID_MINTER, "TREX-Suite Token OID Minter");
     }
 
 }

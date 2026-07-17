@@ -48,7 +48,7 @@ remappings_regenerate = false
 forge-std = "1.16.1"
 "@openzeppelin-contracts" = "5.6.1"
 "@openzeppelin-contracts-upgradeable" = "5.6.1"
-onchain-id = { version = "2.2.2-beta3", git = "https://github.com/onchain-id/solidity.git", tag = "2.2.2-beta3" }
+onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", branch = "develop" }
 
 [rpc_endpoints]
 ethereum = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"

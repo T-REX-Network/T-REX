@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
-import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
-
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
@@ -41,17 +38,11 @@ contract TransferCheckTest is TREXSuiteTest {
         vm.prank(agent);
         identityRegistry.registerIdentity(bob, bobIdentity, Countries.SPAIN);
 
-        // Set up claim issuer signing key and add claims for alice and bob
-        uint256 claimIssuerSigningKeyPrivateKey = 0x12345;
-        address claimIssuerSigningKeyAddress = vm.addr(claimIssuerSigningKeyPrivateKey);
-        bytes32 signingKeyHash = keccak256(abi.encode(claimIssuerSigningKeyAddress));
-        vm.prank(claimIssuerSigner.addr);
-        claimIssuer.addKey(signingKeyHash, KeyPurposes.CLAIM_SIGNER, KeyTypes.ECDSA);
-
-        // Add claims to alice and bob's identities
+        // The issuer is minted with claimIssuerSigner as its CLAIM_SIGNER key, so claims are signed
+        // with that key rather than one added here.
         bytes memory claimData = "Some claim public data.";
-        _addClaim(aliceIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigningKeyPrivateKey, address(claimIssuer), alice);
-        _addClaim(bobIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigningKeyPrivateKey, address(claimIssuer), bob);
+        _addClaim(aliceIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), alice);
+        _addClaim(bobIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), bob);
 
         vm.startPrank(agent);
         token.mint(alice, 1000);

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
-import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
-import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
+import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -35,10 +34,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
         claimTopicsRegistry = ir.topicsRegistry();
         trustedIssuersRegistry = ir.issuersRegistry();
 
-        // Add signing key to ClaimIssuer
-        bytes32 signingKeyHash = keccak256(abi.encode(aliceSigner.key));
-        vm.prank(claimIssuerSigner.addr);
-        claimIssuer.addKey(signingKeyHash, KeyPurposes.CLAIM_SIGNER, KeyTypes.ECDSA);
+        // The issuer is minted with claimIssuerSigner as its CLAIM_SIGNER key, so no key setup here.
 
         // Register alice in IdentityRegistry
         vm.prank(agent);
@@ -108,18 +104,10 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
     /// @notice Should return true for multiple issuers and topics
     function test_getVerifiedDetails_ReturnsTrue_ForMultipleIssuersAndTopics() public {
-        // Deploy a new claim issuer for this test
-        address newClaimIssuerOwner = makeAddr("newClaimIssuerOwner");
-        ClaimIssuer newclaimIssuer = new ClaimIssuer(newClaimIssuerOwner);
-
-        // Create a new signing key for the new claim issuer
-        uint256 newClaimIssuerSigningKeyPrivateKey = 0x67890;
-        address newClaimIssuerSigningKeyAddress = vm.addr(newClaimIssuerSigningKeyPrivateKey);
-
-        // Add signing key to the new claim issuer
-        bytes32 newSigningKeyHash = keccak256(abi.encode(newClaimIssuerSigningKeyAddress));
-        vm.prank(newClaimIssuerOwner);
-        newclaimIssuer.addKey(newSigningKeyHash, 3, 1);
+        // Deploy a second claim issuer for this test, signing with its own key
+        Account memory newClaimIssuerSigner = makeAccount("newClaimIssuerSigner");
+        uint256 newClaimIssuerSigningKeyPrivateKey = newClaimIssuerSigner.key;
+        Identity newclaimIssuer = _deployClaimIssuer(newClaimIssuerSigner.addr, "newClaimIssuer");
 
         // Add two more claim topics
         uint256 claimTopic2 = 2;
@@ -163,7 +151,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
     /// @notice Should return false when claim issuer throws an error in isClaimValid
     function test_getVerifiedDetails_ReturnsFalse_WhenClaimIssuerThrowsError() public {
         // Deploy ClaimIssuerTrick (always throws error on isClaimValid unless called by identity)
-        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick();
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(claimsModule));
 
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         uint256 topic = topics[0];
@@ -179,7 +167,14 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         // Add tricky claim (will throw error when isClaimValid is called)
         vm.prank(alice);
-        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", "0x00", "");
+        aliceIdentity.addClaim(
+            topic,
+            1,
+            address(trickyClaimIssuer),
+            "0x00",
+            Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: "0x00" }),
+            ""
+        );
 
         // getVerifiedDetails should handle the error and return false
         UtilityChecker.EligibilityCheckDetails[] memory results =

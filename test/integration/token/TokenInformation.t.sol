@@ -100,11 +100,10 @@ contract TokenInformationTest is TREXSuiteTest {
 
     /// @notice Should set the onchainID
     function test_setOnchainID_Success() public {
-        // create an identity using IdFactory
-        vm.startPrank(deployer);
-        IIdentity newIdentity = IIdentity(idFactory.createIdentity(deployer, "deployer-salt"));
+        // create an identity using the IdentityFactory
+        IIdentity newIdentity = _deployIdentity(deployer, "deployer-salt");
+        vm.prank(deployer);
         token.setOnchainID(address(newIdentity));
-        vm.stopPrank();
 
         assertEq(token.onchainID(), address(newIdentity));
     }

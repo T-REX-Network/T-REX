@@ -63,6 +63,12 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.IRS_BINDER, account, NO_EXECUTION_DELAY);
     }
 
+    /// @notice Grants TOKEN_OID_MINTER, which the ONCHAINID IdentityFactory resolves when minting
+    ///         IdentityTypes.ASSET identities (the TREXFactory token-OID auto-mint path).
+    function _grantTokenOidMinterRole(address account) internal {
+        accessManager.grantRole(RolesLib.TOKEN_OID_MINTER, account, NO_EXECUTION_DELAY);
+    }
+
     function _grantAgentAdminRole(address account) internal {
         accessManager.grantRole(RolesLib.AGENT_ADMIN, account, NO_EXECUTION_DELAY);
     }

@@ -2,7 +2,6 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { ClaimIssuer } from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
@@ -40,8 +39,8 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
     }
 
     function test_init_RegistersAllProvidedIssuersWithTopics() public {
-        ClaimIssuer issuer1 = new ClaimIssuer(makeAddr("issuer1Mgmt"));
-        ClaimIssuer issuer2 = new ClaimIssuer(makeAddr("issuer2Mgmt"));
+        address issuer1 = makeAddr("issuer1");
+        address issuer2 = makeAddr("issuer2");
 
         address[] memory issuers = new address[](2);
         issuers[0] = address(issuer1);
@@ -79,7 +78,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
     function test_init_OwnerCanStillAddTrustedIssuerAfterInit() public {
         TrustedIssuersRegistry tir = _deployProxy(new address[](0), new uint256[][](0));
 
-        ClaimIssuer issuer = new ClaimIssuer(makeAddr("issuerMgmt"));
+        address issuer = makeAddr("issuer");
         uint256[] memory topics = new uint256[](1);
         topics[0] = 5;
 
@@ -91,7 +90,7 @@ contract TrustedIssuersRegistryInitUnitTest is Test {
     function test_addTrustedIssuer_RevertWhen_NotOwner() public {
         TrustedIssuersRegistry tir = _deployProxy(new address[](0), new uint256[][](0));
 
-        ClaimIssuer issuer = new ClaimIssuer(makeAddr("issuerMgmt"));
+        address issuer = makeAddr("issuer");
         uint256[] memory topics = new uint256[](1);
         topics[0] = 5;
 

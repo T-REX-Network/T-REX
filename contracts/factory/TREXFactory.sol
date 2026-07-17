@@ -61,12 +61,14 @@
  */
 pragma solidity 0.8.30;
 
-import { IIdFactory } from "@onchain-id/solidity/contracts/factory/IIdFactory.sol";
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
+import { IdentityModulesLib } from "../libraries/IdentityModulesLib.sol";
 import { RolesLib } from "../libraries/RolesLib.sol";
 import { ClaimTopicsRegistryProxy } from "../proxy/ClaimTopicsRegistryProxy.sol";
 import { IdentityRegistryProxy } from "../proxy/IdentityRegistryProxy.sol";
@@ -88,16 +90,27 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// the address of the Identity Factory used to deploy token OIDs
     address private _idFactory;
 
+    /// the ONCHAINID KeyApprovalModule singleton installed on token OIDs minted by this factory
+    address private _keyApprovalModule;
+
+    /// the ONCHAINID ClaimsModule singleton installed on token OIDs minted by this factory
+    address private _claimsModule;
+
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
-    constructor(address implementationAuthority, address idFactory, address accessManager)
-        AccessManagedOwnable(accessManager)
-    {
+    constructor(
+        address implementationAuthority,
+        address idFactory,
+        address keyApprovalModule,
+        address claimsModule,
+        address accessManager
+    ) AccessManagedOwnable(accessManager) {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
+        _setIdentityModules(keyApprovalModule, claimsModule);
     }
 
     /**
@@ -155,6 +168,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /**
+     *  @dev See {ITREXFactory-getIdentityModules}.
+     */
+    function getIdentityModules() external view returns (address keyApprovalModule, address claimsModule) {
+        return (_keyApprovalModule, _claimsModule);
+    }
+
+    /**
      *  @dev See {ITREXFactory-getToken}.
      */
     function getToken(string calldata salt) external view returns (address) {
@@ -173,6 +193,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
      */
     function setIdFactory(address idFactoryAddress) public restricted {
         _setIdFactory(idFactoryAddress);
+    }
+
+    /**
+     *  @dev See {ITREXFactory-setIdentityModules}.
+     */
+    function setIdentityModules(address keyApprovalModuleAddress, address claimsModuleAddress) public restricted {
+        _setIdentityModules(keyApprovalModuleAddress, claimsModuleAddress);
     }
 
     /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
@@ -197,6 +224,14 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         _idFactory = idFactoryAddress;
         emit EventsLib.IdFactorySet(idFactoryAddress);
+    }
+
+    /// internal setter for the ONCHAINID module singletons, see {ITREXFactory-setIdentityModules}
+    function _setIdentityModules(address keyApprovalModuleAddress, address claimsModuleAddress) internal {
+        require(keyApprovalModuleAddress != address(0) && claimsModuleAddress != address(0), ErrorsLib.ZeroAddress());
+        _keyApprovalModule = keyApprovalModuleAddress;
+        _claimsModule = claimsModuleAddress;
+        emit EventsLib.IdentityModulesSet(keyApprovalModuleAddress, claimsModuleAddress);
     }
 
     /**
@@ -322,9 +357,12 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         );
     }
 
-    /// Resolves the OID (caller-supplied or minted via `IIdFactory.createTokenIdentity` against the
+    /// Resolves the OID (caller-supplied or minted via `IIdentityFactory.createIdentityFor` against the
     /// Token's predicted CREATE3 address) and deploys the Token proxy. Asserts the deployed Token's
     /// CREATE3 address matches the prediction used by the MC + OID wiring.
+    ///
+    /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
+    /// against its own authority, so this factory must hold that role there for the auto-mint path.
     function _deployToken(
         string memory salt,
         TokenDetails calldata tokenDetails,
@@ -334,7 +372,14 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address predictedToken = _predictAddress(salt, "Token");
         address oid = tokenDetails.ONCHAINID;
         if (oid == address(0)) {
-            oid = IIdFactory(_idFactory).createTokenIdentity(predictedToken, tokenDetails.accessManager, salt);
+            oid = IIdentityFactory(_idFactory)
+                .createIdentityFor(
+                    predictedToken,
+                    IdentityTypes.ASSET,
+                    salt,
+                    IdentityModulesLib.managementKeys(tokenDetails.accessManager),
+                    IdentityModulesLib.legacyQueueModules(_keyApprovalModule, _claimsModule)
+                );
         }
         address token = _deploy(salt, "Token", _tokenBytecode(tokenDetails, identityRegistry, compliance, oid));
         return token;
