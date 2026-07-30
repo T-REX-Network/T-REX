@@ -93,8 +93,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// the ONCHAINID KeyApprovalModule singleton installed on token OIDs minted by this factory
     address private _keyApprovalModule;
 
-    /// the ONCHAINID ClaimsModule singleton installed on token OIDs minted by this factory
-    address private _claimsModule;
+    /// the ONCHAINID ERC734Validator singleton installed on token OIDs minted by this factory
+    address private _validatorModule;
 
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
@@ -103,14 +103,14 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address implementationAuthority,
         address idFactory,
         address keyApprovalModule,
-        address claimsModule,
+        address validatorModule,
         address accessManager
     ) AccessManagedOwnable(accessManager) {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
-        _setIdentityModules(keyApprovalModule, claimsModule);
+        _setIdentityModules(keyApprovalModule, validatorModule);
     }
 
     /**
@@ -170,8 +170,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /**
      *  @dev See {ITREXFactory-getIdentityModules}.
      */
-    function getIdentityModules() external view returns (address keyApprovalModule, address claimsModule) {
-        return (_keyApprovalModule, _claimsModule);
+    function getIdentityModules() external view returns (address keyApprovalModule, address validatorModule) {
+        return (_keyApprovalModule, _validatorModule);
     }
 
     /**
@@ -198,8 +198,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /**
      *  @dev See {ITREXFactory-setIdentityModules}.
      */
-    function setIdentityModules(address keyApprovalModuleAddress, address claimsModuleAddress) public restricted {
-        _setIdentityModules(keyApprovalModuleAddress, claimsModuleAddress);
+    function setIdentityModules(address keyApprovalModuleAddress, address validatorModuleAddress) public restricted {
+        _setIdentityModules(keyApprovalModuleAddress, validatorModuleAddress);
     }
 
     /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
@@ -227,11 +227,11 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /// internal setter for the ONCHAINID module singletons, see {ITREXFactory-setIdentityModules}
-    function _setIdentityModules(address keyApprovalModuleAddress, address claimsModuleAddress) internal {
-        require(keyApprovalModuleAddress != address(0) && claimsModuleAddress != address(0), ErrorsLib.ZeroAddress());
+    function _setIdentityModules(address keyApprovalModuleAddress, address validatorModuleAddress) internal {
+        require(keyApprovalModuleAddress != address(0) && validatorModuleAddress != address(0), ErrorsLib.ZeroAddress());
         _keyApprovalModule = keyApprovalModuleAddress;
-        _claimsModule = claimsModuleAddress;
-        emit EventsLib.IdentityModulesSet(keyApprovalModuleAddress, claimsModuleAddress);
+        _validatorModule = validatorModuleAddress;
+        emit EventsLib.IdentityModulesSet(keyApprovalModuleAddress, validatorModuleAddress);
     }
 
     /**
@@ -378,7 +378,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     IdentityTypes.ASSET,
                     salt,
                     IdentityModulesLib.managementKeys(tokenDetails.accessManager),
-                    IdentityModulesLib.legacyQueueModules(_keyApprovalModule, _claimsModule)
+                    IdentityModulesLib.legacyQueueModules(_keyApprovalModule, _validatorModule)
                 );
         }
         address token = _deploy(salt, "Token", _tokenBytecode(tokenDetails, identityRegistry, compliance, oid));

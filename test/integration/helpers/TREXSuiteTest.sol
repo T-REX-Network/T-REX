@@ -6,9 +6,8 @@ import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/Identity
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
-import { ClaimsModule } from "@onchain-id/solidity/contracts/modules/claims/ClaimsModule.sol";
 import { KeyApprovalModule } from "@onchain-id/solidity/contracts/modules/executors/KeyApprovalModule.sol";
-import { ERC7579Signature } from "@onchain-id/solidity/contracts/modules/validators/ERC7579Signature.sol";
+import { ERC734Validator } from "@onchain-id/solidity/contracts/modules/validators/ERC734Validator.sol";
 import { ReputationRegistry } from "@onchain-id/solidity/contracts/reputation/ReputationRegistry.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -43,11 +42,12 @@ contract TREXSuiteTest is AccessManagerHelper {
     UpgradeableBeacon public identityBeacon;
     IdentityFactory public idFactory;
 
-    // ONCHAINID module singletons. Identity is an ERC-7579 account with no native ERC-734/735
-    // surface, so every identity installs these to hold keys and claims.
+    // ONCHAINID module singletons. Identity is a SmartAccount with no native ERC-734/735 surface,
+    // so every identity installs these to hold keys and claims. The merged ERC734Validator
+    // (`validatorModule`) holds the enshrined key registry and backs the claim + ERC-734 getter surface;
+    // it is also the Identity implementation's enshrined registry immutable.
     KeyApprovalModule public keyApprovalModule;
-    ClaimsModule public claimsModule;
-    ERC7579Signature public signatureValidator;
+    ERC734Validator public validatorModule;
     ReputationRegistry public reputationRegistry;
 
     // Implementations
@@ -64,7 +64,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // TREX Suite
     Token public token;
-    /// @dev A claim issuer is now just an Identity of type CLAIM_ISSUER with the ClaimsModule
+    /// @dev A claim issuer is now just an Identity of type CLAIM_ISSUER with the ERC734Validator
     ///      installed; ONCHAINID no longer ships a standalone ClaimIssuer contract.
     Identity public claimIssuer;
 
@@ -104,25 +104,33 @@ contract TREXSuiteTest is AccessManagerHelper {
         _registerIdentities(token);
     }
 
-    /// @dev Deploys the ONCHAINID stack: identity implementation behind an upgradeable beacon, the
-    ///      IdentityFactory governed by the suite's AccessManager, and the module singletons every
-    ///      identity installs. Identity types are registered with the factory here because it rejects
-    ///      unregistered types from both deploy paths.
+    /// @dev Deploys the ONCHAINID stack: the merged ERC734Validator (enshrined key/claim registry), the
+    ///      identity implementation bound to it, the IdentityFactory governed by the suite's AccessManager
+    ///      that owns the upgradeable beacon, and the module singletons every identity installs. Identity
+    ///      types are registered with the factory here because it rejects unregistered types from both
+    ///      deploy paths.
+    ///
+    ///      Deploy order follows the dependency chain: KeyApprovalModule (no deps) -> IdentityFactory (no
+    ///      beacon yet) -> ReputationRegistry (needs the factory) -> ERC734Validator (needs factory +
+    ///      registry) -> Identity impl (the validator is its enshrined registry immutable) ->
+    ///      factory.initializeBeacon (deploys the beacon at its predetermined CREATE3 slot).
     function _deployOnchainId(address) internal {
         vm.startPrank(deployer);
-        signatureValidator = new ERC7579Signature();
         keyApprovalModule = new KeyApprovalModule();
-
-        identityImplementation = new Identity(false);
-        identityBeacon = new UpgradeableBeacon(address(identityImplementation), deployer);
         vm.stopPrank();
 
         idFactory = _newIdentityFactory();
 
         vm.startPrank(deployer);
         reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
-        claimsModule = new ClaimsModule(address(idFactory), address(reputationRegistry));
+        validatorModule = new ERC734Validator(address(idFactory), address(reputationRegistry));
+        identityImplementation = new Identity(address(validatorModule), address(idFactory));
         vm.stopPrank();
+
+        // The factory's beacon owner is the suite AccessManager, so initializeBeacon is restricted;
+        // the test contract is the AM admin and drives it.
+        idFactory.initializeBeacon(address(identityImplementation));
+        identityBeacon = UpgradeableBeacon(idFactory.beacon());
 
         claimIssuer = _deployClaimIssuer();
     }
@@ -139,16 +147,18 @@ contract TREXSuiteTest is AccessManagerHelper {
             implementationAuthority,
             address(idFactory),
             address(keyApprovalModule),
-            address(claimsModule),
+            address(validatorModule),
             accessManagerAddress
         );
     }
 
-    /// @dev Deploys an IdentityFactory against the shared beacon and registers the identity types the
-    ///      suite mints. Tests that need a second, independent global registry call this directly.
+    /// @dev Deploys an IdentityFactory governed by the suite's AccessManager and registers the identity
+    ///      types the suite mints. The factory owns its own beacon (deployed later via initializeBeacon),
+    ///      so no beacon is passed here. Tests that need a second, independent global registry call this
+    ///      directly.
     function _newIdentityFactory() internal returns (IdentityFactory factory) {
         vm.prank(deployer);
-        factory = new IdentityFactory(address(identityBeacon), address(accessManager));
+        factory = new IdentityFactory(address(accessManager));
         _registerIdentityTypePolicies(factory);
     }
 
@@ -169,7 +179,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     /// @dev A claim issuer is an Identity of type CLAIM_ISSUER holding a CLAIM_SIGNER key. The
     ///      MANAGEMENT key satisfies the factory's post-deploy shape check; CLAIM_SIGNER is the key
-    ///      ClaimsModule verifies claim signatures against.
+    ///      ERC734Validator verifies claim signatures against.
     function _deployClaimIssuer() internal returns (Identity) {
         return _deployClaimIssuer(claimIssuerSigner.addr, "claimIssuer");
     }
@@ -186,7 +196,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             IdentityTypes.CLAIM_ISSUER,
             salt,
             issuerKeys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(claimsModule))
+            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
         );
         return Identity(payable(issuer));
     }
@@ -212,7 +222,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             IdentityTypes.INDIVIDUAL,
             salt,
             keys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(claimsModule))
+            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
         );
         return IIdentity(identity);
     }
@@ -452,9 +462,9 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     /// @notice Adds a claim with an explicit validity envelope.
     /// @dev The claim is signed over the issuer's EIP-712 digest rather than a bare hash: the digest
-    ///      is fetched from the issuer itself (`getClaimHash`, served by its ClaimsModule) so the
+    ///      is fetched from the issuer itself (`getClaimHash`, served by its ERC734Validator) so the
     ///      issuer's domain separator is baked in. The signature is an ERC-7913 envelope,
-    ///      `abi.encode(signer, rawSig)`, which is how ClaimsModule dispatches to SignatureChecker.
+    ///      `abi.encode(signer, rawSig)`, which is how ERC734Validator dispatches to SignatureChecker.
     function _addClaimWithValidity(
         IIdentity _identity,
         uint256 _claimTopic,

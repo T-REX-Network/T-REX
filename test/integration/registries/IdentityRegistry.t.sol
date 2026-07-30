@@ -430,7 +430,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     /// @notice Should return true if there is another valid claim when one claim issuer throws an error
     function test_isVerified_ReturnsTrue_WhenClaimIssuerThrowsErrorButAnotherValidClaimExists() public {
         // Deploy ClaimIssuerTrick (always throws error on isClaimValid)
-        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(claimsModule));
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
 
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         uint256 topic = topics[0];
@@ -456,7 +456,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     /// @notice Should return false if there are no other valid claims when claim issuer throws an error
     function test_isVerified_ReturnsFalse_WhenClaimIssuerThrowsErrorAndNoOtherValidClaim() public {
         // Deploy ClaimIssuerTrick (always throws error on isClaimValid)
-        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(claimsModule));
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
 
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         uint256 topic = topics[0];

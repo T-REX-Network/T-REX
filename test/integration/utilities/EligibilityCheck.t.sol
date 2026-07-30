@@ -151,7 +151,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
     /// @notice Should return false when claim issuer throws an error in isClaimValid
     function test_getVerifiedDetails_ReturnsFalse_WhenClaimIssuerThrowsError() public {
         // Deploy ClaimIssuerTrick (always throws error on isClaimValid unless called by identity)
-        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(claimsModule));
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
 
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         uint256 topic = topics[0];

@@ -10,9 +10,9 @@ contract TestTREXFactory is TREXFactory {
         address implementationAuthority_,
         address idFactory_,
         address keyApprovalModule_,
-        address claimsModule_,
+        address validatorModule_,
         address accessManager_
-    ) TREXFactory(implementationAuthority_, idFactory_, keyApprovalModule_, claimsModule_, accessManager_) { }
+    ) TREXFactory(implementationAuthority_, idFactory_, keyApprovalModule_, validatorModule_, accessManager_) { }
 
     /// @notice Exposes _deploy for testing
     /// Note: _deploy is private in TREXFactory, so we can't expose it directly

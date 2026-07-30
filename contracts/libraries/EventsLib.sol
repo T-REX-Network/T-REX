@@ -92,7 +92,7 @@ library EventsLib {
     event IdFactorySet(address idFactory);
 
     /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address claimsModule);
+    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
     event TREXSuiteDeployed(
         address indexed token, address ir, address irs, address tir, address ctr, address mc, string salt
     );

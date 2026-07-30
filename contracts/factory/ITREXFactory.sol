@@ -124,14 +124,14 @@ interface ITREXFactory {
 
     /**
      *  @dev setter for the ONCHAINID module singletons installed on token ONCHAINIDs minted by
-     *  this factory. ONCHAINID identities are ERC-7579 accounts whose ERC-734/735 surface is
-     *  provided by these modules, so an OID minted without them could not hold claims.
+     *  this factory. ONCHAINID identities install these modules to expose their ERC-734/735
+     *  surface, so an OID minted without them could not hold claims.
      *  Restricted to the configured AccessManager role (OWNER).
      *  emits `IdentityModulesSet` event
      *  @param _keyApprovalModule The address of the ONCHAINID KeyApprovalModule singleton
-     *  @param _claimsModule The address of the ONCHAINID ClaimsModule singleton
+     *  @param _validatorModule The address of the ONCHAINID ERC734Validator singleton
      */
-    function setIdentityModules(address _keyApprovalModule, address _claimsModule) external;
+    function setIdentityModules(address _keyApprovalModule, address _validatorModule) external;
 
     /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
@@ -175,7 +175,7 @@ interface ITREXFactory {
     /**
      *  @dev getter for the ONCHAINID module singletons installed on minted token ONCHAINIDs
      */
-    function getIdentityModules() external view returns (address _keyApprovalModule, address _claimsModule);
+    function getIdentityModules() external view returns (address _keyApprovalModule, address _validatorModule);
 
     /**
      *  @dev getter for token address corresponding to salt string

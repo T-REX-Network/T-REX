@@ -896,7 +896,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(keyApprovalModule),
-            address(claimsModule),
+            address(validatorModule),
             address(0)
         );
     }
@@ -907,7 +907,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(0),
-            address(claimsModule),
+            address(validatorModule),
             address(accessManager)
         );
 
@@ -923,20 +923,20 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_setIdentityModules_Success() public {
         address newKeyApprovalModule = makeAddr("newKeyApprovalModule");
-        address newClaimsModule = makeAddr("newClaimsModule");
+        address newValidatorModule = makeAddr("newValidatorModule");
 
         vm.prank(deployer);
-        trexFactory.setIdentityModules(newKeyApprovalModule, newClaimsModule);
+        trexFactory.setIdentityModules(newKeyApprovalModule, newValidatorModule);
 
-        (address keyApproval, address claims) = trexFactory.getIdentityModules();
+        (address keyApproval, address validator) = trexFactory.getIdentityModules();
         assertEq(keyApproval, newKeyApprovalModule);
-        assertEq(claims, newClaimsModule);
+        assertEq(validator, newValidatorModule);
     }
 
     function test_setIdentityModules_RevertWhen_NotOwner() public {
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        trexFactory.setIdentityModules(address(keyApprovalModule), address(claimsModule));
+        trexFactory.setIdentityModules(address(keyApprovalModule), address(validatorModule));
     }
 
     // ============ setImplementationAuthority() Tests ============
@@ -974,7 +974,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(keyApprovalModule),
-            address(claimsModule),
+            address(validatorModule),
             address(accessManager)
         );
 
