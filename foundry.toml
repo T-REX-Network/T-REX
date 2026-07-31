@@ -45,10 +45,9 @@ exclude_lints = [ "mixed-case-function", "mixed-case-variable", "pascal-case-str
 remappings_regenerate = false
 
 [dependencies]
-forge-std = "1.16.1"
-"@openzeppelin-contracts" = { version = "5.7.0-rc.0", git = "https://github.com/OpenZeppelin/openzeppelin-contracts.git", tag = "v5.7.0-rc.0" }
-"@openzeppelin-contracts-upgradeable" = { version = "5.7.0-rc.0", git = "https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable.git", tag = "v5.7.0-rc.0" }
-"@openzeppelin-accounts" = { version = "0.0.0-e4c2a32a", git = "https://github.com/OpenZeppelin/openzeppelin-accounts.git", rev = "e4c2a32ad7378741a3cc4f2030f7d21d5ac53d28" }
+forge-std = "1.16.2"
+"@openzeppelin-contracts" = "5.7.0"
+"@openzeppelin-contracts-upgradeable" = "5.7.0"
 onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", branch = "develop" }
 
 [rpc_endpoints]

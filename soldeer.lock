@@ -1,27 +1,23 @@
 [[dependencies]]
-name = "@openzeppelin-accounts"
-version = "0.0.0-e4c2a32a"
-git = "https://github.com/OpenZeppelin/openzeppelin-accounts.git"
-rev = "e4c2a32ad7378741a3cc4f2030f7d21d5ac53d28"
-
-[[dependencies]]
 name = "@openzeppelin-contracts"
-version = "5.7.0-rc.0"
-git = "https://github.com/OpenZeppelin/openzeppelin-contracts.git"
-rev = "v5.7.0-rc.0"
+version = "5.7.0"
+url = "https://soldeer-revisions.s3.amazonaws.com/@openzeppelin-contracts/5_7_0_29-07-2026_19:34:46_contracts.zip"
+checksum = "fe08a24bc34334b2976c6ad69a0d74bdfa63de8a5c8528579060f25a11fb5cd5"
+integrity = "3e13bc4d96bdef6e35f6b1e0dc0e455843a958edc597750dff20ca50295b767d"
 
 [[dependencies]]
 name = "@openzeppelin-contracts-upgradeable"
-version = "5.7.0-rc.0"
-git = "https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable.git"
-rev = "v5.7.0-rc.0"
+version = "5.7.0"
+url = "https://soldeer-revisions.s3.amazonaws.com/@openzeppelin-contracts-upgradeable/5_7_0_29-07-2026_19:34:58_contracts-upgradeable.zip"
+checksum = "fba3ad8586bf64281bab2aecd2cf0eb31227ccc5976f962d400e8cc5898da413"
+integrity = "1a08068b2fe262d4f6ae80e0be44965480b1a532d40722c80634d8963337743d"
 
 [[dependencies]]
 name = "forge-std"
-version = "1.16.1"
-url = "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_16_1_08-05-2026_08:51:16_forge-std-1.16.zip"
-checksum = "839b61832925c7152c7b6dffbfa4998d9e606211179bd8f604733124e8a7cb57"
-integrity = "60e55d10150354ca4a1e2985c5456c834b92b82ef85ab0e1d92a7786cddbd219"
+version = "1.16.2"
+url = "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_16_2_03-07-2026_07:37:45_forge-std-1.16.zip"
+checksum = "405dccc9d60d753f6abc412b4adf0359f4390f65dbadbbb277a12b4946ed8969"
+integrity = "5fb4325b60d7d4194bd0481e2f94398cf1d9c6561dd12a66fb2748ef4a68205f"
 
 [[dependencies]]
 name = "onchain-id"
