@@ -2,6 +2,8 @@
 pragma solidity 0.8.30;
 
 import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
+import { Errors } from "@onchain-id/solidity/contracts/libraries/Errors.sol";
+import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
@@ -664,6 +666,45 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(0),
             "IdentityFactory must not have minted a new identity when ONCHAINID was supplied"
         );
+    }
+
+    /// @notice The auto-mint path is gated on the factory holding TOKEN_OID_MINTER at the IdentityFactory's
+    ///         own authority. Strip the role and a deploy that leaves ONCHAINID at zero must revert from
+    ///         inside `createIdentityFor`, not silently fall back to a zero OID.
+    /// @dev Locks the deploy-time prerequisite documented on `TREXFactory._deployToken` and bundled by
+    ///      `AccessManagerSetupLib.setupIdentityFactoryPolicy`. The suite grants this role in
+    ///      `_deployFactories`, so the test has to revoke it first.
+    function test_deployTREXSuite_RevertWhen_FactoryLacksTokenOidMinter() public {
+        // Revoked as the test contract, which is the AccessManager admin (see AccessManagerHelper).
+        accessManager.revokeRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        assertEq(tokenDetails.ONCHAINID, address(0), "Test only covers the auto-mint path");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.NotAuthorizedForIdentityType.selector,
+                address(trexFactory),
+                IdentityTypes.ASSET,
+                RolesLib.TOKEN_OID_MINTER
+            )
+        );
+        _deploySuite("no-oid-minter-salt", tokenDetails, _createEmptyClaimDetails());
+    }
+
+    /// @notice The TOKEN_OID_MINTER gate covers minting only. With the role revoked, a caller-supplied
+    ///         ONCHAINID must still deploy, since that path never calls `createIdentityFor`.
+    function test_deployTREXSuite_Succeeds_WithoutTokenOidMinter_WhenONCHAINIDSupplied() public {
+        accessManager.revokeRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+
+        address suppliedOID = makeAddr("SuppliedOID");
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = suppliedOID;
+
+        _deploySuite("no-oid-minter-supplied-salt", tokenDetails, _createEmptyClaimDetails());
+
+        Token deployedToken = Token(trexFactory.getToken("no-oid-minter-supplied-salt"));
+        assertEq(deployedToken.onchainID(), suppliedOID, "Supplied ONCHAINID must survive the missing role");
     }
 
     /// @notice IR must be owned by the suite AccessManager, with the Token + irAgents pre-granted at init time

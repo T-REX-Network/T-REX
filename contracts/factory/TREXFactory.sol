@@ -362,7 +362,11 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// CREATE3 address matches the prediction used by the MC + OID wiring.
     ///
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
-    /// against its own authority, so this factory must hold that role there for the auto-mint path.
+    /// against its own authority, so this factory must hold that role there for the auto-mint path
+    // (i.e. tokenDetails.ONCHAINID == address(0)):
+    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.TOKEN_OID_MINTER, false)`
+    ///   2. `accessManager.grantRole(RolesLib.TOKEN_OID_MINTER, address(this), 0)`
+    /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both.
     function _deployToken(
         string memory salt,
         TokenDetails calldata tokenDetails,

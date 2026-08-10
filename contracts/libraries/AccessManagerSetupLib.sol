@@ -63,6 +63,8 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
@@ -211,6 +213,31 @@ library AccessManagerSetupLib {
         functions[2] = TREXFactory.setIdentityModules.selector;
         functions[3] = TREXFactory.deployTREXSuite.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
+    }
+
+    /// @notice Wires the two prerequisites the {TREXFactory} auto-mint path needs, so a deployer does
+    ///         not have to rediscover them. Without both, `deployTREXSuite` reverts with
+    ///         `NotAuthorizedForIdentityType` whenever `TokenDetails.ONCHAINID` is left at zero.
+    /// @dev Call order does not matter, but both must land before the first auto-mint deploy.
+    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind TOKEN_OID_MINTER and
+    ///         with self-deploy off: only a registered factory mints token OIDs, and a token must not
+    ///         be able to sign one for itself.
+    ///      2. Grant TOKEN_OID_MINTER to the TREX factory.
+    /// @dev `accessManager` MUST be the IdentityFactory's own authority, which is not necessarily the
+    ///      suite AccessManager: `createIdentityFor` resolves the role against `authority()` on the
+    ///      IdentityFactory. Granting the role on the wrong manager leaves the auto-mint path reverting.
+    /// @dev The caller must be able to reach both calls: `setIdentityTypePolicy` is `restricted` on the
+    ///      IdentityFactory, and `grantRole` requires the caller to be TOKEN_OID_MINTER's role admin.
+    /// @param accessManager The IdentityFactory's authority, where TOKEN_OID_MINTER is resolved
+    /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
+    /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
+    function setupIdentityFactoryPolicy(
+        IAccessManager accessManager,
+        IIdentityFactory identityFactory,
+        address trexFactory
+    ) internal {
+        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.TOKEN_OID_MINTER, false);
+        accessManager.grantRole(RolesLib.TOKEN_OID_MINTER, trexFactory, 0);
     }
 
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)

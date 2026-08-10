@@ -473,12 +473,24 @@ contract TREXSuiteTest is AccessManagerHelper {
         address _claimIssuer,
         address _caller
     ) internal {
-        bytes32 digest = IIdentity(_claimIssuer).getClaimHash(address(_identity), _claimTopic, _data);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(_signerPrivateKey, digest);
-        bytes memory signature = abi.encode(abi.encodePacked(vm.addr(_signerPrivateKey)), abi.encodePacked(r, s, v));
+        bytes memory signature = _signClaim(_identity, _claimTopic, _data, _signerPrivateKey, _claimIssuer);
 
         vm.prank(_caller);
         _identity.addClaim(_claimTopic, 1, _claimIssuer, signature, _data, "uri");
+    }
+
+    /// @notice Builds the claim signature without submitting it, for tests that need to drive
+    ///         `addClaim` themselves (to wrap it in `expectRevert`, or to replay identical bytes).
+    function _signClaim(
+        IIdentity _identity,
+        uint256 _claimTopic,
+        Structs.ClaimData memory _data,
+        uint256 _signerPrivateKey,
+        address _claimIssuer
+    ) internal view returns (bytes memory) {
+        bytes32 digest = IIdentity(_claimIssuer).getClaimHash(address(_identity), _claimTopic, _data);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(_signerPrivateKey, digest);
+        return abi.encode(abi.encodePacked(vm.addr(_signerPrivateKey)), abi.encodePacked(r, s, v));
     }
 
 }
