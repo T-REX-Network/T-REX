@@ -62,11 +62,9 @@ contract IdentityClaimsTest is TREXSuiteTest {
 
         assertEq(aliceIdentity.getClaimIdsByTopic(CLAIM_TOPIC_1).length, 0, "Claim must be gone after removeClaim");
 
-        // Pin the *reason* before the revert: InvalidClaim is also what a bad signature yields, so
-        // asserting the revert alone would not prove revocation is what blocked the re-add.
-        // Queried on the validator directly, pranked as the issuer identity, because the validator
-        // reads the revoked-digest set of `msg.sender` and the Identity fallback only routes
-        // `isClaimValid`, not `getClaimStatus`.
+        // Pin the reason: InvalidClaim is also what a bad signature yields. Queried on the validator
+        // as the issuer, since it reads `msg.sender`'s revoked digests and Identity only routes
+        // `isClaimValid`.
         vm.prank(address(claimIssuer));
         IClaimIssuer.ClaimStatus status = validatorModule.getClaimStatus(aliceIdentity, CLAIM_TOPIC_1, signature, data);
         assertEq(
