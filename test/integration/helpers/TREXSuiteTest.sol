@@ -89,7 +89,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     function setUp() public virtual {
         _deployAccessManager();
-        _deployOnchainId(deployer);
+        _deployOnchainId();
         _deployImplementations();
         _deployFactories();
 
@@ -114,7 +114,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      beacon yet) -> ReputationRegistry (needs the factory) -> ERC734Validator (needs factory +
     ///      registry) -> Identity impl (the validator is its enshrined registry immutable) ->
     ///      factory.initializeBeacon (deploys the beacon at its predetermined CREATE3 slot).
-    function _deployOnchainId(address) internal {
+    function _deployOnchainId() internal {
         vm.startPrank(deployer);
         keyApprovalModule = new KeyApprovalModule();
         vm.stopPrank();

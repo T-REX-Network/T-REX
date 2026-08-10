@@ -126,6 +126,8 @@ interface ITREXFactory {
      *  @dev setter for the ONCHAINID module singletons installed on token ONCHAINIDs minted by
      *  this factory. ONCHAINID identities install these modules to expose their ERC-734/735
      *  surface, so an OID minted without them could not hold claims.
+     *  Affects future mints only: identities already deployed keep the modules installed at their
+     *  own mint time, as module installation happens once during identity creation.
      *  Restricted to the configured AccessManager role (OWNER).
      *  emits `IdentityModulesSet` event
      *  @param _keyApprovalModule The address of the ONCHAINID KeyApprovalModule singleton

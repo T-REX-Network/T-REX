@@ -70,7 +70,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Verify all components are deployed
         assertNotEq(address(trexFactory), address(0), "TREX Factory should be deployed");
         assertNotEq(address(trexImplementationAuthority), address(0), "TREX IA should be deployed");
-        assertNotEq(address(idFactory), address(0), "IdFactory should be deployed");
+        assertNotEq(address(idFactory), address(0), "IdentityFactory should be deployed");
     }
 
     function test_TREXFactoryLinked() public view {
@@ -80,7 +80,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             "Factory should reference IA"
         );
-        assertEq(trexFactory.getIdFactory(), address(idFactory), "Factory should reference IdFactory");
+        assertEq(trexFactory.getIdFactory(), address(idFactory), "Factory should reference IdentityFactory");
     }
 
     // ============ deployTREXSuite() Tests ============
@@ -591,7 +591,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     }
 
     /// @notice Token must be owned by the suite AccessManager, with the configured tokenAgents pre-granted
-    ///         at init time, the OID minted by IdFactory and wired in at init time, and the factory holding
+    ///         at init time, the OID minted by IdentityFactory and wired in at init time, and the factory holding
     ///         no role on the Token (no agent, no pending ownership)
     function test_deployTREXSuite_Token_OwnershipAgentsAndOID_SetAtInit() public {
         address[] memory tokenAgents = new address[](2);
@@ -626,7 +626,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(
             _identityOf(address(deployedToken)),
             deployedToken.onchainID(),
-            "Token OID must match the IdFactory-registered identity for the deployed Token address"
+            "Token OID must match the IdentityFactory-registered identity for the deployed Token address"
         );
 
         assertTrue(_hasAgentRole(bob), "Configured tokenAgent bob must be agent on Token after init");
@@ -635,7 +635,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     }
 
     /// @notice When the caller supplies an ONCHAINID, Token.onchainID must equal that exact address (and the
-    ///         factory must NOT have created a new identity via IdFactory)
+    ///         factory must NOT have created a new identity via IdentityFactory)
     function test_deployTREXSuite_Token_UsesProvidedONCHAINID() public {
         // Spawn a stand-in OID address. We don't deploy a real Identity contract because Token.init only
         // stores `onchainId` as an address — it does not call into it during init.
@@ -662,7 +662,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(
             _identityOf(address(deployedToken)),
             address(0),
-            "IdFactory must not have minted a new identity when ONCHAINID was supplied"
+            "IdentityFactory must not have minted a new identity when ONCHAINID was supplied"
         );
     }
 
@@ -836,7 +836,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(
             _identityOf(address(deployedToken)),
             deployedToken.onchainID(),
-            "Token OID must match the IdFactory-registered identity for the deployed Token address"
+            "Token OID must match the IdentityFactory-registered identity for the deployed Token address"
         );
         assertTrue(_hasAgentRole(bob), "Configured tokenAgent must be agent on Token after init");
     }
@@ -999,7 +999,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         vm.prank(deployer);
         trexFactory.setIdFactory(address(newIdFactory));
 
-        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "IdFactory should be updated");
+        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "IdentityFactory should be updated");
     }
 
     /// @notice Should revert when the CREATE3 target address already contains code

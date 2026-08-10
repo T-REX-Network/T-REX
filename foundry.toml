@@ -48,6 +48,7 @@ remappings_regenerate = false
 forge-std = "1.16.2"
 "@openzeppelin-contracts" = "5.7.0"
 "@openzeppelin-contracts-upgradeable" = "5.7.0"
+# TODO: repin to the ONCHAINID v3 release tag once it is cut.
 onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", branch = "develop" }
 
 [rpc_endpoints]
