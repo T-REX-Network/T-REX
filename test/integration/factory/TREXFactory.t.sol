@@ -707,6 +707,75 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(deployedToken.onchainID(), suppliedOID, "Supplied ONCHAINID must survive the missing role");
     }
 
+    // ============ AccessManagerSetupLib.setupIdentityFactoryPolicy() Tests ============
+
+    /// @notice The helper must be sufficient wiring on its own: starting from a fully unwired state
+    ///         (ASSET unregistered on the IdentityFactory, factory holding no TOKEN_OID_MINTER), the
+    ///         single call restores the auto-mint path end to end.
+    /// @dev Nothing in production calls this helper — it exists for deployers, and `TREXFactory._deployToken`
+    ///      points at it — so without a test it would rot silently against IdentityFactory changes.
+    /// @dev Teardown and the helper both run as the test contract, which is the AccessManager admin and
+    ///      therefore satisfies the helper's two documented reachability conditions: it can call the
+    ///      `restricted` `setIdentityTypePolicy`, and it is TOKEN_OID_MINTER's role admin.
+    function test_setupIdentityFactoryPolicy_RestoresAutoMintPath() public {
+        // Undo both prerequisites the suite wires by hand in `_registerIdentityTypePolicies` and
+        // `_deployFactories`. roleId 0 unregisters the type, so even a role holder is rejected.
+        idFactory.setIdentityTypePolicy(IdentityTypes.ASSET, 0, false);
+        accessManager.revokeRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
+
+        (uint64 roleId, bool selfDeployable) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
+        assertEq(roleId, RolesLib.TOKEN_OID_MINTER, "ASSET minting must be gated behind TOKEN_OID_MINTER");
+        assertFalse(selfDeployable, "A token must not be able to self-deploy its own OID");
+
+        (bool isMember, uint32 executionDelay) = accessManager.hasRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+        assertTrue(isMember, "TREX factory must hold TOKEN_OID_MINTER after the helper call");
+        // Auto-mint is a direct call from inside deployTREXSuite; a delay would make it unschedulable.
+        assertEq(executionDelay, NO_EXECUTION_DELAY, "TOKEN_OID_MINTER must be granted without execution delay");
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        assertEq(tokenDetails.ONCHAINID, address(0), "Test only covers the auto-mint path");
+
+        _deploySuite("setup-policy-salt", tokenDetails, _createEmptyClaimDetails());
+
+        Token deployedToken = Token(trexFactory.getToken("setup-policy-salt"));
+        assertNotEq(deployedToken.onchainID(), address(0), "Auto-mint must have produced a token OID");
+        assertEq(
+            _identityOf(address(deployedToken)),
+            deployedToken.onchainID(),
+            "Token OID must match the IdentityFactory-registered identity for the deployed Token address"
+        );
+    }
+
+    /// @notice Locks the footgun the helper's NatSpec warns about: `createIdentityFor` resolves
+    ///         TOKEN_OID_MINTER against the IdentityFactory's own `authority()`, so passing any other
+    ///         manager grants the role somewhere the check never looks and auto-mint still reverts.
+    function test_setupIdentityFactoryPolicy_RevertWhen_RoleGrantedOnForeignAuthority() public {
+        idFactory.setIdentityTypePolicy(IdentityTypes.ASSET, 0, false);
+        accessManager.revokeRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+
+        // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
+        // factory's real authority), but the grant is stranded on this manager.
+        AccessManager foreignManager = new AccessManager(address(this));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(foreignManager, idFactory, address(trexFactory));
+
+        (bool isMemberOnForeign,) = foreignManager.hasRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+        assertTrue(isMemberOnForeign, "Grant must have landed on the foreign manager");
+        (bool isMemberOnAuthority,) = accessManager.hasRole(RolesLib.TOKEN_OID_MINTER, address(trexFactory));
+        assertFalse(isMemberOnAuthority, "Grant must be absent from the authority the factory actually checks");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.NotAuthorizedForIdentityType.selector,
+                address(trexFactory),
+                IdentityTypes.ASSET,
+                RolesLib.TOKEN_OID_MINTER
+            )
+        );
+        _deploySuite("foreign-authority-salt", _createEmptyTokenDetails(), _createEmptyClaimDetails());
+    }
+
     /// @notice IR must be owned by the suite AccessManager, with the Token + irAgents pre-granted at init time
     function test_deployTREXSuite_IR_OwnershipAndAgents_SetAtInit() public {
         address[] memory irAgents = new address[](2);
