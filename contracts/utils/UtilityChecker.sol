@@ -73,6 +73,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
+import { ModuleCapabilitiesLib } from "../libraries/ModuleCapabilitiesLib.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
 contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable {
@@ -182,7 +183,9 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
-        address[] memory modules = compliance.getModules();
+        // Only the modules that declared the transfer check are consulted, matching what the
+        // compliance actually calls. Listing the others would report a pass they never gave.
+        address[] memory modules = compliance.getModulesByCapability(ModuleCapabilitiesLib.CHECK_TRANSFER);
         uint256 length = modules.length;
         _details = new ComplianceCheckDetails[](length);
         for (uint256 i; i < length; i++) {

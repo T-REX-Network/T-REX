@@ -13,6 +13,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
@@ -196,6 +197,11 @@ contract TREXFactoryTest is TREXSuiteTest {
             // earlier on a call to a non-contract address
             vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.isPlugAndPlay.selector), abi.encode(true));
             vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.bindCompliance.selector), abi.encode());
+            vm.mockCall(
+                complianceModules[i],
+                abi.encodeWithSelector(IModule.moduleCapabilities.selector),
+                abi.encode(ModuleCapabilitiesLib.CHECK_TRANSFER)
+            );
         }
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({

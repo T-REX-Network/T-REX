@@ -8,7 +8,9 @@
  *   - token (un)binding follows the owner / token-self-bind policy (MC-4).
  *
  * Module callbacks (IModule.*) and the AccessManager (`hasRole`, `canCall`) are summarised; the module set
- * itself is real state inside the EnumerableSet.
+ * itself is real state inside the EnumerableSet. `moduleCapabilities` is summarised as every defined bit,
+ * so binding always succeeds and no dispatch point is skipped: these rules are about access control, not
+ * about capability routing.
  *
  * Run:  certoraRun certora/confs/ModularCompliance.conf
  */
@@ -36,6 +38,9 @@ methods {
     function _.moduleMintAction(address,uint256)             external => NONDET;
     function _.moduleBurnAction(address,uint256)             external => NONDET;
     function _.moduleCheck(address,address,uint256,address)  external => ALWAYS(true);
+    function _.moduleCheckSpender(address,address,address,uint256,address) external => ALWAYS(true);
+    // every defined capability bit set, so binding always succeeds and every dispatch point routes
+    function _.moduleCapabilities()                          external => ALWAYS(31);
     function _.bindCompliance(address)                       external => NONDET;
     function _.unbindCompliance(address)                     external => NONDET;
     function _.isPlugAndPlay()                               external => ALWAYS(true);
@@ -81,7 +86,8 @@ definition isRestricted(method f) returns bool =
        f.selector == sig:removeModule(address).selector
     || f.selector == sig:addAndSetModule(address,bytes[]).selector
     || f.selector == sig:addModule(address).selector
-    || f.selector == sig:callModuleFunction(bytes,address).selector;
+    || f.selector == sig:callModuleFunction(bytes,address).selector
+    || f.selector == sig:refreshModuleCapabilities(address).selector;
 
 /* MC-4: bindToken is restricted to the owner, or a self-binding token while the slot is empty. */
 rule bindTokenAccessControl(env e, address newToken) {
