@@ -8,19 +8,23 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import {
-    AllCapabilitiesModule,
     CheckAndMintHookModule,
     CheckAndTransferHookModule,
     CheckTransferOnlyModule,
-    RecordingModule
+    RecordingModule,
+    UngatedCheckAndMintHookModule,
+    UngatedCheckAndTransferHookModule,
+    UngatedCheckTransferOnlyModule
 } from "test/integration/mocks/CapabilityModules.sol";
 
 /// @dev Before/after evidence for capability-gated dispatch, two eight-module sets on the same token:
-/// a baseline declaring every dispatch point (the pre-capability behaviour), and a realistic set where
-/// all eight vet transfers, two keep transfer state and one keeps mint state.
+/// a realistic set where all eight vet transfers, two keep transfer state and one keeps mint state, and
+/// a baseline of the very same modules declaring every dispatch point — the pre-capability behaviour,
+/// where the compliance called every module everywhere.
 ///
-/// Each operation runs once un-measured first, so both are timed against warm storage. The numbers are
-/// therefore conservative: a real transaction also pays a cold account access per skipped call.
+/// The two sets differ only in what they declare, never in what they do, so the delta is the routing
+/// and nothing else. Each operation also runs once un-measured first, so both are timed against the
+/// same warm state.
 contract ComplianceCapabilityGasTest is TREXSuiteTest {
 
     uint256 private constant MODULE_COUNT = 8;
@@ -123,11 +127,15 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         token.transferFrom(alice, bob, 100);
     }
 
-    /// @dev Eight modules each declaring every dispatch point: every transaction calls all of them.
+    /// @dev The realistic set with every module declaring every dispatch point: same work per module,
+    ///      but every transaction calls all of them everywhere.
     function _deployBaselineSet() private returns (address[] memory modules) {
         modules = new address[](MODULE_COUNT);
-        for (uint256 i = 0; i < MODULE_COUNT; i++) {
-            modules[i] = _deploy(address(new AllCapabilitiesModule()));
+        modules[0] = _deploy(address(new UngatedCheckAndMintHookModule()));
+        modules[1] = _deploy(address(new UngatedCheckAndTransferHookModule()));
+        modules[2] = _deploy(address(new UngatedCheckAndTransferHookModule()));
+        for (uint256 i = 3; i < MODULE_COUNT; i++) {
+            modules[i] = _deploy(address(new UngatedCheckTransferOnlyModule()));
         }
     }
 
@@ -159,9 +167,15 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
+    /// @dev Reports the delta without asserting on it, so a regression reaches the assertion that names
+    ///      it rather than panicking on an unsigned subtraction here.
     function _report(string memory label, uint256 baseline, uint256 realistic) private pure {
         console2.log(string.concat(label, " baseline:"), baseline, "  declared-routing:", realistic);
-        console2.log("             saved:", baseline - realistic);
+        if (realistic <= baseline) {
+            console2.log("             saved:", baseline - realistic);
+        } else {
+            console2.log("             REGRESSED by:", realistic - baseline);
+        }
     }
 
     function _deploy(address implementation) private returns (address) {

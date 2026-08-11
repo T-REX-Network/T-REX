@@ -107,7 +107,7 @@ contract CheckTransferOnlyModule is RecordingModule {
         return _allow;
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
+    function moduleCapabilities() external pure virtual returns (uint256) {
         return ModuleCapabilitiesLib.CHECK_TRANSFER;
     }
 
@@ -129,7 +129,7 @@ contract CheckAndTransferHookModule is RecordingModule {
         return _allow;
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
+    function moduleCapabilities() external pure virtual returns (uint256) {
         return ModuleCapabilitiesLib.CHECK_TRANSFER | ModuleCapabilitiesLib.HOOK_TRANSFER;
     }
 
@@ -150,7 +150,7 @@ contract CheckAndMintHookModule is RecordingModule {
         return _allow;
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
+    function moduleCapabilities() external pure virtual returns (uint256) {
         return ModuleCapabilitiesLib.CHECK_TRANSFER | ModuleCapabilitiesLib.HOOK_MINT;
     }
 
@@ -221,6 +221,35 @@ contract UndefinedBitModule is RecordingModule {
 
     function name() external pure override returns (string memory) {
         return "UndefinedBitModule";
+    }
+
+}
+
+/// @dev {CheckTransferOnlyModule} declaring every dispatch point instead of the one it implements:
+///      the pre-capability behaviour, where a compliance called every module everywhere. Same body as
+///      its parent, so a measurement against it isolates the routing from the module's own work.
+contract UngatedCheckTransferOnlyModule is CheckTransferOnlyModule {
+
+    function moduleCapabilities() external pure override returns (uint256) {
+        return ModuleCapabilitiesLib.ALL;
+    }
+
+}
+
+/// @dev {CheckAndTransferHookModule} declaring every dispatch point. See {UngatedCheckTransferOnlyModule}.
+contract UngatedCheckAndTransferHookModule is CheckAndTransferHookModule {
+
+    function moduleCapabilities() external pure override returns (uint256) {
+        return ModuleCapabilitiesLib.ALL;
+    }
+
+}
+
+/// @dev {CheckAndMintHookModule} declaring every dispatch point. See {UngatedCheckTransferOnlyModule}.
+contract UngatedCheckAndMintHookModule is CheckAndMintHookModule {
+
+    function moduleCapabilities() external pure override returns (uint256) {
+        return ModuleCapabilitiesLib.ALL;
     }
 
 }
