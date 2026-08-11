@@ -1,6 +1,18 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Identity-type-aware claim requirements** (per-type claim topics with default fallback):
+  - The `ClaimTopicsRegistry` can now hold alternative sets of required claim topics per ONCHAINID identity type (`IdentityTypes`: ASSET, INDIVIDUAL, CORPORATE, IOT, CLAIM_ISSUER, SMART_CONTRACT, PUBLIC_AUTHORITY, AI_AGENT), on top of the default ERC-3643 set managed by `addClaimTopic`/`removeClaimTopic`/`getClaimTopics`.
+  - New owner-only functions on the `ClaimTopicsRegistry`: `addClaimTopicForIdentityType`, `removeClaimTopicForIdentityType`, and the view `getClaimTopicsForIdentityType`. Identity type 0 is rejected, as it means "no type" and always resolves to the default topics. Each per-type set is capped at 15 topics, like the default set.
+  - `IdentityRegistry.isVerified()` now reads the identity type from the investor's ONCHAINID (`getIdentityType()`, introduced by ONCHAINID v3) and evaluates the topic set registered for that type. **Override semantics, not additive**: when a set exists for a type it fully replaces the default set for identities of that type; if a type should require the default topics plus extras, the default topics must be included in the type's set explicitly.
+  - Default fallback always applies: identities without a type (pre-v3 ONCHAINIDs, resolved through a defensive staticcall), with type 0, or with a type that has no configured set are evaluated against the default ERC-3643 claim topics. A deployment that never touches the new functions behaves exactly as before.
+  - New events: `ClaimTopicAddedForIdentityType`, `ClaimTopicRemovedForIdentityType`. New custom error: `InvalidIdentityType`.
+  - ERC-3643 compatibility preserved: all standard `IClaimTopicsRegistry` and `IIdentityRegistry` functions keep their signatures and semantics; the new functions are implementation-level extensions exposed through the T-REX `IClaimTopicsRegistry` interface (also reported via ERC-165 `supportsInterface`).
+
 ## [4.2.0]
 
 ### Added

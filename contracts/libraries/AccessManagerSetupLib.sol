@@ -130,9 +130,11 @@ library AccessManagerSetupLib {
 
     function setupClaimTopicsRegistryRoles(IAccessManager accessManager, address claimTopicsRegistry) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](2);
+        bytes4[] memory functions = new bytes4[](4);
         functions[0] = ClaimTopicsRegistry.addClaimTopic.selector;
         functions[1] = ClaimTopicsRegistry.removeClaimTopic.selector;
+        functions[2] = ClaimTopicsRegistry.addClaimTopicForIdentityType.selector;
+        functions[3] = ClaimTopicsRegistry.removeClaimTopicForIdentityType.selector;
         accessManager.setTargetFunctionRole(claimTopicsRegistry, functions, RolesLib.OWNER);
     }
 

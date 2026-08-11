@@ -65,5 +65,35 @@ pragma solidity 0.8.30;
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 
 interface IClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
-    // functions that are not part of the original standard can be added here in future versions
+
+    /**
+     *  @dev Adds a required claim topic for a specific identity type (see ONCHAINID `IdentityTypes`).
+     *  The topic set of an identity type overrides the default claim topics for identities of that type:
+     *  when at least one topic is registered for a type, only that set is evaluated, the default set is not.
+     *  Only the owner can call.
+     *  @param identityType the identity type the claim topic is required for, cannot be 0 (0 means "no type"
+     *  and always resolves to the default claim topics)
+     *  @param claimTopic the claim topic required for the given identity type
+     *  emits a `ClaimTopicAddedForIdentityType` event
+     */
+    function addClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external;
+
+    /**
+     *  @dev Removes a required claim topic for a specific identity type.
+     *  When the last topic of a type is removed, identities of that type fall back to the default claim topics.
+     *  Only the owner can call.
+     *  @param identityType the identity type the claim topic is no longer required for, cannot be 0
+     *  @param claimTopic the claim topic to remove for the given identity type
+     *  emits a `ClaimTopicRemovedForIdentityType` event if the topic was registered
+     */
+    function removeClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external;
+
+    /**
+     *  @dev Returns the claim topics required for a specific identity type.
+     *  Returns an empty array when no override is set for the type: callers are expected to
+     *  fall back to `getClaimTopics()` (the default ERC-3643 claim topics) in that case.
+     *  @param identityType the identity type to fetch the required claim topics for
+     */
+    function getClaimTopicsForIdentityType(uint256 identityType) external view returns (uint256[] memory);
+
 }

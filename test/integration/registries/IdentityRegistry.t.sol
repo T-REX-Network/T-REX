@@ -33,8 +33,15 @@ import { Countries } from "../helpers/Countries.sol";
 import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { ClaimIssuerTrick } from "../mocks/ClaimIssuerTrick.sol";
 import { MockContract } from "../mocks/MockContract.sol";
+import { TypedIdentity } from "../mocks/TypedIdentity.sol";
 
 contract IdentityRegistryTest is TREXSuiteTest {
+
+    // Identity types as defined by the ONCHAINID v3 `IdentityTypes` library
+    uint256 public constant INDIVIDUAL = 2;
+    uint256 public constant CORPORATE = 3;
+
+    uint256 public constant CLAIM_TOPIC_KYB = uint256(keccak256(abi.encode("CLAIM_TOPIC_KYB")));
 
     // Contracts
     IdentityRegistry public identityRegistry;
@@ -484,6 +491,101 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
         // Should not be verified (only claim throws error)
         assertFalse(identityRegistry.isVerified(alice));
+    }
+
+    // ============ isVerified() Tests (identity-type-aware claim topics) ============
+
+    /// @notice A typed identity with no override configured for its type is evaluated against the default topics
+    function test_isVerified_UsesDefaultTopics_WhenNoOverrideForIdentityType() public {
+        TypedIdentity davidIdentity = _registerTypedIdentity(david, CORPORATE);
+
+        // No claims yet: the default topic set applies and is not satisfied
+        assertFalse(identityRegistry.isVerified(david));
+
+        // The default KYC-style claim satisfies verification, exactly as for untyped identities
+        _addClaim(davidIdentity, CLAIM_TOPIC_1, "Some claim data.", claimIssuerSigner.key, address(claimIssuer), david);
+        assertTrue(identityRegistry.isVerified(david));
+    }
+
+    /// @notice A per-type topic set replaces the default set for identities of that type (corporate KYB end-to-end)
+    function test_isVerified_UsesTypeTopics_WhenOverrideSetForIdentityType() public {
+        TypedIdentity davidIdentity = _registerTypedIdentity(david, CORPORATE);
+
+        // david holds the default KYC-style claim and is verified against the default topics
+        _addClaim(davidIdentity, CLAIM_TOPIC_1, "Some claim data.", claimIssuerSigner.key, address(claimIssuer), david);
+        assertTrue(identityRegistry.isVerified(david));
+
+        _requireKYBForCorporates();
+
+        // Override semantics: the KYC claim no longer satisfies the corporate requirement
+        assertFalse(identityRegistry.isVerified(david));
+
+        // Identities without a type are still evaluated against the default topics
+        assertTrue(identityRegistry.isVerified(alice));
+
+        // A valid KYB claim from a trusted issuer registered for the KYB topic verifies david
+        _addClaim(davidIdentity, CLAIM_TOPIC_KYB, "Some KYB data.", claimIssuerSigner.key, address(claimIssuer), david);
+        assertTrue(identityRegistry.isVerified(david));
+    }
+
+    /// @notice Removing the last topic of a type restores the default topic set for identities of that type
+    function test_isVerified_FallsBackToDefaultTopics_WhenOverrideRemoved() public {
+        TypedIdentity davidIdentity = _registerTypedIdentity(david, CORPORATE);
+        _addClaim(davidIdentity, CLAIM_TOPIC_1, "Some claim data.", claimIssuerSigner.key, address(claimIssuer), david);
+
+        _requireKYBForCorporates();
+        assertFalse(identityRegistry.isVerified(david));
+
+        vm.prank(deployer);
+        claimTopicsRegistry.removeClaimTopicForIdentityType(CORPORATE, CLAIM_TOPIC_KYB);
+
+        // Back to the default topics, satisfied by the existing KYC-style claim
+        assertTrue(identityRegistry.isVerified(david));
+    }
+
+    /// @notice An identity type change is reflected on the next verification
+    function test_isVerified_ReflectsIdentityTypeChange() public {
+        TypedIdentity davidIdentity = _registerTypedIdentity(david, INDIVIDUAL);
+        _addClaim(davidIdentity, CLAIM_TOPIC_1, "Some claim data.", claimIssuerSigner.key, address(claimIssuer), david);
+
+        _requireKYBForCorporates();
+
+        // As an INDIVIDUAL, david is evaluated against the default topics
+        assertTrue(identityRegistry.isVerified(david));
+
+        // Once the identity reports the CORPORATE type, the KYB requirement applies
+        davidIdentity.setIdentityType(CORPORATE);
+        assertFalse(identityRegistry.isVerified(david));
+    }
+
+    /// @notice Identity type 0 (unset) always resolves to the default topic set
+    function test_isVerified_UsesDefaultTopics_WhenIdentityTypeZero() public {
+        TypedIdentity davidIdentity = _registerTypedIdentity(david, 0);
+        _addClaim(davidIdentity, CLAIM_TOPIC_1, "Some claim data.", claimIssuerSigner.key, address(claimIssuer), david);
+
+        _requireKYBForCorporates();
+
+        assertTrue(identityRegistry.isVerified(david));
+    }
+
+    /// @notice Deploys a typed identity for `wallet` and registers it in the identity registry
+    function _registerTypedIdentity(address wallet, uint256 identityType) internal returns (TypedIdentity) {
+        TypedIdentity typedIdentity = new TypedIdentity(wallet, identityType);
+        vm.prank(agent);
+        identityRegistry.registerIdentity(wallet, typedIdentity, Countries.FRANCE);
+        return typedIdentity;
+    }
+
+    /// @notice Registers the claim issuer for the KYB topic and requires KYB for CORPORATE identities
+    function _requireKYBForCorporates() internal {
+        uint256[] memory issuerTopics = new uint256[](2);
+        issuerTopics[0] = CLAIM_TOPIC_1;
+        issuerTopics[1] = CLAIM_TOPIC_KYB;
+
+        vm.startPrank(deployer);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), issuerTopics);
+        claimTopicsRegistry.addClaimTopicForIdentityType(CORPORATE, CLAIM_TOPIC_KYB);
+        vm.stopPrank();
     }
 
     // ============ disableEligibilityChecks() Tests ============

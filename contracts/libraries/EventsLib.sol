@@ -81,6 +81,11 @@ library EventsLib {
     event ComplianceBound(address indexed compliance);
     event ComplianceUnbound(address indexed compliance);
 
+    // ClaimTopicsRegistry Events
+
+    event ClaimTopicAddedForIdentityType(uint256 indexed identityType, uint256 indexed claimTopic);
+    event ClaimTopicRemovedForIdentityType(uint256 indexed identityType, uint256 indexed claimTopic);
+
     // IdentityRegistry Events
 
     event EligibilityChecksDisabled();

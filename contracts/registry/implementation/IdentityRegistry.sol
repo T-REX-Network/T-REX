@@ -224,8 +224,9 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedOwnableUpgradeable 
         Storage storage s = _getStorage();
 
         if (s.checksDisabled) return true;
-        if (address(identity(userAddress)) == address(0)) return false;
-        uint256[] memory requiredClaimTopics = s.tokenTopicsRegistry.getClaimTopics();
+        IIdentity userIdentity = identity(userAddress);
+        if (address(userIdentity) == address(0)) return false;
+        uint256[] memory requiredClaimTopics = _requiredClaimTopics(s, userIdentity);
         if (requiredClaimTopics.length == 0) {
             return true;
         }
@@ -248,7 +249,6 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedOwnableUpgradeable 
             }
 
             for (uint256 j = 0; j < claimIds.length; j++) {
-                IIdentity userIdentity = identity(userAddress);
                 (foundClaimTopic, scheme, issuer, sig, data,) = userIdentity.getClaim(claimIds[j]);
 
                 if (foundClaimTopic == requiredClaimTopics[claimTopic]) {
@@ -328,6 +328,37 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedOwnableUpgradeable 
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IIdentityRegistry).interfaceId
             || interfaceId == type(IERC3643IdentityRegistry).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    /**
+     *  @dev Resolves the claim topics required for `userIdentity`.
+     *  The identity type is read from the ONCHAINID (ONCHAINID v3 `getIdentityType()`). When the Claim
+     *  Topics Registry defines a topic set for that type, the set replaces the default claim topics
+     *  (override semantics, not additive). Identities without a type (pre-v3 ONCHAINIDs, or type 0)
+     *  and types without an override resolve to the default ERC-3643 claim topics.
+     */
+    function _requiredClaimTopics(Storage storage s, IIdentity userIdentity) internal view returns (uint256[] memory) {
+        uint256 identityType = _identityType(userIdentity);
+        if (identityType != 0) {
+            uint256[] memory typeTopics = s.tokenTopicsRegistry.getClaimTopicsForIdentityType(identityType);
+            if (typeTopics.length > 0) {
+                return typeTopics;
+            }
+        }
+        return s.tokenTopicsRegistry.getClaimTopics();
+    }
+
+    /**
+     *  @dev Returns the identity type of `userIdentity`, or 0 when the identity does not expose
+     *  `getIdentityType()` (pre-v3 ONCHAINID) or returns malformed data.
+     */
+    function _identityType(IIdentity userIdentity) internal view returns (uint256) {
+        (bool success, bytes memory data) =
+            address(userIdentity).staticcall(abi.encodeWithSignature("getIdentityType()"));
+        if (!success || data.length < 32) {
+            return 0;
+        }
+        return abi.decode(data, (uint256));
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

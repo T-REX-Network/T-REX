@@ -67,6 +67,7 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IClaimTopicsRegistry } from "../interface/IClaimTopicsRegistry.sol";
 
@@ -77,6 +78,7 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedOwnableUpgrad
     /// @custom:storage-location erc7201:ERC3643.storage.ClaimTopicsRegistry
     struct Storage {
         EnumerableSet.UintSet claimTopics;
+        mapping(uint256 identityType => EnumerableSet.UintSet claimTopics) claimTopicsByIdentityType;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ClaimTopicsRegistry")) - 1)) & ~bytes32(uint256(0xff));
@@ -112,6 +114,30 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedOwnableUpgrad
     }
 
     /**
+     *  @dev See {IClaimTopicsRegistry-addClaimTopicForIdentityType}.
+     */
+    function addClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external restricted {
+        require(identityType != 0, ErrorsLib.InvalidIdentityType());
+
+        EnumerableSet.UintSet storage typeTopics = _getStorage().claimTopicsByIdentityType[identityType];
+        require(typeTopics.length() < 15, ErrorsLib.MaxClaimTopicsReached(15));
+        require(typeTopics.add(claimTopic), ErrorsLib.ClaimTopicAlreadyExists());
+
+        emit EventsLib.ClaimTopicAddedForIdentityType(identityType, claimTopic);
+    }
+
+    /**
+     *  @dev See {IClaimTopicsRegistry-removeClaimTopicForIdentityType}.
+     */
+    function removeClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external restricted {
+        require(identityType != 0, ErrorsLib.InvalidIdentityType());
+
+        if (_getStorage().claimTopicsByIdentityType[identityType].remove(claimTopic)) {
+            emit EventsLib.ClaimTopicRemovedForIdentityType(identityType, claimTopic);
+        }
+    }
+
+    /**
      *  @dev See {IClaimTopicsRegistry-getClaimTopics}.
      */
     function getClaimTopics() external view returns (uint256[] memory) {
@@ -119,10 +145,18 @@ contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessManagedOwnableUpgrad
     }
 
     /**
+     *  @dev See {IClaimTopicsRegistry-getClaimTopicsForIdentityType}.
+     */
+    function getClaimTopicsForIdentityType(uint256 identityType) external view returns (uint256[] memory) {
+        return _getStorage().claimTopicsByIdentityType[identityType].values();
+    }
+
+    /**
      *  @dev See {IERC165-supportsInterface}.
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
-        return interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || super.supportsInterface(interfaceId);
+        return interfaceId == type(IClaimTopicsRegistry).interfaceId
+            || interfaceId == type(IERC3643ClaimTopicsRegistry).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function _addClaimTopic(uint256 claimTopic) internal {
