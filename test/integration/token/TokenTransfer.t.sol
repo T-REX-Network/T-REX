@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
@@ -14,26 +13,20 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 
+import { RecordingModule, SpenderCheckOnlyModule } from "../mocks/CapabilityModules.sol";
 import { TestModule } from "../mocks/TestModule.sol";
-import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenTransferTest is TREXSuiteTest {
 
     IdentityRegistry public identityRegistry;
 
-    address verified = makeAddr("verified");
-
     function setUp() public override {
         super.setUp();
 
         identityRegistry = IdentityRegistry(address(token.identityRegistry()));
 
-        vm.prank(deployer);
-        IIdentity verifiedIdentity = IIdentity(idFactory.createIdentity(verified, "verified"));
-
         vm.startPrank(agent);
-        identityRegistry.registerIdentity(verified, verifiedIdentity, Countries.FRANCE);
         token.mint(alice, 1000);
         token.mint(bob, 500);
         token.unpause();
@@ -282,26 +275,122 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should transfer tokens and reduce allowance of transferred value
     function test_transferFrom_Success() public {
         vm.prank(alice);
-        token.approve(verified, 100);
+        token.approve(another, 100);
 
-        vm.prank(verified);
+        vm.prank(another);
         vm.expectEmit(true, true, false, false, address(token));
         emit IERC20.Transfer(alice, bob, 100);
         token.transferFrom(alice, bob, 100);
 
-        assertEq(token.allowance(alice, verified), 0);
+        assertEq(token.allowance(alice, another), 0);
     }
 
-    /// @notice Should decrease allowance by the transferred value
-    function test_transferFrom_DecreasesAllowance() public {
+    /// @notice Should decrease allowance when default allowance is NOT enabled (first part of OR condition)
+    function test_transferFrom_DecreasesAllowance_WhenDefaultAllowanceNotEnabled() public {
+        // Ensure default allowance is NOT enabled for another
         vm.prank(alice);
-        token.approve(verified, 200);
+        token.approve(another, 200);
 
-        vm.prank(verified);
+        vm.prank(another);
         token.transferFrom(alice, bob, 100);
 
         // Allowance should be decreased
-        assertEq(token.allowance(alice, verified), 100);
+        assertEq(token.allowance(alice, another), 100);
+    }
+
+    // ============ Spender compliance check Tests ============
+
+    /// @notice Should let the spender through when no bound module vets spenders
+    function test_transferFrom_Success_WhenNoModuleDeclaresTheSpenderCheck() public {
+        vm.prank(alice);
+        token.approve(another, 100);
+
+        vm.prank(another);
+        token.transferFrom(alice, bob, 100);
+
+        assertEq(token.balanceOf(bob), 600);
+    }
+
+    /// @notice Should revert when a bound module refuses the spender
+    function test_transferFrom_RevertWhen_ModuleRefusesTheSpender() public {
+        _bindRefusingSpenderModule();
+
+        vm.prank(alice);
+        token.approve(another, 100);
+
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, another));
+        token.transferFrom(alice, bob, 100);
+
+        assertEq(token.allowance(alice, another), 100);
+        assertEq(token.balanceOf(bob), 500);
+    }
+
+    /// @notice Should leave a direct transfer alone: the holder is not a spender
+    function test_transfer_Success_WhenModuleRefusesEverySpender() public {
+        _bindRefusingSpenderModule();
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+
+        assertEq(token.balanceOf(bob), 600);
+    }
+
+    /// @notice Should let a holder send their own tokens even once their identity is gone:
+    ///         eligibility is checked on the receiver, never on the caller
+    function test_transfer_Success_WhenHolderIdentityDeleted() public {
+        vm.prank(agent);
+        identityRegistry.deleteIdentity(alice);
+        assertFalse(identityRegistry.isVerified(alice));
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+
+        assertEq(token.balanceOf(bob), 600);
+    }
+
+    /// @notice Should leave the agent paths alone: they are gated by roles, not by spender compliance
+    function test_agentPaths_Success_WhenModuleRefusesEverySpender() public {
+        _bindRefusingSpenderModule();
+
+        vm.startPrank(agent);
+        token.mint(alice, 100);
+        token.burn(alice, 50);
+        token.forcedTransfer(alice, bob, 100);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(bob), 600);
+    }
+
+    /// @notice Should re-open transferFrom once the refusing module is unbound
+    function test_transferFrom_Success_AfterRefusingModuleUnbound() public {
+        SpenderCheckOnlyModule spenderCheck = _bindRefusingSpenderModule();
+
+        vm.prank(deployer);
+        ModularCompliance(address(token.compliance())).removeModule(address(spenderCheck));
+
+        vm.prank(alice);
+        token.approve(another, 100);
+
+        vm.prank(another);
+        token.transferFrom(alice, bob, 100);
+
+        assertEq(token.balanceOf(bob), 600);
+    }
+
+    /// @dev Binds a module that declares CHECK_SPENDER and refuses every spender.
+    function _bindRefusingSpenderModule() internal returns (SpenderCheckOnlyModule) {
+        SpenderCheckOnlyModule spenderCheck = SpenderCheckOnlyModule(
+            address(
+                new ModuleProxy(address(new SpenderCheckOnlyModule()), abi.encodeCall(RecordingModule.initialize, ()))
+            )
+        );
+
+        vm.prank(deployer);
+        ModularCompliance(address(token.compliance())).addModule(address(spenderCheck));
+        spenderCheck.setAllow(false);
+
+        return spenderCheck;
     }
 
     // ============ forcedTransfer() Tests ============

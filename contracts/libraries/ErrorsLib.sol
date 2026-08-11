@@ -80,6 +80,7 @@ library ErrorsLib {
     error ComplianceAlreadyBoundToToken();
     error NoTokenToRecover();
     error RecoveryNotPossible();
+    error SpenderNotAllowed(address spender);
     error UnverifiedIdentity();
 
     // ModularCompliance Errors

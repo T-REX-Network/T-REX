@@ -6,6 +6,7 @@ import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
+import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
@@ -181,19 +182,54 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         token.transferFrom(from, to, transferAmount);
     }
 
-    function testTokenTransferFromRevertsWhenSenderNotVerified() public {
+    function testTokenTransferFromRevertsWhenSpenderRefusedByCompliance() public {
         vm.prank(from);
         token.approve(spender, transferAmount);
 
-        vm.mockCall(
-            identityRegistry,
-            abi.encodeWithSelector(IERC3643IdentityRegistry.isVerified.selector, spender),
-            abi.encode(false)
-        );
+        _refuseSpender();
 
-        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, spender));
         vm.prank(spender);
         token.transferFrom(from, to, transferAmount);
+    }
+
+    function testTokenTransferFromKeepsAllowanceWhenSpenderRefused() public {
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
+        _refuseSpender();
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, spender));
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
+
+        assertEq(token.allowance(from, spender), transferAmount);
+        assertEq(token.balanceOf(from), mintAmount);
+    }
+
+    function testTokenTransferIgnoresSpenderCheck() public {
+        _refuseSpender();
+
+        vm.prank(from);
+        token.transfer(to, transferAmount);
+
+        assertEq(token.balanceOf(to), transferAmount);
+    }
+
+    function testTokenTransferFromQueriesTheSpenderNotTheHolder() public {
+        vm.prank(from);
+        token.approve(spender, transferAmount);
+
+        vm.expectCall(
+            compliance,
+            abi.encodeWithSelector(IModularCompliance.canSpenderCall.selector, spender, from, to, transferAmount)
+        );
+        vm.prank(spender);
+        token.transferFrom(from, to, transferAmount);
+    }
+
+    function _refuseSpender() private {
+        vm.mockCall(compliance, abi.encodeWithSelector(IModularCompliance.canSpenderCall.selector), abi.encode(false));
     }
 
     function testTokenTransferFromNominal() public {
