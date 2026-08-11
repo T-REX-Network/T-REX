@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { console2 } from "@forge-std/console2.sol";
+import { console } from "@forge-std/console.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
@@ -48,7 +48,7 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         _unbindAll();
         uint256[4] memory realistic = _measure(_deployRealisticSet());
 
-        console2.log("--- 8 bound modules, gas per operation ---");
+        console.log("--- 8 bound modules, gas per operation ---");
         _report("mint       ", baseline[0], realistic[0]);
         _report("burn       ", baseline[1], realistic[1]);
         _report("transfer   ", baseline[2], realistic[2]);
@@ -72,8 +72,8 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         mc.addModule(module);
         uint256 spent = before - gasleft();
 
-        console2.log("--- cold path ---");
-        console2.log("addModule (records capabilities):", spent);
+        console.log("--- cold path ---");
+        console.log("addModule (records capabilities):", spent);
         assertTrue(mc.isModuleBound(module));
     }
 
@@ -170,11 +170,11 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
     /// @dev Reports the delta without asserting on it, so a regression reaches the assertion that names
     ///      it rather than panicking on an unsigned subtraction here.
     function _report(string memory label, uint256 baseline, uint256 realistic) private pure {
-        console2.log(string.concat(label, " baseline:"), baseline, "  declared-routing:", realistic);
+        console.log(string.concat(label, " baseline:"), baseline, "  declared-routing:", realistic);
         if (realistic <= baseline) {
-            console2.log("             saved:", baseline - realistic);
+            console.log("             saved:", baseline - realistic);
         } else {
-            console2.log("             REGRESSED by:", realistic - baseline);
+            console.log("             REGRESSED by:", realistic - baseline);
         }
     }
 
