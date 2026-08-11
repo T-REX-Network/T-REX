@@ -1,6 +1,45 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - v5
+
+### Added
+
+- **Capabilities-based selective module dispatch**: a module declares which dispatch points are
+  meaningful for it, and `ModularCompliance` only calls it there.
+  - `IModule.moduleCapabilities()` returns a bitmask built from the flags of the new
+    `ModuleCapabilitiesLib` (`CHECK_TRANSFER`, `CHECK_SPENDER`, `HOOK_TRANSFER`, `HOOK_MINT`,
+    `HOOK_BURN`). It MUST be `pure`: the declaration is read once, at binding time.
+  - `refreshModuleCapabilities(address)` re-reads the declaration of a bound module, for when an
+    implementation upgrade changed it. Restricted to OWNER. The module moves to the end of the set.
+  - `getModuleCapabilities(address)` and `getModulesByCapability(uint256)` expose the recorded
+    routing. `UtilityChecker.getTransferDetails` now reports only the modules that vet transfers.
+  - `ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities)` on bind and refresh.
+- **Spender compliance check**: `IModule.moduleCheckSpender(...)` and
+  `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules declaring
+  `CHECK_SPENDER`. No token entry point calls `canSpenderCall` yet; wiring it into `transferFrom`
+  lands separately.
+
+### Changed
+
+- **Breaking, `IModule`**: `moduleCapabilities()` is mandatory and abstract, so every module must
+  declare its dispatch points. `AbstractModuleUpgradeable` now ships defaults for the five dispatch
+  functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
+  are immutable per implementation; an upgrade that changes them needs a refresh on every bound
+  compliance.
+- **Breaking, interface ids**: `type(IModule).interfaceId` and `type(IModularCompliance).interfaceId`
+  both change.
+- `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
+  (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
+  routing decision. Ordering is not preserved across a removal or a refresh.
+- Binding validates fully before writing state, so `canComplianceBind` now sees the module as not yet
+  bound. A module declaring nothing, or carrying an undefined bit, cannot be bound
+  (`ModuleHasNoCapabilities`, `InvalidModuleCapabilities`).
+
+Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
+~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;
+transfers are not.
+
 ## [4.2.0]
 
 ### Added

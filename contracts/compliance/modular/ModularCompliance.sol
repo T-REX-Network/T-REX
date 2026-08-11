@@ -71,6 +71,7 @@ import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
@@ -78,14 +79,18 @@ import { IModule } from "./modules/IModule.sol";
 
 contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeable {
 
-    using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.UintSet;
+
+    /// @dev Bit offset of the declared capabilities, just above the 160 bits of the module address.
+    uint256 private constant CAPABILITIES_OFFSET = 160;
 
     /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
     struct Storage {
         /// token linked to the compliance contract
         address tokenBound;
-        /// Set of modules bound to the compliance
-        EnumerableSet.AddressSet modules;
+        /// Bound modules, each packed as `uint160(module) | capabilities << 160`, so one SLOAD
+        /// yields both the call target and whether this dispatch point applies to it.
+        EnumerableSet.UintSet modules;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
@@ -156,10 +161,28 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     function removeModule(address _module) external restricted {
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
-        Storage storage s = _getStorage();
-        require(s.modules.remove(_module), ErrorsLib.ModuleNotBound());
+        uint256 packed = _packedOf(_module);
+        require(packed != 0, ErrorsLib.ModuleNotBound());
+
+        _getStorage().modules.remove(packed);
         IModule(_module).unbindCompliance(address(this));
         emit EventsLib.ModuleRemoved(_module);
+    }
+
+    /**
+     *  @dev See {IModularCompliance-refreshModuleCapabilities}.
+     */
+    function refreshModuleCapabilities(address _module) external restricted {
+        uint256 packed = _packedOf(_module);
+        require(packed != 0, ErrorsLib.ModuleNotBound());
+
+        uint256 capabilities = _readCapabilities(_module);
+        Storage storage s = _getStorage();
+        // the packed entry is the set key, so a changed declaration is a different key
+        s.modules.remove(packed);
+        s.modules.add(_pack(_module, capabilities));
+
+        emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
     }
 
     /**
@@ -171,7 +194,11 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules.at(i)).moduleTransferAction(_from, _to, _value);
+            uint256 packed = s.modules.at(i);
+            if (!_declares(packed, ModuleCapabilitiesLib.HOOK_TRANSFER)) {
+                continue;
+            }
+            IModule(_unpackModule(packed)).moduleTransferAction(_from, _to, _value);
         }
     }
 
@@ -184,7 +211,11 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules.at(i)).moduleMintAction(_to, _value);
+            uint256 packed = s.modules.at(i);
+            if (!_declares(packed, ModuleCapabilitiesLib.HOOK_MINT)) {
+                continue;
+            }
+            IModule(_unpackModule(packed)).moduleMintAction(_to, _value);
         }
     }
 
@@ -197,7 +228,11 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules.at(i)).moduleBurnAction(_from, _value);
+            uint256 packed = s.modules.at(i);
+            if (!_declares(packed, ModuleCapabilitiesLib.HOOK_BURN)) {
+                continue;
+            }
+            IModule(_unpackModule(packed)).moduleBurnAction(_from, _value);
         }
     }
 
@@ -216,14 +251,49 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
      *  @dev See {IModularCompliance-isModuleBound}.
      */
     function isModuleBound(address _module) external view returns (bool) {
-        return _getStorage().modules.contains(_module);
+        return _packedOf(_module) != 0;
     }
 
     /**
      *  @dev See {IModularCompliance-getModules}.
      */
     function getModules() external view returns (address[] memory) {
-        return _getStorage().modules.values();
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        address[] memory modules = new address[](length);
+        for (uint256 i = 0; i < length; i++) {
+            modules[i] = _unpackModule(s.modules.at(i));
+        }
+        return modules;
+    }
+
+    /**
+     *  @dev See {IModularCompliance-getModuleCapabilities}.
+     */
+    function getModuleCapabilities(address _module) external view returns (uint256) {
+        uint256 packed = _packedOf(_module);
+        require(packed != 0, ErrorsLib.ModuleNotBound());
+        return packed >> CAPABILITIES_OFFSET;
+    }
+
+    /**
+     *  @dev See {IModularCompliance-getModulesByCapability}.
+     */
+    function getModulesByCapability(uint256 _capability) external view returns (address[] memory) {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        address[] memory matched = new address[](length);
+        uint256 count;
+        for (uint256 i = 0; i < length; i++) {
+            uint256 packed = s.modules.at(i);
+            if (_declares(packed, _capability)) {
+                matched[count++] = _unpackModule(packed);
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(matched, count)
+        }
+        return matched;
     }
 
     /**
@@ -247,7 +317,30 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(s.modules.at(i)).moduleCheck(_from, _to, _value, address(this))) {
+            uint256 packed = s.modules.at(i);
+            if (!_declares(packed, ModuleCapabilitiesLib.CHECK_TRANSFER)) {
+                continue;
+            }
+            if (!IModule(_unpackModule(packed)).moduleCheck(_from, _to, _value, address(this))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     *  @dev See {IModularCompliance-canSpenderCall}.
+     */
+    function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            uint256 packed = s.modules.at(i);
+            if (!_declares(packed, ModuleCapabilitiesLib.CHECK_SPENDER)) {
+                continue;
+            }
+            if (!IModule(_unpackModule(packed)).moduleCheckSpender(_spender, _from, _to, _value, address(this))) {
                 return false;
             }
         }
@@ -285,28 +378,71 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         emit ERC3643EventsLib.TokenBound(_token);
     }
 
-    /// @dev Binds a module to the compliance with the existing validation rules (zero check, duplicate check,
-    ///      cap of 25, plug-and-play / canComplianceBind requirement). No caller check — wrappers enforce it.
+    /// @dev Binds a module with the existing validation rules (zero check, duplicate check, cap of 25,
+    ///      plug-and-play / canComplianceBind requirement) and records the dispatch points it declares.
+    ///      No caller check — wrappers enforce it. Everything is validated before any state is written,
+    ///      so `canComplianceBind` sees the module as not yet bound.
     function _addModule(address _module) internal {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
-        require(s.modules.add(_module), ErrorsLib.ModuleAlreadyBound());
+        require(_packedOf(_module) == 0, ErrorsLib.ModuleAlreadyBound());
         IModule module = IModule(_module);
         require(
             module.isPlugAndPlay() || module.canComplianceBind(address(this)),
             ErrorsLib.ComplianceNotSuitableForBindingToModule(_module)
         );
 
+        uint256 capabilities = _readCapabilities(_module);
+        s.modules.add(_pack(_module, capabilities));
+
         module.bindCompliance(address(this));
 
         emit EventsLib.ModuleAdded(_module);
+        emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
+    }
+
+    /// @dev Reads a module's declaration and rejects anything the compliance cannot route. A plain call
+    ///      is deliberate: an EOA or a missing function reverts on its own, bubbling the real reason.
+    function _readCapabilities(address _module) internal pure returns (uint256 capabilities) {
+        capabilities = IModule(_module).moduleCapabilities();
+        require(capabilities != 0, ErrorsLib.ModuleHasNoCapabilities());
+        require(capabilities & ~ModuleCapabilitiesLib.ALL == 0, ErrorsLib.InvalidModuleCapabilities(capabilities));
+    }
+
+    /// @dev The packed entry of `_module`, or zero when it is not bound. A bound entry always carries
+    ///      at least one capability bit, so zero is unambiguous. Bounded by the 25-module cap.
+    function _packedOf(address _module) internal view returns (uint256) {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            uint256 packed = s.modules.at(i);
+            if (_unpackModule(packed) == _module) {
+                return packed;
+            }
+        }
+        return 0;
+    }
+
+    function _pack(address _module, uint256 _capabilities) internal pure returns (uint256) {
+        return uint256(uint160(_module)) | (_capabilities << CAPABILITIES_OFFSET);
+    }
+
+    function _unpackModule(uint256 _packed) internal pure returns (address) {
+        // truncation is the point: it drops the capability bits packed above the address
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return address(uint160(_packed));
+    }
+
+    /// @dev Whether a packed entry declares `_capability`, tested without unpacking.
+    function _declares(uint256 _packed, uint256 _capability) internal pure returns (bool) {
+        return _packed & (_capability << CAPABILITIES_OFFSET) != 0;
     }
 
     /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
     ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
-        require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
+        require(_packedOf(_module) != 0, ErrorsLib.ModuleNotBound());
 
         if (!LowLevelCall.callNoReturn(_module, callData)) {
             LowLevelCall.bubbleRevert();

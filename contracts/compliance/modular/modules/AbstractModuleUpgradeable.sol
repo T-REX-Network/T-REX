@@ -71,6 +71,19 @@ import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
 import { IModule } from "./IModule.sol";
 
+/**
+ * @dev Base for every compliance module.
+ *
+ * The five dispatch points ship a default here, a no-op for the hooks and a pass for the checks, so a
+ * module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
+ * it is the one member a module MUST declare.
+ *
+ * Keep the declaration next to the overrides it describes. An override without its flag is never called,
+ * and the rule silently stops applying; the EVM cannot detect this, so nothing catches it for you.
+ *
+ * Capabilities are immutable per implementation. An upgrade that changes them is a breaking change until
+ * each bound compliance calls `refreshModuleCapabilities`.
+ */
 abstract contract AbstractModuleUpgradeable is
     IModule,
     Initializable,
@@ -138,6 +151,40 @@ abstract contract AbstractModuleUpgradeable is
         s.nonces[_compliance]++;
 
         emit EventsLib.ComplianceUnbound(_compliance);
+    }
+
+    /**
+     *  @dev See {IModule-moduleTransferAction}.
+     *  Default no-op: a module overrides it only when it declares `HOOK_TRANSFER`.
+     */
+    function moduleTransferAction(address, address, uint256) external virtual onlyComplianceCall { }
+
+    /**
+     *  @dev See {IModule-moduleMintAction}.
+     *  Default no-op: a module overrides it only when it declares `HOOK_MINT`.
+     */
+    function moduleMintAction(address, uint256) external virtual onlyComplianceCall { }
+
+    /**
+     *  @dev See {IModule-moduleBurnAction}.
+     *  Default no-op: a module overrides it only when it declares `HOOK_BURN`.
+     */
+    function moduleBurnAction(address, uint256) external virtual onlyComplianceCall { }
+
+    /**
+     *  @dev See {IModule-moduleCheck}.
+     *  Default pass: a module overrides it only when it declares `CHECK_TRANSFER`.
+     */
+    function moduleCheck(address, address, uint256, address) external view virtual returns (bool) {
+        return true;
+    }
+
+    /**
+     *  @dev See {IModule-moduleCheckSpender}.
+     *  Default pass: a module overrides it only when it declares `CHECK_SPENDER`.
+     */
+    function moduleCheckSpender(address, address, address, uint256, address) external view virtual returns (bool) {
+        return true;
     }
 
     /**
