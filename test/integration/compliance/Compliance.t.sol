@@ -105,7 +105,8 @@ contract ComplianceTest is TREXSuiteTest {
             irImplementation: address(mockImpl), // Invalid
             irsImplementation: address(mockImpl), // Invalid
             tirImplementation: address(mockImpl), // Invalid
-            mcImplementation: address(mockImpl) // Invalid - doesn't have init() function
+            mcImplementation: address(mockImpl), // Invalid - doesn't have init() function
+            trexRegistryImplementation: address(0)
         });
 
         // Add version to IA (need to be owner)

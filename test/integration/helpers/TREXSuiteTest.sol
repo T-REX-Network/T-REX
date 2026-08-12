@@ -13,6 +13,7 @@ import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
@@ -23,10 +24,8 @@ import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
 } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
-import { IERC3643IdentityRegistry, IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
-import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
@@ -52,11 +51,9 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // Implementations
     Token tokenImplementation;
-    IdentityRegistry identityRegistryImplementation;
     IdentityRegistryStorage identityRegistryStorageImplementation;
-    ClaimTopicsRegistry claimTopicsRegistryImplementation;
-    TrustedIssuersRegistry trustedIssuersRegistryImplementation;
     ModularCompliance modularComplianceImplementation;
+    TREXRegistry trexRegistryImplementation;
 
     // Factories
     TREXFactory public trexFactory;
@@ -242,11 +239,9 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     function _deployImplementations() internal {
         tokenImplementation = new Token();
-        identityRegistryImplementation = new IdentityRegistry();
         identityRegistryStorageImplementation = new IdentityRegistryStorage();
-        claimTopicsRegistryImplementation = new ClaimTopicsRegistry();
-        trustedIssuersRegistryImplementation = new TrustedIssuersRegistry();
         modularComplianceImplementation = new ModularCompliance();
+        trexRegistryImplementation = new TREXRegistry();
     }
 
     function _deployFactories() internal {
@@ -278,15 +273,19 @@ contract TREXSuiteTest is AccessManagerHelper {
             _grantOwnerRole(deployer);
 
             vm.prank(deployer);
+            // The legacy `irImplementation` / `ctrImplementation` / `tirImplementation` slots are kept
+            // for ABI compatibility; post-merge they all point at the merged `TREXRegistry`
+            // implementation, which answers as IR, CTR and TIR via ERC-165.
             ia.addAndUseTREXVersion(
                 ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
                 ITREXImplementationAuthority.TREXContracts({
                     tokenImplementation: address(tokenImplementation),
-                    irImplementation: address(identityRegistryImplementation),
+                    irImplementation: address(trexRegistryImplementation),
                     irsImplementation: address(identityRegistryStorageImplementation),
-                    ctrImplementation: address(claimTopicsRegistryImplementation),
-                    tirImplementation: address(trustedIssuersRegistryImplementation),
-                    mcImplementation: address(modularComplianceImplementation)
+                    ctrImplementation: address(trexRegistryImplementation),
+                    tirImplementation: address(trexRegistryImplementation),
+                    mcImplementation: address(modularComplianceImplementation),
+                    trexRegistryImplementation: address(trexRegistryImplementation)
                 })
             );
         }
@@ -383,15 +382,10 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     /// @notice Wires the selector-to-role mappings on the AccessManager for every contract of `_token`'s suite.
     function _setupTokenSuiteRoles(Token _token) internal {
+        // The registry answers topicsRegistry()/issuersRegistry() with its own address, so a single
+        // registry wiring covers all three sub-surfaces.
         IERC3643IdentityRegistry ir = _token.identityRegistry();
-        _setupSuiteRoles(
-            address(_token),
-            address(ir),
-            address(ir.identityStorage()),
-            address(ir.topicsRegistry()),
-            address(ir.issuersRegistry()),
-            address(_token.compliance())
-        );
+        _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
     }
 
     /// @notice Deploys a fresh ModularCompliance proxy with no token bound, managed by the test AccessManager
@@ -414,11 +408,13 @@ contract TREXSuiteTest is AccessManagerHelper {
     function getTREXContracts() public view returns (ITREXImplementationAuthority.TREXContracts memory) {
         return ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: address(tokenImplementation),
-            ctrImplementation: address(claimTopicsRegistryImplementation),
-            irImplementation: address(identityRegistryImplementation),
+            // Legacy CTR/IR/TIR slots resolve to the merged registry implementation post-merge.
+            ctrImplementation: address(trexRegistryImplementation),
+            irImplementation: address(trexRegistryImplementation),
             irsImplementation: address(identityRegistryStorageImplementation),
-            tirImplementation: address(trustedIssuersRegistryImplementation),
-            mcImplementation: address(modularComplianceImplementation)
+            tirImplementation: address(trexRegistryImplementation),
+            mcImplementation: address(modularComplianceImplementation),
+            trexRegistryImplementation: address(trexRegistryImplementation)
         });
     }
 

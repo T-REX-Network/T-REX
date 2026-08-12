@@ -7,7 +7,7 @@ import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
@@ -19,7 +19,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
     UtilityChecker public utilityChecker;
 
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
     IERC3643ClaimTopicsRegistry public claimTopicsRegistry;
     IERC3643TrustedIssuersRegistry public trustedIssuersRegistry;
 
@@ -30,7 +30,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         // Get registries
         IERC3643IdentityRegistry ir = token.identityRegistry();
-        identityRegistry = IdentityRegistry(address(ir));
+        identityRegistry = TREXRegistry(address(ir));
         claimTopicsRegistry = ir.topicsRegistry();
         trustedIssuersRegistry = ir.issuersRegistry();
 

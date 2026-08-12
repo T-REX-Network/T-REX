@@ -41,12 +41,11 @@ abstract contract AccessManagerHelper is Test {
     }
 
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
-    function _setupSuiteRoles(address token, address ir, address irs, address ctr, address tir, address mc) internal {
+    /// @dev `registry` is the TREXRegistry, which serves as the suite's IR, CTR and TIR.
+    function _setupSuiteRoles(address token, address registry, address irs, address mc) internal {
         AccessManagerSetupLib.setupTokenRoles(accessManager, token);
-        AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, ir);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry);
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs);
-        AccessManagerSetupLib.setupClaimTopicsRegistryRoles(accessManager, ctr);
-        AccessManagerSetupLib.setupTrustedIssuersRegistryRoles(accessManager, tir);
         AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc);
     }
 

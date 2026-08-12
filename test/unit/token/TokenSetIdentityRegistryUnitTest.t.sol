@@ -41,7 +41,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
             abi.encodeWithSelector(IAccessManaged.authority.selector),
             abi.encode(address(accessManager))
         );
-        AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, newIdentityRegistry);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, newIdentityRegistry);
         accessManager.grantRole(RolesLib.AGENT, address(token), 0);
 
         vm.expectEmit(true, true, true, true, address(token));

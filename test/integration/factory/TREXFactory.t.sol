@@ -17,10 +17,8 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
-import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 import { Create3 } from "contracts/vendor/openzeppelin/Create3.sol";
 
@@ -344,7 +342,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(deployedToken.symbol(), "SYM", "Token symbol should match");
 
         // Verify CTR is owned by the suite AccessManager
-        ClaimTopicsRegistry ctr = ClaimTopicsRegistry(address(deployedToken.identityRegistry().topicsRegistry()));
+        TREXRegistry ctr = TREXRegistry(address(deployedToken.identityRegistry().topicsRegistry()));
         assertEq(
             IAccessManaged(address(ctr)).authority(),
             address(accessManager),
@@ -356,7 +354,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(storedTopics[0], claimTopic, "CTR topic should match input");
 
         // Verify TIR is owned by the suite AccessManager
-        TrustedIssuersRegistry tir = TrustedIssuersRegistry(address(deployedToken.identityRegistry().issuersRegistry()));
+        TREXRegistry tir = TREXRegistry(address(deployedToken.identityRegistry().issuersRegistry()));
         assertEq(
             IAccessManaged(address(tir)).authority(),
             address(accessManager),
@@ -379,7 +377,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // Verify IR is owned by the suite AccessManager, with the Token and configured irAgents holding
         // the AGENT role from deploy time.
-        IdentityRegistry ir = IdentityRegistry(irAddress);
+        TREXRegistry ir = TREXRegistry(irAddress);
         assertEq(
             IAccessManaged(address(ir)).authority(), address(accessManager), "IR owner must be the suite AccessManager"
         );
@@ -448,7 +446,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite("tir-init-salt", tokenDetails, claimDetails);
 
         Token deployedToken = Token(trexFactory.getToken("tir-init-salt"));
-        TrustedIssuersRegistry tir = TrustedIssuersRegistry(address(deployedToken.identityRegistry().issuersRegistry()));
+        TREXRegistry tir = TREXRegistry(address(deployedToken.identityRegistry().issuersRegistry()));
 
         assertEq(
             IAccessManaged(address(tir)).authority(),
@@ -495,7 +493,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite("ctr-init-salt", tokenDetails, claimDetails);
 
         Token deployedToken = Token(trexFactory.getToken("ctr-init-salt"));
-        ClaimTopicsRegistry ctr = ClaimTopicsRegistry(address(deployedToken.identityRegistry().topicsRegistry()));
+        TREXRegistry ctr = TREXRegistry(address(deployedToken.identityRegistry().topicsRegistry()));
 
         assertEq(
             IAccessManaged(address(ctr)).authority(),
@@ -799,7 +797,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite("ir-init-salt", tokenDetails, claimDetails);
 
         Token deployedToken = Token(trexFactory.getToken("ir-init-salt"));
-        IdentityRegistry ir = IdentityRegistry(address(deployedToken.identityRegistry()));
+        TREXRegistry ir = TREXRegistry(address(deployedToken.identityRegistry()));
 
         assertEq(
             IAccessManaged(address(ir)).authority(), address(accessManager), "IR owner must be the suite AccessManager"
@@ -872,13 +870,13 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///         suite contract. Split out of the test body so the function fits inside the stack budget.
     function _assertFullConfigSuite(string memory salt, address testModuleAddr, address issuerAddr) internal view {
         Token deployedToken = Token(trexFactory.getToken(salt));
-        IdentityRegistry ir = IdentityRegistry(address(deployedToken.identityRegistry()));
+        TREXRegistry ir = TREXRegistry(address(deployedToken.identityRegistry()));
         _assertFullConfigOwnership(deployedToken, ir);
         _assertFullConfigInitState(deployedToken, ir, testModuleAddr, issuerAddr);
     }
 
     /// @notice All 6 suite contracts must report the suite AccessManager as their authority.
-    function _assertFullConfigOwnership(Token deployedToken, IdentityRegistry ir) internal view {
+    function _assertFullConfigOwnership(Token deployedToken, TREXRegistry ir) internal view {
         assertEq(
             IAccessManaged(address(ir.topicsRegistry())).authority(),
             address(accessManager),
@@ -914,16 +912,16 @@ contract TREXFactoryTest is TREXSuiteTest {
     /// @notice Topics, issuers, agents, modules, settings, OID, IRS binding all in place at init time.
     function _assertFullConfigInitState(
         Token deployedToken,
-        IdentityRegistry ir,
+        TREXRegistry ir,
         address testModuleAddr,
         address issuerAddr
     ) internal view {
-        ClaimTopicsRegistry ctr = ClaimTopicsRegistry(address(ir.topicsRegistry()));
+        TREXRegistry ctr = TREXRegistry(address(ir.topicsRegistry()));
         uint256[] memory storedTopics = ctr.getClaimTopics();
         assertEq(storedTopics.length, 1, "CTR must have the configured claim topic");
         assertEq(storedTopics[0], 1, "CTR topic must match input");
 
-        TrustedIssuersRegistry tir = TrustedIssuersRegistry(address(ir.issuersRegistry()));
+        TREXRegistry tir = TREXRegistry(address(ir.issuersRegistry()));
         assertTrue(tir.isTrustedIssuer(issuerAddr), "TIR must have the configured issuer registered");
 
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(ir.identityStorage()));
@@ -1119,9 +1117,9 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         string memory salt = "collision-salt";
 
-        // The first contract deployed by deployTREXSuite is the TIR. Pre-populating code at its
+        // The first contract deployed by deployTREXSuite is the IRS. Pre-populating code at its
         // predicted CREATE3 address makes the inner CREATE return zero, so the deploy reverts.
-        vm.etch(_predictSuiteAddress(salt, "TIR"), hex"60006000");
+        vm.etch(_predictSuiteAddress(salt, "IRS"), hex"60006000");
 
         vm.prank(deployer);
         vm.expectRevert();

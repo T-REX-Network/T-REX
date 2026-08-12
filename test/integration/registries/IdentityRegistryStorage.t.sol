@@ -8,19 +8,14 @@ import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { ClaimTopicsRegistryProxy } from "contracts/proxy/ClaimTopicsRegistryProxy.sol";
-import { IdentityRegistryProxy } from "contracts/proxy/IdentityRegistryProxy.sol";
 import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
-import { TrustedIssuersRegistryProxy } from "contracts/proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { ClaimTopicsRegistry } from "contracts/registry/implementation/ClaimTopicsRegistry.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
 import {
     IERC3643IdentityRegistryStorage,
     IdentityRegistryStorage
 } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
-import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
@@ -325,7 +320,8 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
             irImplementation: address(mockImpl), // Invalid
             irsImplementation: address(mockImpl), // Invalid - doesn't have init() function
             tirImplementation: address(mockImpl), // Invalid
-            mcImplementation: address(mockImpl) // Invalid
+            mcImplementation: address(mockImpl), // Invalid
+            trexRegistryImplementation: address(0)
         });
 
         // Add version to IA (need to be owner)

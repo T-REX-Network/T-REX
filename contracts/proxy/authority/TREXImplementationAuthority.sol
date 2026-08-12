@@ -169,6 +169,11 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         _contracts[_versionToBytes(_version)] =
             ITREXImplementationAuthority(getReferenceContract()).getContracts(_version);
         emit EventsLib.TREXVersionFetched(_version, _contracts[_versionToBytes(_version)]);
+        if (_contracts[_versionToBytes(_version)].trexRegistryImplementation != address(0)) {
+            emit EventsLib.TREXRegistryImplementationSet(_contracts[_versionToBytes(
+                        _version
+                    )].trexRegistryImplementation);
+        }
     }
 
     /**
@@ -184,8 +189,6 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         address _ir = address(IERC3643(_token).identityRegistry());
         address _mc = address(IERC3643(_token).compliance());
         address _irs = address(IERC3643IdentityRegistry(_ir).identityStorage());
-        address _ctr = address(IERC3643IdentityRegistry(_ir).topicsRegistry());
-        address _tir = address(IERC3643IdentityRegistry(_ir).issuersRegistry());
 
         if (_newImplementationAuthority == address(0)) {
             _newImplementationAuthority = IIAFactory(_iaFactory).deployIA(_token);
@@ -210,8 +213,6 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         IProxy(_token).setImplementationAuthority(_newImplementationAuthority);
         IProxy(_ir).setImplementationAuthority(_newImplementationAuthority);
         IProxy(_mc).setImplementationAuthority(_newImplementationAuthority);
-        IProxy(_ctr).setImplementationAuthority(_newImplementationAuthority);
-        IProxy(_tir).setImplementationAuthority(_newImplementationAuthority);
         // IRS can be shared by multiple tokens, and therefore could have been updated already
         if (IProxy(_irs).getImplementationAuthority() == address(this)) {
             IProxy(_irs).setImplementationAuthority(_newImplementationAuthority);
@@ -248,20 +249,6 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     }
 
     /**
-     *  @dev See {ITREXImplementationAuthority-getCTRImplementation}.
-     */
-    function getCTRImplementation() external view returns (address) {
-        return _contracts[_versionToBytes(_currentVersion)].ctrImplementation;
-    }
-
-    /**
-     *  @dev See {ITREXImplementationAuthority-getIRImplementation}.
-     */
-    function getIRImplementation() external view returns (address) {
-        return _contracts[_versionToBytes(_currentVersion)].irImplementation;
-    }
-
-    /**
      *  @dev See {ITREXImplementationAuthority-getIRSImplementation}.
      */
     function getIRSImplementation() external view returns (address) {
@@ -269,17 +256,17 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     }
 
     /**
-     *  @dev See {ITREXImplementationAuthority-getTIRImplementation}.
-     */
-    function getTIRImplementation() external view returns (address) {
-        return _contracts[_versionToBytes(_currentVersion)].tirImplementation;
-    }
-
-    /**
      *  @dev See {ITREXImplementationAuthority-getMCImplementation}.
      */
     function getMCImplementation() external view returns (address) {
         return _contracts[_versionToBytes(_currentVersion)].mcImplementation;
+    }
+
+    /**
+     *  @dev See {ITREXImplementationAuthority-getTREXRegistryImplementation}.
+     */
+    function getTREXRegistryImplementation() external view returns (address) {
+        return _contracts[_versionToBytes(_currentVersion)].trexRegistryImplementation;
     }
 
     /**
@@ -304,6 +291,9 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
 
         _contracts[_versionToBytes(_version)] = _trex;
         emit EventsLib.TREXVersionAdded(_version, _trex);
+        if (_trex.trexRegistryImplementation != address(0)) {
+            emit EventsLib.TREXRegistryImplementationSet(_trex.trexRegistryImplementation);
+        }
     }
 
     /**

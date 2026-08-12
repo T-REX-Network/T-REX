@@ -70,12 +70,10 @@ import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { IdentityModulesLib } from "../libraries/IdentityModulesLib.sol";
 import { RolesLib } from "../libraries/RolesLib.sol";
-import { ClaimTopicsRegistryProxy } from "../proxy/ClaimTopicsRegistryProxy.sol";
-import { IdentityRegistryProxy } from "../proxy/IdentityRegistryProxy.sol";
 import { IdentityRegistryStorageProxy } from "../proxy/IdentityRegistryStorageProxy.sol";
 import { ModularComplianceProxy } from "../proxy/ModularComplianceProxy.sol";
+import { TREXRegistryProxy } from "../proxy/TREXRegistryProxy.sol";
 import { TokenProxy } from "../proxy/TokenProxy.sol";
-import { TrustedIssuersRegistryProxy } from "../proxy/TrustedIssuersRegistryProxy.sol";
 import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
@@ -129,28 +127,28 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             tokenDetails.irAgents.length <= 5 && tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
         );
 
-        address tir = _deployTIR(salt, tokenDetails.accessManager, claimDetails.issuers, claimDetails.issuerClaims);
-        address ctr = _deployCTR(salt, tokenDetails.accessManager, claimDetails.claimTopics);
-
         address irs = tokenDetails.irs;
         if (irs == address(0)) {
             irs = _deployIRS(salt, tokenDetails);
         }
 
-        address ir = _deployIR(salt, tokenDetails, tir, ctr, irs);
+        // selector-to-role wiring is a governance action: the factory holds no ADMIN_ROLE and must
+        // not call setTargetFunctionRole
+        address registry = _deployTREXRegistry(salt, tokenDetails, irs, claimDetails);
+
         address mc = _deployMC(salt, tokenDetails);
 
         // a reused IRS must share the suite's AccessManager; the bind reverts otherwise (restricted guard)
         if (tokenDetails.irs != address(0)) {
-            _bindReusedIRS(IAccessManager(tokenDetails.accessManager), irs, ir);
+            _bindReusedIRS(IAccessManager(tokenDetails.accessManager), irs, registry);
         }
 
-        address token = _deployToken(salt, tokenDetails, ir, mc);
+        address token = _deployToken(salt, tokenDetails, registry, mc);
         tokenDeployed[salt] = token;
 
-        _grantAgentRoles(tokenDetails, token, ir);
+        _grantAgentRoles(tokenDetails, token, registry);
 
-        emit EventsLib.TREXSuiteDeployed(token, ir, irs, tir, ctr, mc, salt);
+        emit EventsLib.TREXSuiteDeployed(token, registry, irs, registry, registry, mc, salt);
     }
 
     /**
@@ -208,11 +206,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         // should not be possible to set an implementation authority that is not complete
         require(
             (ITREXImplementationAuthority(implementationAuthorityAddress)).getTokenImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getCTRImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getIRImplementation() != address(0)
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getTREXRegistryImplementation()
+                    != address(0)
                 && (ITREXImplementationAuthority(implementationAuthorityAddress)).getIRSImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getMCImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getTIRImplementation() != address(0),
+                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getMCImplementation() != address(0),
             ErrorsLib.InvalidImplementationAuthority()
         );
         _implementationAuthority = implementationAuthorityAddress;
@@ -272,34 +269,29 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return bytes20(address(this)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
     }
 
-    /// function used to deploy a trusted issuers registry using CREATE3
-    function _deployTIR(
+    /// function used to deploy the eligibility registry using CREATE3
+    /// @dev Seeds the required claim topics and trusted issuers through the proxy constructor, so the
+    ///      factory needs no OWNER privilege over the freshly deployed registry. Deployed under the
+    ///      "IR" discriminator, which `_deployIRS` pre-computes via `_predictAddress(salt, "IR")`.
+    function _deployTREXRegistry(
         string memory salt,
-        address accessManagerAddress,
-        address[] memory issuers,
-        uint256[][] memory issuerClaims
+        TokenDetails calldata tokenDetails,
+        address identityStorage,
+        ClaimDetails calldata claimDetails
     ) private returns (address) {
         return _deploy(
             salt,
-            "TIR",
+            "IR",
             bytes.concat(
-                type(TrustedIssuersRegistryProxy).creationCode,
-                abi.encode(_implementationAuthority, accessManagerAddress, issuers, issuerClaims)
-            )
-        );
-    }
-
-    /// function used to deploy a claim topics registry using CREATE3
-    function _deployCTR(string memory salt, address accessManagerAddress, uint256[] memory initialTopics)
-        private
-        returns (address)
-    {
-        return _deploy(
-            salt,
-            "CTR",
-            bytes.concat(
-                type(ClaimTopicsRegistryProxy).creationCode,
-                abi.encode(_implementationAuthority, accessManagerAddress, initialTopics)
+                type(TREXRegistryProxy).creationCode,
+                abi.encode(
+                    _implementationAuthority,
+                    identityStorage,
+                    tokenDetails.accessManager,
+                    claimDetails.claimTopics,
+                    claimDetails.issuers,
+                    claimDetails.issuerClaims
+                )
             )
         );
     }
@@ -329,30 +321,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             bytes.concat(
                 type(IdentityRegistryStorageProxy).creationCode,
                 abi.encode(_implementationAuthority, tokenDetails.accessManager, _predictAddress(salt, "IR"))
-            )
-        );
-    }
-
-    /// function used to deploy an identity registry using CREATE3
-    function _deployIR(
-        string memory salt,
-        TokenDetails calldata tokenDetails,
-        address trustedIssuersRegistry,
-        address claimTopicsRegistry,
-        address identityStorage
-    ) private returns (address) {
-        return _deploy(
-            salt,
-            "IR",
-            bytes.concat(
-                type(IdentityRegistryProxy).creationCode,
-                abi.encode(
-                    _implementationAuthority,
-                    trustedIssuersRegistry,
-                    claimTopicsRegistry,
-                    identityStorage,
-                    tokenDetails.accessManager
-                )
             )
         );
     }

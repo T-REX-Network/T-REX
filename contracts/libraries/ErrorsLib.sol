@@ -141,4 +141,10 @@ library ErrorsLib {
     // AbstractProxy Errors
     error OnlyCurrentImplementationAuthorityCanCall();
 
+    // IAFactory Errors
+    error OnlyReferenceIACanDeploy();
+
+    // TREXRegistry Errors
+    error Deprecated();
+
 }

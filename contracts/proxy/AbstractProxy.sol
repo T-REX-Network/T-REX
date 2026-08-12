@@ -85,11 +85,10 @@ abstract contract AbstractProxy is IProxy, Initializable {
         require(_newImplementationAuthority != address(0), ErrorsLib.ZeroAddress());
         require(
             (ITREXImplementationAuthority(_newImplementationAuthority)).getTokenImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getCTRImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getIRImplementation() != address(0)
                 && (ITREXImplementationAuthority(_newImplementationAuthority)).getIRSImplementation() != address(0)
                 && (ITREXImplementationAuthority(_newImplementationAuthority)).getMCImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getTIRImplementation() != address(0),
+                && (ITREXImplementationAuthority(_newImplementationAuthority)).getTREXRegistryImplementation()
+                    != address(0),
             ErrorsLib.InvalidImplementationAuthority()
         );
         _storeImplementationAuthority(_newImplementationAuthority);

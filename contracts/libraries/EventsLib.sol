@@ -110,6 +110,7 @@ library EventsLib {
     event TREXFactorySet(address indexed trexFactory);
     event IAFactorySet(address indexed iaFactory);
     event ImplementationAuthorityChanged(address indexed token, address indexed newImplementationAuthority);
+    event TREXRegistryImplementationSet(address indexed trexRegistryImplementation);
 
     // IAFactory Events
 

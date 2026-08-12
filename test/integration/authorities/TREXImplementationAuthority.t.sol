@@ -334,11 +334,12 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
             ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
         ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: address(tokenImplementation),
-            ctrImplementation: address(claimTopicsRegistryImplementation),
-            irImplementation: address(identityRegistryImplementation),
+            ctrImplementation: address(trexRegistryImplementation),
+            irImplementation: address(trexRegistryImplementation),
             irsImplementation: address(identityRegistryStorageImplementation),
-            tirImplementation: address(trustedIssuersRegistryImplementation),
-            mcImplementation: address(modularComplianceImplementation)
+            tirImplementation: address(trexRegistryImplementation),
+            mcImplementation: address(modularComplianceImplementation),
+            trexRegistryImplementation: address(trexRegistryImplementation)
         });
         vm.prank(deployer);
         otherIA.addAndUseTREXVersion(version, contracts);

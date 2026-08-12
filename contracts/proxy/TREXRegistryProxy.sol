@@ -60,27 +60,39 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity 0.8.30;
+pragma solidity ^0.8.30;
 
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
-import { IdentityRegistry } from "../registry/implementation/IdentityRegistry.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { AbstractProxy } from "./AbstractProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
 
-contract IdentityRegistryProxy is AbstractProxy {
+/// @title TREXRegistryProxy
+/// @notice Upgradeable proxy in front of the `TREXRegistry` contract.
+/// @dev    Holds its implementation authority in the `AbstractProxy` storage slot
+///         (`erc3643.proxy.beacon`). The implementation address is resolved on every call via the
+///         configured `TREXImplementationAuthority`'s `getTREXRegistryImplementation()`.
+contract TREXRegistryProxy is AbstractProxy {
 
     constructor(
         address implementationAuthority,
-        address trustedIssuersRegistry,
-        address claimTopicsRegistry,
-        address identityStorage,
-        address accessManager
+        address identityStorageAddress,
+        address accessManager,
+        uint256[] memory initialTopics,
+        address[] memory issuers,
+        uint256[][] memory issuerClaims
     ) AbstractProxy(implementationAuthority) {
+        // A delegatecall to address(0) succeeds silently, which would leave the proxy uninitialized;
+        // reject an authority that surfaces no registry implementation instead.
+        address logic = getLogic();
+        require(logic != address(0), ErrorsLib.ZeroAddress());
+
         if (!LowLevelCall.delegatecallNoReturn(
-                getLogic(),
+                logic,
                 abi.encodeCall(
-                    IdentityRegistry.init, (trustedIssuersRegistry, claimTopicsRegistry, identityStorage, accessManager)
+                    TREXRegistry.init, (identityStorageAddress, accessManager, initialTopics, issuers, issuerClaims)
                 )
             )) {
             LowLevelCall.bubbleRevert();
@@ -88,7 +100,7 @@ contract IdentityRegistryProxy is AbstractProxy {
     }
 
     function getLogic() internal view override returns (address) {
-        return (ITREXImplementationAuthority(getImplementationAuthority())).getIRImplementation();
+        return (ITREXImplementationAuthority(getImplementationAuthority())).getTREXRegistryImplementation();
     }
 
 }

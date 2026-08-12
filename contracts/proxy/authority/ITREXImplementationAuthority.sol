@@ -78,6 +78,10 @@ interface ITREXImplementationAuthority {
         address tirImplementation;
         // address of ModularCompliance implementation contract
         address mcImplementation;
+        // address of TREXRegistry (merged registry) implementation contract.
+        // Appended at the end to preserve ABI compatibility with callers that
+        // construct the struct positionally without specifying this field.
+        address trexRegistryImplementation;
     }
 
     struct Version {
@@ -195,34 +199,23 @@ interface ITREXImplementationAuthority {
     function getTokenImplementation() external view returns (address);
 
     /**
-     *  @dev getter function returning address of ClaimTopicsRegistry contract implementation
-     *  currently used by the proxies using this TREXImplementationAuthority
-     */
-    function getCTRImplementation() external view returns (address);
-
-    /**
-     *  @dev getter function returning address of IdentityRegistry contract implementation
-     *  currently used by the proxies using this TREXImplementationAuthority
-     */
-    function getIRImplementation() external view returns (address);
-
-    /**
      *  @dev getter function returning address of IdentityRegistryStorage contract implementation
      *  currently used by the proxies using this TREXImplementationAuthority
      */
     function getIRSImplementation() external view returns (address);
 
     /**
-     *  @dev getter function returning address of TrustedIssuersRegistry contract implementation
-     *  currently used by the proxies using this TREXImplementationAuthority
-     */
-    function getTIRImplementation() external view returns (address);
-
-    /**
      *  @dev getter function returning address of ModularCompliance contract implementation
      *  currently used by the proxies using this TREXImplementationAuthority
      */
     function getMCImplementation() external view returns (address);
+
+    /**
+     *  @dev getter function returning address of TREXRegistry (merged registry) contract
+     *  implementation currently used by the proxies using this TREXImplementationAuthority.
+     *  Returns address(0) for versions registered before the merged registry was introduced.
+     */
+    function getTREXRegistryImplementation() external view returns (address);
 
     /**
      *  @dev returns true if the contract is the main contract
