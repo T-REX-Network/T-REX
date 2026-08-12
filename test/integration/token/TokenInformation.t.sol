@@ -520,12 +520,9 @@ contract TokenInformationTest is TREXSuiteTest {
 
         ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: address(mockImpl), // Invalid - doesn't have init() function
-            ctrImplementation: address(mockImpl), // Invalid
-            irImplementation: address(mockImpl), // Invalid
             irsImplementation: address(mockImpl), // Invalid
-            tirImplementation: address(mockImpl), // Invalid
             mcImplementation: address(mockImpl), // Invalid
-            trexRegistryImplementation: address(0)
+            trexRegistryImplementation: address(mockImpl) // Invalid
         });
 
         // Add version to IA (need to be owner)

@@ -68,19 +68,11 @@ interface ITREXImplementationAuthority {
     struct TREXContracts {
         // address of token implementation contract
         address tokenImplementation;
-        // address of ClaimTopicsRegistry implementation contract
-        address ctrImplementation;
-        // address of IdentityRegistry implementation contract
-        address irImplementation;
         // address of IdentityRegistryStorage implementation contract
         address irsImplementation;
-        // address of TrustedIssuersRegistry implementation contract
-        address tirImplementation;
         // address of ModularCompliance implementation contract
         address mcImplementation;
-        // address of TREXRegistry (merged registry) implementation contract.
-        // Appended at the end to preserve ABI compatibility with callers that
-        // construct the struct positionally without specifying this field.
+        // address of TREXRegistry implementation contract
         address trexRegistryImplementation;
     }
 
@@ -211,9 +203,8 @@ interface ITREXImplementationAuthority {
     function getMCImplementation() external view returns (address);
 
     /**
-     *  @dev getter function returning address of TREXRegistry (merged registry) contract
+     *  @dev getter function returning address of TREXRegistry contract
      *  implementation currently used by the proxies using this TREXImplementationAuthority.
-     *  Returns address(0) for versions registered before the merged registry was introduced.
      */
     function getTREXRegistryImplementation() external view returns (address);
 

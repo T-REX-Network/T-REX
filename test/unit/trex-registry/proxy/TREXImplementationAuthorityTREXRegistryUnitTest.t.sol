@@ -6,6 +6,7 @@ import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessMana
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import {
@@ -13,13 +14,12 @@ import {
     TREXImplementationAuthority
 } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 
-/// @notice Unit tests for the new TREXRegistry surface on `TREXImplementationAuthority`.
-/// @dev    Covers the `trexRegistryImplementation` field that was appended to the
-///         `TREXContracts` struct, the `getTREXRegistryImplementation()` view, and the
-///         `TREXRegistryImplementationSet(address)` event. The setter follows the same
-///         "versioned struct" pattern as the legacy implementation slots — there is no
-///         per-slot setter on the authority; the implementation is registered through
-///         `addTREXVersion` / `addAndUseTREXVersion`.
+/// @notice Unit tests for the TREXRegistry surface on `TREXImplementationAuthority`.
+/// @dev    Covers the `trexRegistryImplementation` field of the `TREXContracts` struct, the
+///         `getTREXRegistryImplementation()` view, and the `TREXRegistryImplementationSet(address)`
+///         event. The field follows the same "versioned struct" pattern as the other implementation
+///         slots — there is no per-slot setter on the authority; the implementation is registered
+///         through `addTREXVersion` / `addAndUseTREXVersion`.
 contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
 
     address public deployer = makeAddr("deployer");
@@ -30,10 +30,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
     TREXImplementationAuthority public ia;
 
     address public tokenImpl = makeAddr("tokenImpl");
-    address public ctrImpl = makeAddr("ctrImpl");
-    address public irImpl = makeAddr("irImpl");
     address public irsImpl = makeAddr("irsImpl");
-    address public tirImpl = makeAddr("tirImpl");
     address public mcImpl = makeAddr("mcImpl");
     address public trexRegistryImpl = makeAddr("trexRegistryImpl");
 
@@ -51,10 +48,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
     function _baseContracts() internal view returns (ITREXImplementationAuthority.TREXContracts memory) {
         return ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: tokenImpl,
-            ctrImplementation: ctrImpl,
-            irImplementation: irImpl,
             irsImplementation: irsImpl,
-            tirImplementation: tirImpl,
             mcImplementation: mcImpl,
             trexRegistryImplementation: trexRegistryImpl
         });
@@ -145,25 +139,20 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
         assertTrue(sawEvent, "TREXRegistryImplementationSet event must be emitted");
     }
 
-    /// @notice Should NOT emit the event when registering a legacy version with zero TREXRegistry impl.
-    function test_addAndUseTREXVersion_DoesNotEmit_WhenTREXRegistryIsZero() public {
+    /// @notice A version with a zero TREXRegistry implementation must be rejected outright: the
+    ///         factory and every proxy reject such an authority, so registering one would only
+    ///         produce a version that can never be used.
+    function test_addAndUseTREXVersion_RevertWhen_TREXRegistryIsZero() public {
         ITREXImplementationAuthority.Version memory version =
             ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
         ITREXImplementationAuthority.TREXContracts memory contracts = _baseContracts();
         contracts.trexRegistryImplementation = address(0);
 
-        vm.recordLogs();
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         vm.prank(deployer);
         ia.addAndUseTREXVersion(version, contracts);
 
-        Vm.Log[] memory entries = vm.getRecordedLogs();
-        bytes32 sig = keccak256("TREXRegistryImplementationSet(address)");
-        for (uint256 i = 0; i < entries.length; i++) {
-            if (entries[i].emitter == address(ia) && entries[i].topics[0] == sig) {
-                fail();
-            }
-        }
-        assertEq(ia.getTREXRegistryImplementation(), address(0), "must remain zero");
+        assertEq(ia.getTREXRegistryImplementation(), address(0), "must remain unset");
     }
 
 }

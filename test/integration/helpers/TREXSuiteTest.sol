@@ -273,17 +273,11 @@ contract TREXSuiteTest is AccessManagerHelper {
             _grantOwnerRole(deployer);
 
             vm.prank(deployer);
-            // The legacy `irImplementation` / `ctrImplementation` / `tirImplementation` slots are kept
-            // for ABI compatibility; post-merge they all point at the merged `TREXRegistry`
-            // implementation, which answers as IR, CTR and TIR via ERC-165.
             ia.addAndUseTREXVersion(
                 ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
                 ITREXImplementationAuthority.TREXContracts({
                     tokenImplementation: address(tokenImplementation),
-                    irImplementation: address(trexRegistryImplementation),
                     irsImplementation: address(identityRegistryStorageImplementation),
-                    ctrImplementation: address(trexRegistryImplementation),
-                    tirImplementation: address(trexRegistryImplementation),
                     mcImplementation: address(modularComplianceImplementation),
                     trexRegistryImplementation: address(trexRegistryImplementation)
                 })
@@ -408,11 +402,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     function getTREXContracts() public view returns (ITREXImplementationAuthority.TREXContracts memory) {
         return ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: address(tokenImplementation),
-            // Legacy CTR/IR/TIR slots resolve to the merged registry implementation post-merge.
-            ctrImplementation: address(trexRegistryImplementation),
-            irImplementation: address(trexRegistryImplementation),
             irsImplementation: address(identityRegistryStorageImplementation),
-            tirImplementation: address(trexRegistryImplementation),
             mcImplementation: address(modularComplianceImplementation),
             trexRegistryImplementation: address(trexRegistryImplementation)
         });

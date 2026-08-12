@@ -160,20 +160,16 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         _fetchVersion(_version);
     }
 
-    function _fetchVersion(Version memory _version) internal {
+    function _fetchVersion(Version memory version) internal {
         require(!isReferenceContract(), ErrorsLib.CannotCallOnReferenceContract());
-        require(
-            _contracts[_versionToBytes(_version)].tokenImplementation == address(0), ErrorsLib.VersionAlreadyFetched()
-        );
 
-        _contracts[_versionToBytes(_version)] =
-            ITREXImplementationAuthority(getReferenceContract()).getContracts(_version);
-        emit EventsLib.TREXVersionFetched(_version, _contracts[_versionToBytes(_version)]);
-        if (_contracts[_versionToBytes(_version)].trexRegistryImplementation != address(0)) {
-            emit EventsLib.TREXRegistryImplementationSet(_contracts[_versionToBytes(
-                        _version
-                    )].trexRegistryImplementation);
-        }
+        bytes32 bVersion = _versionToBytes(version);
+        require(_contracts[bVersion].tokenImplementation == address(0), ErrorsLib.VersionAlreadyFetched());
+
+        _contracts[bVersion] = ITREXImplementationAuthority(getReferenceContract()).getContracts(version);
+
+        emit EventsLib.TREXVersionFetched(version, _contracts[bVersion]);
+        emit EventsLib.TREXRegistryImplementationSet(_contracts[bVersion].trexRegistryImplementation);
     }
 
     /**
@@ -283,17 +279,14 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         );
 
         require(
-            _trex.ctrImplementation != address(0) && _trex.irImplementation != address(0)
-                && _trex.irsImplementation != address(0) && _trex.mcImplementation != address(0)
-                && _trex.tirImplementation != address(0) && _trex.tokenImplementation != address(0),
+            _trex.tokenImplementation != address(0) && _trex.irsImplementation != address(0)
+                && _trex.mcImplementation != address(0) && _trex.trexRegistryImplementation != address(0),
             ErrorsLib.ZeroAddress()
         );
 
         _contracts[_versionToBytes(_version)] = _trex;
         emit EventsLib.TREXVersionAdded(_version, _trex);
-        if (_trex.trexRegistryImplementation != address(0)) {
-            emit EventsLib.TREXRegistryImplementationSet(_trex.trexRegistryImplementation);
-        }
+        emit EventsLib.TREXRegistryImplementationSet(_trex.trexRegistryImplementation);
     }
 
     /**

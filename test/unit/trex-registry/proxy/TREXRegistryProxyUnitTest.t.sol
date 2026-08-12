@@ -58,10 +58,7 @@ contract TREXRegistryProxyUnitTest is Test {
             ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
             ITREXImplementationAuthority.TREXContracts({
                 tokenImplementation: makeAddr("tokenImpl"),
-                ctrImplementation: makeAddr("ctrImpl"),
-                irImplementation: makeAddr("irImpl"),
                 irsImplementation: address(irsImpl),
-                tirImplementation: makeAddr("tirImpl"),
                 mcImplementation: makeAddr("mcImpl"),
                 trexRegistryImplementation: address(registryImpl)
             })

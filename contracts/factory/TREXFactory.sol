@@ -132,10 +132,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             irs = _deployIRS(salt, tokenDetails);
         }
 
-        // selector-to-role wiring is a governance action: the factory holds no ADMIN_ROLE and must
-        // not call setTargetFunctionRole
         address registry = _deployTREXRegistry(salt, tokenDetails, irs, claimDetails);
-
         address mc = _deployMC(salt, tokenDetails);
 
         // a reused IRS must share the suite's AccessManager; the bind reverts otherwise (restricted guard)
@@ -203,13 +200,14 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
     function _setImplementationAuthority(address implementationAuthorityAddress) internal {
         require(implementationAuthorityAddress != address(0), ErrorsLib.ZeroAddress());
-        // should not be possible to set an implementation authority that is not complete
+
+        ITREXImplementationAuthority implementationAuthority =
+            ITREXImplementationAuthority(implementationAuthorityAddress);
         require(
-            (ITREXImplementationAuthority(implementationAuthorityAddress)).getTokenImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getTREXRegistryImplementation()
-                    != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getIRSImplementation() != address(0)
-                && (ITREXImplementationAuthority(implementationAuthorityAddress)).getMCImplementation() != address(0),
+            implementationAuthority.getTokenImplementation() != address(0)
+                && implementationAuthority.getTREXRegistryImplementation() != address(0)
+                && implementationAuthority.getIRSImplementation() != address(0)
+                && implementationAuthority.getMCImplementation() != address(0),
             ErrorsLib.InvalidImplementationAuthority()
         );
         _implementationAuthority = implementationAuthorityAddress;
