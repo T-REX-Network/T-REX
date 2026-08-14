@@ -108,8 +108,7 @@ library RolesLib {
     // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
     // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
     // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, TOKEN_OID_MINTER, false)`
-    // (self-deploy stays off: an ASSET is a contract that cannot sign for itself).
-    uint64 constant TOKEN_OID_MINTER = ROLE_PREFIX + 15;
+    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
+    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
 
 }

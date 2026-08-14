@@ -219,16 +219,16 @@ library AccessManagerSetupLib {
     ///         not have to rediscover them. Without both, `deployTREXSuite` reverts with
     ///         `NotAuthorizedForIdentityType` whenever `TokenDetails.ONCHAINID` is left at zero.
     /// @dev Call order does not matter, but both must land before the first auto-mint deploy.
-    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind TOKEN_OID_MINTER and
+    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind ASSET_DEPLOYER and
     ///         with self-deploy off: only a registered factory mints token OIDs, and a token must not
     ///         be able to sign one for itself.
-    ///      2. Grant TOKEN_OID_MINTER to the TREX factory.
+    ///      2. Grant ASSET_DEPLOYER to the TREX factory.
     /// @dev `accessManager` MUST be the IdentityFactory's own authority, which is not necessarily the
     ///      suite AccessManager: `createIdentityFor` resolves the role against `authority()` on the
     ///      IdentityFactory. Granting the role on the wrong manager leaves the auto-mint path reverting.
     /// @dev The caller must be able to reach both calls: `setIdentityTypePolicy` is `restricted` on the
-    ///      IdentityFactory, and `grantRole` requires the caller to be TOKEN_OID_MINTER's role admin.
-    /// @param accessManager The IdentityFactory's authority, where TOKEN_OID_MINTER is resolved
+    ///      IdentityFactory, and `grantRole` requires the caller to be ASSET_DEPLOYER's role admin.
+    /// @param accessManager The IdentityFactory's authority, where ASSET_DEPLOYER is resolved
     /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
     /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
     function setupIdentityFactoryPolicy(
@@ -236,8 +236,8 @@ library AccessManagerSetupLib {
         IIdentityFactory identityFactory,
         address trexFactory
     ) internal {
-        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.TOKEN_OID_MINTER, false);
-        accessManager.grantRole(RolesLib.TOKEN_OID_MINTER, trexFactory, 0);
+        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
+        accessManager.grantRole(RolesLib.ASSET_DEPLOYER, trexFactory, 0);
     }
 
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
@@ -300,7 +300,7 @@ library AccessManagerSetupLib {
         accessManager.labelRole(RolesLib.IRS_BINDER, "TREX-Suite IRS Binder (transient)");
 
         // Resolved by the ONCHAINID IdentityFactory, not by any TREX selector mapping
-        accessManager.labelRole(RolesLib.TOKEN_OID_MINTER, "TREX-Suite Token OID Minter");
+        accessManager.labelRole(RolesLib.ASSET_DEPLOYER, "TREX-Suite Asset Deployer");
     }
 
 }

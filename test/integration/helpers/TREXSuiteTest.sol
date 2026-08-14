@@ -110,18 +110,15 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      types are registered with the factory here because it rejects unregistered types from both
     ///      deploy paths.
     ///
-    ///      Deploy order follows the dependency chain: KeyApprovalModule (no deps) -> IdentityFactory (no
-    ///      beacon yet) -> ReputationRegistry (needs the factory) -> ERC734Validator (needs factory +
-    ///      registry) -> Identity impl (the validator is its enshrined registry immutable) ->
-    ///      factory.initializeBeacon (deploys the beacon at its predetermined CREATE3 slot).
+    ///      Deploy order follows the dependency chain: IdentityFactory (no beacon yet) ->
+    ///      KeyApprovalModule (no deps) -> ReputationRegistry (needs the factory) -> ERC734Validator
+    ///      (needs factory + registry) -> Identity impl (the validator is its enshrined registry
+    ///      immutable) -> factory.initializeBeacon (deploys the beacon at its predetermined CREATE3 slot).
     function _deployOnchainId() internal {
-        vm.startPrank(deployer);
-        keyApprovalModule = new KeyApprovalModule();
-        vm.stopPrank();
-
         idFactory = _newIdentityFactory();
 
         vm.startPrank(deployer);
+        keyApprovalModule = new KeyApprovalModule();
         reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
         validatorModule = new ERC734Validator(address(idFactory), address(reputationRegistry));
         identityImplementation = new Identity(address(validatorModule), address(idFactory));
@@ -164,7 +161,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     /// @dev Registers the identity types the suite mints; the factory rejects unregistered types from
     ///      both deploy paths. INDIVIDUAL and CLAIM_ISSUER are open (PUBLIC_ROLE, self-deployable) for
-    ///      test convenience. ASSET is gated behind TOKEN_OID_MINTER with self-deploy off, mirroring
+    ///      test convenience. ASSET is gated behind ASSET_DEPLOYER with self-deploy off, mirroring
     ///      production: only a registered token factory mints token OIDs, and a token cannot sign for
     ///      itself.
     /// @dev Called as the test contract, which is the AccessManager admin (see AccessManagerHelper);
@@ -174,7 +171,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true);
         factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true);
-        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.TOKEN_OID_MINTER, false);
+        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
     }
 
     /// @dev A claim issuer is an Identity of type CLAIM_ISSUER holding a CLAIM_SIGNER key. The
@@ -257,7 +254,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
-        // The IdentityFactory gates ASSET minting on TOKEN_OID_MINTER, resolved against its own
+        // The IdentityFactory gates ASSET minting on ASSET_DEPLOYER, resolved against its own
         // authority (the suite AccessManager here). Without this the auto-mint path reverts.
         _grantTokenOidMinterRole(address(trexFactory));
 
