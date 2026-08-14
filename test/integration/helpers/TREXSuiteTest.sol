@@ -10,6 +10,7 @@ import { KeyApprovalModule } from "@onchain-id/solidity/contracts/modules/execut
 import { ERC734Validator } from "@onchain-id/solidity/contracts/modules/validators/ERC734Validator.sol";
 import { ReputationRegistry } from "@onchain-id/solidity/contracts/reputation/ReputationRegistry.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
+import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -19,11 +20,10 @@ import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
-import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
-} from "contracts/proxy/authority/TREXImplementationAuthority.sol";
+} from "contracts/proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -248,7 +248,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     function _deployFactories() internal {
-        trexImplementationAuthority = _deployTREXImplementationAuthority(true);
+        trexImplementationAuthority = _deployTREXImplementationAuthority();
 
         trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
@@ -256,38 +256,35 @@ contract TREXSuiteTest is AccessManagerHelper {
         // authority (the suite AccessManager here). Without this the auto-mint path reverts.
         _grantTokenOidMinterRole(address(trexFactory));
 
-        // setTREXFactory is restricted to the OWNER role on the reference IA
-        vm.prank(deployer);
-        trexImplementationAuthority.setTREXFactory(address(trexFactory));
-
         _setupFactoryRoles(address(trexFactory));
         // deployTREXSuite grants the AGENT role, which is administered by AGENT_ADMIN
         _grantAgentAdminRole(address(trexFactory));
     }
 
-    /// @dev Deploys a reference IA, wires its governance selectors to the OWNER role and pins
-    ///      version 5.0.0 through the restricted entrypoint, called as the OWNER-holding deployer.
-    function _deployTREXImplementationAuthority(bool isReference) internal returns (TREXImplementationAuthority) {
-        TREXImplementationAuthority ia =
-            new TREXImplementationAuthority(isReference, address(0), address(0), address(accessManager));
+    /// @dev Deploys an authority seeded with version 5.0.0. The constructor deploys and owns the 4
+    ///      beacons, so there is no separate version-pinning call; `publish` / `upgrade` are then wired
+    ///      to VERSION_MANAGER, which the deployer holds.
+    function _deployTREXImplementationAuthority() internal returns (TREXImplementationAuthority) {
+        TREXImplementationAuthority ia = new TREXImplementationAuthority(
+            address(accessManager),
+            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
+            _suiteImplementations()
+        );
 
-        if (isReference) {
-            _authorizeIAGovernance(address(ia));
-            _grantOwnerRole(deployer);
-
-            vm.prank(deployer);
-            ia.addAndUseTREXVersion(
-                ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
-                ITREXImplementationAuthority.TREXContracts({
-                    tokenImplementation: address(tokenImplementation),
-                    irsImplementation: address(identityRegistryStorageImplementation),
-                    mcImplementation: address(modularComplianceImplementation),
-                    trexRegistryImplementation: address(trexRegistryImplementation)
-                })
-            );
-        }
+        _authorizeIAGovernance(address(ia));
+        _grantOwnerRole(deployer);
+        _grantVersionManagerRole(deployer);
 
         return ia;
+    }
+
+    function _suiteImplementations() internal view returns (ITREXImplementationAuthority.SuiteImplementations memory) {
+        return ITREXImplementationAuthority.SuiteImplementations({
+            tokenImplementation: address(tokenImplementation),
+            trexRegistryImplementation: address(trexRegistryImplementation),
+            irsImplementation: address(identityRegistryStorageImplementation),
+            mcImplementation: address(modularComplianceImplementation)
+        });
     }
 
     function _deployToken(string memory salt, string memory name, string memory symbol) internal returns (Token) {
@@ -393,22 +390,14 @@ contract TREXSuiteTest is AccessManagerHelper {
         address sentinel = address(uint160(uint256(keccak256("trex.test.unboundMC.sentinel"))));
         address[] memory noModules = new address[](0);
         bytes[] memory noSettings = new bytes[](0);
-        ModularComplianceProxy proxy = new ModularComplianceProxy(
-            implementationAuthority_, sentinel, address(accessManager), noModules, noSettings
+        address mcBeacon = ITREXImplementationAuthority(implementationAuthority_).current().mcBeacon;
+        BeaconProxy proxy = new BeaconProxy(
+            mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(accessManager), noModules, noSettings))
         );
         ModularCompliance freshCompliance = ModularCompliance(address(proxy));
         AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance));
         freshCompliance.unbindToken(sentinel);
         return freshCompliance;
-    }
-
-    function getTREXContracts() public view returns (ITREXImplementationAuthority.TREXContracts memory) {
-        return ITREXImplementationAuthority.TREXContracts({
-            tokenImplementation: address(tokenImplementation),
-            irsImplementation: address(identityRegistryStorageImplementation),
-            mcImplementation: address(modularComplianceImplementation),
-            trexRegistryImplementation: address(trexRegistryImplementation)
-        });
     }
 
     function _deployIdentities() internal {

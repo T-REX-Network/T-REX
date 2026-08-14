@@ -1,6 +1,35 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## [5.0.0] - Unreleased
+
+### Removed
+
+- Custom `AbstractProxy` / `IProxy`-based `TREXImplementationAuthority` / `IAFactory` stack removed.
+  The per-type wrapper proxies (`TokenProxy`, `IdentityRegistryStorageProxy`, `TREXRegistryProxy`,
+  `ModularComplianceProxy`) and the `IProxy` / `IIAFactory` interfaces are deleted.
+- Public ABI break: `setImplementationAuthority(address)` and `getImplementationAuthority()` selectors
+  are removed from every suite proxy, and `changeImplementationAuthority(...)` is removed from the
+  upgrade path.
+
+### Changed
+
+- Suite contracts are now stock OZ `BeaconProxy` instances pointing at four per-type
+  `UpgradeableBeacon`s: Token, TREXRegistry, IdentityRegistryStorage and ModularCompliance. The beacon
+  address lives at the standard ERC-1967 beacon slot.
+- `TREXImplementationAuthority` owns the four beacons and is the single upgrade entry point.
+  `publish(version, implementations)` archives a version without touching a beacon; `upgrade(version)`
+  rotates all four in one transaction; `publishAndUpgrade(...)` does both. All three are gated by the
+  new `VERSION_MANAGER` role rather than `OWNER`.
+- `SuiteImplementations` and `SuiteBeacons` carry four members, down from six, following the
+  consolidation of the claim-topics, identity and trusted-issuers registries into `TREXRegistry`.
+
+### Added
+
+- Per-token opt-out is deploy-time only, via `TREXFactory.deployTREXSuiteIsolated(...)`, which clones
+  the four beacons under the issuer's own AccessManager so later `publish` / `upgrade` calls on the
+  shared authority never reach that suite.
+
 ## [4.2.0]
 
 ### Added
