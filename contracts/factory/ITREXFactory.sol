@@ -165,6 +165,23 @@ interface ITREXFactory {
     ) external;
 
     /**
+     *  @dev deploys a suite that does not follow the shared implementation authority.
+     *  Clones 4 fresh `UpgradeableBeacon`s from the authority's active implementations and points the
+     *  suite at those clones instead of the shared beacons, so later `publish` / `upgrade` calls on the
+     *  authority never reach this suite. The clones are owned by `_tokenDetails.accessManager`.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events
+     *  @param _salt the salt used to make the contracts deployments with CREATE3
+     *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)
+     *  @param _claimDetails The details of the claims and claim issuers (see struct ClaimDetails for more details)
+     */
+    function deployTREXSuiteIsolated(
+        string memory _salt,
+        TokenDetails calldata _tokenDetails,
+        ClaimDetails calldata _claimDetails
+    ) external;
+
+    /**
      *  @dev getter for implementation authority address
      */
     function getImplementationAuthority() external view returns (address);

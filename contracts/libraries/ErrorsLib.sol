@@ -127,20 +127,9 @@ library ErrorsLib {
     error TrustedIssuerAlreadyExists();
 
     // TREXImplementationAuthority Errors
-    error CannotCallOnReferenceContract();
-    error NewIAIsNotAReferenceContract();
-    error NonExistingVersion();
-    error OnlyReferenceContractCanCall();
-    error VersionAlreadyFetched();
-    error VersionAlreadyExists();
-    error VersionAlreadyInUse();
-    error VersionOfNewIAMustBeTheSameAsCurrentIA();
-
-    // AbstractProxy Errors
-    error OnlyCurrentImplementationAuthorityCanCall();
-
-    // IAFactory Errors
-    error OnlyReferenceIACanDeploy();
+    error EmptyImplementations();
+    error UnknownVersion();
+    error VersionAlreadyPublished();
 
     // TREXRegistry Errors
     error Deprecated();
