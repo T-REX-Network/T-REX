@@ -103,4 +103,12 @@ library RolesLib {
     // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
     uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
 
+    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
+
+    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
+    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
+    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
+    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
+    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
+
 }

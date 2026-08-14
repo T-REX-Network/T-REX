@@ -64,6 +64,7 @@
 pragma solidity 0.8.30;
 
 import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -147,7 +148,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     {
         /// forge-lint: disable-next-line(asm-keccak256)
         bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
-        (uint256 foundClaimTopic,, address issuer, bytes memory sig, bytes memory data,) = identity.getClaim(claimId);
+        (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
+            identity.getClaim(claimId);
         if (foundClaimTopic != topic) return (false, false);
         topicMatch = true;
 

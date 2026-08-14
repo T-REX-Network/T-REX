@@ -51,7 +51,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     function test_setTREXFactory_RevertWhen_FactoryNotUsingThisAuthority() public {
         // Deploy another IA and factory using it
         TREXImplementationAuthority otherIA = _deployTREXImplementationAuthority(true);
-        TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory), address(accessManager));
+        TREXFactory otherFactory = _newTREXFactory(address(otherIA), address(accessManager));
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.OnlyReferenceContractCanCall.selector);
@@ -61,8 +61,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     /// @notice Should set the trex factory address
     function test_setTREXFactory_Success() public {
         // Deploy a new factory using this IA
-        TREXFactory newFactory =
-            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TREXFactory newFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
@@ -101,7 +100,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     function test_setIAFactory_RevertWhen_FactoryReferencesDifferentIA() public {
         // Deploy another reference IA and factory using it
         TREXImplementationAuthority otherIA = _deployTREXImplementationAuthority(true);
-        TREXFactory otherFactory = new TREXFactory(address(otherIA), address(idFactory), address(accessManager));
+        TREXFactory otherFactory = _newTREXFactory(address(otherIA), address(accessManager));
 
         // Create a new reference IA with the other factory in constructor
         // This factory references otherIASetup, not this IA
@@ -138,8 +137,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
     /// @dev The auxiliary IA already pins the reference's current version (5.0.0) at construction,
     ///      so fetching that same version again reverts.
     function test_fetchVersion_RevertWhen_AlreadyFetched() public {
-        TREXFactory factory =
-            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TREXFactory factory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // Deploy non-reference IA (auto-fetches and uses version 5.0.0 at construction)
         TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
@@ -161,8 +159,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         vm.prank(deployer);
         trexImplementationAuthority.addTREXVersion(extraVersion, getTREXContracts());
 
-        TREXFactory factory =
-            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TREXFactory factory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // Deploy non-reference IA (auto-fetches current 5.0.0 at construction)
         TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
@@ -192,8 +189,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should revert when called on a non-reference contract
     function test_addTREXVersion_RevertWhen_NonReferenceContract() public {
-        TREXFactory factory =
-            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TREXFactory factory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // Deploy non-reference IA and wire its governance so the restricted check passes
         TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
@@ -276,8 +272,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
     /// @notice Should revert when new authority is zero address on non-reference contract
     function test_changeImplementationAuthority_RevertWhen_ZeroAddressOnNonReference() public {
-        TREXFactory factory =
-            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TREXFactory factory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // Deploy non-reference IA and wire its changeImplementationAuthority to the OWNER role
         TREXImplementationAuthority otherIA = new TREXImplementationAuthority(
@@ -395,8 +390,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         token.setCompliance(address(compliance));
 
         // Deploy non-reference IA that fetched version but not deployed by factory
-        TREXFactory factory =
-            new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TREXFactory factory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // Auxiliary IA pins version 5.0.0 at construction but is not deployed by the IAFactory
         TREXImplementationAuthority otherIA = new TREXImplementationAuthority(

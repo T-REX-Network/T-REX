@@ -3,8 +3,7 @@ pragma solidity 0.8.30;
 
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
-import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
@@ -245,10 +244,8 @@ contract IdentityRegistryTest is TREXSuiteTest {
     ///         itself wired to a role, so the inner `registerIdentity` restricted check resolves the
     ///         outer selector to the default ADMIN role; the test contract holds it as manager admin.
     function test_batchRegisterIdentity_Success() public {
-        vm.startPrank(deployer);
-        IIdentity davidIdentity = IIdentity(idFactory.createIdentity(david, "david"));
-        IIdentity anotherIdentity = IIdentity(idFactory.createIdentity(another, "another"));
-        vm.stopPrank();
+        IIdentity davidIdentity = _deployIdentity(david, "david");
+        IIdentity anotherIdentity = _deployIdentity(another, "another");
 
         address[] memory userAddresses = new address[](2);
         userAddresses[0] = david;
@@ -418,11 +415,13 @@ contract IdentityRegistryTest is TREXSuiteTest {
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         bytes32[] memory claimIds = aliceIdentity.getClaimIdsByTopic(topics[0]);
 
-        // claimIds[0] is already issued by ClaimIssuer in the setup
-        (,,, bytes memory sig,,) = aliceIdentity.getClaim(claimIds[0]);
+        // claimIds[0] is already issued by the claim issuer in the setup. Revocation is now keyed by
+        // the EIP-712 claim digest rather than the raw signature.
+        (,,,, Structs.ClaimData memory data,) = aliceIdentity.getClaim(claimIds[0]);
+        bytes32 digest = IIdentity(address(claimIssuer)).getClaimHash(address(aliceIdentity), topics[0], data);
 
         vm.prank(claimIssuerSigner.addr);
-        claimIssuer.revokeClaimBySignature(sig);
+        IClaimIssuer(address(claimIssuer)).revokeClaimByDigest(digest);
 
         // Now alice should not be verified
         assertFalse(identityRegistry.isVerified(alice));
@@ -431,7 +430,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     /// @notice Should return true if there is another valid claim when one claim issuer throws an error
     function test_isVerified_ReturnsTrue_WhenClaimIssuerThrowsErrorButAnotherValidClaimExists() public {
         // Deploy ClaimIssuerTrick (always throws error on isClaimValid)
-        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick();
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
 
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         uint256 topic = topics[0];
@@ -443,19 +442,12 @@ contract IdentityRegistryTest is TREXSuiteTest {
         trustedIssuersRegistry.addTrustedIssuer(address(claimIssuer), topics);
         vm.stopPrank();
 
-        // Get alice's existing claim
-        bytes32[] memory claimIds = aliceIdentity.getClaimIdsByTopic(topic);
-        (, uint256 scheme, address issuer, bytes memory sig, bytes memory data, string memory uri) =
-            aliceIdentity.getClaim(claimIds[0]);
-
-        // Remove the existing claim and add both tricky and normal claims
-        vm.startPrank(alice);
-        aliceIdentity.removeClaim(claimIds[0]);
-        // Add tricky claim (will throw error)
-        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", "0x00", "");
-        // Add normal claim (will work)
-        aliceIdentity.addClaim(topic, scheme, issuer, sig, data, uri);
-        vm.stopPrank();
+        // Alice keeps her valid claim from setUp and gains a second one from the tricky issuer. Claim
+        // ids are keyed by (issuer, topic), so the two coexist rather than overwrite. The valid claim
+        // is deliberately left untouched: removing a claim revokes its digest for good, so it could
+        // not be added back.
+        vm.prank(alice);
+        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", _trickyClaimData(), "");
 
         // Should still be verified (normal claim works)
         assertTrue(identityRegistry.isVerified(alice));
@@ -464,7 +456,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
     /// @notice Should return false if there are no other valid claims when claim issuer throws an error
     function test_isVerified_ReturnsFalse_WhenClaimIssuerThrowsErrorAndNoOtherValidClaim() public {
         // Deploy ClaimIssuerTrick (always throws error on isClaimValid)
-        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick();
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
 
         uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
         uint256 topic = topics[0];
@@ -480,7 +472,7 @@ contract IdentityRegistryTest is TREXSuiteTest {
 
         // Add only tricky claim (will throw error, no other valid claim)
         vm.prank(alice);
-        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", "0x00", "");
+        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", _trickyClaimData(), "");
 
         // Should not be verified (only claim throws error)
         assertFalse(identityRegistry.isVerified(alice));
@@ -574,6 +566,12 @@ contract IdentityRegistryTest is TREXSuiteTest {
             // If no topics required, verification should pass
             assertTrue(identityRegistry.isVerified(charlie));
         }
+    }
+
+    /// @dev Claim envelope for the tricky issuer: the payload is never read because the issuer
+    ///      reverts before inspecting it, but `issuedAt` must be set for the claim to be stored.
+    function _trickyClaimData() private view returns (Structs.ClaimData memory) {
+        return Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: "0x00" });
     }
 
 }

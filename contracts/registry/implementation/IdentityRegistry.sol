@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -234,7 +235,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessManagedOwnableUpgradeable 
         uint256 scheme;
         address issuer;
         bytes memory sig;
-        bytes memory data;
+        Structs.ClaimData memory data;
         uint256 claimTopic;
         for (claimTopic = 0; claimTopic < requiredClaimTopics.length; claimTopic++) {
             address[] memory trustedIssuers =
