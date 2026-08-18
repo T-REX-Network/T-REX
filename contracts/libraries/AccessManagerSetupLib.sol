@@ -130,18 +130,11 @@ library AccessManagerSetupLib {
 
     function setupIdentityRegistryStorageRoles(IAccessManager accessManager, address identityRegistryStorage) internal {
         // ------ IRS_BINDER role ------
-        // bindIdentityRegistry is gated to IRS_BINDER, NOT OWNER: the factory must attach a new IR
-        // onto a reused IRS during deployTREXSuite without holding standing OWNER. IRS_BINDER is a
-        // transient role the factory self-grants (admin = AGENT_ADMIN, which the factory holds) for
-        // the bind window and revokes before returning. Governance (OWNER/ADMIN_ROLE) can still bind
-        // by granting itself IRS_BINDER if ever needed.
         bytes4[] memory functions = new bytes4[](1);
         functions[0] = IdentityRegistryStorage.bindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.IRS_BINDER);
 
         // ------ OWNER role ------
-        // unbindIdentityRegistry stays a governance operation: removing an IR from the bound set is
-        // not a deploy-time action and must not be reachable through the transient bind path.
         functions[0] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.OWNER);
 
@@ -155,33 +148,20 @@ library AccessManagerSetupLib {
     }
 
     /// @notice Role wiring for the `TREXRegistry` contract.
-    /// @dev    OWNER receives the storage swap, eligibility toggles and the trusted-issuers /
-    ///         claim-topics admin selectors. AGENT receives every identity-mutation selector,
-    ///         including `batchRegisterIdentity`: the `restricted` modifier reads the OUTER
-    ///         selector from calldata, so `batchRegisterIdentity` itself must carry the AGENT
-    ///         role binding for the inner `registerIdentity` calls to pass.
     function setupTREXRegistryRoles(IAccessManager accessManager, address registry) internal {
         // ------ OWNER role ------
-        // Identity Registry sub-surface: storage swap + eligibility toggles.
-        // `setClaimTopicsRegistry` and `setTrustedIssuersRegistry` revert with `Deprecated()`
-        // and are therefore deliberately omitted from the role wiring.
         bytes4[] memory functions = new bytes4[](8);
         functions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
         functions[1] = TREXRegistry.disableEligibilityChecks.selector;
         functions[2] = TREXRegistry.enableEligibilityChecks.selector;
-        // TrustedIssuersRegistry sub-surface.
         functions[3] = TREXRegistry.addTrustedIssuer.selector;
         functions[4] = TREXRegistry.removeTrustedIssuer.selector;
         functions[5] = TREXRegistry.updateIssuerClaimTopics.selector;
-        // ClaimTopicsRegistry sub-surface.
         functions[6] = TREXRegistry.addClaimTopic.selector;
         functions[7] = TREXRegistry.removeClaimTopic.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        // `batchRegisterIdentity` must be bound here too: its inner `registerIdentity` calls
-        // hit the `restricted` modifier which checks the outer calldata selector, not the
-        // internally-dispatched one.
         functions = new bytes4[](5);
         functions[0] = TREXRegistry.registerIdentity.selector;
         functions[1] = TREXRegistry.batchRegisterIdentity.selector;
@@ -193,8 +173,6 @@ library AccessManagerSetupLib {
 
     function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance) internal {
         // ------ OWNER role ------
-        // bindToken/unbindToken are not `restricted`; they self-check via the shared BIND_UNBIND_TOKEN
-        // capability, so that single selector is registered here rather than each real selector separately.
         bytes4[] memory functions = new bytes4[](5);
         functions[0] = ModularCompliance.removeModule.selector;
         functions[1] = ModularCompliance.addAndSetModule.selector;

@@ -85,7 +85,6 @@ contract TREXRegistryProxy is AbstractProxy {
         uint256[][] memory issuerClaims
     ) AbstractProxy(implementationAuthority) {
         // A delegatecall to address(0) succeeds silently, which would leave the proxy uninitialized;
-        // reject an authority that surfaces no registry implementation instead.
         address logic = getLogic();
         require(logic != address(0), ErrorsLib.ZeroAddress());
 
