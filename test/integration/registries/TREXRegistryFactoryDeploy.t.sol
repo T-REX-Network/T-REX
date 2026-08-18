@@ -122,9 +122,7 @@ contract TREXRegistryFactoryDeployTest is TREXSuiteTest {
         assertEq(topics.length, 1, "expected the single seeded claim topic");
         assertEq(topics[0], CLAIM_TOPIC_1, "wrong topic seeded");
 
-        assertTrue(
-            registry.isTrustedIssuer(address(claimIssuer)), "claim issuer must be trusted on the registry"
-        );
+        assertTrue(registry.isTrustedIssuer(address(claimIssuer)), "claim issuer must be trusted on the registry");
         assertTrue(
             registry.hasClaimTopic(address(claimIssuer), CLAIM_TOPIC_1),
             "claim issuer must be authorised for the seeded topic"
