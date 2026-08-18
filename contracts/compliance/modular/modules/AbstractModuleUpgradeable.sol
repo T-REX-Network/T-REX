@@ -78,8 +78,7 @@ import { IModule } from "./IModule.sol";
  * module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
  * it is the one member a module MUST declare.
  *
- * Keep the declaration next to the overrides it describes. An override without its flag is never called,
- * and the rule silently stops applying; the EVM cannot detect this, so nothing catches it for you.
+ * An override without its flag is never called, so the rule silently stops applying.
  *
  * Capabilities are immutable per implementation. An upgrade that changes them is a breaking change until
  * each bound compliance calls `refreshModuleCapabilities`.
