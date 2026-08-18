@@ -8,10 +8,6 @@ libs = ["dependencies"]
 solc_version = "0.8.30"
 optimizer = true
 optimizer_runs = 200
-# Required, not a preference: TREXFactory is 25,218 bytes on the legacy pipeline, 642 over EIP-170.
-# Lowering optimizer_runs does not close that gap (runs=1 only reaches 25,168); via-IR brings it to
-# 22,365 while keeping runs at 200. Costs ~2min on a cold `forge build`.
-via_ir = true
 evm_version = "cancun"
 
 [profile.default.fuzz]
@@ -26,8 +22,6 @@ call_override = false
 # Fast profile used by the Gambit mutation-testing runner (mutation/run_mutation.sh).
 # Reduced fuzz/invariant budgets keep per-mutant wall-clock low while still exercising
 # the randomized harnesses that catch arithmetic/logic mutants the unit tests miss.
-# via-IR is inherited from the default profile; disabled here because the runner recompiles once per
-# mutant and only asserts behavior, never deployed size.
 [profile.mutation]
 via_ir = false
 [profile.mutation.fuzz]
