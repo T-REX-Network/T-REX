@@ -50,6 +50,17 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
         assertEq(IERC173(address(token)).owner(), address(newAuthority));
     }
 
+    /// @notice The non-upgradeable shim exposes the same public setter as the upgradeable one: the
+    ///         current authority can rotate `trexFactory` straight through `setAuthority`.
+    function test_setAuthority_RotatesNonUpgradeableContract() public {
+        AccessManager newAuthority = new AccessManager(address(this));
+
+        vm.prank(address(accessManager));
+        IAccessManaged(address(trexFactory)).setAuthority(address(newAuthority));
+
+        assertEq(IERC173(address(trexFactory)).owner(), address(newAuthority));
+    }
+
     // ============ transferOwnership() Tests ============
 
     /// @notice transferOwnership() forwards to AccessManaged.setAuthority, which only the current authority
