@@ -46,24 +46,23 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
         assertEq(mc.getModuleCapabilities(address(module)), ModuleCapabilitiesLib.CHECK_SPENDER);
     }
 
-    /// @notice Should not claim plug and play: the compliance would then skip canComplianceBind
+    /// @notice Should claim plug and play: the module holds no per-compliance state to set up
     function test_isPlugAndPlay_Success() public view {
-        assertFalse(module.isPlugAndPlay());
+        assertTrue(module.isPlugAndPlay());
         assertEq(module.name(), "SpenderVerificationModule");
     }
 
-    /// @notice Should refuse to bind to a compliance with no token: the registry would be unreachable
-    function test_addModule_RevertWhen_ComplianceHasNoToken() public {
+    /// @notice Should bind to a compliance that has no token yet: the registry is resolved at check time
+    function test_addModule_Success_WhenComplianceHasNoToken() public {
         ModularCompliance unbound = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         SpenderVerificationModule fresh = _deployModule();
 
-        assertFalse(fresh.canComplianceBind(address(unbound)));
+        assertTrue(fresh.canComplianceBind(address(unbound)));
 
         vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ComplianceNotSuitableForBindingToModule.selector, address(fresh))
-        );
         unbound.addModule(address(fresh));
+
+        assertEq(unbound.getModuleCapabilities(address(fresh)), ModuleCapabilitiesLib.CHECK_SPENDER);
     }
 
     // ============ Enforcement Tests ============
@@ -89,7 +88,7 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
         token.approve(another, 100);
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, another, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
 
         assertEq(token.allowance(alice, another), 100);
@@ -104,7 +103,7 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
         identityRegistry.deleteIdentity(charlie);
 
         vm.prank(charlie);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
 
         vm.prank(agent);

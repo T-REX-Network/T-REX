@@ -110,19 +110,19 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
     }
 
     /// @inheritdoc IModule
-    /// @dev A compliance with no token gives the module no registry to read.
-    /// @param _compliance address of the compliance contract
-    /// @return true if a token is bound to `_compliance`
-    function canComplianceBind(address _compliance) external view returns (bool) {
-        return IModularCompliance(_compliance).getTokenBound() != address(0);
+    /// @dev Nothing to verify: the module holds no per-compliance state to set up.
+    /// @return always true
+    function canComplianceBind(address) external pure returns (bool) {
+        return true;
     }
 
     /// @inheritdoc IModule
-    /// @dev False so the bind check above runs: the compliance short-circuits
-    /// `isPlugAndPlay() || canComplianceBind(...)`.
-    /// @return always false
+    /// @dev Binds anywhere, in any order. The registry is resolved through the bound token at check
+    /// time, and `moduleCheckSpender` is only ever reached from a token's `transferFrom`, so a token
+    /// is necessarily bound by then.
+    /// @return always true
     function isPlugAndPlay() external pure returns (bool) {
-        return false;
+        return true;
     }
 
     /// @inheritdoc IModule

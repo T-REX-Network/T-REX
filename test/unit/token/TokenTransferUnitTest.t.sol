@@ -188,7 +188,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
 
         _refuseSpender();
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, spender));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, spender, from, to, transferAmount));
         vm.prank(spender);
         token.transferFrom(from, to, transferAmount);
     }
@@ -199,7 +199,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
 
         _refuseSpender();
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, spender));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, spender, from, to, transferAmount));
         vm.prank(spender);
         token.transferFrom(from, to, transferAmount);
 

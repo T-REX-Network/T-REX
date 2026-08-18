@@ -88,8 +88,15 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     /// @param _spender address no longer allowed to call `transferFrom`
     event SpenderDisallowed(address indexed _compliance, address indexed _spender);
 
-    /// @dev Allowlist per compliance, scoped by the bind nonce.
-    mapping(address compliance => mapping(uint256 nonce => mapping(address spender => bool))) private _allowedSpenders;
+    /// @custom:storage-location erc7201:ERC3643.storage.SpenderWhitelist
+    struct SpenderWhitelistStorage {
+        /// allowlist per compliance, scoped by the bind nonce
+        mapping(address compliance => mapping(uint256 nonce => mapping(address spender => bool))) allowedSpenders;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.SpenderWhitelist")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant _SPENDER_WHITELIST_STORAGE_LOCATION =
+        0x5812fc22578328f47b9e6cc9cd4b23cdee5afcb5c752c16bb48975c028b9ff00;
 
     constructor() {
         _disableInitializers();
@@ -105,34 +112,28 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     }
 
     /// @dev Lists a spender for the calling compliance. Driven by the compliance owner through
-    /// `callModuleFunction`. Emits `SpenderAllowed` when the entry is new.
+    /// `callModuleFunction`. Emits `SpenderAllowed`.
     /// @param _spender address allowed to move tokens on behalf of holders
-    /// @return true if the spender was added, false if it was already listed
-    function allowSpender(address _spender) external onlyComplianceCall returns (bool) {
+    function allowSpender(address _spender) external onlyComplianceCall {
         require(_spender != address(0), ErrorsLib.ZeroAddress());
 
+        SpenderWhitelistStorage storage s = _getSpenderWhitelistStorage();
         uint256 nonce = getNonce(msg.sender);
-        if (_allowedSpenders[msg.sender][nonce][_spender]) {
-            return false;
-        }
+        require(!s.allowedSpenders[msg.sender][nonce][_spender], ErrorsLib.SpenderAlreadyAllowed(_spender));
 
-        _allowedSpenders[msg.sender][nonce][_spender] = true;
+        s.allowedSpenders[msg.sender][nonce][_spender] = true;
         emit SpenderAllowed(msg.sender, _spender);
-        return true;
     }
 
-    /// @dev Delists a spender for the calling compliance. Emits `SpenderDisallowed` when the entry existed.
+    /// @dev Delists a spender for the calling compliance. Emits `SpenderDisallowed`.
     /// @param _spender address to delist
-    /// @return true if the spender was removed, false if it was not listed
-    function disallowSpender(address _spender) external onlyComplianceCall returns (bool) {
+    function disallowSpender(address _spender) external onlyComplianceCall {
+        SpenderWhitelistStorage storage s = _getSpenderWhitelistStorage();
         uint256 nonce = getNonce(msg.sender);
-        if (!_allowedSpenders[msg.sender][nonce][_spender]) {
-            return false;
-        }
+        require(s.allowedSpenders[msg.sender][nonce][_spender], ErrorsLib.SpenderNotListed(_spender));
 
-        _allowedSpenders[msg.sender][nonce][_spender] = false;
+        s.allowedSpenders[msg.sender][nonce][_spender] = false;
         emit SpenderDisallowed(msg.sender, _spender);
-        return true;
     }
 
     /// @inheritdoc IModule
@@ -177,7 +178,7 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     /// @param _spender address to look up
     /// @return true if the spender may call `transferFrom` under `_compliance`
     function isSpenderAllowed(address _compliance, address _spender) public view returns (bool) {
-        return _allowedSpenders[_compliance][getNonce(_compliance)][_spender];
+        return _getSpenderWhitelistStorage().allowedSpenders[_compliance][getNonce(_compliance)][_spender];
     }
 
     /// @inheritdoc AccessManagedOwnableBase
@@ -196,5 +197,13 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @dev Gated through the shared authority.
     function _authorizeUpgrade(address) internal override restricted { }
+
+    /// @dev Resolves the ERC-7201 namespaced storage of this module.
+    /// @return s the module storage struct
+    function _getSpenderWhitelistStorage() private pure returns (SpenderWhitelistStorage storage s) {
+        assembly ("memory-safe") {
+            s.slot := _SPENDER_WHITELIST_STORAGE_LOCATION
+        }
+    }
 
 }

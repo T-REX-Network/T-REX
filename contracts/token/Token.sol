@@ -469,7 +469,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     {
         require(
             _tokenStorage().compliance.canSpenderCall(_msgSender(), from, to, value),
-            ErrorsLib.SpenderNotAllowed(_msgSender())
+            ErrorsLib.SpenderNotAllowed(_msgSender(), from, to, value)
         );
 
         return super.transferFrom(from, to, value);

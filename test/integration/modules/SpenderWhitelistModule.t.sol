@@ -54,7 +54,7 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         token.approve(charlie, 100);
 
         vm.prank(charlie);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
     }
 
@@ -87,7 +87,7 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         token.approve(charlie, 100);
 
         vm.prank(charlie);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
     }
 
@@ -112,38 +112,40 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
 
     // ============ Allowlist Administration Tests ============
 
-    /// @notice Should report whether listing changed anything, without reverting on a repeat
-    function test_allowSpender_Success_ReportsWhetherItChangedAnything() public {
-        vm.prank(address(mc));
-        assertTrue(module.allowSpender(charlie));
-
-        vm.prank(address(mc));
-        assertFalse(module.allowSpender(charlie));
+    /// @notice Should list a spender and announce it
+    function test_allowSpender_Success_ListsAndEmits() public {
+        vm.expectEmit(true, true, false, false, address(module));
+        emit SpenderWhitelistModule.SpenderAllowed(address(mc), charlie);
+        _allow(charlie);
 
         assertTrue(module.isSpenderAllowed(address(mc), charlie));
     }
 
-    /// @notice Should report whether delisting changed anything, without reverting on an absent entry
-    function test_disallowSpender_Success_ReportsWhetherItChangedAnything() public {
-        vm.prank(address(mc));
-        assertFalse(module.disallowSpender(charlie));
-
+    /// @notice Should delist a spender and announce it
+    function test_disallowSpender_Success_DelistsAndEmits() public {
         _allow(charlie);
 
-        vm.prank(address(mc));
-        assertTrue(module.disallowSpender(charlie));
+        vm.expectEmit(true, true, false, false, address(module));
+        emit SpenderWhitelistModule.SpenderDisallowed(address(mc), charlie);
+        _disallow(charlie);
 
         assertFalse(module.isSpenderAllowed(address(mc), charlie));
     }
 
-    /// @notice Should not emit a second time when the spender is already listed
-    function test_allowSpender_Success_SilentWhenAlreadyAllowed() public {
+    /// @notice Should refuse to list a spender that is already on the allowlist
+    function test_allowSpender_RevertWhen_AlreadyAllowed() public {
         _allow(charlie);
 
-        vm.recordLogs();
-        _allow(charlie);
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderAlreadyAllowed.selector, charlie));
+        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (charlie)), address(module));
+    }
 
-        assertEq(vm.getRecordedLogs().length, 1); // ModuleInteraction only, no SpenderAllowed
+    /// @notice Should refuse to delist a spender that was never listed
+    function test_disallowSpender_RevertWhen_NotListed() public {
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotListed.selector, charlie));
+        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.disallowSpender, (charlie)), address(module));
     }
 
     /// @notice Should refuse the zero address
@@ -178,7 +180,7 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         token.approve(charlie, 100);
 
         vm.prank(charlie);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
     }
 

@@ -319,7 +319,7 @@ contract TokenTransferTest is TREXSuiteTest {
         token.approve(another, 100);
 
         vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, another));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, another, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
 
         assertEq(token.allowance(alice, another), 100);
