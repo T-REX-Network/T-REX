@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IdFactory } from "@onchain-id/solidity/contracts/factory/IdFactory.sol";
+import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -322,9 +322,8 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice storedIdentity falls back to the global identity registry when no local identity is stored
     function test_storedIdentity_FallsBackToGlobal_WhenLocalMissing() public {
         // `another` is a fresh wallet that has never been added to the local IRS.
-        // Create its identity directly in the global IdFactory and check the fallback.
-        vm.prank(deployer);
-        address globalIdentity = idFactory.createIdentity(another, "another");
+        // Create its identity directly in the global IdentityFactory and check the fallback.
+        address globalIdentity = address(_deployIdentity(another, "another"));
 
         assertEq(address(identityRegistryStorage.storedIdentity(another)), globalIdentity);
     }
@@ -358,9 +357,10 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     /// @notice Should update the idFactory and affect subsequent fallbacks
     function test_setIdFactory_Success() public {
-        // Deploy a fresh IdFactory and register `another` only in it.
-        IdFactory newIdFactory = new IdFactory(address(implementationAuthority));
-        address newGlobalIdentity = newIdFactory.createIdentity(another, "another");
+        // Deploy a fresh IdentityFactory and register `another` only in it.
+        IdentityFactory newIdFactory = _newIdentityFactory();
+        newIdFactory.initializeBeacon(address(identityImplementation));
+        address newGlobalIdentity = address(_deployIdentityIn(newIdFactory, another, "another"));
 
         vm.prank(deployer);
         identityRegistryStorage.setIdFactory(address(newIdFactory));

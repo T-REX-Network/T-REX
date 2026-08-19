@@ -62,8 +62,9 @@
 
 pragma solidity 0.8.30;
 
-import { IIdFactory } from "@onchain-id/solidity/contracts/factory/IIdFactory.sol";
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -90,7 +91,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         EnumerableSet.AddressSet identityRegistries;
 
         /// @dev global identity registry used as a fallback when no local identity is stored
-        IIdFactory idFactory;
+        IIdentityFactory idFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
@@ -111,7 +112,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         require(accessManagerAddress != address(0) && idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
 
-        _getStorage().idFactory = IIdFactory(idFactoryAddress);
+        _getStorage().idFactory = IIdentityFactory(idFactoryAddress);
         emit EventsLib.IdFactorySet(idFactoryAddress);
 
         if (initialIRAddress != address(0)) {
@@ -193,7 +194,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
      */
     function setIdFactory(address idFactoryAddress) external restricted {
         require(idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
-        _getStorage().idFactory = IIdFactory(idFactoryAddress);
+        _getStorage().idFactory = IIdentityFactory(idFactoryAddress);
         emit EventsLib.IdFactorySet(idFactoryAddress);
     }
 
@@ -220,7 +221,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedIdentity}.
-     *  @dev Falls back to the global identity registry (IdFactory) when no local identity is stored.
+     *  @dev Falls back to the global identity registry (IdentityFactory) when no local identity is
+     *  stored. The factory keys wallets by ERC-7930 interoperable address, so the lookup wraps the
+     *  wallet in an EVM envelope for this chain.
      */
     function storedIdentity(address _userAddress) external view returns (IIdentity) {
         Storage storage s = _getStorage();
@@ -228,7 +231,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         if (address(local) != address(0)) {
             return local;
         }
-        return IIdentity(s.idFactory.getIdentity(_userAddress));
+        return IIdentity(s.idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, _userAddress)));
     }
 
     /**

@@ -289,10 +289,18 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         bytes32[] memory claimIds = id.getClaimIdsByTopic(COUNTRY_CLAIM_TOPIC);
         if (claimIds.length == 0) return 0;
 
-        (,,,, bytes memory data,) = id.getClaim(claimIds[0]);
-        if (data.length == 0) return 0;
+        (,,,, Structs.ClaimData memory data,) = id.getClaim(claimIds[0]);
+        if (data.payload.length == 0) return 0;
 
-        return abi.decode(data, (uint16));
+        // The claim is read straight off the identity without asking the issuer, so the validity
+        // window has to be honoured here; `isClaimValid` would otherwise be the one enforcing it.
+        // Block-timestamp drift is not material against windows measured in days or longer.
+        /// forge-lint: disable-next-line(block-timestamp)
+        if (block.timestamp < data.issuedAt) return 0;
+        /// forge-lint: disable-next-line(block-timestamp)
+        if (data.validUntil != 0 && block.timestamp > data.validUntil) return 0;
+
+        return abi.decode(data.payload, (uint16));
     }
 
     /// @inheritdoc IERC3643IdentityRegistry

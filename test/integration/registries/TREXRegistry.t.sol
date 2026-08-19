@@ -226,8 +226,7 @@ contract TREXRegistryTest is TREXSuiteTest {
     /// @notice A registered identity carrying no country claim reports 0.
     function test_identity_investorCountry_ReturnsZero_WhenIdentityHasNoCountryClaim() public {
         // david has no identity yet -- give him one without a country claim
-        vm.prank(deployer);
-        IIdentity davidIdentity = IIdentity(idFactory.createIdentity(david, "david"));
+        IIdentity davidIdentity = _deployIdentity(david, "david");
 
         vm.prank(agent);
         registry.registerIdentity(david, davidIdentity, 0);
@@ -237,8 +236,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice A country claim whose payload is empty reports 0 rather than reverting on decode.
     function test_identity_investorCountry_ReturnsZero_WhenCountryClaimDataIsEmpty() public {
-        vm.prank(deployer);
-        IIdentity davidIdentity = IIdentity(idFactory.createIdentity(david, "david"));
+        IIdentity davidIdentity = _deployIdentity(david, "david");
 
         vm.prank(agent);
         registry.registerIdentity(david, davidIdentity, 0);
