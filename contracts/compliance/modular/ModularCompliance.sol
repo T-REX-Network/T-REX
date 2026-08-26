@@ -96,7 +96,6 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0x44b49c37d3109105ef492022bec834e94dca859d191a0d5323d3afbc4aa69400;
 
-    /// modifiers
     /**
      * @dev Throws if called by any address that is not a token bound to the compliance.
      */
@@ -195,10 +194,9 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
             uint256 packed = s.modules.at(i);
-            if (!_declares(packed, ModuleCapabilitiesLib.HOOK_TRANSFER)) {
-                continue;
+            if (_declares(packed, ModuleCapabilitiesLib.HOOK_TRANSFER)) {
+                IModule(_unpackModule(packed)).moduleTransferAction(_from, _to, _value);
             }
-            IModule(_unpackModule(packed)).moduleTransferAction(_from, _to, _value);
         }
     }
 
@@ -212,10 +210,9 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
             uint256 packed = s.modules.at(i);
-            if (!_declares(packed, ModuleCapabilitiesLib.HOOK_MINT)) {
-                continue;
+            if (_declares(packed, ModuleCapabilitiesLib.HOOK_MINT)) {
+                IModule(_unpackModule(packed)).moduleMintAction(_to, _value);
             }
-            IModule(_unpackModule(packed)).moduleMintAction(_to, _value);
         }
     }
 
@@ -229,10 +226,9 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
             uint256 packed = s.modules.at(i);
-            if (!_declares(packed, ModuleCapabilitiesLib.HOOK_BURN)) {
-                continue;
+            if (_declares(packed, ModuleCapabilitiesLib.HOOK_BURN)) {
+                IModule(_unpackModule(packed)).moduleBurnAction(_from, _value);
             }
-            IModule(_unpackModule(packed)).moduleBurnAction(_from, _value);
         }
     }
 
@@ -318,10 +314,10 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
             uint256 packed = s.modules.at(i);
-            if (!_declares(packed, ModuleCapabilitiesLib.CHECK_TRANSFER)) {
-                continue;
-            }
-            if (!IModule(_unpackModule(packed)).moduleCheck(_from, _to, _value, address(this))) {
+            if (
+                _declares(packed, ModuleCapabilitiesLib.CHECK_TRANSFER)
+                    && !IModule(_unpackModule(packed)).moduleCheck(_from, _to, _value, address(this))
+            ) {
                 return false;
             }
         }
@@ -337,10 +333,10 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
             uint256 packed = s.modules.at(i);
-            if (!_declares(packed, ModuleCapabilitiesLib.CHECK_SPENDER)) {
-                continue;
-            }
-            if (!IModule(_unpackModule(packed)).moduleCheckSpender(_spender, _from, _to, _value, address(this))) {
+            if (
+                _declares(packed, ModuleCapabilitiesLib.CHECK_SPENDER)
+                    && !IModule(_unpackModule(packed)).moduleCheckSpender(_spender, _from, _to, _value, address(this))
+            ) {
                 return false;
             }
         }
@@ -371,7 +367,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
-    ///      No caller check — the public `bindToken` wrapper enforces the Token-self-bind policy.
+    ///  No caller check — the public `bindToken` wrapper enforces the Token-self-bind policy.
     function _bindToken(address _token) internal {
         require(_token != address(0), ErrorsLib.ZeroAddress());
         _getStorage().tokenBound = _token;
@@ -379,9 +375,9 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /// @dev Binds a module with the existing validation rules (zero check, duplicate check, cap of 25,
-    ///      plug-and-play / canComplianceBind requirement) and records the dispatch points it declares.
-    ///      No caller check — wrappers enforce it. Everything is validated before any state is written,
-    ///      so `canComplianceBind` sees the module as not yet bound.
+    ///  plug-and-play / canComplianceBind requirement) and records the dispatch points it declares.
+    ///  No caller check — wrappers enforce it. Everything is validated before any state is written,
+    ///  so `canComplianceBind` sees the module as not yet bound.
     function _addModule(address _module) internal {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
@@ -403,7 +399,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /// @dev Reads a module's declaration and rejects anything the compliance cannot route. A plain call
-    ///      is deliberate: an EOA or a missing function reverts on its own, bubbling the real reason.
+    ///  is deliberate: an EOA or a missing function reverts on its own, bubbling the real reason.
     function _readCapabilities(address _module) internal pure returns (uint256 capabilities) {
         capabilities = IModule(_module).moduleCapabilities();
         require(capabilities != 0, ErrorsLib.ModuleHasNoCapabilities());
@@ -411,7 +407,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /// @dev The packed entry of `_module`, or zero when it is not bound. A bound entry always carries
-    ///      at least one capability bit, so zero is unambiguous. Bounded by the 25-module cap.
+    ///  at least one capability bit, so zero is unambiguous. Bounded by the 25-module cap.
     function _packedOf(address _module) internal view returns (uint256) {
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
@@ -429,7 +425,6 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     function _unpackModule(uint256 _packed) internal pure returns (address) {
-        // truncation is the point: it drops the capability bits packed above the address
         // forge-lint: disable-next-line(unsafe-typecast)
         return address(uint160(_packed));
     }
@@ -440,7 +435,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
-    ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
+    ///  Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         require(_packedOf(_module) != 0, ErrorsLib.ModuleNotBound());
 
