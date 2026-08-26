@@ -82,7 +82,7 @@ interface IModularCompliance is IERC3643Compliance {
      *  @dev re-reads a bound module's declared dispatch points and records them again
      *  @param _module address of the bound module to resynchronise
      *  the escape hatch for an implementation upgrade that changed a module's capabilities, avoiding
-     *  a full unbind and rebind cycle. The module moves to the end of the bound modules
+     *  a full unbind and rebind cycle. The module keeps its position in the bound modules
      *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleCapabilitiesRecorded event, including when nothing changed
      */

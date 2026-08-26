@@ -240,23 +240,24 @@ contract ComplianceCapabilitiesTest is TREXSuiteTest {
         assertEq(mc.getModuleCapabilities(module), Caps.HOOK_BURN);
     }
 
-    /// @notice Refreshing keeps every module bound, but moves the refreshed one to the end: the packed
-    ///         entry is the set key, so a re-record is a remove and an add.
-    function test_refreshModuleCapabilities_Success_WhenModuleIsNotLast() public {
+    /// @notice A refresh rewrites one entry: the other bound modules and the bind order are untouched.
+    function test_refreshModuleCapabilities_Success_WhenOtherModulesAreBound() public {
         address first = _deploy(address(new MintOnlyModule()));
         address second = _deploy(address(new BurnOnlyModule()));
         _bind(first);
         _bind(second);
+
+        RecordingModule(first).upgradeToAndCall(address(new TransferHookOnlyModule()), "");
 
         vm.prank(deployer);
         mc.refreshModuleCapabilities(first);
 
         address[] memory modules = mc.getModules();
         assertEq(modules.length, 2);
-        assertEq(modules[0], second);
-        assertEq(modules[1], first);
-        assertTrue(mc.isModuleBound(first));
-        assertEq(mc.getModuleCapabilities(first), Caps.HOOK_MINT);
+        assertEq(modules[0], first);
+        assertEq(modules[1], second);
+        assertEq(mc.getModuleCapabilities(first), Caps.HOOK_TRANSFER);
+        assertEq(mc.getModuleCapabilities(second), Caps.HOOK_BURN);
     }
 
     /// @notice Refreshing an unchanged module is a no-op that still announces the state.

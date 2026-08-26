@@ -28,6 +28,9 @@ import {
 contract ComplianceCapabilityGasTest is TREXSuiteTest {
 
     uint256 private constant MODULE_COUNT = 8;
+    uint256 private constant MODULE_CAP = 25;
+    uint256 private constant DISPATCH_FIXED_READS = 2;
+    uint256 private constant DISPATCH_READS_PER_MODULE = 3;
 
     ModularCompliance internal mc;
 
@@ -75,6 +78,74 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         console.log("--- cold path ---");
         console.log("addModule (records capabilities):", spent);
         assertTrue(mc.isModuleBound(module));
+    }
+
+    /// @notice A module is found in the same gas whether it bound first or last, at the 25-module cap.
+    function test_gas_Success_WhenLookupDoesNotGrowWithTheModuleCount() public {
+        address[] memory modules = new address[](MODULE_CAP);
+        for (uint256 i = 0; i < MODULE_CAP; i++) {
+            modules[i] = _deploy(address(new CheckTransferOnlyModule()));
+        }
+        _bindAll(modules);
+
+        uint256 firstBound = _complianceReads(modules[0]);
+        uint256 lastBound = _complianceReads(modules[MODULE_CAP - 1]);
+
+        console.log("--- lookup at the 25-module cap ---");
+        console.log("isModuleBound storage reads, first bound:", firstBound);
+        console.log("isModuleBound storage reads,  last bound:", lastBound);
+
+        // storage reads rather than gas: `forge test --gas-report` inflates a gasleft() bracket,
+        // while the number of slots a lookup touches is what "constant time" actually means here
+        assertEq(lastBound, firstBound, "lookup is not constant time: reads track the module's position");
+        assertLe(firstBound, 2, "a lookup should resolve without walking the bound set");
+    }
+
+    /// @notice Dispatch touches a fixed number of slots per bound module and nothing beyond them.
+    function test_gas_Success_WhenDispatchReadsThreeSlotsPerModule() public {
+        _bindAll(_deployRealisticSet());
+        uint256 eight = _dispatchReads();
+
+        _unbindAll();
+        _bindAll(_deployHalfSet());
+        uint256 four = _dispatchReads();
+
+        console.log("--- canTransfer storage reads on the compliance ---");
+        console.log("with eight bound:", eight);
+        console.log("with  four bound:", four);
+
+        // per module the map costs the array bounds check on the key length, the key itself, and the
+        // value it maps to. The two fixed reads are the length behind `length()` and its first re-read
+        assertEq(eight, DISPATCH_FIXED_READS + DISPATCH_READS_PER_MODULE * MODULE_COUNT, "dispatch reads changed");
+        assertEq(four, DISPATCH_FIXED_READS + DISPATCH_READS_PER_MODULE * (MODULE_COUNT / 2), "dispatch reads changed");
+        assertEq(
+            eight - four,
+            DISPATCH_READS_PER_MODULE * (MODULE_COUNT / 2),
+            "dispatch cost per module is no longer constant"
+        );
+    }
+
+    function _deployHalfSet() private returns (address[] memory modules) {
+        modules = new address[](MODULE_COUNT / 2);
+        for (uint256 i = 0; i < modules.length; i++) {
+            modules[i] = _deploy(address(new CheckTransferOnlyModule()));
+        }
+    }
+
+    /// @return the number of compliance storage slots read while answering a `canTransfer` dispatch
+    function _dispatchReads() private returns (uint256) {
+        vm.record();
+        mc.canTransfer(alice, bob, 100);
+        (bytes32[] memory reads,) = vm.accesses(address(mc));
+        return reads.length;
+    }
+
+    /// @return the number of compliance storage slots read while answering `isModuleBound` for `module`
+    function _complianceReads(address module) private returns (uint256) {
+        vm.record();
+        mc.isModuleBound(module);
+        (bytes32[] memory reads,) = vm.accesses(address(mc));
+        return reads.length;
     }
 
     /// @return gasUsed gas spent on mint, burn, transfer and transferFrom, in that order
