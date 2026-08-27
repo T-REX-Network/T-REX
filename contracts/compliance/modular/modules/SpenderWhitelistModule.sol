@@ -90,7 +90,12 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @custom:storage-location erc7201:ERC3643.storage.SpenderWhitelist
     struct SpenderWhitelistStorage {
-        /// allowlist per compliance, scoped by the bind nonce
+        /// allowlist per compliance, scoped by the bind nonce so an unbind invalidates every entry at
+        /// once, without iterating storage.
+        /// Example: compliance C binds, its nonce is 0, and `allowSpender(alice)` writes
+        /// `allowedSpenders[C][0][alice] = true`. C unbinds and the nonce becomes 1. On re-bind, reads
+        /// use nonce 1, so alice is not allowed anymore; listing her again writes
+        /// `allowedSpenders[C][1][alice]` and the nonce-0 entries stay behind as harmless orphans.
         mapping(address compliance => mapping(uint256 nonce => mapping(address spender => bool))) allowedSpenders;
     }
 
