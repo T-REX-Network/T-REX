@@ -612,12 +612,10 @@ contract TREXRegistryTest is TREXSuiteTest {
         assertTrue(registry.hasClaimTopic(address(secondIssuer), CLAIM_TOPIC_2));
     }
 
-    /// @notice `getTrustedIssuerClaimTopics` reverts when the issuer is unknown.
-    function test_trustedIssuer_getTrustedIssuerClaimTopics_RevertWhen_NotRegistered() public {
+    /// @notice `getTrustedIssuerClaimTopics` returns an empty set when the issuer is unknown.
+    function test_trustedIssuer_getTrustedIssuerClaimTopics_ReturnsEmptyWhen_NotRegistered() public {
         address newClaimIssuer = makeAddr("newClaimIssuer");
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TrustedIssuerDoesNotExist.selector);
-        registry.getTrustedIssuerClaimTopics(address(newClaimIssuer));
+        assertEq(registry.getTrustedIssuerClaimTopics(address(newClaimIssuer)).length, 0);
     }
 
     // =============================================================================================

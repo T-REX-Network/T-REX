@@ -104,9 +104,9 @@ interface IERC3643TrustedIssuersRegistry {
 
     /**
      *  @dev Function for getting all the claim topic of trusted claim issuer
-     *  Requires the provided ClaimIssuer contract to be registered in the trusted issuers registry.
      *  @param _trustedIssuer the trusted issuer concerned.
-     *  @return The set of claim topics that the trusted issuer is allowed to emit
+     *  @return The set of claim topics that the trusted issuer is allowed to emit,
+     *  empty if the provided ClaimIssuer contract is not registered.
      */
     function getTrustedIssuerClaimTopics(address _trustedIssuer) external view returns (uint256[] memory);
 

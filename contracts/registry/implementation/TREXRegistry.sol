@@ -379,10 +379,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643TrustedIssuersRegistry
+    /// @dev Unlike the reference implementation this never reverts: an unknown issuer yields an empty array.
     function getTrustedIssuerClaimTopics(address _trustedIssuer) external view returns (uint256[] memory) {
-        Storage storage s = _getStorage();
-        require(s.trustedIssuers.contains(_trustedIssuer), ErrorsLib.TrustedIssuerDoesNotExist());
-        return s.trustedIssuerClaimTopics[_trustedIssuer].values();
+        return _getStorage().trustedIssuerClaimTopics[_trustedIssuer].values();
     }
 
     /// @inheritdoc IERC3643TrustedIssuersRegistry

@@ -172,8 +172,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
         assertFalse(registry.hasClaimTopic(address(bobIssuer), CLAIM_TOPIC_2));
         assertFalse(registry.hasClaimTopic(address(bobIssuer), CLAIM_TOPIC_3));
 
-        vm.expectRevert(ErrorsLib.TrustedIssuerDoesNotExist.selector);
-        registry.getTrustedIssuerClaimTopics(address(bobIssuer));
+        assertEq(registry.getTrustedIssuerClaimTopics(address(bobIssuer)).length, 0);
     }
 
     function test_removeTrustedIssuer_KeepsCoIssuerOnSharedTopic() public {
@@ -299,10 +298,9 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
     // ============ getTrustedIssuerClaimTopics() ============
 
-    function test_getTrustedIssuerClaimTopics_RevertWhen_NotRegistered() public {
+    function test_getTrustedIssuerClaimTopics_ReturnsEmptyWhen_NotRegistered() public {
         address newIssuer = makeAddr("newIssuer");
-        vm.expectRevert(ErrorsLib.TrustedIssuerDoesNotExist.selector);
-        registry.getTrustedIssuerClaimTopics(address(newIssuer));
+        assertEq(registry.getTrustedIssuerClaimTopics(address(newIssuer)).length, 0);
     }
 
     function test_getTrustedIssuerClaimTopics_Success_ReturnsSetTopics() public view {
