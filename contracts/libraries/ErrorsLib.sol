@@ -94,7 +94,6 @@ library ErrorsLib {
     // Module Errors
     error ComplianceNotBound();
     error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
 
