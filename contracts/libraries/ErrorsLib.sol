@@ -126,7 +126,6 @@ library ErrorsLib {
     error NotATrustedIssuer();
     error TrustedClaimTopicsCannotBeEmpty();
     error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
 
     // TREXImplementationAuthority Errors
     error CannotCallOnReferenceContract();

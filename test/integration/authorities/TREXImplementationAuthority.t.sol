@@ -498,7 +498,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         // Try to call deployIA from a non-reference address
         // This should revert at line 90 because msg.sender != trexFactory.getImplementationAuthority()
         vm.prank(nonReferenceIA);
-        vm.expectRevert(IAFactory.OnlyReferenceIACanDeploy.selector);
+        vm.expectRevert(ErrorsLib.OnlyReferenceIACanDeploy.selector);
         iaFactory.deployIA(address(token));
     }
 

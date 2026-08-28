@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { ITREXFactory } from "../../factory/ITREXFactory.sol";
+import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { IIAFactory } from "./IIAFactory.sol";
 import { ITREXImplementationAuthority } from "./ITREXImplementationAuthority.sol";
@@ -79,10 +80,6 @@ contract IAFactory is IIAFactory, ERC165 {
     /// mapping allowing to know if an IA was deployed by the factory or not
     mapping(address => bool) private _deployedByFactory;
 
-    /// Errors
-
-    error OnlyReferenceIACanDeploy();
-
     /// functions
 
     constructor(address trexFactory) {
@@ -93,7 +90,9 @@ contract IAFactory is IIAFactory, ERC165 {
      *  @dev See {IIAFactory-deployIA}.
      */
     function deployIA(address _token) external returns (address) {
-        require(ITREXFactory(_trexFactory).getImplementationAuthority() == msg.sender, OnlyReferenceIACanDeploy());
+        require(
+            ITREXFactory(_trexFactory).getImplementationAuthority() == msg.sender, ErrorsLib.OnlyReferenceIACanDeploy()
+        );
         // The new IA is governed by the token's AccessManager and pins the reference contract's
         // current version at construction, so no restricted call is needed here.
         TREXImplementationAuthority _newIA = new TREXImplementationAuthority(
