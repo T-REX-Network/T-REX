@@ -356,8 +356,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         issuerTopics.clear();
 
         for (uint256 i = 0; i < _claimTopics.length; i++) {
-            issuerTopics.add(_claimTopics[i]);
-            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
+            if (issuerTopics.add(_claimTopics[i])) {
+                s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
+            }
         }
         emit ERC3643EventsLib.ClaimTopicsUpdated(_trustedIssuer, _claimTopics);
     }
@@ -433,8 +434,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         s.trustedIssuers.add(_trustedIssuer);
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[_trustedIssuer];
         for (uint256 i = 0; i < _claimTopics.length; i++) {
-            issuerTopics.add(_claimTopics[i]);
-            s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
+            if (issuerTopics.add(_claimTopics[i])) {
+                s.claimTopicsToTrustedIssuers[_claimTopics[i]].add(_trustedIssuer);
+            }
         }
 
         // This event will re-emit eventual duplicated _claimTopics.
