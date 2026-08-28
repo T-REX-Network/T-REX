@@ -275,7 +275,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
         assertEq(
             address(deployedToken.identityRegistry()),
-            _predictSuiteAddress("predict-salt", "IR"),
+            _predictSuiteAddress("predict-salt", "REGISTRY"),
             "IR must deploy at its predicted CREATE3 address"
         );
     }

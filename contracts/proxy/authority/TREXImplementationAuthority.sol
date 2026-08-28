@@ -168,7 +168,6 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
 
         _contracts[bVersion] = ITREXImplementationAuthority(getReferenceContract()).getContracts(version);
 
-        emit EventsLib.TREXVersionFetched(version, _contracts[bVersion]);
         emit EventsLib.TREXRegistryImplementationSet(_contracts[bVersion].trexRegistryImplementation);
     }
 

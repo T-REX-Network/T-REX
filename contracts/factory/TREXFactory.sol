@@ -145,7 +145,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
         _grantAgentRoles(tokenDetails, token, registry);
 
-        emit EventsLib.TREXSuiteDeployed(token, registry, irs, registry, registry, mc, salt);
+        emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
     }
 
     /**
@@ -270,7 +270,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// function used to deploy the eligibility registry using CREATE3
     /// @dev Seeds the required claim topics and trusted issuers through the proxy constructor, so the
     ///      factory needs no OWNER privilege over the freshly deployed registry. Deployed under the
-    ///      "IR" discriminator, which `_deployIRS` pre-computes via `_predictAddress(salt, "IR")`.
+    ///      "REGISTRY" discriminator, which `_deployIRS` pre-computes via `_predictAddress(salt, "REGISTRY")`.
     function _deployTREXRegistry(
         string memory salt,
         TokenDetails calldata tokenDetails,
@@ -279,7 +279,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     ) private returns (address) {
         return _deploy(
             salt,
-            "IR",
+            "REGISTRY",
             bytes.concat(
                 type(TREXRegistryProxy).creationCode,
                 abi.encode(
@@ -318,7 +318,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             "IRS",
             bytes.concat(
                 type(IdentityRegistryStorageProxy).creationCode,
-                abi.encode(_implementationAuthority, tokenDetails.accessManager, _predictAddress(salt, "IR"))
+                abi.encode(_implementationAuthority, tokenDetails.accessManager, _predictAddress(salt, "REGISTRY"))
             )
         );
     }
