@@ -339,6 +339,8 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643TrustedIssuersRegistry
+    /// @dev An empty `_claimTopics` reverts `ClaimTopicsCannotBeEmpty`; `removeTrustedIssuer` is the way to
+    /// strip an issuer of every topic.
     function updateIssuerClaimTopics(address _trustedIssuer, uint256[] calldata _claimTopics) external restricted {
         require(_trustedIssuer != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();

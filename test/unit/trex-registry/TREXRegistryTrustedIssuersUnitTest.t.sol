@@ -155,6 +155,45 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
         assertEq(address(trusted[2]), address(charlieIssuer));
     }
 
+    function test_removeTrustedIssuer_ClearsClaimTopics() public {
+        address bobIssuer = makeAddr("bobIssuer");
+        uint256[] memory topicsBob = new uint256[](2);
+        topicsBob[0] = CLAIM_TOPIC_2;
+        topicsBob[1] = CLAIM_TOPIC_3;
+
+        vm.prank(deployer);
+        registry.addTrustedIssuer(address(bobIssuer), topicsBob);
+
+        vm.prank(deployer);
+        registry.removeTrustedIssuer(address(bobIssuer));
+
+        assertEq(registry.getTrustedIssuersForClaimTopic(CLAIM_TOPIC_2).length, 0);
+        assertEq(registry.getTrustedIssuersForClaimTopic(CLAIM_TOPIC_3).length, 0);
+        assertFalse(registry.hasClaimTopic(address(bobIssuer), CLAIM_TOPIC_2));
+        assertFalse(registry.hasClaimTopic(address(bobIssuer), CLAIM_TOPIC_3));
+
+        vm.expectRevert(ErrorsLib.TrustedIssuerDoesNotExist.selector);
+        registry.getTrustedIssuerClaimTopics(address(bobIssuer));
+    }
+
+    function test_removeTrustedIssuer_KeepsCoIssuerOnSharedTopic() public {
+        address bobIssuer = makeAddr("bobIssuer");
+        address charlieIssuer = makeAddr("charlieIssuer");
+        uint256[] memory sharedTopics = new uint256[](1);
+        sharedTopics[0] = CLAIM_TOPIC_2;
+
+        vm.startPrank(deployer);
+        registry.addTrustedIssuer(address(bobIssuer), sharedTopics);
+        registry.addTrustedIssuer(address(charlieIssuer), sharedTopics);
+        registry.removeTrustedIssuer(address(bobIssuer));
+        vm.stopPrank();
+
+        address[] memory issuers = registry.getTrustedIssuersForClaimTopic(CLAIM_TOPIC_2);
+        assertEq(issuers.length, 1);
+        assertEq(address(issuers[0]), address(charlieIssuer));
+        assertTrue(registry.hasClaimTopic(address(charlieIssuer), CLAIM_TOPIC_2));
+    }
+
     // ============ updateIssuerClaimTopics() ============
 
     function test_updateIssuerClaimTopics_RevertWhen_NotOwner() public {
@@ -197,6 +236,18 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ClaimTopicsCannotBeEmpty.selector);
         registry.updateIssuerClaimTopics(address(claimIssuer), empty);
+    }
+
+    function test_updateIssuerClaimTopics_KeepsTopics_WhenEmptySetRejected() public {
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ClaimTopicsCannotBeEmpty.selector);
+        registry.updateIssuerClaimTopics(address(claimIssuer), empty);
+
+        uint256[] memory topics = registry.getTrustedIssuerClaimTopics(address(claimIssuer));
+        assertEq(topics.length, 1);
+        assertEq(topics[0], CLAIM_TOPIC_1);
+        assertTrue(registry.hasClaimTopic(address(claimIssuer), CLAIM_TOPIC_1));
     }
 
     function test_updateIssuerClaimTopics_Success() public {
