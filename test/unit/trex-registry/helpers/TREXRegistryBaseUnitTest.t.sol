@@ -129,8 +129,10 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     ///      factory) -> ERC734Validator (needs factory + registry) -> Identity impl (the validator is
     ///      its enshrined registry immutable) -> `initializeBeacon`.
     function _deployOnchainId() internal {
-        vm.prank(deployer);
+        vm.startPrank(deployer);
         idFactory = new IdentityFactory(address(accessManager));
+        vm.stopPrank();
+
         _registerIdentityTypePolicies(idFactory);
 
         vm.startPrank(deployer);

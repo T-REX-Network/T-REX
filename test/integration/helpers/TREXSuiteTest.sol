@@ -136,7 +136,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         internal
         returns (TREXFactory factory)
     {
-        vm.prank(deployer);
+        vm.startPrank(deployer);
         factory = new TREXFactory(
             implementationAuthority,
             address(idFactory),
@@ -144,6 +144,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             address(validatorModule),
             accessManagerAddress
         );
+        vm.stopPrank();
     }
 
     /// @dev Deploys an IdentityFactory governed by the suite's AccessManager and registers the identity
@@ -151,8 +152,10 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      so no beacon is passed here. Tests that need a second, independent global registry call this
     ///      directly.
     function _newIdentityFactory() internal returns (IdentityFactory factory) {
-        vm.prank(deployer);
+        vm.startPrank(deployer);
         factory = new IdentityFactory(address(accessManager));
+        vm.stopPrank();
+
         _registerIdentityTypePolicies(factory);
     }
 

@@ -104,13 +104,14 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         // Create a new reference IA with the other factory in constructor
         // This factory references otherIASetup, not this IA
-        vm.prank(deployer);
+        vm.startPrank(deployer);
         TREXImplementationAuthority newIA = new TREXImplementationAuthority(
             true, // is reference
             address(otherFactory), // factory that references a different IA
             address(0), // no IAFactory
             address(accessManager)
         );
+        vm.stopPrank();
         _authorizeIAGovernance(address(newIA));
 
         // Now try to set IAFactory - should revert because otherFactory.getImplementationAuthority() != address(newIA)
