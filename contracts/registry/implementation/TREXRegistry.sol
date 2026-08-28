@@ -158,9 +158,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         address[] calldata userAddresses,
         IIdentity[] calldata identities,
         uint16[] calldata countries
-    ) external override {
+    ) external override restricted {
         for (uint256 i = 0; i < userAddresses.length; i++) {
-            registerIdentity(userAddresses[i], identities[i], countries[i]);
+            _registerIdentity(userAddresses[i], identities[i], countries[i]);
         }
     }
 
@@ -300,8 +300,12 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
     /// @inheritdoc IERC3643IdentityRegistry
     function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) public override restricted {
-        _getStorage().tokenIdentityStorage.addIdentityToStorage(_userAddress, _identity, _country);
-        emit ERC3643EventsLib.IdentityRegistered(_userAddress, _identity);
+        _registerIdentity(_userAddress, _identity, _country);
+    }
+
+    function _registerIdentity(address userAddress, IIdentity userIdentity, uint16 country) internal {
+        _getStorage().tokenIdentityStorage.addIdentityToStorage(userAddress, userIdentity, country);
+        emit ERC3643EventsLib.IdentityRegistered(userAddress, userIdentity);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
