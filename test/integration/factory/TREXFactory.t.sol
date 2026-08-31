@@ -6,6 +6,7 @@ import { Errors } from "@onchain-id/solidity/contracts/libraries/Errors.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
@@ -22,7 +23,6 @@ import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegi
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TrustedIssuersRegistry } from "contracts/registry/implementation/TrustedIssuersRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
-import { Create3 } from "contracts/vendor/openzeppelin/Create3.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import { TestModule } from "test/integration/mocks/TestModule.sol";
