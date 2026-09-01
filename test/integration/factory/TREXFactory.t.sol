@@ -1282,7 +1282,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         AccessManager otherAccessManager = new AccessManager(address(this));
         address foreignIRS = address(
             new BeaconProxy(
-                trexImplementationAuthority.current().irsBeacon,
+                trexImplementationAuthority.beacons().irsBeacon,
                 abi.encodeCall(IdentityRegistryStorage.init, (address(otherAccessManager), address(0)))
             )
         );
@@ -1304,7 +1304,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 ///      `InvalidImplementationAuthority` guard. A real authority cannot reach this state.
 contract EmptyBeaconsAuthority {
 
-    function current() external pure returns (ITREXImplementationAuthority.SuiteBeacons memory) {
+    function beacons() external pure returns (ITREXImplementationAuthority.SuiteBeacons memory) {
         return ITREXImplementationAuthority.SuiteBeacons({
             tokenBeacon: address(0), trexRegistryBeacon: address(0), irsBeacon: address(0), mcBeacon: address(0)
         });

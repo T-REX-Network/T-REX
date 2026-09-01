@@ -77,7 +77,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
 
     /// @notice The registry beacon is deployed, owned by the authority, and resolves to the implementation.
     function test_constructor_RegistryBeaconPointsToImplementation() public view {
-        address beacon = ia.current().trexRegistryBeacon;
+        address beacon = ia.beacons().trexRegistryBeacon;
 
         assertTrue(beacon != address(0), "registry beacon must exist");
         assertEq(UpgradeableBeacon(beacon).owner(), address(ia), "authority must own the registry beacon");
@@ -97,7 +97,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
 
     /// @notice Upgrading to a version with a new registry implementation rotates the registry beacon.
     function test_publishAndUpgrade_RotatesRegistryBeaconAcrossVersions() public {
-        address beacon = ia.current().trexRegistryBeacon;
+        address beacon = ia.beacons().trexRegistryBeacon;
         assertEq(UpgradeableBeacon(beacon).implementation(), address(trexRegistryImpl));
 
         DummyImpl newRegistryImpl = new DummyImpl();
@@ -107,7 +107,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
         vm.prank(deployer);
         ia.publishAndUpgrade(v1, impls);
 
-        assertEq(ia.current().trexRegistryBeacon, beacon, "the beacon address must not change");
+        assertEq(ia.beacons().trexRegistryBeacon, beacon, "the beacon address must not change");
         assertEq(
             UpgradeableBeacon(beacon).implementation(),
             address(newRegistryImpl),

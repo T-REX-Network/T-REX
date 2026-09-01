@@ -103,13 +103,13 @@ interface ITREXImplementationAuthority {
      *  The beacons (and therefore every live shared-mode suite) keep pointing at the active version
      *  until a separate `upgrade(version)` call rotates them.
      *  @param version the new version to publish
-     *  @param implementations the set of implementations corresponding to the new version
+     *  @param impls the set of implementations corresponding to the new version
      *  reverts if the version was already published
      *  reverts if any implementation address is zero
      *  only VERSION_MANAGER can call
      *  emits a `VersionPublished` event
      */
-    function publish(Version calldata version, SuiteImplementations calldata implementations) external;
+    function publish(Version calldata version, SuiteImplementations calldata impls) external;
 
     /**
      *  @dev rotates every beacon to the implementations archived for a previously published version.
@@ -124,21 +124,15 @@ interface ITREXImplementationAuthority {
 
     /**
      *  @dev convenience wrapper that publishes a new version and immediately activates it.
-     *  Equivalent to `publish(version, implementations)` followed by `upgrade(version)`.
+     *  Equivalent to `publish(version, impls)` followed by `upgrade(version)`.
      *  @param version the new version to publish
-     *  @param implementations the set of implementations corresponding to the new version
+     *  @param impls the set of implementations corresponding to the new version
      *  reverts if the version was already published
      *  reverts if any implementation address is zero
      *  only VERSION_MANAGER can call
      *  emits `VersionPublished` and `SuiteUpgraded` events
      */
-    function publishAndUpgrade(Version calldata version, SuiteImplementations calldata implementations) external;
-
-    /**
-     *  @dev returns the 4 beacon addresses currently driving every shared-mode suite.
-     *  beacon addresses never change after construction.
-     */
-    function current() external view returns (SuiteBeacons memory);
+    function publishAndUpgrade(Version calldata version, SuiteImplementations calldata impls) external;
 
     /**
      *  @dev returns the latest published version (may be ahead of the active version if it
@@ -152,17 +146,15 @@ interface ITREXImplementationAuthority {
     function currentVersion() external view returns (Version memory);
 
     /**
-     *  @dev returns the 4 beacon addresses.
-     *  identical to `current()` and kept for ABI clarity.
+     *  @dev returns the 4 beacon addresses driving every shared-mode suite.
+     *  beacon addresses never change after construction.
      */
     function beacons() external view returns (SuiteBeacons memory);
 
     /**
-     *  @dev returns the 4 beacon addresses regardless of the requested version
-     *  (beacons are stable across versions) but reverts if the version was never published.
-     *  @param version the version to query
+     *  @dev returns the implementations the beacons currently point at.
      */
-    function beaconsFor(Version calldata version) external view returns (SuiteBeacons memory);
+    function implementations() external view returns (SuiteImplementations memory);
 
     /**
      *  @dev returns the archived implementations for a given version.

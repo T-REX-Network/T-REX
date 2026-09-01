@@ -492,11 +492,11 @@ contract TokenInformationTest is TREXSuiteTest {
     }
 
     function _tokenBeacon() private view returns (address) {
-        return trexImplementationAuthority.current().tokenBeacon;
+        return trexImplementationAuthority.beacons().tokenBeacon;
     }
 
     function _tokenInit(
-        address identityRegistry,
+        address identityRegistry_,
         address compliance,
         string memory name,
         string memory symbol,
@@ -505,13 +505,13 @@ contract TokenInformationTest is TREXSuiteTest {
         address accessManager_
     ) private pure returns (bytes memory) {
         return abi.encodeCall(
-            Token.init, (name, symbol, decimals, identityRegistry, compliance, onchainId, accessManager_)
+            Token.init, (name, symbol, decimals, identityRegistry_, compliance, onchainId, accessManager_)
         );
     }
 
     function _newTokenProxy(
         address beacon,
-        address identityRegistry,
+        address identityRegistry_,
         address compliance,
         string memory name,
         string memory symbol,
@@ -521,7 +521,7 @@ contract TokenInformationTest is TREXSuiteTest {
     ) private returns (address) {
         return address(
             new BeaconProxy(
-                beacon, _tokenInit(identityRegistry, compliance, name, symbol, decimals, onchainId, accessManager_)
+                beacon, _tokenInit(identityRegistry_, compliance, name, symbol, decimals, onchainId, accessManager_)
             )
         );
     }

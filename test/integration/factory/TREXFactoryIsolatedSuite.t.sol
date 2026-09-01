@@ -89,7 +89,7 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
     ///         AccessManager, pointing at the registry's current implementations, and leaves the shared
     ///         registry's beacons + their ownership untouched.
     function test_deployIsolatedSuite_OwnsClonedBeacons() public {
-        ITREXImplementationAuthority.SuiteBeacons memory sharedBefore = trexImplementationAuthority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory sharedBefore = trexImplementationAuthority.beacons();
 
         (, ITREXImplementationAuthority.SuiteBeacons memory beacons) =
             _deployIsolatedSuiteAndReadBeacons("isolated-salt", "Iso", "ISO");
@@ -147,7 +147,7 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
         );
 
         // the shared registry's beacons must be untouched and still owned by the registry
-        ITREXImplementationAuthority.SuiteBeacons memory sharedAfter = trexImplementationAuthority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory sharedAfter = trexImplementationAuthority.beacons();
         assertEq(sharedAfter.tokenBeacon, sharedBefore.tokenBeacon, "shared token beacon must be stable");
         assertEq(
             sharedAfter.trexRegistryBeacon, sharedBefore.trexRegistryBeacon, "shared registry beacon must be stable"

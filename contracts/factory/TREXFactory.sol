@@ -123,7 +123,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         _validateDeploymentInputs(salt, tokenDetails, claimDetails);
 
         _deploySuiteContracts(
-            salt, tokenDetails, claimDetails, ITREXImplementationAuthority(_implementationAuthority).current()
+            salt, tokenDetails, claimDetails, ITREXImplementationAuthority(_implementationAuthority).beacons()
         );
     }
 
@@ -258,7 +258,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(implementationAuthorityAddress != address(0), ErrorsLib.ZeroAddress());
         // should not be possible to set an authority that is missing any of the 4 beacons
         ITREXImplementationAuthority.SuiteBeacons memory beacons =
-            ITREXImplementationAuthority(implementationAuthorityAddress).current();
+            ITREXImplementationAuthority(implementationAuthorityAddress).beacons();
         require(
             beacons.tokenBeacon != address(0) && beacons.trexRegistryBeacon != address(0)
                 && beacons.irsBeacon != address(0) && beacons.mcBeacon != address(0),

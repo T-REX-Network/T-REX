@@ -390,7 +390,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         address sentinel = address(uint160(uint256(keccak256("trex.test.unboundMC.sentinel"))));
         address[] memory noModules = new address[](0);
         bytes[] memory noSettings = new bytes[](0);
-        address mcBeacon = ITREXImplementationAuthority(implementationAuthority_).current().mcBeacon;
+        address mcBeacon = ITREXImplementationAuthority(implementationAuthority_).beacons().mcBeacon;
         BeaconProxy proxy = new BeaconProxy(
             mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(accessManager), noModules, noSettings))
         );

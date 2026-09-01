@@ -111,8 +111,8 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     }
 
     /// @inheritdoc ITREXImplementationAuthority
-    function publish(Version calldata version, SuiteImplementations calldata implementations) external restricted {
-        _publish(version, implementations);
+    function publish(Version calldata version, SuiteImplementations calldata impls) external restricted {
+        _publish(version, impls);
     }
 
     /// @inheritdoc ITREXImplementationAuthority
@@ -121,17 +121,12 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     }
 
     /// @inheritdoc ITREXImplementationAuthority
-    function publishAndUpgrade(Version calldata version, SuiteImplementations calldata implementations)
+    function publishAndUpgrade(Version calldata version, SuiteImplementations calldata impls)
         external
         restricted
     {
-        _publish(version, implementations);
+        _publish(version, impls);
         _upgrade(version);
-    }
-
-    /// @inheritdoc ITREXImplementationAuthority
-    function current() external view returns (SuiteBeacons memory) {
-        return _assembleBeacons();
     }
 
     /// @inheritdoc ITREXImplementationAuthority
@@ -150,9 +145,8 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     }
 
     /// @inheritdoc ITREXImplementationAuthority
-    function beaconsFor(Version calldata version) external view returns (SuiteBeacons memory) {
-        require(_implementations[_versionKey(version)].tokenImplementation != address(0), ErrorsLib.UnknownVersion());
-        return _assembleBeacons();
+    function implementations() external view returns (SuiteImplementations memory) {
+        return _implementations[_versionKey(_currentVersion)];
     }
 
     /// @inheritdoc ITREXImplementationAuthority
@@ -162,40 +156,40 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         return impls;
     }
 
-    /// @dev archives `implementations` under `version` and marks it as the latest published version.
+    /// @dev archives `impls` under `version` and marks it as the latest published version.
     ///      reverts if the version was already published or if any implementation address is zero.
-    function _publish(Version calldata version, SuiteImplementations calldata implementations) private {
+    function _publish(Version calldata version, SuiteImplementations calldata impls) private {
         require(
             _implementations[_versionKey(version)].tokenImplementation == address(0),
             ErrorsLib.VersionAlreadyPublished()
         );
         require(
-            implementations.tokenImplementation != address(0)
-                && implementations.trexRegistryImplementation != address(0)
-                && implementations.irsImplementation != address(0) && implementations.mcImplementation != address(0),
+            impls.tokenImplementation != address(0)
+                && impls.trexRegistryImplementation != address(0)
+                && impls.irsImplementation != address(0) && impls.mcImplementation != address(0),
             ErrorsLib.EmptyImplementations()
         );
 
-        _implementations[_versionKey(version)] = implementations;
+        _implementations[_versionKey(version)] = impls;
         _latestVersion = version;
 
-        emit EventsLib.VersionPublished(version, implementations);
+        emit EventsLib.VersionPublished(version, impls);
     }
 
     /// @dev rotates the 4 beacons to the implementations archived for `version` and marks it active.
     ///      reverts if the version was never published.
     function _upgrade(Version calldata version) private {
-        SuiteImplementations memory implementations = _implementations[_versionKey(version)];
-        require(implementations.tokenImplementation != address(0), ErrorsLib.UnknownVersion());
+        SuiteImplementations memory impls = _implementations[_versionKey(version)];
+        require(impls.tokenImplementation != address(0), ErrorsLib.UnknownVersion());
 
-        UpgradeableBeacon(_TOKEN_BEACON).upgradeTo(implementations.tokenImplementation);
-        UpgradeableBeacon(_TREX_REGISTRY_BEACON).upgradeTo(implementations.trexRegistryImplementation);
-        UpgradeableBeacon(_IRS_BEACON).upgradeTo(implementations.irsImplementation);
-        UpgradeableBeacon(_MC_BEACON).upgradeTo(implementations.mcImplementation);
+        UpgradeableBeacon(_TOKEN_BEACON).upgradeTo(impls.tokenImplementation);
+        UpgradeableBeacon(_TREX_REGISTRY_BEACON).upgradeTo(impls.trexRegistryImplementation);
+        UpgradeableBeacon(_IRS_BEACON).upgradeTo(impls.irsImplementation);
+        UpgradeableBeacon(_MC_BEACON).upgradeTo(impls.mcImplementation);
 
         _currentVersion = version;
 
-        emit EventsLib.SuiteUpgraded(version, implementations);
+        emit EventsLib.SuiteUpgraded(version, impls);
     }
 
     /// @dev assembles the 4 immutable beacon addresses into a `SuiteBeacons` struct.

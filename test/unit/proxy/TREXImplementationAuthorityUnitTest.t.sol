@@ -66,7 +66,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
     }
 
     function test_constructor_Deploys4BeaconsOwnedByRegistry() public view {
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
 
         assertTrue(bs.tokenBeacon != address(0));
         assertTrue(bs.trexRegistryBeacon != address(0));
@@ -80,7 +80,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
     }
 
     function test_constructor_BeaconsPointToProvidedImplementations() public view {
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
 
         assertEq(UpgradeableBeacon(bs.tokenBeacon).implementation(), address(tokenImplV0));
         assertEq(UpgradeableBeacon(bs.trexRegistryBeacon).implementation(), address(trexRegistryImplV0));
@@ -113,14 +113,13 @@ contract TREXImplementationAuthorityUnitTest is Test {
         assertEq(archived.mcImplementation, address(mcImplV0));
     }
 
-    function test_constructor_BeaconsAndCurrentReturnSameAddresses() public view {
-        ITREXImplementationAuthority.SuiteBeacons memory fromCurrent = authority.current();
-        ITREXImplementationAuthority.SuiteBeacons memory fromBeacons = authority.beacons();
+    function test_constructor_ExposesV0AsCurrentImplementations() public view {
+        ITREXImplementationAuthority.SuiteImplementations memory active = authority.implementations();
 
-        assertEq(fromCurrent.tokenBeacon, fromBeacons.tokenBeacon);
-        assertEq(fromCurrent.trexRegistryBeacon, fromBeacons.trexRegistryBeacon);
-        assertEq(fromCurrent.irsBeacon, fromBeacons.irsBeacon);
-        assertEq(fromCurrent.mcBeacon, fromBeacons.mcBeacon);
+        assertEq(active.tokenImplementation, address(tokenImplV0));
+        assertEq(active.trexRegistryImplementation, address(trexRegistryImplV0));
+        assertEq(active.irsImplementation, address(irsImplV0));
+        assertEq(active.mcImplementation, address(mcImplV0));
     }
 
     function test_constructor_RevertWhen_AccessManagerIsZero() public {
@@ -163,12 +162,12 @@ contract TREXImplementationAuthorityUnitTest is Test {
     // ---------- publishAndUpgrade happy path ----------
 
     function test_publishAndUpgrade_VersionManagerCanPublishNewVersion() public {
-        ITREXImplementationAuthority.SuiteBeacons memory beforeUpgrade = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory beforeUpgrade = authority.beacons();
 
         vm.prank(versionManager);
         authority.publishAndUpgrade(v1, _v1Impls());
 
-        ITREXImplementationAuthority.SuiteBeacons memory afterUpgrade = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory afterUpgrade = authority.beacons();
 
         // beacons must NOT change
         assertEq(beforeUpgrade.tokenBeacon, afterUpgrade.tokenBeacon);
@@ -274,7 +273,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         vm.prank(versionManager);
         authority.publish(v1, _v1Impls());
 
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
 
         // beacons still resolve to the v0 implementations: publish must not touch any beacon
         assertEq(UpgradeableBeacon(bs.tokenBeacon).implementation(), address(tokenImplV0));
@@ -345,7 +344,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         authority.upgrade(v1);
         vm.stopPrank();
 
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
         assertEq(UpgradeableBeacon(bs.tokenBeacon).implementation(), address(tokenImplV1));
         assertEq(UpgradeableBeacon(bs.trexRegistryBeacon).implementation(), address(trexRegistryImplV1));
         assertEq(UpgradeableBeacon(bs.irsBeacon).implementation(), address(irsImplV1));
@@ -382,7 +381,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         authority.upgrade(v0);
         vm.stopPrank();
 
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
         assertEq(UpgradeableBeacon(bs.tokenBeacon).implementation(), address(tokenImplV0));
 
         // latest published is still v1, active rolled back to v0
@@ -429,19 +428,28 @@ contract TREXImplementationAuthorityUnitTest is Test {
 
     // ---------- read API ----------
 
-    function test_beaconsFor_ReturnsSameAddressesAsCurrent_ForKnownVersion() public view {
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beaconsFor(v0);
-        ITREXImplementationAuthority.SuiteBeacons memory cs = authority.current();
+    function test_implementations_FollowsTheActiveVersion() public {
+        vm.prank(versionManager);
+        authority.publishAndUpgrade(v1, _v1Impls());
 
-        assertEq(bs.tokenBeacon, cs.tokenBeacon);
-        assertEq(bs.trexRegistryBeacon, cs.trexRegistryBeacon);
-        assertEq(bs.irsBeacon, cs.irsBeacon);
-        assertEq(bs.mcBeacon, cs.mcBeacon);
+        ITREXImplementationAuthority.SuiteImplementations memory active = authority.implementations();
+
+        assertEq(active.tokenImplementation, address(tokenImplV1));
+        assertEq(active.trexRegistryImplementation, address(trexRegistryImplV1));
+        assertEq(active.irsImplementation, address(irsImplV1));
+        assertEq(active.mcImplementation, address(mcImplV1));
     }
 
-    function test_beaconsFor_RevertWhen_UnknownVersion() public {
-        vm.expectRevert(ErrorsLib.UnknownVersion.selector);
-        authority.beaconsFor(v1);
+    function test_implementations_IgnoresAPublishedButNotUpgradedVersion() public {
+        vm.prank(versionManager);
+        authority.publish(v1, _v1Impls());
+
+        ITREXImplementationAuthority.SuiteImplementations memory active = authority.implementations();
+
+        assertEq(active.tokenImplementation, address(tokenImplV0));
+        assertEq(active.trexRegistryImplementation, address(trexRegistryImplV0));
+        assertEq(active.irsImplementation, address(irsImplV0));
+        assertEq(active.mcImplementation, address(mcImplV0));
     }
 
     function test_implementationsFor_RevertWhen_UnknownVersion() public {
@@ -466,7 +474,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
     // ---------- beacon-level access control ----------
 
     function test_beacon_EOACannotCallUpgradeToDirectly() public {
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
 
         vm.prank(versionManager);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, versionManager));
@@ -474,7 +482,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
     }
 
     function test_beacon_NonManagerEOACannotCallUpgradeToDirectly() public {
-        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.current();
+        ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
 
         vm.prank(notVersionManager);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notVersionManager));
