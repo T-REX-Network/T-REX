@@ -6,6 +6,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
+import { MintOnlyModule, RecordingModule } from "../mocks/CapabilityModules.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -111,6 +112,24 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertTrue(results[0].pass);
         assertEq(keccak256(bytes(results[1].moduleName)), keccak256(bytes("TestModule")));
         assertTrue(results[1].pass);
+    }
+
+    /// @notice Should skip modules that never declared the transfer check
+    function test_getTransferDetails_OmitsModules_WithoutTheTransferCheck() public {
+        MintOnlyModule mintOnlyImplementation = new MintOnlyModule();
+        bytes memory initData = abi.encodeCall(RecordingModule.initialize, ());
+        address mintOnly = address(new ModuleProxy(address(mintOnlyImplementation), initData));
+
+        vm.prank(deployer);
+        compliance.addModule(mintOnly);
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), alice, bob, 100);
+
+        // the mint-only module is bound, but it enforces nothing on a transfer
+        assertEq(compliance.getModules().length, 2);
+        assertEq(results.length, 1);
+        assertEq(keccak256(bytes(results[0].moduleName)), keccak256(bytes("TestModule")));
     }
 
 }
