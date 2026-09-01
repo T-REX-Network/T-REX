@@ -71,10 +71,22 @@ interface IModularCompliance is IERC3643Compliance {
      *  @dev adds a module to the list of compliance modules
      *  @param _module address of the module to add
      *  there cannot be more than 25 modules bound to the modular compliance for gas cost reasons
+     *  the module must declare at least one dispatch point through {IModule-moduleCapabilities},
+     *  and the declaration is recorded so the compliance only calls it where it declared
      *  Restricted to the configured AccessManager role (OWNER).
-     *  Emits a ModuleAdded event
+     *  Emits a ModuleAdded event and a ModuleCapabilitiesRecorded event
      */
     function addModule(address _module) external;
+
+    /**
+     *  @dev re-reads a bound module's declared dispatch points and records them again
+     *  @param _module address of the bound module to resynchronise
+     *  the escape hatch for an implementation upgrade that changed a module's capabilities, avoiding
+     *  a full unbind and rebind cycle. The module keeps its position in the bound modules
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleCapabilitiesRecorded event, including when nothing changed
+     */
+    function refreshModuleCapabilities(address _module) external;
 
     /**
      *  @dev removes a module from the list of compliance modules
@@ -133,6 +145,34 @@ interface IModularCompliance is IERC3643Compliance {
      *  returns address array of module contracts bound to the compliance
      */
     function getModules() external view returns (address[] memory);
+
+    /**
+     *  @dev checks whether every bound module allows `_spender` to move `_value` from `_from` to `_to`
+     *  @param _spender address initiating the transfer on behalf of `_from`
+     *  @param _from address of the transfer sender
+     *  @param _to address of the transfer receiver
+     *  @param _value amount of tokens sent
+     *  only the modules that declared the spender check are consulted, and all of them must agree
+     *  a direct transfer needs no spender check: the spender is the sender, already covered by
+     *  {canTransfer}
+     *  returns true when no bound module objects, including when none enforces a spender rule
+     */
+    function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool);
+
+    /**
+     *  @dev getter for the dispatch points a bound module declared
+     *  @param _module address of the bound module
+     *  reverts when the module is not bound
+     *  returns the recorded bitmask, built from the flags of `ModuleCapabilitiesLib`
+     */
+    function getModuleCapabilities(address _module) external view returns (uint256);
+
+    /**
+     *  @dev getter for the bound modules that declared a given dispatch point
+     *  @param _capability one of the flags of `ModuleCapabilitiesLib`
+     *  returns the addresses the compliance actually calls at that dispatch point
+     */
+    function getModulesByCapability(uint256 _capability) external view returns (address[] memory);
 
     /**
      *  @dev checks if a module is bound to the compliance contract

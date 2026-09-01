@@ -85,8 +85,10 @@ library ErrorsLib {
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
     error ComplianceNotSuitableForBindingToModule(address module);
+    error InvalidModuleCapabilities(uint256 capabilities);
     error MaxModulesReached(uint256 maxValue);
     error ModuleAlreadyBound();
+    error ModuleHasNoCapabilities();
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();

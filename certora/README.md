@@ -68,6 +68,9 @@ This branch diverged from the spec's original target. The following were changed
   (`IdentityRegistry.isVerified`, `ModularCompliance.canTransfer`, the `IModule` callbacks, the downstream
   registries) are summarised permissively so each spec isolates the contract under test. Those gates are
   proved on their own contracts and exercised end-to-end by the Foundry invariant suite (INV-5/INV-6).
+  `IModule.moduleCapabilities` is summarised as every defined bit (31) and `moduleCheckSpender` as `true`,
+  so modules always bind and no dispatch point is skipped. Capability routing is covered by the Foundry
+  dispatch suite instead.
 - **AccessManager is ghost-modelled.** `authority().canCall(...)` / `hasRole(...)` are summarised with a
   ghost, so the access-control rules assert "deny ⇒ revert" without instantiating a full `AccessManager`.
   This assumes the standard OZ AccessManaged gate with **`executionDelay == 0`**, which matches the suite's

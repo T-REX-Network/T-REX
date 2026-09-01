@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 import { StdInvariant } from "@forge-std/StdInvariant.sol";
-import { console2 } from "@forge-std/console2.sol";
+import { console } from "@forge-std/console.sol";
 
 import { TREXSuiteTest } from "../integration/helpers/TREXSuiteTest.sol";
 import { TokenHandler } from "./handlers/TokenHandler.sol";
@@ -94,13 +94,13 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
     /// @notice Prints how often each transition fired (visible with `forge test -vv`).
     function invariant_callSummary() public view {
-        console2.log("mint           ", handler.callsMint());
-        console2.log("burn           ", handler.callsBurn());
-        console2.log("transfer       ", handler.callsTransfer());
-        console2.log("forcedTransfer ", handler.callsForcedTransfer());
-        console2.log("freeze         ", handler.callsFreeze());
-        console2.log("unfreeze       ", handler.callsUnfreeze());
-        console2.log("pauseToggle    ", handler.callsPauseToggle());
+        console.log("mint           ", handler.callsMint());
+        console.log("burn           ", handler.callsBurn());
+        console.log("transfer       ", handler.callsTransfer());
+        console.log("forcedTransfer ", handler.callsForcedTransfer());
+        console.log("freeze         ", handler.callsFreeze());
+        console.log("unfreeze       ", handler.callsUnfreeze());
+        console.log("pauseToggle    ", handler.callsPauseToggle());
     }
 
 }
