@@ -6,6 +6,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { ITREXFactory } from "contracts/factory/ITREXFactory.sol";
+import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -179,8 +180,7 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
 
         // registry owner publishes v5.0.1 with a MockTokenV2 token implementation
         MockTokenV2 v2Implementation = new MockTokenV2();
-        ITREXImplementationAuthority.Version memory v1 =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
+        Version v1 = VersionLib.pack(5, 0, 1);
         ITREXImplementationAuthority.SuiteImplementations memory impls =
             ITREXImplementationAuthority.SuiteImplementations({
                 tokenImplementation: address(v2Implementation),

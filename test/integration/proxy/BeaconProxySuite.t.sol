@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 
@@ -49,8 +50,7 @@ contract BeaconProxySuiteTest is TREXSuiteTest {
 
         // publish v5.0.1 with a MockTokenV2 implementation; every other impl stays put
         MockTokenV2 v2Implementation = new MockTokenV2();
-        ITREXImplementationAuthority.Version memory v1 =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
+        Version v1 = VersionLib.pack(5, 0, 1);
         ITREXImplementationAuthority.SuiteImplementations memory impls =
             ITREXImplementationAuthority.SuiteImplementations({
                 tokenImplementation: address(v2Implementation),
@@ -77,8 +77,7 @@ contract BeaconProxySuiteTest is TREXSuiteTest {
 
         // publish a new version through the registry (same beacons, new impl)
         MockTokenV2 v2Implementation = new MockTokenV2();
-        ITREXImplementationAuthority.Version memory v1 =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
+        Version v1 = VersionLib.pack(5, 0, 1);
         ITREXImplementationAuthority.SuiteImplementations memory impls =
             ITREXImplementationAuthority.SuiteImplementations({
                 tokenImplementation: address(v2Implementation),

@@ -21,6 +21,14 @@ All notable changes to this project will be documented in this file.
   `publish(version, implementations)` archives a version without touching a beacon; `upgrade(version)`
   rotates all four in one transaction; `publishAndUpgrade(...)` does both. All three are gated by the
   new `VERSION_MANAGER` role rather than `OWNER`.
+- A version is a packed `uint24` (`major << 16 | minor << 8 | patch`) rather than a
+  `(uint8, uint8, uint8)` tuple, exposed as the `Version` user-defined value type in
+  `contracts/libraries/VersionLib.sol`. This changes the selectors of `publish`, `upgrade`,
+  `publishAndUpgrade`, `implementationsFor` and `currentVersion`, and the payloads of
+  the `VersionPublished` and `SuiteUpgraded` events.
+- `upgrade(version)` only moves forward: the target must rank above the active version, comparing major
+  then minor then patch, and otherwise reverts with `VersionNotNewer()`. Rolling a beacon back onto an
+  older implementation is no longer possible; recovery is a forward publish.
 - `SuiteImplementations` and `SuiteBeacons` carry four members, down from six, following the
   consolidation of the claim-topics, identity and trusted-issuers registries into `TREXRegistry`.
 

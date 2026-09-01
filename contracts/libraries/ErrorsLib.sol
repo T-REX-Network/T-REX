@@ -130,6 +130,7 @@ library ErrorsLib {
     error EmptyImplementations();
     error UnknownVersion();
     error VersionAlreadyPublished();
+    error VersionNotNewer();
 
     // TREXRegistry Errors
     error Deprecated();

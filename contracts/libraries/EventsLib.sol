@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
+import { Version } from "./VersionLib.sol";
 
 library EventsLib {
 
@@ -99,11 +100,7 @@ library EventsLib {
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);
-    event VersionPublished(
-        ITREXImplementationAuthority.Version version, ITREXImplementationAuthority.SuiteImplementations implementations
-    );
-    event SuiteUpgraded(
-        ITREXImplementationAuthority.Version version, ITREXImplementationAuthority.SuiteImplementations implementations
-    );
+    event VersionPublished(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
+    event SuiteUpgraded(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
 
 }

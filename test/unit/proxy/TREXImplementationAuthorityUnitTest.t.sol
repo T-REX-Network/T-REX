@@ -11,6 +11,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/beacon/TREXImplementationAuthority.sol";
 
@@ -34,10 +35,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
     DummyIrsV1 private irsImplV1;
     DummyMcV1 private mcImplV1;
 
-    ITREXImplementationAuthority.Version private v0 =
-        ITREXImplementationAuthority.Version({ major: 4, minor: 1, patch: 0 });
-    ITREXImplementationAuthority.Version private v1 =
-        ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
+    Version private v0 = VersionLib.pack(4, 1, 0);
+    Version private v1 = VersionLib.pack(5, 0, 0);
 
     function setUp() public {
         tokenImplV0 = new DummyTokenV0();
@@ -88,20 +87,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
         assertEq(UpgradeableBeacon(bs.mcBeacon).implementation(), address(mcImplV0));
     }
 
-    function test_constructor_SeedsLatestVersionWithV0() public view {
-        ITREXImplementationAuthority.Version memory latest = authority.latestVersion();
-
-        assertEq(latest.major, v0.major);
-        assertEq(latest.minor, v0.minor);
-        assertEq(latest.patch, v0.patch);
-    }
-
     function test_constructor_SeedsCurrentVersionWithV0() public view {
-        ITREXImplementationAuthority.Version memory active = authority.currentVersion();
-
-        assertEq(active.major, v0.major);
-        assertEq(active.minor, v0.minor);
-        assertEq(active.patch, v0.patch);
+        assertTrue(authority.currentVersion() == v0, "active version must be v0");
     }
 
     function test_constructor_ArchivesV0Implementations() public view {
@@ -194,17 +181,6 @@ contract TREXImplementationAuthorityUnitTest is Test {
         assertEq(archived.mcImplementation, address(mcImplV1));
     }
 
-    function test_publishAndUpgrade_UpdatesLatestVersion() public {
-        vm.prank(versionManager);
-        authority.publishAndUpgrade(v1, _v1Impls());
-
-        ITREXImplementationAuthority.Version memory latest = authority.latestVersion();
-
-        assertEq(latest.major, v1.major);
-        assertEq(latest.minor, v1.minor);
-        assertEq(latest.patch, v1.patch);
-    }
-
     function test_publishAndUpgrade_KeepsV0ArchiveIntact() public {
         vm.prank(versionManager);
         authority.publishAndUpgrade(v1, _v1Impls());
@@ -282,20 +258,12 @@ contract TREXImplementationAuthorityUnitTest is Test {
         assertEq(UpgradeableBeacon(bs.mcBeacon).implementation(), address(mcImplV0));
     }
 
-    function test_publish_AdvancesLatestVersionButNotCurrentVersion() public {
+    function test_publish_DoesNotMoveCurrentVersion() public {
         vm.prank(versionManager);
         authority.publish(v1, _v1Impls());
 
-        ITREXImplementationAuthority.Version memory latest = authority.latestVersion();
-        assertEq(latest.major, v1.major);
-        assertEq(latest.minor, v1.minor);
-        assertEq(latest.patch, v1.patch);
-
         // active version stays at v0 until a separate upgrade rotates the beacons
-        ITREXImplementationAuthority.Version memory active = authority.currentVersion();
-        assertEq(active.major, v0.major);
-        assertEq(active.minor, v0.minor);
-        assertEq(active.patch, v0.patch);
+        assertTrue(authority.currentVersion() == v0, "active version must stay at v0");
     }
 
     function test_publish_ArchivesImplementations() public {
@@ -357,10 +325,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         authority.upgrade(v1);
         vm.stopPrank();
 
-        ITREXImplementationAuthority.Version memory active = authority.currentVersion();
-        assertEq(active.major, v1.major);
-        assertEq(active.minor, v1.minor);
-        assertEq(active.patch, v1.patch);
+        assertTrue(authority.currentVersion() == v1, "active version must be v1");
     }
 
     function test_upgrade_EmitsSuiteUpgraded() public {
@@ -374,19 +339,32 @@ contract TREXImplementationAuthorityUnitTest is Test {
         authority.upgrade(v1);
     }
 
-    function test_upgrade_CanRollBackToEarlierVersion() public {
+    function test_upgrade_RevertWhen_RollingBackToAnEarlierVersion() public {
         vm.startPrank(versionManager);
         authority.publishAndUpgrade(v1, _v1Impls());
-        // roll back to v0 — still a published version, beacons must return to the v0 implementations
+
+        // v0 is still published, but the beacons only ever move forward
+        vm.expectRevert(ErrorsLib.VersionNotNewer.selector);
+        authority.upgrade(v0);
+        vm.stopPrank();
+    }
+
+    function test_upgrade_RevertWhen_TargetingTheActiveVersion() public {
+        vm.prank(versionManager);
+        vm.expectRevert(ErrorsLib.VersionNotNewer.selector);
+        authority.upgrade(v0);
+    }
+
+    function test_upgrade_LeavesBeaconsUntouchedWhen_NotNewer() public {
+        vm.startPrank(versionManager);
+        authority.publishAndUpgrade(v1, _v1Impls());
+        vm.expectRevert(ErrorsLib.VersionNotNewer.selector);
         authority.upgrade(v0);
         vm.stopPrank();
 
         ITREXImplementationAuthority.SuiteBeacons memory bs = authority.beacons();
-        assertEq(UpgradeableBeacon(bs.tokenBeacon).implementation(), address(tokenImplV0));
-
-        // latest published is still v1, active rolled back to v0
-        assertEq(authority.latestVersion().major, v1.major);
-        assertEq(authority.currentVersion().major, v0.major);
+        assertEq(UpgradeableBeacon(bs.tokenBeacon).implementation(), address(tokenImplV1));
+        assertTrue(authority.currentVersion() == v1, "active version must stay at v1");
     }
 
     function test_upgrade_RevertWhen_UnknownVersion() public {
@@ -410,10 +388,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         vm.prank(versionManager);
         authority.publishAndUpgrade(v1, _v1Impls());
 
-        ITREXImplementationAuthority.Version memory active = authority.currentVersion();
-        assertEq(active.major, v1.major);
-        assertEq(active.minor, v1.minor);
-        assertEq(active.patch, v1.patch);
+        assertTrue(authority.currentVersion() == v1, "active version must be v1");
     }
 
     function test_publishAndUpgrade_EmitsVersionPublishedThenSuiteUpgraded() public {

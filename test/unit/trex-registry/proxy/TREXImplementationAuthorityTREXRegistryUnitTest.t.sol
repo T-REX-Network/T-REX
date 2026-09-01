@@ -10,6 +10,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
@@ -34,10 +35,8 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
     DummyImpl public mcImpl;
     DummyImpl public trexRegistryImpl;
 
-    ITREXImplementationAuthority.Version private v0 =
-        ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
-    ITREXImplementationAuthority.Version private v1 =
-        ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
+    Version private v0 = VersionLib.pack(5, 0, 0);
+    Version private v1 = VersionLib.pack(5, 0, 1);
 
     function setUp() public {
         tokenImpl = new DummyImpl();

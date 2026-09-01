@@ -20,6 +20,7 @@ import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { VersionLib } from "contracts/libraries/VersionLib.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
@@ -266,9 +267,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      to VERSION_MANAGER, which the deployer holds.
     function _deployTREXImplementationAuthority() internal returns (TREXImplementationAuthority) {
         TREXImplementationAuthority ia = new TREXImplementationAuthority(
-            address(accessManager),
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 }),
-            _suiteImplementations()
+            address(accessManager), VersionLib.pack(5, 0, 0), _suiteImplementations()
         );
 
         _authorizeIAGovernance(address(ia));
