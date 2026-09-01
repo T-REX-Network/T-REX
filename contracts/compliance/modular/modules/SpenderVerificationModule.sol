@@ -36,7 +36,6 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-
 /**
  *     NOTICE
  *
@@ -63,87 +62,97 @@
 
 pragma solidity 0.8.30;
 
-library ErrorsLib {
+import { IERC3643 } from "../../../ERC-3643/IERC3643.sol";
+import { IERC3643IdentityRegistry } from "../../../ERC-3643/IERC3643IdentityRegistry.sol";
+import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
+import { ModuleCapabilitiesLib } from "../../../libraries/ModuleCapabilitiesLib.sol";
+import {
+    AccessManagedOwnableBase,
+    AccessManagedOwnableUpgradeable
+} from "../../../utils/AccessManagedOwnableUpgradeable.sol";
+import { IModularCompliance } from "../IModularCompliance.sol";
+import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
+import { IModule } from "./IModule.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error InvalidImplementationAuthority();
+/// @title SpenderVerificationModule
+/// @dev Requires the spender of a `transferFrom` to be verified in the token's registry.
+/// Stateless: the registry is resolved through the compliance on every call.
+contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable {
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error NoTokenToRecover();
-    error RecoveryNotPossible();
-    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
-    error UnverifiedIdentity();
+    constructor() {
+        _disableInitializers();
+    }
 
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
+    /// @dev Initializes the module behind its proxy.
+    /// @param accessManagerAddress authority gating the implementation upgrade
+    function initialize(address accessManagerAddress) external initializer {
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
+        __AbstractModule_init();
+        __AccessManaged_init(accessManagerAddress);
+    }
 
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    error TokenAlreadyDeployed();
+    /// @inheritdoc IModule
+    /// @return true if the spender is verified in the registry of the bound token
+    function moduleCheckSpender(address _spender, address, address, uint256, address _compliance)
+        external
+        view
+        override
+        returns (bool)
+    {
+        return _identityRegistry(_compliance).isVerified(_spender);
+    }
 
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
+    /// @inheritdoc IModule
+    /// @return the bitmask of the dispatch points this module implements
+    function moduleCapabilities() external pure returns (uint256) {
+        return ModuleCapabilitiesLib.CHECK_SPENDER;
+    }
 
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
+    /// @inheritdoc IModule
+    /// @dev Nothing to verify: the module holds no per-compliance state to set up.
+    /// @return always true
+    function canComplianceBind(address) external pure returns (bool) {
+        return true;
+    }
 
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
+    /// @inheritdoc IModule
+    /// @dev Binds anywhere, in any order. The registry is resolved through the bound token at check
+    /// time, and `moduleCheckSpender` is only ever reached from a token's `transferFrom`, so a token
+    /// is necessarily bound by then.
+    /// @return always true
+    function isPlugAndPlay() external pure returns (bool) {
+        return true;
+    }
 
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
+    /// @inheritdoc IModule
+    /// @return _name the name of the module
+    function name() external pure returns (string memory _name) {
+        return "SpenderVerificationModule";
+    }
 
-    // TREXImplementationAuthority Errors
-    error CannotCallOnReferenceContract();
-    error NewIAIsNotAReferenceContract();
-    error NonExistingVersion();
-    error OnlyReferenceContractCanCall();
-    error VersionAlreadyFetched();
-    error VersionAlreadyExists();
-    error VersionAlreadyInUse();
-    error VersionOfNewIAMustBeTheSameAsCurrentIA();
+    /// @inheritdoc AccessManagedOwnableBase
+    /// @param interfaceId the interface identifier, as specified in ERC-165
+    /// @return true if the contract implements `interfaceId`
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(AbstractModuleUpgradeable, AccessManagedOwnableBase)
+        returns (bool)
+    {
+        return AbstractModuleUpgradeable.supportsInterface(interfaceId)
+            || AccessManagedOwnableBase.supportsInterface(interfaceId);
+    }
 
-    // AbstractProxy Errors
-    error OnlyCurrentImplementationAuthorityCanCall();
+    /// @dev Resolves the registry of the token bound to a compliance.
+    /// @param _compliance address of the compliance contract
+    /// @return the identity registry of the token bound to `_compliance`
+    function _identityRegistry(address _compliance) private view returns (IERC3643IdentityRegistry) {
+        return IERC3643(IModularCompliance(_compliance).getTokenBound()).identityRegistry();
+    }
+
+    /// @dev Gated through the shared authority.
+    function _authorizeUpgrade(address) internal override restricted { }
 
 }

@@ -78,8 +78,7 @@ import { IModule } from "./IModule.sol";
  * module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
  * it is the one member a module MUST declare.
  *
- * Keep the declaration next to the overrides it describes. An override without its flag is never called,
- * and the rule silently stops applying; the EVM cannot detect this, so nothing catches it for you.
+ * An override without its flag is never called, so the rule silently stops applying.
  *
  * Capabilities are immutable per implementation. An upgrade that changes them is a breaking change until
  * each bound compliance calls `refreshModuleCapabilities`.
@@ -94,10 +93,14 @@ abstract contract AbstractModuleUpgradeable is
 
     /// @custom:storage-location erc7201:ERC3643.storage.AbstractModule
     struct AbstractModuleStorage {
-        /// compliance contract binding status
-        mapping(address => bool) complianceBound;
-        /// nonce for the module
-        mapping(address => uint256) nonces;
+        /// Compliance contract binding status
+        mapping(address compliance => bool) complianceBound;
+
+        /// Bind nonce per compliance, incremented on every unbind.
+        /// @dev A module that keys its own per-compliance storage by this nonce drops all of it in a single
+        /// write when the compliance unbinds, instead of iterating and clearing entry by entry. The old
+        /// entries are never read again and stay behind as harmless orphans.
+        mapping(address compliance => uint256) nonces;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.AbstractModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -141,6 +144,7 @@ abstract contract AbstractModuleUpgradeable is
 
     /**
      *  @dev See {IModule-unbindCompliance}.
+     *  Increments the bind nonce of `_compliance`, which invalidates any module storage keyed by it.
      */
     function unbindCompliance(address _compliance) external onlyComplianceCall onlyProxy {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
@@ -195,6 +199,11 @@ abstract contract AbstractModuleUpgradeable is
         return s.complianceBound[_compliance];
     }
 
+    /**
+     *  @dev Returns the current bind nonce of `_compliance`, starting at 0 and incremented on every
+     *  unbind. Modules key their per-compliance storage by this value so that an unbind discards it.
+     *  @param _compliance compliance contract address
+     */
     function getNonce(address _compliance) public view returns (uint256) {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         return s.nonces[_compliance];

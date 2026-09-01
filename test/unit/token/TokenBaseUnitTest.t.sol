@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
+import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
@@ -69,6 +70,7 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.unbindToken.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector), abi.encode(true));
+        vm.mockCall(compliance, abi.encodeWithSelector(IModularCompliance.canSpenderCall.selector), abi.encode(true));
 
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.created.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.destroyed.selector), "");
