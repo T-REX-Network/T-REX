@@ -36,7 +36,6 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-
 /**
  *     NOTICE
  *
@@ -61,31 +60,46 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity 0.8.30;
+pragma solidity ^0.8.30;
 
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
-import { TrustedIssuersRegistry } from "../registry/implementation/TrustedIssuersRegistry.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { AbstractProxy } from "./AbstractProxy.sol";
 import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
 
-contract TrustedIssuersRegistryProxy is AbstractProxy {
+/// @title TREXRegistryProxy
+/// @notice Upgradeable proxy in front of the `TREXRegistry` contract.
+/// @dev    Holds its implementation authority in the `AbstractProxy` storage slot
+///         (`erc3643.proxy.beacon`). The implementation address is resolved on every call via the
+///         configured `TREXImplementationAuthority`'s `getTREXRegistryImplementation()`.
+contract TREXRegistryProxy is AbstractProxy {
 
     constructor(
         address implementationAuthority,
+        address identityStorageAddress,
         address accessManager,
+        uint256[] memory initialTopics,
         address[] memory issuers,
         uint256[][] memory issuerClaims
     ) AbstractProxy(implementationAuthority) {
+        // A delegatecall to address(0) succeeds silently, which would leave the proxy uninitialized;
+        address logic = getLogic();
+        require(logic != address(0), ErrorsLib.ZeroAddress());
+
         if (!LowLevelCall.delegatecallNoReturn(
-                getLogic(), abi.encodeCall(TrustedIssuersRegistry.init, (accessManager, issuers, issuerClaims))
+                logic,
+                abi.encodeCall(
+                    TREXRegistry.init, (identityStorageAddress, accessManager, initialTopics, issuers, issuerClaims)
+                )
             )) {
             LowLevelCall.bubbleRevert();
         }
     }
 
     function getLogic() internal view override returns (address) {
-        return (ITREXImplementationAuthority(getImplementationAuthority())).getTIRImplementation();
+        return (ITREXImplementationAuthority(getImplementationAuthority())).getTREXRegistryImplementation();
     }
 
 }

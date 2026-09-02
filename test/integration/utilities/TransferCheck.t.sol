@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
@@ -15,7 +15,7 @@ contract TransferCheckTest is TREXSuiteTest {
 
     UtilityChecker public utilityChecker;
     ModularCompliance public compliance;
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
     TestModule public testModule;
 
     function setUp() public override {
@@ -30,7 +30,7 @@ contract TransferCheckTest is TREXSuiteTest {
         compliance.addModule(address(testModule));
 
         // Get IdentityRegistry
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         // Register alice and bob in IdentityRegistry
         vm.prank(agent);

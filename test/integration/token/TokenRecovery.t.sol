@@ -6,18 +6,18 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenRecoveryTest is TREXSuiteTest {
 
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
 
     function setUp() public override {
         super.setUp();
 
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         vm.prank(agent);
         token.mint(bob, 500);

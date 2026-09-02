@@ -94,16 +94,11 @@ library EventsLib {
 
     /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
     event IdentityModulesSet(address keyApprovalModule, address validatorModule);
-    event TREXSuiteDeployed(
-        address indexed token, address ir, address irs, address tir, address ctr, address mc, string salt
-    );
+    event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
 
     // TREXImplementationAuthority Events
 
     event TREXVersionAdded(
-        ITREXImplementationAuthority.Version indexed version, ITREXImplementationAuthority.TREXContracts indexed trex
-    );
-    event TREXVersionFetched(
         ITREXImplementationAuthority.Version indexed version, ITREXImplementationAuthority.TREXContracts indexed trex
     );
     event VersionUpdated(ITREXImplementationAuthority.Version indexed version);
@@ -111,6 +106,7 @@ library EventsLib {
     event TREXFactorySet(address indexed trexFactory);
     event IAFactorySet(address indexed iaFactory);
     event ImplementationAuthorityChanged(address indexed token, address indexed newImplementationAuthority);
+    event TREXRegistryImplementationSet(address indexed trexRegistryImplementation);
 
     // IAFactory Events
 

@@ -104,13 +104,14 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
 
         // Create a new reference IA with the other factory in constructor
         // This factory references otherIASetup, not this IA
-        vm.prank(deployer);
+        vm.startPrank(deployer);
         TREXImplementationAuthority newIA = new TREXImplementationAuthority(
             true, // is reference
             address(otherFactory), // factory that references a different IA
             address(0), // no IAFactory
             address(accessManager)
         );
+        vm.stopPrank();
         _authorizeIAGovernance(address(newIA));
 
         // Now try to set IAFactory - should revert because otherFactory.getImplementationAuthority() != address(newIA)
@@ -334,11 +335,9 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
             ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
         ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: address(tokenImplementation),
-            ctrImplementation: address(claimTopicsRegistryImplementation),
-            irImplementation: address(identityRegistryImplementation),
             irsImplementation: address(identityRegistryStorageImplementation),
-            tirImplementation: address(trustedIssuersRegistryImplementation),
-            mcImplementation: address(modularComplianceImplementation)
+            mcImplementation: address(modularComplianceImplementation),
+            trexRegistryImplementation: address(trexRegistryImplementation)
         });
         vm.prank(deployer);
         otherIA.addAndUseTREXVersion(version, contracts);
@@ -499,7 +498,7 @@ contract TREXImplementationAuthorityTest is TREXSuiteTest {
         // Try to call deployIA from a non-reference address
         // This should revert at line 90 because msg.sender != trexFactory.getImplementationAuthority()
         vm.prank(nonReferenceIA);
-        vm.expectRevert(IAFactory.OnlyReferenceIACanDeploy.selector);
+        vm.expectRevert(ErrorsLib.OnlyReferenceIACanDeploy.selector);
         iaFactory.deployIA(address(token));
     }
 

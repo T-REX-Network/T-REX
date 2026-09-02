@@ -11,7 +11,7 @@ import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { RecordingModule, SpenderCheckOnlyModule } from "../mocks/CapabilityModules.sol";
 import { TestModule } from "../mocks/TestModule.sol";
@@ -19,12 +19,12 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenTransferTest is TREXSuiteTest {
 
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
 
     function setUp() public override {
         super.setUp();
 
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         vm.startPrank(agent);
         token.mint(alice, 1000);

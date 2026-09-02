@@ -84,6 +84,23 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         assertEq(token.balanceOf(to), transferAmount);
     }
 
+    function testTokenBatchForcedTransferRevertsWhenNotAgent(address caller) public {
+        vm.assume(caller != agent);
+
+        address[] memory froms = new address[](1);
+        froms[0] = from;
+
+        address[] memory tos = new address[](1);
+        tos[0] = to;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = transferAmount;
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
+        vm.prank(caller);
+        token.batchForcedTransfer(froms, tos, amounts);
+    }
+
     function testTokenBatchForcedTransferNominal() public {
         address from1 = makeAddr("From1");
         address from2 = makeAddr("From2");

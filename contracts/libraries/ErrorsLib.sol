@@ -97,7 +97,6 @@ library ErrorsLib {
     // Module Errors
     error ComplianceNotBound();
     error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(address spender);
@@ -131,7 +130,6 @@ library ErrorsLib {
     error NotATrustedIssuer();
     error TrustedClaimTopicsCannotBeEmpty();
     error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
 
     // TREXImplementationAuthority Errors
     error CannotCallOnReferenceContract();
@@ -145,5 +143,11 @@ library ErrorsLib {
 
     // AbstractProxy Errors
     error OnlyCurrentImplementationAuthorityCanCall();
+
+    // IAFactory Errors
+    error OnlyReferenceIACanDeploy();
+
+    // TREXRegistry Errors
+    error Deprecated();
 
 }

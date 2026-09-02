@@ -8,7 +8,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { SpenderVerificationModule } from "contracts/compliance/modular/modules/SpenderVerificationModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -18,14 +18,14 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 contract SpenderVerificationModuleTest is TREXSuiteTest {
 
     ModularCompliance internal mc;
-    IdentityRegistry internal identityRegistry;
+    TREXRegistry internal identityRegistry;
     SpenderVerificationModule internal module;
 
     function setUp() public override {
         super.setUp();
 
         mc = ModularCompliance(address(token.compliance()));
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         vm.startPrank(agent);
         token.mint(alice, 1000);

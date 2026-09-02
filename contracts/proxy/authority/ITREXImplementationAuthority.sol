@@ -68,16 +68,12 @@ interface ITREXImplementationAuthority {
     struct TREXContracts {
         // address of token implementation contract
         address tokenImplementation;
-        // address of ClaimTopicsRegistry implementation contract
-        address ctrImplementation;
-        // address of IdentityRegistry implementation contract
-        address irImplementation;
         // address of IdentityRegistryStorage implementation contract
         address irsImplementation;
-        // address of TrustedIssuersRegistry implementation contract
-        address tirImplementation;
         // address of ModularCompliance implementation contract
         address mcImplementation;
+        // address of TREXRegistry implementation contract
+        address trexRegistryImplementation;
     }
 
     struct Version {
@@ -195,34 +191,22 @@ interface ITREXImplementationAuthority {
     function getTokenImplementation() external view returns (address);
 
     /**
-     *  @dev getter function returning address of ClaimTopicsRegistry contract implementation
-     *  currently used by the proxies using this TREXImplementationAuthority
-     */
-    function getCTRImplementation() external view returns (address);
-
-    /**
-     *  @dev getter function returning address of IdentityRegistry contract implementation
-     *  currently used by the proxies using this TREXImplementationAuthority
-     */
-    function getIRImplementation() external view returns (address);
-
-    /**
      *  @dev getter function returning address of IdentityRegistryStorage contract implementation
      *  currently used by the proxies using this TREXImplementationAuthority
      */
     function getIRSImplementation() external view returns (address);
 
     /**
-     *  @dev getter function returning address of TrustedIssuersRegistry contract implementation
-     *  currently used by the proxies using this TREXImplementationAuthority
-     */
-    function getTIRImplementation() external view returns (address);
-
-    /**
      *  @dev getter function returning address of ModularCompliance contract implementation
      *  currently used by the proxies using this TREXImplementationAuthority
      */
     function getMCImplementation() external view returns (address);
+
+    /**
+     *  @dev getter function returning address of TREXRegistry contract
+     *  implementation currently used by the proxies using this TREXImplementationAuthority.
+     */
+    function getTREXRegistryImplementation() external view returns (address);
 
     /**
      *  @dev returns true if the contract is the main contract

@@ -17,7 +17,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { PausableUpgradeable, Token } from "contracts/token/Token.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
@@ -26,12 +26,12 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenInformationTest is TREXSuiteTest {
 
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
 
     function setUp() public override {
         super.setUp();
 
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         vm.prank(agent);
         token.unpause();
@@ -520,11 +520,9 @@ contract TokenInformationTest is TREXSuiteTest {
 
         ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
             tokenImplementation: address(mockImpl), // Invalid - doesn't have init() function
-            ctrImplementation: address(mockImpl), // Invalid
-            irImplementation: address(mockImpl), // Invalid
             irsImplementation: address(mockImpl), // Invalid
-            tirImplementation: address(mockImpl), // Invalid
-            mcImplementation: address(mockImpl) // Invalid
+            mcImplementation: address(mockImpl), // Invalid
+            trexRegistryImplementation: address(mockImpl) // Invalid
         });
 
         // Add version to IA (need to be owner)
