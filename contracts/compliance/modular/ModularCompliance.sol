@@ -65,12 +65,13 @@ pragma solidity 0.8.30;
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
-import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
@@ -78,20 +79,19 @@ import { IModule } from "./modules/IModule.sol";
 
 contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeable {
 
-    using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableMap for EnumerableMap.AddressToUintMap;
 
     /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
     struct Storage {
         /// token linked to the compliance contract
         address tokenBound;
-        /// Set of modules bound to the compliance
-        EnumerableSet.AddressSet modules;
+        /// Bound modules, each mapped to the dispatch points it declares.
+        EnumerableMap.AddressToUintMap modules;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0x44b49c37d3109105ef492022bec834e94dca859d191a0d5323d3afbc4aa69400;
 
-    /// modifiers
     /**
      * @dev Throws if called by any address that is not a token bound to the compliance.
      */
@@ -156,10 +156,22 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     function removeModule(address _module) external restricted {
         require(_module != address(0), ErrorsLib.ZeroAddress());
 
-        Storage storage s = _getStorage();
-        require(s.modules.remove(_module), ErrorsLib.ModuleNotBound());
+        require(_getStorage().modules.remove(_module), ErrorsLib.ModuleNotBound());
         IModule(_module).unbindCompliance(address(this));
         emit EventsLib.ModuleRemoved(_module);
+    }
+
+    /**
+     *  @dev See {IModularCompliance-refreshModuleCapabilities}.
+     */
+    function refreshModuleCapabilities(address _module) external restricted {
+        Storage storage s = _getStorage();
+        require(s.modules.contains(_module), ErrorsLib.ModuleNotBound());
+
+        uint256 capabilities = _readCapabilities(_module);
+        s.modules.set(_module, capabilities);
+
+        emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
     }
 
     /**
@@ -171,7 +183,10 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules.at(i)).moduleTransferAction(_from, _to, _value);
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.HOOK_TRANSFER != 0) {
+                IModule(module).moduleTransferAction(_from, _to, _value);
+            }
         }
     }
 
@@ -184,7 +199,10 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules.at(i)).moduleMintAction(_to, _value);
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.HOOK_MINT != 0) {
+                IModule(module).moduleMintAction(_to, _value);
+            }
         }
     }
 
@@ -197,7 +215,10 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(s.modules.at(i)).moduleBurnAction(_from, _value);
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.HOOK_BURN != 0) {
+                IModule(module).moduleBurnAction(_from, _value);
+            }
         }
     }
 
@@ -223,7 +244,36 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
      *  @dev See {IModularCompliance-getModules}.
      */
     function getModules() external view returns (address[] memory) {
-        return _getStorage().modules.values();
+        return _getStorage().modules.keys();
+    }
+
+    /**
+     *  @dev See {IModularCompliance-getModuleCapabilities}.
+     */
+    function getModuleCapabilities(address _module) external view returns (uint256) {
+        Storage storage s = _getStorage();
+        require(s.modules.contains(_module), ErrorsLib.ModuleNotBound());
+        return s.modules.get(_module);
+    }
+
+    /**
+     *  @dev See {IModularCompliance-getModulesByCapability}.
+     */
+    function getModulesByCapability(uint256 _capability) external view returns (address[] memory) {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        address[] memory matched = new address[](length);
+        uint256 count;
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & _capability != 0) {
+                matched[count++] = module;
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(matched, count)
+        }
+        return matched;
     }
 
     /**
@@ -247,7 +297,30 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(s.modules.at(i)).moduleCheck(_from, _to, _value, address(this))) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (
+                capabilities & ModuleCapabilitiesLib.CHECK_TRANSFER != 0
+                    && !IModule(module).moduleCheck(_from, _to, _value, address(this))
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     *  @dev See {IModularCompliance-canSpenderCall}.
+     */
+    function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (
+                capabilities & ModuleCapabilitiesLib.CHECK_SPENDER != 0
+                    && !IModule(module).moduleCheckSpender(_spender, _from, _to, _value, address(this))
+            ) {
                 return false;
             }
         }
@@ -278,33 +351,46 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
-    ///      No caller check — the public `bindToken` wrapper enforces the Token-self-bind policy.
+    ///  No caller check — the public `bindToken` wrapper enforces the Token-self-bind policy.
     function _bindToken(address _token) internal {
         require(_token != address(0), ErrorsLib.ZeroAddress());
         _getStorage().tokenBound = _token;
         emit ERC3643EventsLib.TokenBound(_token);
     }
 
-    /// @dev Binds a module to the compliance with the existing validation rules (zero check, duplicate check,
-    ///      cap of 25, plug-and-play / canComplianceBind requirement). No caller check — wrappers enforce it.
+    /// @dev Binds a module with the existing validation rules (zero check, duplicate check, cap of 25,
+    ///  plug-and-play / canComplianceBind requirement) and records the dispatch points it declares.
+    ///  No caller check — wrappers enforce it. Everything is validated before any state is written,
+    ///  so `canComplianceBind` sees the module as not yet bound.
     function _addModule(address _module) internal {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
         require(s.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
-        require(s.modules.add(_module), ErrorsLib.ModuleAlreadyBound());
+        require(!s.modules.contains(_module), ErrorsLib.ModuleAlreadyBound());
         IModule module = IModule(_module);
         require(
             module.isPlugAndPlay() || module.canComplianceBind(address(this)),
             ErrorsLib.ComplianceNotSuitableForBindingToModule(_module)
         );
 
+        uint256 capabilities = _readCapabilities(_module);
+        s.modules.set(_module, capabilities);
+
         module.bindCompliance(address(this));
 
         emit EventsLib.ModuleAdded(_module);
+        emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
+    }
+
+    /// @dev Reads a module's declaration and rejects anything the compliance cannot route.
+    function _readCapabilities(address _module) internal pure returns (uint256 capabilities) {
+        capabilities = IModule(_module).moduleCapabilities();
+        require(capabilities != 0, ErrorsLib.ModuleHasNoCapabilities());
+        require(capabilities & ~ModuleCapabilitiesLib.ALL == 0, ErrorsLib.InvalidModuleCapabilities(capabilities));
     }
 
     /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
-    ///      Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
+    ///  Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         require(_getStorage().modules.contains(_module), ErrorsLib.ModuleNotBound());
 

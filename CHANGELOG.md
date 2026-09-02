@@ -1,19 +1,71 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
-## [5.0.0] - Unreleased
+## [Unreleased] - v5
 
-### Removed
+### Added
 
-- Custom `AbstractProxy` / `IProxy`-based `TREXImplementationAuthority` / `IAFactory` stack removed.
-  The per-type wrapper proxies (`TokenProxy`, `IdentityRegistryStorageProxy`, `TREXRegistryProxy`,
-  `ModularComplianceProxy`) and the `IProxy` / `IIAFactory` interfaces are deleted.
-- Public ABI break: `setImplementationAuthority(address)` and `getImplementationAuthority()` selectors
-  are removed from every suite proxy, and `changeImplementationAuthority(...)` is removed from the
-  upgrade path.
+- **Capabilities-based selective module dispatch**: a module declares which dispatch points are
+  meaningful for it, and `ModularCompliance` only calls it there.
+  - `IModule.moduleCapabilities()` returns a bitmask built from the flags of the new
+    `ModuleCapabilitiesLib` (`CHECK_TRANSFER`, `CHECK_SPENDER`, `HOOK_TRANSFER`, `HOOK_MINT`,
+    `HOOK_BURN`). It MUST be `pure`: the declaration is read once, at binding time.
+  - `refreshModuleCapabilities(address)` re-reads the declaration of a bound module, for when an
+    implementation upgrade changed it. Restricted to OWNER. The module moves to the end of the set.
+  - `getModuleCapabilities(address)` and `getModulesByCapability(uint256)` expose the recorded
+    routing. `UtilityChecker.getTransferDetails` now reports only the modules that vet transfers.
+  - `ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities)` on bind and refresh.
+- **Spender compliance check**: `IModule.moduleCheckSpender(...)` and
+  `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules declaring
+  `CHECK_SPENDER`.
+  - `Token.transferFrom` consults it before spending the allowance and reverts
+    `SpenderNotAllowed(address spender, address from, address to, uint256 value)` when a module
+    refuses the caller — the whole call is reported, since a module may accept a spender in general
+    and still refuse the specific transfer. A refused call leaves the allowance and the balances
+    untouched.
+  - Only `transferFrom` is concerned. A direct `transfer` has no spender to vet and pays nothing for
+    the check; `mint`, `burn` and `forcedTransfer` stay gated by roles alone, since agent
+    permissioning is not investor-facing compliance.
+  - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
+    empty set.
+- **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
+  verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
+  It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
+  on every call, so it is plug and play and binds in any order. Investors are unaffected: a direct
+  `transfer` never consults it.
+- **`SpenderWhitelistModule`**: per-compliance allowlist of the operators an issuer trusts to call
+  `transferFrom` — marketplaces, settlement contracts, custodians, none of which eligibility can
+  describe. `allowSpender` / `disallowSpender` run through `callModuleFunction` and revert
+  `SpenderAlreadyAllowed` / `SpenderNotListed` on a redundant call. **Default closed**: a freshly
+  bound module blocks every `transferFrom` until an operator is listed, so bind it with
+  `addAndSetModule` to list several at once. Entries are scoped by the bind nonce, so an unbind
+  discards the list rather than resurrecting it on rebind.
+- **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
+  and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
+  single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
+  - `ITREXRegistry` inherits `IERC3643IdentityRegistry`, `IERC3643TrustedIssuersRegistry` and
+    `IERC3643ClaimTopicsRegistry`; `supportsInterface` answers for all four ids. An integration
+    holding an `IERC3643IdentityRegistry` reference keeps working against the merged address.
+  - `issuersRegistry()` and `topicsRegistry()` return `address(this)`, so code that hops from the
+    identity registry to the other two lands back on the same contract.
+  - A suite deploys one registry proxy instead of three. Claim topics and trusted issuers are seeded
+    through the initializer called atomically at deployment, so the factory never needs an OWNER role
+    on the registry it just deployed.
+- Per-token opt-out is deploy-time only, via `TREXFactory.deployTREXSuiteIsolated(...)`, which clones
+  the four beacons under the issuer's own AccessManager so later `publish` / `upgrade` calls on the
+  shared authority never reach that suite.
 
 ### Changed
 
+- **Breaking, registries merged**: `IdentityRegistry`, `TrustedIssuersRegistry` and
+  `ClaimTopicsRegistry` are gone, together with `IIdentityRegistry`, `ITrustedIssuersRegistry`,
+  `IClaimTopicsRegistry` and their proxies.
+- **Breaking, `ITREXImplementationAuthority`**: `SuiteImplementations` replaces `ctrImplementation`,
+  `irImplementation` and `tirImplementation` with a single `trexRegistryImplementation`. A version is
+  complete with four implementations instead of six.
+- **Breaking, `TREXSuiteDeployed`**: now `(address indexed token, address registry, address irs,
+  address mc, string salt)`. The `tir` and `ctr` addresses are gone and `registry` is the merged
+  registry.
 - Suite contracts are now stock OZ `BeaconProxy` instances pointing at four per-type
   `UpgradeableBeacon`s: Token, TREXRegistry, IdentityRegistryStorage and ModularCompliance. The beacon
   address lives at the standard ERC-1967 beacon slot.
@@ -29,14 +81,39 @@ All notable changes to this project will be documented in this file.
 - `upgrade(version)` only moves forward: the target must rank above the active version, comparing major
   then minor then patch, and otherwise reverts with `VersionNotNewer()`. Rolling a beacon back onto an
   older implementation is no longer possible; recovery is a forward publish.
-- `SuiteImplementations` and `SuiteBeacons` carry four members, down from six, following the
-  consolidation of the claim-topics, identity and trusted-issuers registries into `TREXRegistry`.
+- `setClaimTopicsRegistry` and `setTrustedIssuersRegistry` stay for ERC-3643 conformance but revert
+  `Deprecated()`: the registry is its own topics and issuers registry and cannot point elsewhere.
+- `getTrustedIssuerClaimTopics` returns an empty array for an unregistered issuer instead of
+  reverting, and `TrustedIssuerDoesNotExist` is removed. `updateIssuerClaimTopics` still rejects an
+  empty set, so stripping an issuer of every topic means `removeTrustedIssuer`.
+- `batchRegisterIdentity` is `restricted` and bound to AGENT. No role was bound to its selector
+  before, so the AccessManager fell back to admin-only on a function meant for agents.
+- **Breaking, `IModule`**: `moduleCapabilities()` is mandatory and abstract, so every module must
+  declare its dispatch points. `AbstractModuleUpgradeable` now ships defaults for the five dispatch
+  functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
+  are immutable per implementation; an upgrade that changes them needs a refresh on every bound
+  compliance.
+- **Breaking, interface ids**: `type(IModule).interfaceId` and `type(IModularCompliance).interfaceId`
+  both change.
+- `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
+  (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
+  routing decision. Ordering is not preserved across a removal or a refresh.
+- Binding validates fully before writing state, so `canComplianceBind` now sees the module as not yet
+  bound. A module declaring nothing, or carrying an undefined bit, cannot be bound
+  (`ModuleHasNoCapabilities`, `InvalidModuleCapabilities`).
 
-### Added
+Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
+~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;
+transfers are not.
 
-- Per-token opt-out is deploy-time only, via `TREXFactory.deployTREXSuiteIsolated(...)`, which clones
-  the four beacons under the issuer's own AccessManager so later `publish` / `upgrade` calls on the
-  shared authority never reach that suite.
+### Removed
+
+- Custom `AbstractProxy` / `IProxy`-based `TREXImplementationAuthority` / `IAFactory` stack removed.
+  The per-type wrapper proxies (`TokenProxy`, `IdentityRegistryStorageProxy`, `TREXRegistryProxy`,
+  `ModularComplianceProxy`) and the `IProxy` / `IIAFactory` interfaces are deleted.
+- Public ABI break: `setImplementationAuthority(address)` and `getImplementationAuthority()` selectors
+  are removed from every suite proxy, and `changeImplementationAuthority(...)` /
+  `changeImplementationAuthorityOfToken(...)` are removed from the upgrade path.
 
 ## [4.2.0]
 

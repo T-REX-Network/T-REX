@@ -62,128 +62,97 @@
 
 pragma solidity 0.8.30;
 
-import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
+import { IERC3643 } from "../../../ERC-3643/IERC3643.sol";
+import { IERC3643IdentityRegistry } from "../../../ERC-3643/IERC3643IdentityRegistry.sol";
+import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
+import { ModuleCapabilitiesLib } from "../../../libraries/ModuleCapabilitiesLib.sol";
+import {
+    AccessManagedOwnableBase,
+    AccessManagedOwnableUpgradeable
+} from "../../../utils/AccessManagedOwnableUpgradeable.sol";
+import { IModularCompliance } from "../IModularCompliance.sol";
+import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
+import { IModule } from "./IModule.sol";
 
-contract TestModule is AbstractModuleUpgradeable {
+/// @title SpenderVerificationModule
+/// @dev Requires the spender of a `transferFrom` to be verified in the token's registry.
+/// Stateless: the registry is resolved through the compliance on every call.
+contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable {
 
-    /// @dev raised when a caller other than the upgrade admin tries to move upgrade authority
-    error NotUpgradeAdmin();
+    constructor() {
+        _disableInitializers();
+    }
 
-    /// @dev address authorized to upgrade this test module
-    address private _upgradeAdmin;
+    /// @dev Initializes the module behind its proxy.
+    /// @param accessManagerAddress authority gating the implementation upgrade
+    function initialize(address accessManagerAddress) external initializer {
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
 
-    /// state variables
-    mapping(address => uint256) private _complianceData;
-    mapping(address => bool) private _blockedTransfers;
-
-    /// functions
-
-    /**
-     * @dev initializes the contract and sets the initial state.
-     * @notice This function should only be called once during the contract deployment.
-     */
-    function initialize() external initializer {
         __AbstractModule_init();
-        _upgradeAdmin = msg.sender;
+        __AccessManaged_init(accessManagerAddress);
     }
 
-    /// @dev Transfers upgrade authority to a pending admin (two-step: pendingAdmin must call acceptUpgradeAdmin).
-    address private _pendingUpgradeAdmin;
-
-    function transferUpgradeAdmin(address newAdmin) external {
-        require(msg.sender == _upgradeAdmin, NotUpgradeAdmin());
-        _pendingUpgradeAdmin = newAdmin;
-    }
-
-    function acceptUpgradeAdmin() external {
-        require(msg.sender == _pendingUpgradeAdmin, NotUpgradeAdmin());
-        _upgradeAdmin = _pendingUpgradeAdmin;
-        _pendingUpgradeAdmin = address(0);
-    }
-
-    function upgradeAdmin() external view returns (address) {
-        return _upgradeAdmin;
-    }
-
-    function doSomething(uint256 _value) external onlyComplianceCall {
-        _complianceData[msg.sender] = _value;
-    }
-
-    function blockModule(bool _blocked) external onlyComplianceCall {
-        _blockedTransfers[msg.sender] = _blocked;
-    }
-
-    function getComplianceData(address _compliance) external view returns (uint256) {
-        return _complianceData[_compliance];
-    }
-
-    function getBlockedTransfers(address _compliance) external view returns (bool) {
-        return _blockedTransfers[_compliance];
-    }
-
-    /**
-     *  @dev See {IModule-moduleCheck}.
-     *  always returns true (just a test module)
-     */
-    function moduleCheck(
-        address,
-        /*_from*/
-        address,
-        uint256,
-        address _compliance
-    )
+    /// @inheritdoc IModule
+    /// @return true if the spender is verified in the registry of the bound token
+    function moduleCheckSpender(address _spender, address, address, uint256, address _compliance)
         external
         view
         override
         returns (bool)
     {
-        if (_blockedTransfers[_compliance]) {
-            return false;
-        }
-        return true;
+        return _identityRegistry(_compliance).isVerified(_spender);
     }
 
-    /**
-     *  @dev See {IModule-moduleCapabilities}.
-     *  only the transfer check is implemented, the hooks keep the base defaults
-     */
+    /// @inheritdoc IModule
+    /// @return the bitmask of the dispatch points this module implements
     function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER;
+        return ModuleCapabilitiesLib.CHECK_SPENDER;
     }
 
-    /**
-     *  @dev See {IModule-canComplianceBind}.
-     */
+    /// @inheritdoc IModule
+    /// @dev Nothing to verify: the module holds no per-compliance state to set up.
+    /// @return always true
     function canComplianceBind(address) external pure returns (bool) {
         return true;
     }
 
-    /**
-     *  @dev See {IModule-isPlugAndPlay}.
-     */
+    /// @inheritdoc IModule
+    /// @dev Binds anywhere, in any order. The registry is resolved through the bound token at check
+    /// time, and `moduleCheckSpender` is only ever reached from a token's `transferFrom`, so a token
+    /// is necessarily bound by then.
+    /// @return always true
     function isPlugAndPlay() external pure returns (bool) {
         return true;
     }
 
-    /**
-     *  @dev See {IModule-name}.
-     */
-    function name() public pure returns (string memory _name) {
-        return "TestModule";
+    /// @inheritdoc IModule
+    /// @return _name the name of the module
+    function name() external pure returns (string memory _name) {
+        return "SpenderVerificationModule";
     }
 
-    /**
-     *  @dev Test function to cover onlyBoundCompliance modifier
-     */
-    function invokeOnlyBoundCompliance(address _compliance) external onlyBoundCompliance(_compliance) { }
-
-    /// @dev Upgrade guard: only the upgrade admin may authorize an upgrade.
-    function _authorizeUpgrade(address) internal virtual override {
-        require(msg.sender == _upgradeAdmin, NotUpgradeAdmin());
+    /// @inheritdoc AccessManagedOwnableBase
+    /// @param interfaceId the interface identifier, as specified in ERC-165
+    /// @return true if the contract implements `interfaceId`
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(AbstractModuleUpgradeable, AccessManagedOwnableBase)
+        returns (bool)
+    {
+        return AbstractModuleUpgradeable.supportsInterface(interfaceId)
+            || AccessManagedOwnableBase.supportsInterface(interfaceId);
     }
 
-    // Fallback function to accept any callData (used for testing _selector with short callData)
-    fallback() external { }
+    /// @dev Resolves the registry of the token bound to a compliance.
+    /// @param _compliance address of the compliance contract
+    /// @return the identity registry of the token bound to `_compliance`
+    function _identityRegistry(address _compliance) private view returns (IERC3643IdentityRegistry) {
+        return IERC3643(IModularCompliance(_compliance).getTokenBound()).identityRegistry();
+    }
+
+    /// @dev Gated through the shared authority.
+    function _authorizeUpgrade(address) internal override restricted { }
 
 }

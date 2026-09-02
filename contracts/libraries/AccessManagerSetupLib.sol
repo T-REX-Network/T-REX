@@ -173,12 +173,15 @@ library AccessManagerSetupLib {
 
     function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](5);
+        // bindToken/unbindToken are not `restricted`; they self-check via the shared BIND_UNBIND_TOKEN
+        // capability, so that single selector is registered here rather than each real selector separately.
+        bytes4[] memory functions = new bytes4[](6);
         functions[0] = ModularCompliance.removeModule.selector;
         functions[1] = ModularCompliance.addAndSetModule.selector;
         functions[2] = ModularCompliance.addModule.selector;
         functions[3] = ModularCompliance.callModuleFunction.selector;
         functions[4] = RolesLib.BIND_UNBIND_TOKEN;
+        functions[5] = ModularCompliance.refreshModuleCapabilities.selector;
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.OWNER);
     }
 

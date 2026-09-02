@@ -80,13 +80,16 @@ library ErrorsLib {
     error ComplianceAlreadyBoundToToken();
     error NoTokenToRecover();
     error RecoveryNotPossible();
+    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
     error ComplianceNotSuitableForBindingToModule(address module);
+    error InvalidModuleCapabilities(uint256 capabilities);
     error MaxModulesReached(uint256 maxValue);
     error ModuleAlreadyBound();
+    error ModuleHasNoCapabilities();
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
@@ -96,6 +99,8 @@ library ErrorsLib {
     error ComplianceAlreadyBound();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
+    error SpenderAlreadyAllowed(address spender);
+    error SpenderNotListed(address spender);
 
     // TREXFactory Errors
     error AuthorityMismatch();

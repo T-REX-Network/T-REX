@@ -7,6 +7,7 @@ import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/Identity
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
@@ -15,6 +16,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import {
     ITREXImplementationAuthority,
@@ -23,7 +25,6 @@ import {
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
-import { Create3 } from "contracts/vendor/openzeppelin/Create3.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import { TestModule } from "test/integration/mocks/TestModule.sol";
@@ -198,6 +199,11 @@ contract TREXFactoryTest is TREXSuiteTest {
             // earlier on a call to a non-contract address
             vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.isPlugAndPlay.selector), abi.encode(true));
             vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.bindCompliance.selector), abi.encode());
+            vm.mockCall(
+                complianceModules[i],
+                abi.encodeWithSelector(IModule.moduleCapabilities.selector),
+                abi.encode(ModuleCapabilitiesLib.CHECK_TRANSFER)
+            );
         }
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({

@@ -133,6 +133,33 @@ interface IModule {
     function moduleCheck(address _from, address _to, uint256 _value, address _compliance) external view returns (bool);
 
     /**
+     *  @dev spender side compliance check on the module for a specific transaction
+     *  this function is used to check if the spender is allowed to move the tokens of another party
+     *  This function can be called only on a compliance contract that is bound to the module
+     *  modules with no rule to enforce on the spender leave the default implementation in place
+     *  @param _spender address initiating the transfer on behalf of `_from`
+     *  @param _from address of the transfer sender
+     *  @param _to address of the transfer receiver
+     *  @param _value amount of tokens sent
+     *  @param _compliance address of the compliance contract concerned by the transfer action
+     *  the function returns TRUE if the module allows the spender to call, FALSE otherwise
+     */
+    function moduleCheckSpender(address _spender, address _from, address _to, uint256 _value, address _compliance)
+        external
+        view
+        returns (bool);
+
+    /**
+     *  @dev getter for the dispatch points this module implements
+     *  the returned value is a bitmask built from the flags of `ModuleCapabilitiesLib`
+     *  the compliance reads it once, at binding time, and never calls a dispatch point whose flag is absent
+     *  MUST be pure: a value read from storage would let the recorded routing drift from the real behaviour
+     *  a module returning zero, or a value carrying an undefined bit, cannot be bound
+     *  @return the bitmask of the dispatch points the module implements
+     */
+    function moduleCapabilities() external pure returns (uint256);
+
+    /**
      *  @dev getter for compliance binding status on module
      *  @param _compliance address of the compliance contract
      */

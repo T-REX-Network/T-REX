@@ -67,6 +67,7 @@ import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/Identity
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
@@ -79,7 +80,6 @@ import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
 import { Token } from "../token/Token.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
-import { Create3 } from "../vendor/openzeppelin/Create3.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
