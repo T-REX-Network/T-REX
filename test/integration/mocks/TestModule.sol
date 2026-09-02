@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
+import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 contract TestModule is AbstractModuleUpgradeable {
 
@@ -122,24 +123,6 @@ contract TestModule is AbstractModuleUpgradeable {
     }
 
     /**
-     *  @dev See {IModule-moduleTransferAction}.
-     *  no transfer action required in this module
-     */
-    function moduleTransferAction(address, address, uint256) external override onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-moduleMintAction}.
-     *  no mint action required in this module
-     */
-    function moduleMintAction(address, uint256) external override onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-moduleBurnAction}.
-     *  no burn action required in this module
-     */
-    function moduleBurnAction(address, uint256) external override onlyComplianceCall { }
-
-    /**
      *  @dev See {IModule-moduleCheck}.
      *  always returns true (just a test module)
      */
@@ -159,6 +142,14 @@ contract TestModule is AbstractModuleUpgradeable {
             return false;
         }
         return true;
+    }
+
+    /**
+     *  @dev See {IModule-moduleCapabilities}.
+     *  only the transfer check is implemented, the hooks keep the base defaults
+     */
+    function moduleCapabilities() external pure returns (uint256) {
+        return ModuleCapabilitiesLib.CHECK_TRANSFER;
     }
 
     /**

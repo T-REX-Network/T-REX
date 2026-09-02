@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
 
-import { Create3 } from "contracts/vendor/openzeppelin/Create3.sol";
+import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 /// @dev Thin wrapper exposing the internal Create3 library so it can be fuzzed directly.
 contract Create3Wrapper {

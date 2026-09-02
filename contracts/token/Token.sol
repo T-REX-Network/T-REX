@@ -81,6 +81,7 @@ import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import {
     AccessManagedOwnableBase,
@@ -102,7 +103,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         string symbol;
         uint8 decimals;
         address onchainId;
-        IERC3643Compliance compliance;
+        IModularCompliance compliance;
         IERC3643IdentityRegistry identityRegistry;
         mapping(address user => FrozenStatus) frozenStatus;
     }
@@ -149,7 +150,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         s.onchainId = onchainIdAddress;
 
         s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
-        s.compliance = IERC3643Compliance(complianceAddress);
+        s.compliance = IModularCompliance(complianceAddress);
         _emitUpdatedTokenInformation();
 
         _pause();
@@ -194,14 +195,14 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     function setCompliance(address complianceAddress) public restricted onlySharedAuthority(complianceAddress) {
         // A compliance already bound to a different token would make every transferred/created/destroyed
         // hook revert (onlyBoundedToken), silently breaking transfers after the swap.
-        address boundToken = IERC3643Compliance(complianceAddress).getTokenBound();
+        address boundToken = IModularCompliance(complianceAddress).getTokenBound();
         require(boundToken == address(0), ErrorsLib.ComplianceAlreadyBoundToToken());
 
         TokenStorage storage s = _tokenStorage();
         if (address(s.compliance) != address(0)) {
             s.compliance.unbindToken(address(this));
         }
-        s.compliance = IERC3643Compliance(complianceAddress);
+        s.compliance = IModularCompliance(complianceAddress);
         s.compliance.bindToken(address(this));
         emit ERC3643EventsLib.ComplianceAdded(complianceAddress);
     }
@@ -452,6 +453,27 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     }
 
     /* ----- Transfer Functions ----- */
+
+    /// @inheritdoc IERC20
+    /// @dev The bound modules vet the spender before the allowance is spent: a module declaring
+    ///      `CHECK_SPENDER` may refuse the caller even when the transfer itself would comply.
+    ///      A direct {transfer} never reaches this path, so it carries no spender check and no extra gas.
+    /// @param from address the tokens are taken from
+    /// @param to address the tokens are sent to
+    /// @param value amount of tokens moved
+    /// @return true when the transfer succeeded
+    function transferFrom(address from, address to, uint256 value)
+        public
+        override(ERC20Upgradeable, IERC20)
+        returns (bool)
+    {
+        require(
+            _tokenStorage().compliance.canSpenderCall(_msgSender(), from, to, value),
+            ErrorsLib.SpenderNotAllowed(_msgSender(), from, to, value)
+        );
+
+        return super.transferFrom(from, to, value);
+    }
 
     /// @inheritdoc IERC3643
     function forcedTransfer(address from, address to, uint256 amount) public restricted returns (bool) {

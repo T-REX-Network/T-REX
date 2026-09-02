@@ -1,6 +1,66 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - v5
+
+### Added
+
+- **Capabilities-based selective module dispatch**: a module declares which dispatch points are
+  meaningful for it, and `ModularCompliance` only calls it there.
+  - `IModule.moduleCapabilities()` returns a bitmask built from the flags of the new
+    `ModuleCapabilitiesLib` (`CHECK_TRANSFER`, `CHECK_SPENDER`, `HOOK_TRANSFER`, `HOOK_MINT`,
+    `HOOK_BURN`). It MUST be `pure`: the declaration is read once, at binding time.
+  - `refreshModuleCapabilities(address)` re-reads the declaration of a bound module, for when an
+    implementation upgrade changed it. Restricted to OWNER. The module moves to the end of the set.
+  - `getModuleCapabilities(address)` and `getModulesByCapability(uint256)` expose the recorded
+    routing. `UtilityChecker.getTransferDetails` now reports only the modules that vet transfers.
+  - `ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities)` on bind and refresh.
+- **Spender compliance check**: `IModule.moduleCheckSpender(...)` and
+  `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules declaring
+  `CHECK_SPENDER`.
+  - `Token.transferFrom` consults it before spending the allowance and reverts
+    `SpenderNotAllowed(address spender, address from, address to, uint256 value)` when a module
+    refuses the caller — the whole call is reported, since a module may accept a spender in general
+    and still refuse the specific transfer. A refused call leaves the allowance and the balances
+    untouched.
+  - Only `transferFrom` is concerned. A direct `transfer` has no spender to vet and pays nothing for
+    the check; `mint`, `burn` and `forcedTransfer` stay gated by roles alone, since agent
+    permissioning is not investor-facing compliance.
+  - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
+    empty set.
+- **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
+  verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
+  It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
+  on every call, so it is plug and play and binds in any order. Investors are unaffected: a direct
+  `transfer` never consults it.
+- **`SpenderWhitelistModule`**: per-compliance allowlist of the operators an issuer trusts to call
+  `transferFrom` — marketplaces, settlement contracts, custodians, none of which eligibility can
+  describe. `allowSpender` / `disallowSpender` run through `callModuleFunction` and revert
+  `SpenderAlreadyAllowed` / `SpenderNotListed` on a redundant call. **Default closed**: a freshly
+  bound module blocks every `transferFrom` until an operator is listed, so bind it with
+  `addAndSetModule` to list several at once. Entries are scoped by the bind nonce, so an unbind
+  discards the list rather than resurrecting it on rebind.
+
+### Changed
+
+- **Breaking, `IModule`**: `moduleCapabilities()` is mandatory and abstract, so every module must
+  declare its dispatch points. `AbstractModuleUpgradeable` now ships defaults for the five dispatch
+  functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
+  are immutable per implementation; an upgrade that changes them needs a refresh on every bound
+  compliance.
+- **Breaking, interface ids**: `type(IModule).interfaceId` and `type(IModularCompliance).interfaceId`
+  both change.
+- `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
+  (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
+  routing decision. Ordering is not preserved across a removal or a refresh.
+- Binding validates fully before writing state, so `canComplianceBind` now sees the module as not yet
+  bound. A module declaring nothing, or carrying an undefined bit, cannot be bound
+  (`ModuleHasNoCapabilities`, `InvalidModuleCapabilities`).
+
+Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
+~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;
+transfers are not.
+
 ## [4.2.0]
 
 ### Added

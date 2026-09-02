@@ -60,56 +60,34 @@
  *     You should have received a copy of the GNU General Public License
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 pragma solidity 0.8.30;
 
-import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
+/**
+ * @title ModuleCapabilitiesLib
+ * @dev Dispatch-point flags a compliance module declares through {IModule-moduleCapabilities}.
+ *
+ * ModularCompliance records the declaration when the module binds, then skips the external call at any
+ * dispatch point the module did not declare. Flags are single bits, combined with a bitwise OR.
+ */
+library ModuleCapabilitiesLib {
 
-library EventsLib {
+    /// @dev The module implements {IModule-moduleCheck}.
+    uint256 internal constant CHECK_TRANSFER = 1 << 0;
 
-    // Common Events
+    /// @dev The module implements {IModule-moduleCheckSpender}.
+    uint256 internal constant CHECK_SPENDER = 1 << 1;
 
-    event ImplementationAuthoritySet(address implementationAuthority);
+    /// @dev The module implements {IModule-moduleTransferAction}.
+    uint256 internal constant HOOK_TRANSFER = 1 << 2;
 
-    // ModularCompliance Events
+    /// @dev The module implements {IModule-moduleMintAction}.
+    uint256 internal constant HOOK_MINT = 1 << 3;
 
-    event ModuleInteraction(address indexed target, bytes4 selector);
-    event ModuleAdded(address indexed module);
-    event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
-    event ModuleRemoved(address indexed module);
+    /// @dev The module implements {IModule-moduleBurnAction}.
+    uint256 internal constant HOOK_BURN = 1 << 4;
 
-    // AbstractModule / AbstractModuleUpgradeable Events
-
-    event ComplianceBound(address indexed compliance);
-    event ComplianceUnbound(address indexed compliance);
-
-    // IdentityRegistry Events
-
-    event EligibilityChecksDisabled();
-    event EligibilityChecksEnabled();
-
-    // TREXFactory Events
-
-    event Deployed(address indexed addr);
-    event IdFactorySet(address idFactory);
-
-    /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
-    event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
-
-    // TREXImplementationAuthority Events
-
-    event TREXVersionAdded(
-        ITREXImplementationAuthority.Version indexed version, ITREXImplementationAuthority.TREXContracts indexed trex
-    );
-    event VersionUpdated(ITREXImplementationAuthority.Version indexed version);
-    event ImplementationAuthoritySetWithStatus(bool referenceStatus, address trexFactory);
-    event TREXFactorySet(address indexed trexFactory);
-    event IAFactorySet(address indexed iaFactory);
-    event ImplementationAuthorityChanged(address indexed token, address indexed newImplementationAuthority);
-    event TREXRegistryImplementationSet(address indexed trexRegistryImplementation);
-
-    // IAFactory Events
-
-    event ImplementationAuthorityDeployed(address indexed ia);
+    /// @dev Mask of every defined flag, used to reject undefined bits at binding time.
+    uint256 internal constant ALL = CHECK_TRANSFER | CHECK_SPENDER | HOOK_TRANSFER | HOOK_MINT | HOOK_BURN;
 
 }
