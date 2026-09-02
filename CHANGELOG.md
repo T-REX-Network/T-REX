@@ -40,9 +40,38 @@ All notable changes to this project will be documented in this file.
   bound module blocks every `transferFrom` until an operator is listed, so bind it with
   `addAndSetModule` to list several at once. Entries are scoped by the bind nonce, so an unbind
   discards the list rather than resurrecting it on rebind.
+- **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
+  and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
+  single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
+  - `ITREXRegistry` inherits `IERC3643IdentityRegistry`, `IERC3643TrustedIssuersRegistry` and
+    `IERC3643ClaimTopicsRegistry`; `supportsInterface` answers for all four ids. An integration
+    holding an `IERC3643IdentityRegistry` reference keeps working against the merged address.
+  - `issuersRegistry()` and `topicsRegistry()` return `address(this)`, so code that hops from the
+    identity registry to the other two lands back on the same contract.
+  - A suite deploys one `TREXRegistryProxy` instead of three registry proxies. Claim topics and
+    trusted issuers are seeded through the proxy constructor, so the factory never needs an OWNER
+    role on the registry it just deployed.
 
 ### Changed
 
+- **Breaking, registries merged**: `IdentityRegistry`, `TrustedIssuersRegistry` and
+  `ClaimTopicsRegistry` are gone, together with `IIdentityRegistry`, `ITrustedIssuersRegistry`,
+  `IClaimTopicsRegistry` and their proxies. `changeImplementationAuthorityOfToken` no longer
+  re-points a claim topics or trusted issuers proxy, since a suite no longer owns one.
+- **Breaking, `ITREXImplementationAuthority`**: `TREXContracts` replaces `ctrImplementation`,
+  `irImplementation` and `tirImplementation` with a single `trexRegistryImplementation`, and
+  `getCTRImplementation` / `getIRImplementation` / `getTIRImplementation` give way to
+  `getTREXRegistryImplementation`. A version is complete with four implementations instead of six.
+  `_fetchVersion` emits `TREXRegistryImplementationSet(address)`; `TREXVersionFetched` is removed.
+- **Breaking, `TREXSuiteDeployed`**: now `(address indexed token, address registry, address irs,
+  address mc, string salt)`. The `tir` and `ctr` addresses are gone and `ir` is the merged registry.
+- `setClaimTopicsRegistry` and `setTrustedIssuersRegistry` stay for ERC-3643 conformance but revert
+  `Deprecated()`: the registry is its own topics and issuers registry and cannot point elsewhere.
+- `getTrustedIssuerClaimTopics` returns an empty array for an unregistered issuer instead of
+  reverting, and `TrustedIssuerDoesNotExist` is removed. `updateIssuerClaimTopics` still rejects an
+  empty set, so stripping an issuer of every topic means `removeTrustedIssuer`.
+- `batchRegisterIdentity` is `restricted` and bound to AGENT. No role was bound to its selector
+  before, so the AccessManager fell back to admin-only on a function meant for agents.
 - **Breaking, `IModule`**: `moduleCapabilities()` is mandatory and abstract, so every module must
   declare its dispatch points. `AbstractModuleUpgradeable` now ships defaults for the five dispatch
   functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
