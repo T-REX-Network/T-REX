@@ -88,22 +88,16 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         AccessManagedOwnable(accessManager)
     {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
-        require(
-            impls.tokenImplementation != address(0) && impls.trexRegistryImplementation != address(0)
-                && impls.irsImplementation != address(0) && impls.mcImplementation != address(0),
-            ErrorsLib.EmptyImplementations()
-        );
+
+        _publish(v0, impls);
 
         _TOKEN_BEACON = address(new UpgradeableBeacon(impls.tokenImplementation, address(this)));
         _TREX_REGISTRY_BEACON = address(new UpgradeableBeacon(impls.trexRegistryImplementation, address(this)));
         _IRS_BEACON = address(new UpgradeableBeacon(impls.irsImplementation, address(this)));
         _MC_BEACON = address(new UpgradeableBeacon(impls.mcImplementation, address(this)));
-
-        _implementations[v0] = impls;
         _currentVersion = v0;
 
         emit EventsLib.BeaconsDeployed(_assembleBeacons());
-        emit EventsLib.VersionPublished(v0, impls);
         emit EventsLib.SuiteUpgraded(v0, impls);
     }
 
@@ -147,7 +141,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
 
     /// @dev archives `impls` under `version` without touching a beacon.
     ///  reverts if the version was already published or if any implementation address is zero.
-    function _publish(Version version, SuiteImplementations calldata impls) private {
+    function _publish(Version version, SuiteImplementations memory impls) private {
         require(_implementations[version].tokenImplementation == address(0), ErrorsLib.VersionAlreadyPublished());
         require(
             impls.tokenImplementation != address(0) && impls.trexRegistryImplementation != address(0)
