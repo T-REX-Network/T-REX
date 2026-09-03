@@ -65,18 +65,20 @@ import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdenti
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
+import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { IdentityModulesLib } from "../libraries/IdentityModulesLib.sol";
 import { RolesLib } from "../libraries/RolesLib.sol";
-import { IdentityRegistryStorageProxy } from "../proxy/IdentityRegistryStorageProxy.sol";
-import { ModularComplianceProxy } from "../proxy/ModularComplianceProxy.sol";
-import { TREXRegistryProxy } from "../proxy/TREXRegistryProxy.sol";
-import { TokenProxy } from "../proxy/TokenProxy.sol";
-import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
+import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
+import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
+import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
+import { Token } from "../token/Token.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
@@ -118,6 +120,50 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         external
         restricted
     {
+        _validateDeploymentInputs(salt, tokenDetails, claimDetails);
+
+        _deploySuiteContracts(
+            salt, tokenDetails, claimDetails, ITREXImplementationAuthority(_implementationAuthority).beacons()
+        );
+    }
+
+    /**
+     *  @dev See {ITREXFactory-deployTREXSuiteIsolated}.
+     */
+    function deployTREXSuiteIsolated(
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        ClaimDetails calldata claimDetails
+    ) external restricted {
+        _validateDeploymentInputs(salt, tokenDetails, claimDetails);
+
+        ITREXImplementationAuthority authority = ITREXImplementationAuthority(_implementationAuthority);
+        ITREXImplementationAuthority.SuiteImplementations memory impls =
+            authority.implementationsFor(authority.currentVersion());
+
+        // The clones are owned by the suite's own AccessManager, so an isolated suite is upgraded through
+        // `AccessManager.execute(beacon, upgradeTo(...))`. An unmapped target function resolves to
+        // ADMIN_ROLE, so only that AccessManager's admin can upgrade until an operator maps `upgradeTo`
+        // to a narrower role. The shared authority's beacons are untouched and never propagate here.
+        address beaconOwner = tokenDetails.accessManager;
+        ITREXImplementationAuthority.SuiteBeacons memory beacons = ITREXImplementationAuthority.SuiteBeacons({
+            tokenBeacon: address(new UpgradeableBeacon(impls.tokenImplementation, beaconOwner)),
+            trexRegistryBeacon: address(new UpgradeableBeacon(impls.trexRegistryImplementation, beaconOwner)),
+            irsBeacon: address(new UpgradeableBeacon(impls.irsImplementation, beaconOwner)),
+            mcBeacon: address(new UpgradeableBeacon(impls.mcImplementation, beaconOwner))
+        });
+
+        address token = _deploySuiteContracts(salt, tokenDetails, claimDetails, beacons);
+
+        emit EventsLib.IsolatedSuiteDeployed(token, beacons);
+    }
+
+    /// @dev Shared input validation for both deployment entry points, so they stay in lock-step.
+    function _validateDeploymentInputs(
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        ClaimDetails calldata claimDetails
+    ) private view {
         require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
         require(tokenDetails.accessManager != address(0), ErrorsLib.ZeroAddress());
 
@@ -126,26 +172,36 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(
             tokenDetails.irAgents.length <= 5 && tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
         );
+    }
 
+    /// @dev Deploys the 4 beacon proxies against `beacons`, wires them, and records the token.
+    ///      Kept in its own frame so both entry points stay inside the stack budget.
+    function _deploySuiteContracts(
+        string memory salt,
+        TokenDetails calldata tokenDetails,
+        ClaimDetails calldata claimDetails,
+        ITREXImplementationAuthority.SuiteBeacons memory beacons
+    ) private returns (address) {
         address irs = tokenDetails.irs;
         if (irs == address(0)) {
-            irs = _deployIRS(salt, tokenDetails);
+            irs = _deployIRS(salt, beacons.irsBeacon, tokenDetails);
         }
 
-        address registry = _deployTREXRegistry(salt, tokenDetails, irs, claimDetails);
-        address mc = _deployMC(salt, tokenDetails);
+        address registry = _deployTREXRegistry(salt, beacons.trexRegistryBeacon, tokenDetails, irs, claimDetails);
+        address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails);
 
         // a reused IRS must share the suite's AccessManager; the bind reverts otherwise (restricted guard)
         if (tokenDetails.irs != address(0)) {
             _bindReusedIRS(IAccessManager(tokenDetails.accessManager), irs, registry);
         }
 
-        address token = _deployToken(salt, tokenDetails, registry, mc);
+        address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, registry, mc);
         tokenDeployed[salt] = token;
 
         _grantAgentRoles(tokenDetails, token, registry);
 
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
+        return token;
     }
 
     /**
@@ -200,14 +256,12 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
     function _setImplementationAuthority(address implementationAuthorityAddress) internal {
         require(implementationAuthorityAddress != address(0), ErrorsLib.ZeroAddress());
-
-        ITREXImplementationAuthority implementationAuthority =
-            ITREXImplementationAuthority(implementationAuthorityAddress);
+        // should not be possible to set an authority that is missing any of the 4 beacons
+        ITREXImplementationAuthority.SuiteBeacons memory beacons =
+            ITREXImplementationAuthority(implementationAuthorityAddress).beacons();
         require(
-            implementationAuthority.getTokenImplementation() != address(0)
-                && implementationAuthority.getTREXRegistryImplementation() != address(0)
-                && implementationAuthority.getIRSImplementation() != address(0)
-                && implementationAuthority.getMCImplementation() != address(0),
+            beacons.tokenBeacon != address(0) && beacons.trexRegistryBeacon != address(0)
+                && beacons.irsBeacon != address(0) && beacons.mcBeacon != address(0),
             ErrorsLib.InvalidImplementationAuthority()
         );
         _implementationAuthority = implementationAuthorityAddress;
@@ -232,7 +286,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /**
      * @dev Deploys a contract using CREATE3
      * @param salt Base salt for deployment
-     * @param contractType Contract type identifier (e.g., "TIR", "CTR")
+     * @param contractType Contract type identifier (e.g., "IR", "IRS")
      * @param bytecode Full creation bytecode including constructor parameters
      */
     function _deploy(string memory salt, string memory contractType, bytes memory bytecode) internal returns (address) {
@@ -260,19 +314,21 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
      *      2) 1 byte: 0x00
      *      3) 11 bytes: bytes11(keccak256(salt, contractType))
      *
-     *      The contractType discriminator prevents the 6 suite contracts from colliding on a single CREATE3 slot
+     *      The contractType discriminator prevents the 4 suite contracts from colliding on a single CREATE3 slot
      *      (they all share the user-provided salt).
      */
     function _saltBytes(string memory salt, string memory contractType) private view returns (bytes32) {
         return bytes20(address(this)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
     }
 
-    /// function used to deploy the eligibility registry using CREATE3
-    /// @dev Seeds the required claim topics and trusted issuers through the proxy constructor, so the
-    ///      factory needs no OWNER privilege over the freshly deployed registry. Deployed under the
-    ///      "REGISTRY" discriminator, which `_deployIRS` pre-computes via `_predictAddress(salt, "REGISTRY")`.
+    /// function used to deploy the merged eligibility registry using CREATE3.
+    /// The deployed contract is a stock OZ `BeaconProxy` whose beacon resolves to the current
+    /// `TREXRegistry` implementation; `init(...)` is invoked atomically through the proxy constructor,
+    /// seeding claim topics and issuers so the factory needs no OWNER privilege over a fresh registry.
+    /// Deployed under "REGISTRY" so `_deployIRS` can pre-bind its address via `_predictAddress(salt, "REGISTRY")`.
     function _deployTREXRegistry(
         string memory salt,
+        address trexRegistryBeacon,
         TokenDetails calldata tokenDetails,
         address identityStorage,
         ClaimDetails calldata claimDetails
@@ -280,47 +336,66 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return _deploy(
             salt,
             "REGISTRY",
-            bytes.concat(
-                type(TREXRegistryProxy).creationCode,
-                abi.encode(
-                    _implementationAuthority,
-                    identityStorage,
-                    tokenDetails.accessManager,
-                    claimDetails.claimTopics,
-                    claimDetails.issuers,
-                    claimDetails.issuerClaims
+            _beaconProxyBytecode(
+                trexRegistryBeacon,
+                abi.encodeCall(
+                    TREXRegistry.init,
+                    (
+                        identityStorage,
+                        tokenDetails.accessManager,
+                        claimDetails.claimTopics,
+                        claimDetails.issuers,
+                        claimDetails.issuerClaims
+                    )
                 )
             )
         );
     }
 
-    /// function used to deploy modular compliance contract using CREATE3
-    function _deployMC(string memory salt, TokenDetails calldata tokenDetails) private returns (address) {
+    /// function used to deploy modular compliance contract using CREATE3.
+    function _deployMC(string memory salt, address mcBeacon, TokenDetails calldata tokenDetails)
+        private
+        returns (address)
+    {
         return _deploy(
             salt,
             "MC",
-            bytes.concat(
-                type(ModularComplianceProxy).creationCode,
-                abi.encode(
-                    _implementationAuthority,
-                    _predictAddress(salt, "Token"),
-                    tokenDetails.accessManager,
-                    tokenDetails.complianceModules,
-                    tokenDetails.complianceSettings
+            _beaconProxyBytecode(
+                mcBeacon,
+                abi.encodeCall(
+                    ModularCompliance.init,
+                    (
+                        _predictAddress(salt, "Token"),
+                        tokenDetails.accessManager,
+                        tokenDetails.complianceModules,
+                        tokenDetails.complianceSettings
+                    )
                 )
             )
         );
     }
 
-    function _deployIRS(string memory salt, TokenDetails calldata tokenDetails) private returns (address) {
+    /// function used to deploy an identity registry storage using CREATE3.
+    function _deployIRS(string memory salt, address irsBeacon, TokenDetails calldata tokenDetails)
+        private
+        returns (address)
+    {
         return _deploy(
             salt,
             "IRS",
-            bytes.concat(
-                type(IdentityRegistryStorageProxy).creationCode,
-                abi.encode(_implementationAuthority, tokenDetails.accessManager, _predictAddress(salt, "REGISTRY"))
+            _beaconProxyBytecode(
+                irsBeacon,
+                abi.encodeCall(
+                    IdentityRegistryStorage.init, (tokenDetails.accessManager, _predictAddress(salt, "REGISTRY"))
+                )
             )
         );
+    }
+
+    /// @dev Assembles the creation bytecode of a stock OZ `BeaconProxy` pointed at `beacon` and
+    ///  initialized atomically with `initData` inside the proxy constructor.
+    function _beaconProxyBytecode(address beacon, bytes memory initData) private pure returns (bytes memory) {
+        return bytes.concat(type(BeaconProxy).creationCode, abi.encode(beacon, initData));
     }
 
     /// Resolves the OID (caller-supplied or minted via `IIdentityFactory.createIdentityFor` against the
@@ -335,6 +410,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both.
     function _deployToken(
         string memory salt,
+        address tokenBeacon,
         TokenDetails calldata tokenDetails,
         address identityRegistry,
         address compliance
@@ -351,27 +427,31 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     IdentityModulesLib.legacyQueueModules(_keyApprovalModule, _validatorModule)
                 );
         }
-        address token = _deploy(salt, "Token", _tokenBytecode(tokenDetails, identityRegistry, compliance, oid));
+        address token =
+            _deploy(salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, identityRegistry, compliance, oid));
         return token;
     }
 
     function _tokenBytecode(
+        address tokenBeacon,
         TokenDetails calldata tokenDetails,
         address identityRegistry,
         address compliance,
         address oid
-    ) private view returns (bytes memory) {
-        return bytes.concat(
-            type(TokenProxy).creationCode,
-            abi.encode(
-                _implementationAuthority,
-                identityRegistry,
-                compliance,
-                tokenDetails.name,
-                tokenDetails.symbol,
-                tokenDetails.decimals,
-                oid,
-                tokenDetails.accessManager
+    ) private pure returns (bytes memory) {
+        return _beaconProxyBytecode(
+            tokenBeacon,
+            abi.encodeCall(
+                Token.init,
+                (
+                    tokenDetails.name,
+                    tokenDetails.symbol,
+                    tokenDetails.decimals,
+                    identityRegistry,
+                    compliance,
+                    oid,
+                    tokenDetails.accessManager
+                )
             )
         );
     }

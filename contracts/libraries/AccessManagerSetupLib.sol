@@ -69,7 +69,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
-import { TREXImplementationAuthority } from "../proxy/authority/TREXImplementationAuthority.sol";
+import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { Token } from "../token/Token.sol";
@@ -187,11 +187,12 @@ library AccessManagerSetupLib {
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](4);
+        bytes4[] memory functions = new bytes4[](5);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
         functions[2] = TREXFactory.setIdentityModules.selector;
         functions[3] = TREXFactory.deployTREXSuite.selector;
+        functions[4] = TREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
     }
 
@@ -223,15 +224,12 @@ library AccessManagerSetupLib {
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
         internal
     {
-        // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](6);
-        functions[0] = TREXImplementationAuthority.setTREXFactory.selector;
-        functions[1] = TREXImplementationAuthority.setIAFactory.selector;
-        functions[2] = TREXImplementationAuthority.addTREXVersion.selector;
-        functions[3] = TREXImplementationAuthority.useTREXVersion.selector;
-        functions[4] = TREXImplementationAuthority.addAndUseTREXVersion.selector;
-        functions[5] = TREXImplementationAuthority.changeImplementationAuthority.selector;
-        accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
+        // ------ VERSION_MANAGER role ------
+        bytes4[] memory functions = new bytes4[](3);
+        functions[0] = TREXImplementationAuthority.publish.selector;
+        functions[1] = TREXImplementationAuthority.upgrade.selector;
+        functions[2] = TREXImplementationAuthority.publishAndUpgrade.selector;
+        accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.VERSION_MANAGER);
     }
 
     /// @notice Wires the role-giver hierarchy. Call once, before any operational grant.
@@ -271,6 +269,7 @@ library AccessManagerSetupLib {
 
         accessManager.labelRole(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
         accessManager.labelRole(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
+        accessManager.labelRole(RolesLib.VERSION_MANAGER, "TREX-Suite Manager: Version");
 
         // Role-givers
         accessManager.labelRole(RolesLib.AGENT_ADMIN, "TREX-Suite Admin: Agent");

@@ -57,6 +57,11 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.AGENT, account, NO_EXECUTION_DELAY);
     }
 
+    /// @notice Grants VERSION_MANAGER, which gates publish/upgrade on the TREXImplementationAuthority.
+    function _grantVersionManagerRole(address account) internal {
+        accessManager.grantRole(RolesLib.VERSION_MANAGER, account, NO_EXECUTION_DELAY);
+    }
+
     /// @notice Grants the transient IRS_BINDER role (gates IdentityRegistryStorage.bindIdentityRegistry).
     function _grantIRSBinderRole(address account) internal {
         accessManager.grantRole(RolesLib.IRS_BINDER, account, NO_EXECUTION_DELAY);

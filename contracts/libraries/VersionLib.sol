@@ -36,6 +36,7 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
+
 /**
  *     NOTICE
  *
@@ -62,36 +63,41 @@
 
 pragma solidity 0.8.30;
 
-import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+/// @dev A semver triple packed big-endian into a single word: major in bits 23-16, minor in 15-8, patch in 7-0.
+type Version is uint24;
 
-import { Token } from "../token/Token.sol";
-import { AbstractProxy } from "./AbstractProxy.sol";
-import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
+using { eqVersion as ==, gtVersion as > } for Version global;
 
-contract TokenProxy is AbstractProxy {
+using VersionLib for Version global;
 
-    constructor(
-        address implementationAuthority,
-        address _identityRegistry,
-        address _compliance,
-        string memory _name,
-        string memory _symbol,
-        uint8 _decimals,
-        address _onchainID,
-        address _accessManager
-    ) AbstractProxy(implementationAuthority) {
-        if (!LowLevelCall.delegatecallNoReturn(
-                getLogic(),
-                abi.encodeCall(
-                    Token.init, (_name, _symbol, _decimals, _identityRegistry, _compliance, _onchainID, _accessManager)
-                )
-            )) {
-            LowLevelCall.bubbleRevert();
-        }
+function eqVersion(Version a, Version b) pure returns (bool) {
+    return Version.unwrap(a) == Version.unwrap(b);
+}
+
+function gtVersion(Version a, Version b) pure returns (bool) {
+    return Version.unwrap(a) > Version.unwrap(b);
+}
+
+library VersionLib {
+
+    /// @dev packs a semver triple into a `Version`.
+    function pack(uint8 majorValue, uint8 minorValue, uint8 patchValue) internal pure returns (Version) {
+        return Version.wrap((uint24(majorValue) << 16) | (uint24(minorValue) << 8) | uint24(patchValue));
     }
 
-    function getLogic() internal view override returns (address) {
-        return (ITREXImplementationAuthority(getImplementationAuthority())).getTokenImplementation();
+    /// @dev major component of `self`.
+    function major(Version self) internal pure returns (uint8) {
+        return uint8(Version.unwrap(self) >> 16);
+    }
+
+    /// @dev minor component of `self`.
+    function minor(Version self) internal pure returns (uint8) {
+        return uint8(Version.unwrap(self) >> 8);
+    }
+
+    /// @dev patch component of `self`.
+    function patch(Version self) internal pure returns (uint8) {
+        return uint8(Version.unwrap(self));
     }
 
 }

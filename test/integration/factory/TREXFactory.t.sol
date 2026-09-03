@@ -6,6 +6,7 @@ import { Errors } from "@onchain-id/solidity/contracts/libraries/Errors.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -17,8 +18,10 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
-import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
-import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
+import {
+    ITREXImplementationAuthority,
+    TREXImplementationAuthority
+} from "contracts/proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -1061,11 +1064,10 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.setImplementationAuthority(address(0));
     }
 
+    /// @dev A real authority cannot be incomplete: its constructor rejects a zero implementation. The
+    ///      factory's guard therefore only fires for an authority-shaped contract reporting empty beacons.
     function test_setImplementationAuthority_RevertWhen_IncompleteIA() public {
-        // Deploy a new IA but don't add any version (incomplete)
-        TREXImplementationAuthority incompleteIA =
-            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        _authorizeIAGovernance(address(incompleteIA));
+        EmptyBeaconsAuthority incompleteIA = new EmptyBeaconsAuthority();
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.InvalidImplementationAuthority.selector);
@@ -1074,7 +1076,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_setImplementationAuthority_Success() public {
         // Deploy a complete IA using the helper
-        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority(true);
+        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
 
         vm.prank(deployer);
         trexFactory.setImplementationAuthority(address(newIA));
@@ -1244,36 +1246,26 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     // ============ AccessManagerSetupLib.setupTREXImplementationAuthorityRoles() Tests ============
 
-    /// @notice Wires the 5 TREXImplementationAuthority governance selectors to the OWNER role.
-    function test_setupTREXImplementationAuthorityRoles_MapsSelectorsToOwner() public {
+    /// @notice Wires the 3 TREXImplementationAuthority version selectors to the VERSION_MANAGER role.
+    function test_setupTREXImplementationAuthorityRoles_MapsSelectorsToVersionManager() public {
         address authority = address(trexImplementationAuthority);
 
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority);
 
         assertEq(
-            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.setTREXFactory.selector),
-            RolesLib.OWNER,
-            "setTREXFactory must be mapped to OWNER"
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector),
+            RolesLib.VERSION_MANAGER,
+            "publish must be mapped to VERSION_MANAGER"
         );
         assertEq(
-            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.setIAFactory.selector),
-            RolesLib.OWNER,
-            "setIAFactory must be mapped to OWNER"
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.upgrade.selector),
+            RolesLib.VERSION_MANAGER,
+            "upgrade must be mapped to VERSION_MANAGER"
         );
         assertEq(
-            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.addTREXVersion.selector),
-            RolesLib.OWNER,
-            "addTREXVersion must be mapped to OWNER"
-        );
-        assertEq(
-            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.useTREXVersion.selector),
-            RolesLib.OWNER,
-            "useTREXVersion must be mapped to OWNER"
-        );
-        assertEq(
-            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.addAndUseTREXVersion.selector),
-            RolesLib.OWNER,
-            "addAndUseTREXVersion must be mapped to OWNER"
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publishAndUpgrade.selector),
+            RolesLib.VERSION_MANAGER,
+            "publishAndUpgrade must be mapped to VERSION_MANAGER"
         );
     }
 
@@ -1294,10 +1286,12 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_deployTREXSuite_RevertWhen_ReusedIRS_ForeignAuthority() public {
         // Deploy a standalone IRS proxy governed by a DIFFERENT AccessManager than the suite's accessManager
         AccessManager otherAccessManager = new AccessManager(address(this));
-        IdentityRegistryStorageProxy foreignIRSProxy = new IdentityRegistryStorageProxy(
-            address(trexImplementationAuthority), address(otherAccessManager), address(0)
+        address foreignIRS = address(
+            new BeaconProxy(
+                trexImplementationAuthority.beacons().irsBeacon,
+                abi.encodeCall(IdentityRegistryStorage.init, (address(otherAccessManager), address(0)))
+            )
         );
-        address foreignIRS = address(foreignIRSProxy);
 
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         tokenDetails.irs = foreignIRS;
@@ -1308,6 +1302,18 @@ contract TREXFactoryTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(trexFactory)));
         trexFactory.deployTREXSuite("salt-authority-mismatch", tokenDetails, claimDetails);
+    }
+
+}
+
+/// @dev An authority-shaped contract whose beacons are all zero, used to exercise the factory's
+///      `InvalidImplementationAuthority` guard. A real authority cannot reach this state.
+contract EmptyBeaconsAuthority {
+
+    function beacons() external pure returns (ITREXImplementationAuthority.SuiteBeacons memory) {
+        return ITREXImplementationAuthority.SuiteBeacons({
+            tokenBeacon: address(0), trexRegistryBeacon: address(0), irsBeacon: address(0), mcBeacon: address(0)
+        });
     }
 
 }

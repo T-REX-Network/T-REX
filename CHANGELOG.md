@@ -48,23 +48,39 @@ All notable changes to this project will be documented in this file.
     holding an `IERC3643IdentityRegistry` reference keeps working against the merged address.
   - `issuersRegistry()` and `topicsRegistry()` return `address(this)`, so code that hops from the
     identity registry to the other two lands back on the same contract.
-  - A suite deploys one `TREXRegistryProxy` instead of three registry proxies. Claim topics and
-    trusted issuers are seeded through the proxy constructor, so the factory never needs an OWNER
-    role on the registry it just deployed.
+  - A suite deploys one registry proxy instead of three. Claim topics and trusted issuers are seeded
+    through the initializer called atomically at deployment, so the factory never needs an OWNER role
+    on the registry it just deployed.
+- Per-token opt-out is deploy-time only, via `TREXFactory.deployTREXSuiteIsolated(...)`, which clones
+  the four beacons under the issuer's own AccessManager so later `publish` / `upgrade` calls on the
+  shared authority never reach that suite.
 
 ### Changed
 
 - **Breaking, registries merged**: `IdentityRegistry`, `TrustedIssuersRegistry` and
   `ClaimTopicsRegistry` are gone, together with `IIdentityRegistry`, `ITrustedIssuersRegistry`,
-  `IClaimTopicsRegistry` and their proxies. `changeImplementationAuthorityOfToken` no longer
-  re-points a claim topics or trusted issuers proxy, since a suite no longer owns one.
-- **Breaking, `ITREXImplementationAuthority`**: `TREXContracts` replaces `ctrImplementation`,
-  `irImplementation` and `tirImplementation` with a single `trexRegistryImplementation`, and
-  `getCTRImplementation` / `getIRImplementation` / `getTIRImplementation` give way to
-  `getTREXRegistryImplementation`. A version is complete with four implementations instead of six.
-  `_fetchVersion` emits `TREXRegistryImplementationSet(address)`; `TREXVersionFetched` is removed.
+  `IClaimTopicsRegistry` and their proxies.
+- **Breaking, `ITREXImplementationAuthority`**: `SuiteImplementations` replaces `ctrImplementation`,
+  `irImplementation` and `tirImplementation` with a single `trexRegistryImplementation`. A version is
+  complete with four implementations instead of six.
 - **Breaking, `TREXSuiteDeployed`**: now `(address indexed token, address registry, address irs,
-  address mc, string salt)`. The `tir` and `ctr` addresses are gone and `ir` is the merged registry.
+  address mc, string salt)`. The `tir` and `ctr` addresses are gone and `registry` is the merged
+  registry.
+- Suite contracts are now stock OZ `BeaconProxy` instances pointing at four per-type
+  `UpgradeableBeacon`s: Token, TREXRegistry, IdentityRegistryStorage and ModularCompliance. The beacon
+  address lives at the standard ERC-1967 beacon slot.
+- `TREXImplementationAuthority` owns the four beacons and is the single upgrade entry point.
+  `publish(version, implementations)` archives a version without touching a beacon; `upgrade(version)`
+  rotates all four in one transaction; `publishAndUpgrade(...)` does both. All three are gated by the
+  new `VERSION_MANAGER` role rather than `OWNER`.
+- A version is a packed `uint24` (`major << 16 | minor << 8 | patch`) rather than a
+  `(uint8, uint8, uint8)` tuple, exposed as the `Version` user-defined value type in
+  `contracts/libraries/VersionLib.sol`. This changes the selectors of `publish`, `upgrade`,
+  `publishAndUpgrade`, `implementationsFor` and `currentVersion`, and the payloads of
+  the `VersionPublished` and `SuiteUpgraded` events.
+- `upgrade(version)` only moves forward: the target must rank above the active version, comparing major
+  then minor then patch, and otherwise reverts with `VersionNotNewer()`. Rolling a beacon back onto an
+  older implementation is no longer possible; recovery is a forward publish.
 - `setClaimTopicsRegistry` and `setTrustedIssuersRegistry` stay for ERC-3643 conformance but revert
   `Deprecated()`: the registry is its own topics and issuers registry and cannot point elsewhere.
 - `getTrustedIssuerClaimTopics` returns an empty array for an unregistered issuer instead of
@@ -89,6 +105,15 @@ All notable changes to this project will be documented in this file.
 Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
 ~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;
 transfers are not.
+
+### Removed
+
+- Custom `AbstractProxy` / `IProxy`-based `TREXImplementationAuthority` / `IAFactory` stack removed.
+  The per-type wrapper proxies (`TokenProxy`, `IdentityRegistryStorageProxy`, `TREXRegistryProxy`,
+  `ModularComplianceProxy`) and the `IProxy` / `IIAFactory` interfaces are deleted.
+- Public ABI break: `setImplementationAuthority(address)` and `getImplementationAuthority()` selectors
+  are removed from every suite proxy, and `changeImplementationAuthority(...)` /
+  `changeImplementationAuthorityOfToken(...)` are removed from the upgrade path.
 
 ## [4.2.0]
 

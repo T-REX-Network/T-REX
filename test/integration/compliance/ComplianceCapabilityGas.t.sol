@@ -29,7 +29,7 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
 
     uint256 private constant MODULE_COUNT = 8;
     uint256 private constant MODULE_CAP = 25;
-    uint256 private constant DISPATCH_FIXED_READS = 2;
+    uint256 private constant DISPATCH_FIXED_READS = 1;
     uint256 private constant DISPATCH_READS_PER_MODULE = 3;
 
     ModularCompliance internal mc;
@@ -115,7 +115,8 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         console.log("with  four bound:", four);
 
         // per module the map costs the array bounds check on the key length, the key itself, and the
-        // value it maps to. The two fixed reads are the length behind `length()` and its first re-read
+        // value it maps to. The fixed read is the length behind `length()`. The proxy adds none of its
+        // own: a stock OZ `BeaconProxy` holds its beacon in an immutable, not in storage
         assertEq(eight, DISPATCH_FIXED_READS + DISPATCH_READS_PER_MODULE * MODULE_COUNT, "dispatch reads changed");
         assertEq(four, DISPATCH_FIXED_READS + DISPATCH_READS_PER_MODULE * (MODULE_COUNT / 2), "dispatch reads changed");
         assertEq(

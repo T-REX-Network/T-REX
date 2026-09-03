@@ -85,6 +85,10 @@ library RolesLib {
     uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
     uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
 
+    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
+    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
+    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
+
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
     // AccessManager's setRoleAdmin semantics. They let grants be delegated without

@@ -62,7 +62,8 @@
  */
 pragma solidity 0.8.30;
 
-import { ITREXImplementationAuthority } from "../proxy/authority/ITREXImplementationAuthority.sol";
+import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
+import { Version } from "./VersionLib.sol";
 
 library EventsLib {
 
@@ -95,21 +96,12 @@ library EventsLib {
     /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
     event IdentityModulesSet(address keyApprovalModule, address validatorModule);
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
+    event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
 
     // TREXImplementationAuthority Events
 
-    event TREXVersionAdded(
-        ITREXImplementationAuthority.Version indexed version, ITREXImplementationAuthority.TREXContracts indexed trex
-    );
-    event VersionUpdated(ITREXImplementationAuthority.Version indexed version);
-    event ImplementationAuthoritySetWithStatus(bool referenceStatus, address trexFactory);
-    event TREXFactorySet(address indexed trexFactory);
-    event IAFactorySet(address indexed iaFactory);
-    event ImplementationAuthorityChanged(address indexed token, address indexed newImplementationAuthority);
-    event TREXRegistryImplementationSet(address indexed trexRegistryImplementation);
-
-    // IAFactory Events
-
-    event ImplementationAuthorityDeployed(address indexed ia);
+    event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);
+    event VersionPublished(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
+    event SuiteUpgraded(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
 
 }

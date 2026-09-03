@@ -62,80 +62,95 @@
 
 pragma solidity 0.8.30;
 
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import { Version } from "../../libraries/VersionLib.sol";
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
-import { EventsLib } from "../libraries/EventsLib.sol";
-import { ITREXImplementationAuthority } from "./authority/ITREXImplementationAuthority.sol";
-import { IProxy } from "./interface/IProxy.sol";
+interface ITREXImplementationAuthority {
 
-abstract contract AbstractProxy is IProxy, Initializable {
-
-    constructor(address implementationAuthority) {
-        require(implementationAuthority != address(0), ErrorsLib.ZeroAddress());
-        _storeImplementationAuthority(implementationAuthority);
-        emit EventsLib.ImplementationAuthoritySet(implementationAuthority);
+    /// types
+    struct SuiteImplementations {
+        // address of token implementation contract
+        address tokenImplementation;
+        // address of TREXRegistry (merged registry) implementation contract
+        address trexRegistryImplementation;
+        // address of IdentityRegistryStorage implementation contract
+        address irsImplementation;
+        // address of ModularCompliance implementation contract
+        address mcImplementation;
     }
+
+    struct SuiteBeacons {
+        // address of UpgradeableBeacon for Token
+        address tokenBeacon;
+        // address of UpgradeableBeacon for TREXRegistry
+        address trexRegistryBeacon;
+        // address of UpgradeableBeacon for IdentityRegistryStorage
+        address irsBeacon;
+        // address of UpgradeableBeacon for ModularCompliance
+        address mcBeacon;
+    }
+
+    /// functions
 
     /**
-     *  @dev See {IProxy-setImplementationAuthority}.
+     *  @dev archives a new version's implementations without touching any beacon.
+     *  The beacons (and therefore every live shared-mode suite) keep pointing at the active version
+     *  until a separate `upgrade(version)` call rotates them.
+     *  @param version the new version to publish
+     *  @param impls the set of implementations corresponding to the new version
+     *  reverts if the version was already published
+     *  reverts if any implementation address is zero
+     *  only VERSION_MANAGER can call
+     *  emits a `VersionPublished` event
      */
-    function setImplementationAuthority(address _newImplementationAuthority) external {
-        require(msg.sender == getImplementationAuthority(), ErrorsLib.OnlyCurrentImplementationAuthorityCanCall());
-        require(_newImplementationAuthority != address(0), ErrorsLib.ZeroAddress());
-        require(
-            (ITREXImplementationAuthority(_newImplementationAuthority)).getTokenImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getIRSImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getMCImplementation() != address(0)
-                && (ITREXImplementationAuthority(_newImplementationAuthority)).getTREXRegistryImplementation()
-                    != address(0),
-            ErrorsLib.InvalidImplementationAuthority()
-        );
-        _storeImplementationAuthority(_newImplementationAuthority);
-        emit EventsLib.ImplementationAuthoritySet(_newImplementationAuthority);
-    }
+    function publish(Version version, SuiteImplementations calldata impls) external;
 
     /**
-     *  @dev See {IProxy-getImplementationAuthority}.
+     *  @dev rotates every beacon to the implementations archived for a previously published version.
+     *  Drives every shared-mode suite to that version atomically and marks it as the active version.
+     *  Only moves forward: the target must rank above the active version, so a beacon can never be
+     *  rolled back onto an older implementation.
+     *  @param version the published version to activate
+     *  reverts if the version is not greater than the active version
+     *  reverts if the version was never published
+     *  only VERSION_MANAGER can call
+     *  emits a `SuiteUpgraded` event
      */
-    function getImplementationAuthority() public view returns (address) {
-        address implemAuth;
-        assembly ("memory-safe") {
-            implemAuth := sload(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc)
-        }
-        return implemAuth;
-    }
+    function upgrade(Version version) external;
 
     /**
-     *  @dev store the implementationAuthority contract address using the ERC-3643 implementation slot in storage
-     *  the slot storage is the result of `keccak256("ERC-3643.proxy.beacon")`
+     *  @dev convenience wrapper that publishes a new version and immediately activates it.
+     *  Equivalent to `publish(version, impls)` followed by `upgrade(version)`.
+     *  @param version the new version to publish
+     *  @param impls the set of implementations corresponding to the new version
+     *  reverts if the version is not greater than the active version
+     *  reverts if the version was already published
+     *  reverts if any implementation address is zero
+     *  only VERSION_MANAGER can call
+     *  emits `VersionPublished` and `SuiteUpgraded` events
      */
-    function _storeImplementationAuthority(address implementationAuthority) internal {
-        assembly ("memory-safe") {
-            sstore(0x821f3e4d3d679f19eacc940c87acf846ea6eae24a63058ea750304437a62aafc, implementationAuthority)
-        }
-    }
+    function publishAndUpgrade(Version version, SuiteImplementations calldata impls) external;
 
-    function getLogic() internal view virtual returns (address);
+    /**
+     *  @dev returns the active version, i.e. the one every beacon currently points at.
+     */
+    function currentVersion() external view returns (Version);
 
-    fallback() external payable {
-        address logic = getLogic();
+    /**
+     *  @dev returns the 4 beacon addresses driving every shared-mode suite.
+     *  beacon addresses never change after construction.
+     */
+    function beacons() external view returns (SuiteBeacons memory);
 
-        assembly {
-            calldatacopy(0x0, 0x0, calldatasize())
-            let success := delegatecall(gas(), logic, 0x0, calldatasize(), 0, 0)
-            let retSz := returndatasize()
-            returndatacopy(0, 0, retSz)
-            switch success
-            case 0 {
-                revert(0, retSz)
-            }
-            default {
-                return(0, retSz)
-            }
-        }
-    }
+    /**
+     *  @dev returns the implementations the beacons currently point at.
+     */
+    function implementations() external view returns (SuiteImplementations memory);
 
-    receive() external payable { }
+    /**
+     *  @dev returns the archived implementations for a given version.
+     *  reverts if the version was never published.
+     *  @param version the version to query
+     */
+    function implementationsFor(Version version) external view returns (SuiteImplementations memory);
 
 }

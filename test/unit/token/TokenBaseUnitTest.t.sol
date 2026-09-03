@@ -5,18 +5,17 @@ import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
-import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
-import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
+import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
 abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
     Token tokenImplementation;
     Token token;
 
-    address implementationAuthority = makeAddr("ImplementationAuthorityMock");
+    address tokenBeacon;
 
     address identityRegistry = makeAddr("IdentityRegistryMock");
     address compliance = makeAddr("ComplianceMock");
@@ -29,8 +28,8 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
     constructor() {
         tokenImplementation = new Token();
+        tokenBeacon = BeaconProxyDeployer.newBeacon(address(tokenImplementation));
 
-        mockImplementationAuthority();
         mockCompliance();
         mockIdentityRegistry();
     }
@@ -40,30 +39,17 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         _deployAccessManager();
 
         token = Token(
-            address(
-                new TokenProxy(
-                    implementationAuthority,
-                    identityRegistry,
-                    compliance,
-                    "Token",
-                    "TKN",
-                    18,
-                    address(onchainId),
-                    address(accessManager)
+            BeaconProxyDeployer.newProxy(
+                tokenBeacon,
+                abi.encodeCall(
+                    Token.init,
+                    ("Token", "TKN", 18, identityRegistry, compliance, address(onchainId), address(accessManager))
                 )
             )
         );
 
         AccessManagerSetupLib.setupTokenRoles(accessManager, address(token));
         _grantAllAgentRoles(agent);
-    }
-
-    function mockImplementationAuthority() internal {
-        vm.mockCall(
-            implementationAuthority,
-            abi.encodeWithSelector(ITREXImplementationAuthority.getTokenImplementation.selector),
-            abi.encode(address(tokenImplementation))
-        );
     }
 
     function mockCompliance() internal {

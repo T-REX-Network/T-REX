@@ -3,14 +3,13 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
-import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
-import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import {
     IERC3643IdentityRegistryStorage,
     IdentityRegistryStorage
@@ -295,41 +294,20 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     // ============ Constructor Tests ============
 
-    /// @notice Should revert when implementation authority is zero address
-    function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new IdentityRegistryStorageProxy(address(0), deployer, address(0));
+    /// @notice Should revert when the beacon is the zero address
+    function test_constructor_RevertWhen_BeaconIsZeroAddress() public {
+        vm.expectRevert();
+        new BeaconProxy(address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
     }
 
-    /// @notice Should revert when initialization fails (invalid implementation)
+    /// @notice Should revert when initialization fails (implementation without init())
     function test_constructor_RevertWhen_InitializationFails() public {
-        // Deploy a mock contract that doesn't have init() function
         MockContract mockImpl = new MockContract();
+        address beacon = address(new UpgradeableBeacon(address(mockImpl), address(this)));
 
-        // Deploy an IA and manually set an invalid IRS implementation
-        TREXImplementationAuthority incompleteIA =
-            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-
-        // Create a version with invalid IRS implementation (mock contract without init())
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
-
-        ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
-            tokenImplementation: address(mockImpl), // Invalid - doesn't have proper init
-            irsImplementation: address(mockImpl), // Invalid - doesn't have init() function
-            mcImplementation: address(mockImpl), // Invalid
-            trexRegistryImplementation: address(mockImpl) // Invalid
-        });
-
-        // Add version to IA (need to be owner)
-        _authorizeIAGovernance(address(incompleteIA));
-        vm.prank(deployer);
-        incompleteIA.addAndUseTREXVersion(version, contracts);
-
-        // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
-        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
+        // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
         vm.expectRevert();
-        new IdentityRegistryStorageProxy(address(incompleteIA), deployer, address(0));
+        new BeaconProxy(beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
     }
 
 }

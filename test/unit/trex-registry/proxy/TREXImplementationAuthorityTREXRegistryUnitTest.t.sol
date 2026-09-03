@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.30;
 
-import { Test, Vm } from "@forge-std/Test.sol";
+import { Test } from "@forge-std/Test.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
-} from "contracts/proxy/authority/TREXImplementationAuthority.sol";
+} from "contracts/proxy/beacon/TREXImplementationAuthority.sol";
 
-/// @notice Unit tests for the TREXRegistry surface on `TREXImplementationAuthority`.
-/// @dev    Covers the `trexRegistryImplementation` field of the `TREXContracts` struct, the
-///         `getTREXRegistryImplementation()` view, and the `TREXRegistryImplementationSet(address)`
-///         event. The field follows the same "versioned struct" pattern as the other implementation
-///         slots — there is no per-slot setter on the authority; the implementation is registered
-///         through `addTREXVersion` / `addAndUseTREXVersion`.
+/// @notice Unit tests for the merged-registry slot of `TREXImplementationAuthority`.
+/// @dev    Covers the `trexRegistryImplementation` field of `SuiteImplementations`, the registry beacon
+///         it drives, and the `VersionPublished` / `SuiteUpgraded` events that carry it. There is no
+///         per-slot setter: the implementation is registered through `publish` / `publishAndUpgrade`,
+///         both gated by VERSION_MANAGER.
 contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
 
     address public deployer = makeAddr("deployer");
@@ -29,130 +30,157 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
     AccessManager public accessManager;
     TREXImplementationAuthority public ia;
 
-    address public tokenImpl = makeAddr("tokenImpl");
-    address public irsImpl = makeAddr("irsImpl");
-    address public mcImpl = makeAddr("mcImpl");
-    address public trexRegistryImpl = makeAddr("trexRegistryImpl");
+    DummyImpl public tokenImpl;
+    DummyImpl public irsImpl;
+    DummyImpl public mcImpl;
+    DummyImpl public trexRegistryImpl;
+
+    Version private v0 = VersionLib.pack(5, 0, 0);
+    Version private v1 = VersionLib.pack(5, 0, 1);
 
     function setUp() public {
+        tokenImpl = new DummyImpl();
+        irsImpl = new DummyImpl();
+        mcImpl = new DummyImpl();
+        trexRegistryImpl = new DummyImpl();
+
         accessManager = new AccessManager(accessManagerAdmin);
 
-        vm.prank(accessManagerAdmin);
-        accessManager.grantRole(RolesLib.OWNER, deployer, 0);
+        ia = new TREXImplementationAuthority(address(accessManager), v0, _baseImpls());
 
-        ia = new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-        vm.prank(accessManagerAdmin);
+        vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(ia));
+        accessManager.grantRole(RolesLib.VERSION_MANAGER, deployer, 0);
+        vm.stopPrank();
     }
 
-    function _baseContracts() internal view returns (ITREXImplementationAuthority.TREXContracts memory) {
-        return ITREXImplementationAuthority.TREXContracts({
-            tokenImplementation: tokenImpl,
-            irsImplementation: irsImpl,
-            mcImplementation: mcImpl,
-            trexRegistryImplementation: trexRegistryImpl
+    function _baseImpls() internal view returns (ITREXImplementationAuthority.SuiteImplementations memory) {
+        return ITREXImplementationAuthority.SuiteImplementations({
+            tokenImplementation: address(tokenImpl),
+            trexRegistryImplementation: address(trexRegistryImpl),
+            irsImplementation: address(irsImpl),
+            mcImplementation: address(mcImpl)
         });
     }
 
-    // ============ Default state ============
+    // ============ Seeded state ============
 
-    /// @notice Should return zero before any TREX version is registered.
-    function test_getTREXRegistryImplementation_DefaultZero() public view {
-        assertEq(ia.getTREXRegistryImplementation(), address(0), "must default to zero");
+    /// @notice The constructor archives the merged-registry implementation for the seeded version.
+    function test_constructor_ArchivesTREXRegistryImplementation() public view {
+        assertEq(
+            ia.implementationsFor(v0).trexRegistryImplementation,
+            address(trexRegistryImpl),
+            "seeded version must carry the TREXRegistry implementation"
+        );
     }
 
-    // ============ Access control on setter (struct-based) ============
+    /// @notice The registry beacon is deployed, owned by the authority, and resolves to the implementation.
+    function test_constructor_RegistryBeaconPointsToImplementation() public view {
+        address beacon = ia.beacons().trexRegistryBeacon;
 
-    /// @notice `addAndUseTREXVersion` must reject non-owner callers.
-    function test_addAndUseTREXVersion_RevertWhen_NotOwner() public {
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
+        assertTrue(beacon != address(0), "registry beacon must exist");
+        assertEq(UpgradeableBeacon(beacon).owner(), address(ia), "authority must own the registry beacon");
+        assertEq(UpgradeableBeacon(beacon).implementation(), address(trexRegistryImpl));
+    }
 
+    // ============ Access control ============
+
+    /// @notice `publishAndUpgrade` must reject callers without VERSION_MANAGER.
+    function test_publishAndUpgrade_RevertWhen_NotVersionManager() public {
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        ia.addAndUseTREXVersion(version, _baseContracts());
+        ia.publishAndUpgrade(v1, _baseImpls());
     }
 
-    // ============ Getter returns the most recent value ============
+    // ============ Registry implementation across versions ============
 
-    /// @notice Should expose the registry implementation address after a version is set.
-    function test_getTREXRegistryImplementation_ReturnsLatestValue() public {
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
+    /// @notice Upgrading to a version with a new registry implementation rotates the registry beacon.
+    function test_publishAndUpgrade_RotatesRegistryBeaconAcrossVersions() public {
+        address beacon = ia.beacons().trexRegistryBeacon;
+        assertEq(UpgradeableBeacon(beacon).implementation(), address(trexRegistryImpl));
+
+        DummyImpl newRegistryImpl = new DummyImpl();
+        ITREXImplementationAuthority.SuiteImplementations memory impls = _baseImpls();
+        impls.trexRegistryImplementation = address(newRegistryImpl);
 
         vm.prank(deployer);
-        ia.addAndUseTREXVersion(version, _baseContracts());
+        ia.publishAndUpgrade(v1, impls);
 
+        assertEq(ia.beacons().trexRegistryBeacon, beacon, "the beacon address must not change");
         assertEq(
-            ia.getTREXRegistryImplementation(),
-            trexRegistryImpl,
-            "getter must return the registered TREXRegistry implementation"
+            UpgradeableBeacon(beacon).implementation(),
+            address(newRegistryImpl),
+            "beacon must resolve to the most recently activated registry implementation"
         );
+        assertEq(ia.implementationsFor(v1).trexRegistryImplementation, address(newRegistryImpl));
     }
 
-    /// @notice Should update the returned value when a new version is registered.
-    function test_getTREXRegistryImplementation_UpdatesAcrossVersions() public {
-        ITREXImplementationAuthority.Version memory v1 =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
+    /// @notice The earlier version's archive keeps its own registry implementation.
+    function test_publishAndUpgrade_KeepsPreviousRegistryArchive() public {
+        DummyImpl newRegistryImpl = new DummyImpl();
+        ITREXImplementationAuthority.SuiteImplementations memory impls = _baseImpls();
+        impls.trexRegistryImplementation = address(newRegistryImpl);
 
         vm.prank(deployer);
-        ia.addAndUseTREXVersion(v1, _baseContracts());
-        assertEq(ia.getTREXRegistryImplementation(), trexRegistryImpl);
+        ia.publishAndUpgrade(v1, impls);
 
-        // Register v5.0.1 with a different TREXRegistry implementation and switch to it.
-        ITREXImplementationAuthority.Version memory v2 =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 1 });
-        address newRegistryImpl = makeAddr("trexRegistryImplV2");
-        ITREXImplementationAuthority.TREXContracts memory contracts = _baseContracts();
-        contracts.trexRegistryImplementation = newRegistryImpl;
-
-        vm.prank(deployer);
-        ia.addAndUseTREXVersion(v2, contracts);
-
-        assertEq(
-            ia.getTREXRegistryImplementation(), newRegistryImpl, "getter must reflect the most recently used version"
-        );
+        assertEq(ia.implementationsFor(v0).trexRegistryImplementation, address(trexRegistryImpl));
     }
 
     // ============ Event emission ============
 
-    /// @notice `addTREXVersion` should emit `TREXRegistryImplementationSet` when the field is non-zero.
-    function test_addAndUseTREXVersion_Emits_TREXRegistryImplementationSet() public {
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 5, minor: 0, patch: 0 });
+    /// @notice `publish` emits `VersionPublished` carrying the registry implementation.
+    function test_publish_EmitsVersionPublishedWithRegistryImplementation() public {
+        ITREXImplementationAuthority.SuiteImplementations memory impls = _baseImpls();
 
-        vm.recordLogs();
+        vm.expectEmit(true, true, true, true);
+        emit EventsLib.VersionPublished(v1, impls);
+
         vm.prank(deployer);
-        ia.addAndUseTREXVersion(version, _baseContracts());
-
-        Vm.Log[] memory entries = vm.getRecordedLogs();
-        bytes32 sig = keccak256("TREXRegistryImplementationSet(address)");
-        bool sawEvent;
-        for (uint256 i = 0; i < entries.length; i++) {
-            if (entries[i].emitter != address(ia)) continue;
-            if (entries[i].topics[0] == sig) {
-                sawEvent = true;
-                assertEq(address(uint160(uint256(entries[i].topics[1]))), trexRegistryImpl);
-                break;
-            }
-        }
-        assertTrue(sawEvent, "TREXRegistryImplementationSet event must be emitted");
+        ia.publish(v1, impls);
     }
 
-    /// @notice A version with a zero TREXRegistry implementation must be rejected outright: the
-    ///         factory and every proxy reject such an authority, so registering one would only
-    ///         produce a version that can never be used.
-    function test_addAndUseTREXVersion_RevertWhen_TREXRegistryIsZero() public {
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
-        ITREXImplementationAuthority.TREXContracts memory contracts = _baseContracts();
-        contracts.trexRegistryImplementation = address(0);
+    /// @notice `publishAndUpgrade` emits `SuiteUpgraded` carrying the registry implementation.
+    function test_publishAndUpgrade_EmitsSuiteUpgradedWithRegistryImplementation() public {
+        ITREXImplementationAuthority.SuiteImplementations memory impls = _baseImpls();
 
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectEmit(true, true, true, true);
+        emit EventsLib.SuiteUpgraded(v1, impls);
+
         vm.prank(deployer);
-        ia.addAndUseTREXVersion(version, contracts);
+        ia.publishAndUpgrade(v1, impls);
+    }
 
-        assertEq(ia.getTREXRegistryImplementation(), address(0), "must remain unset");
+    // ============ Zero registry implementation ============
+
+    /// @notice A version with a zero TREXRegistry implementation must be rejected outright: the factory
+    ///         rejects such an authority, so publishing one would only produce an unusable version.
+    function test_publish_RevertWhen_TREXRegistryIsZero() public {
+        ITREXImplementationAuthority.SuiteImplementations memory impls = _baseImpls();
+        impls.trexRegistryImplementation = address(0);
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
+        ia.publish(v1, impls);
+    }
+
+    /// @notice The constructor rejects a zero TREXRegistry implementation for the same reason.
+    function test_constructor_RevertWhen_TREXRegistryIsZero() public {
+        ITREXImplementationAuthority.SuiteImplementations memory impls = _baseImpls();
+        impls.trexRegistryImplementation = address(0);
+
+        vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
+        new TREXImplementationAuthority(address(accessManager), v0, impls);
+    }
+
+}
+
+/// @dev A beacon's implementation must be a contract, so the slots are filled with distinct
+///      non-empty contracts rather than plain addresses.
+contract DummyImpl {
+
+    function marker() external pure returns (string memory) {
+        return "dummy";
     }
 
 }

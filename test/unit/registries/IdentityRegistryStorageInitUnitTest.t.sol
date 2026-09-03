@@ -8,15 +8,15 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
-import { IdentityRegistryStorageProxy } from "contracts/proxy/IdentityRegistryStorageProxy.sol";
-import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+
+import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
 contract IdentityRegistryStorageInitUnitTest is Test {
 
     IdentityRegistryStorage private irsImplementation;
     AccessManager private accessManager;
-    address private implementationAuthority = makeAddr("ImplementationAuthorityMock");
+    address private irsBeacon;
 
     address private notOwner = makeAddr("NotOwner");
 
@@ -26,11 +26,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         accessManager.grantRole(RolesLib.OWNER, address(this), 0);
         // bindIdentityRegistry is gated by IRS_BINDER (not OWNER); the test acts as the binder here.
         accessManager.grantRole(RolesLib.IRS_BINDER, address(this), 0);
-        vm.mockCall(
-            implementationAuthority,
-            abi.encodeWithSelector(ITREXImplementationAuthority.getIRSImplementation.selector),
-            abi.encode(address(irsImplementation))
-        );
+        irsBeacon = BeaconProxyDeployer.newBeacon(address(irsImplementation));
     }
 
     function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
@@ -96,12 +92,14 @@ contract IdentityRegistryStorageInitUnitTest is Test {
 
     function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new IdentityRegistryStorageProxy(implementationAuthority, address(0), address(0));
+        BeaconProxyDeployer.newProxy(irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(0), address(0))));
     }
 
     function _deployProxy(address _initialIR) private returns (IdentityRegistryStorage) {
         IdentityRegistryStorage irs = IdentityRegistryStorage(
-            address(new IdentityRegistryStorageProxy(implementationAuthority, address(accessManager), _initialIR))
+            BeaconProxyDeployer.newProxy(
+                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), _initialIR))
+            )
         );
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs));
         return irs;
