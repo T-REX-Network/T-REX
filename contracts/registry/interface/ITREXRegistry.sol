@@ -102,13 +102,17 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// @param token the token this registry serves
     function bindToken(address token) external;
 
-    /// @notice Writes the cached value of a claim-derived attribute for an identity.
-    /// @dev Callable only by the bound token, during reconciliation.
-    /// @param identity the identity the attribute belongs to
-    /// @param topic claim topic identifying the attribute
-    /// @param newValue value now attested by the claim, or the value being kept while flagged
-    /// @param flagged true when the attesting claim no longer resolves and the identity needs review
-    function syncAttribute(address identity, uint256 topic, uint16 newValue, bool flagged) external;
+    /// @notice Reconciles the cached country of an investor against their residence claim.
+    /// @dev Callable only by the bound token. Idempotent: nothing pending writes nothing. A claim that
+    /// stopped resolving keeps the cached value and flags the identity.
+    /// @param userAddress the wallet of the investor
+    /// @return topic claim topic of the reconciled attribute
+    /// @return oldValue value the compliance aggregates are built on
+    /// @return newValue value now cached
+    /// @return moved true when the cached value changed and compliance must move the position
+    function reconcileAttribute(address userAddress)
+        external
+        returns (uint256 topic, uint16 oldValue, uint16 newValue, bool moved);
 
     /// @notice Claim topic carrying the investor's attested residence.
     function COUNTRY_CLAIM_TOPIC() external view returns (uint256);

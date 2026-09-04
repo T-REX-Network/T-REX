@@ -215,15 +215,37 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc ITREXRegistry
-    function syncAttribute(address _identity, uint256 _topic, uint16 _newValue, bool _flagged)
+    /// @dev The claim is resolved on every call: ONCHAINID exposes no per-claim nonce to short-circuit on.
+    function reconcileAttribute(address _userAddress)
         external
         onlyBoundedToken
+        returns (uint256 topic, uint16 oldValue, uint16 newValue, bool moved)
     {
+        topic = COUNTRY_CLAIM_TOPIC;
+        IIdentity userIdentity = identity(_userAddress);
+        if (address(userIdentity) == address(0)) return (topic, oldValue, newValue, moved);
+
         Storage storage s = _getStorage();
-        uint16 oldValue = s.attributeCache[_identity][_topic];
-        s.attributeCache[_identity][_topic] = _newValue;
-        s.attributeFlagged[_identity][_topic] = _flagged;
-        emit EventsLib.AttributeCacheSynced(_identity, _topic, oldValue, _newValue, _flagged);
+        address identityAddress = address(userIdentity);
+        oldValue = s.attributeCache[identityAddress][topic];
+        newValue = oldValue;
+        bool flagged = s.attributeFlagged[identityAddress][topic];
+        uint16 attested = _resolveCountryFromClaim(userIdentity);
+
+        // The claim stopped resolving: keep the investor counted where they are and flag for review.
+        if (attested == 0) {
+            if (oldValue != 0 && !flagged) _writeAttribute(identityAddress, topic, oldValue, true);
+            return (topic, oldValue, newValue, moved);
+        }
+
+        if (attested == oldValue) {
+            if (flagged) _writeAttribute(identityAddress, topic, oldValue, false);
+            return (topic, oldValue, newValue, moved);
+        }
+
+        _writeAttribute(identityAddress, topic, attested, false);
+        emit ERC3643EventsLib.CountryUpdated(_userAddress, attested);
+        return (topic, oldValue, attested, attested != oldValue);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -333,7 +355,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
     /// @inheritdoc ITREXRegistry
     function attestedCountry(address _userAddress) external view override returns (uint16) {
-        return _resolveCountryFromClaim(_userAddress);
+        IIdentity userIdentity = identity(_userAddress);
+        if (address(userIdentity) == address(0)) return 0;
+        return _resolveCountryFromClaim(userIdentity);
     }
 
     /// @inheritdoc ITREXRegistry
@@ -522,10 +546,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     /// @dev Resolves the country attested in the residence claim, or 0 when no issuer trusted for
     ///  {COUNTRY_CLAIM_TOPIC} attests one. Never reverts: a hostile issuer or a malformed payload must
     ///  not take down the view paths reading this.
-    function _resolveCountryFromClaim(address userAddress) internal view returns (uint16) {
-        IIdentity userIdentity = identity(userAddress);
-        if (address(userIdentity) == address(0)) return 0;
-
+    function _resolveCountryFromClaim(IIdentity userIdentity) internal view returns (uint16) {
         address[] memory trustedIssuersForTopic =
             _getStorage().claimTopicsToTrustedIssuers[COUNTRY_CLAIM_TOPIC].values();
 
@@ -557,6 +578,14 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         }
 
         return 0;
+    }
+
+    function _writeAttribute(address identityAddress, uint256 topic, uint16 newValue, bool flagged) internal {
+        Storage storage s = _getStorage();
+        uint16 oldValue = s.attributeCache[identityAddress][topic];
+        s.attributeCache[identityAddress][topic] = newValue;
+        s.attributeFlagged[identityAddress][topic] = flagged;
+        emit EventsLib.AttributeCacheSynced(identityAddress, topic, oldValue, newValue, flagged);
     }
 
     function _addClaimTopic(uint256 claimTopic) internal {

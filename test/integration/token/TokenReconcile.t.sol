@@ -76,18 +76,20 @@ contract TokenReconcileTest is TREXSuiteTest {
 
     /// @notice The module is handed the old value, the new value and the investor's whole position.
     function test_reconcile_Success_HandsTheModuleThePosition() public {
+        _addCountryClaim(bobIdentity, Countries.SPAIN, bob);
+
         token.reconcile(bob);
 
         assertEq(syncModule.lastInvestor(), bob);
         assertEq(syncModule.lastTopic(), topic);
-        assertEq(syncModule.lastOldValue(), 0);
-        assertEq(syncModule.lastNewValue(), Countries.UNITED_STATES);
+        assertEq(syncModule.lastOldValue(), Countries.UNITED_STATES);
+        assertEq(syncModule.lastNewValue(), Countries.SPAIN);
         assertEq(syncModule.lastPosition(), token.balanceOf(bob));
     }
 
     /// @notice The event carries the claim-derived value.
     function test_reconcile_Success_EmitsTheAttestedValue() public {
-        vm.expectEmit(true, true, false, false, address(token));
+        vm.expectEmit(true, true, false, false, address(registry));
         emit ERC3643EventsLib.CountryUpdated(alice, Countries.FRANCE);
 
         token.reconcile(alice);
@@ -217,11 +219,12 @@ contract TokenReconcileTest is TREXSuiteTest {
 
     // ============ The cache writer ============
 
-    /// @notice Only the bound token moves the cache. An agent cannot assert a country by hand.
-    function test_syncAttribute_RevertWhen_CallerIsNotTheBoundToken() public {
+    /// @notice Only the bound token moves the cache: reconciling through the registry alone would
+    ///         leave the compliance aggregates behind.
+    function test_reconcileAttribute_RevertWhen_CallerIsNotTheBoundToken() public {
         vm.prank(agent);
         vm.expectRevert(ErrorsLib.AddressNotATokenBoundToRegistry.selector);
-        registry.syncAttribute(address(bobIdentity), topic, Countries.SPAIN, false);
+        registry.reconcileAttribute(bob);
     }
 
     /// @notice The registry reports the token it serves.
@@ -328,6 +331,34 @@ contract TokenReconcileTest is TREXSuiteTest {
 
         assertEq(syncModule.lastNewValue(), Countries.FRANCE);
         assertEq(syncModule.lastInvestor(), alice);
+    }
+
+    /// @notice The module is handed the position its aggregates were built on, before the transfer
+    ///         moves it. Handing the post-move balance would leave the difference stranded under the
+    ///         old country.
+    function test_transfer_Success_HandsTheModuleThePreMovePosition() public {
+        token.reconcile(alice);
+        _addCountryClaim(bobIdentity, Countries.SPAIN, bob);
+
+        vm.prank(bob);
+        token.transfer(alice, 100);
+
+        assertEq(syncModule.lastInvestor(), bob);
+        assertEq(syncModule.lastOldValue(), Countries.UNITED_STATES);
+        assertEq(syncModule.lastNewValue(), Countries.SPAIN);
+        assertEq(syncModule.lastPosition(), 500);
+        assertEq(token.balanceOf(bob), 400);
+    }
+
+    /// @notice A first mint reconciles on an empty position: the mint hook, not the sync, adds the
+    ///         minted amount to the aggregates.
+    function test_mint_Success_HandsTheModuleThePositionBeforeTheMint() public {
+        vm.prank(agent);
+        token.mint(alice, 100);
+
+        assertEq(syncModule.lastInvestor(), alice);
+        assertEq(syncModule.lastPosition(), 0);
+        assertEq(token.balanceOf(alice), 100);
     }
 
     /// @notice A module reverting inside the sync cannot stop a transfer settling. The auto-trigger

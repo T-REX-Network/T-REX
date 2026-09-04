@@ -78,18 +78,10 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
             identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.identity.selector), abi.encode(address(0))
         );
         vm.mockCall(
-            identityRegistry, abi.encodeWithSelector(ITREXRegistry.COUNTRY_CLAIM_TOPIC.selector), abi.encode(uint256(0))
+            identityRegistry,
+            abi.encodeWithSelector(ITREXRegistry.reconcileAttribute.selector),
+            abi.encode(uint256(0), uint16(0), uint16(0), false)
         );
-        vm.mockCall(
-            identityRegistry, abi.encodeWithSelector(ITREXRegistry.cachedAttribute.selector), abi.encode(uint16(0))
-        );
-        vm.mockCall(
-            identityRegistry, abi.encodeWithSelector(ITREXRegistry.attestedCountry.selector), abi.encode(uint16(0))
-        );
-        vm.mockCall(
-            identityRegistry, abi.encodeWithSelector(ITREXRegistry.isAttributeFlagged.selector), abi.encode(false)
-        );
-        vm.mockCall(identityRegistry, abi.encodeWithSelector(ITREXRegistry.syncAttribute.selector), "");
     }
 
 }

@@ -106,7 +106,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         uint8 decimals;
         address onchainId;
         IModularCompliance compliance;
-        IERC3643IdentityRegistry identityRegistry;
+        ITREXRegistry trexRegistry;
         mapping(address user => FrozenStatus) frozenStatus;
     }
 
@@ -151,8 +151,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         s.decimals = tokenDecimals;
         s.onchainId = onchainIdAddress;
 
-        s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
-        ITREXRegistry(identityRegistryAddress).bindToken(address(this));
+        s.trexRegistry = ITREXRegistry(identityRegistryAddress);
+        s.trexRegistry.bindToken(address(this));
         s.compliance = IModularCompliance(complianceAddress);
         _emitUpdatedTokenInformation();
 
@@ -190,8 +190,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         restricted
         onlySharedAuthority(identityRegistryAddress)
     {
-        _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
-        ITREXRegistry(identityRegistryAddress).bindToken(address(this));
+        TokenStorage storage s = _tokenStorage();
+        s.trexRegistry = ITREXRegistry(identityRegistryAddress);
+        s.trexRegistry.bindToken(address(this));
         emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
@@ -233,7 +234,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
     /// @inheritdoc IERC3643
     function identityRegistry() external view returns (IERC3643IdentityRegistry) {
-        return _tokenStorage().identityRegistry;
+        return _tokenStorage().trexRegistry;
     }
 
     /// @inheritdoc IERC3643
@@ -394,8 +395,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         uint256 investorTokens = balanceOf(lostWallet);
         require(investorTokens != 0, ErrorsLib.NoTokenToRecover());
         require(
-            s.identityRegistry.contains(lostWallet) || s.identityRegistry.contains(newWallet),
-            ErrorsLib.RecoveryNotPossible()
+            s.trexRegistry.contains(lostWallet) || s.trexRegistry.contains(newWallet), ErrorsLib.RecoveryNotPossible()
         );
 
         uint256 frozenTokens = s.frozenStatus[lostWallet].amount;
@@ -441,20 +441,18 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     ///      whenever it has no *local* entry, since resolving through the global identity registry fallback
     ///      leaves nothing to delete and no investor country recorded on this IRS.
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
-        TokenStorage storage s = _tokenStorage();
-        ITREXRegistry registry = ITREXRegistry(address(s.identityRegistry));
+        ITREXRegistry registry = _tokenStorage().trexRegistry;
 
         require(
-            !s.identityRegistry.contains(newWallet)
-                || s.identityRegistry.identity(newWallet) == IIdentity(investorOnchainId),
+            !registry.contains(newWallet) || registry.identity(newWallet) == IIdentity(investorOnchainId),
             ErrorsLib.RecoveryNotPossible()
         );
 
         if (!registry.isLocallyRegistered(newWallet)) {
-            s.identityRegistry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
+            registry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
         }
         if (registry.isLocallyRegistered(lostWallet)) {
-            s.identityRegistry.deleteIdentity(lostWallet);
+            registry.deleteIdentity(lostWallet);
         }
     }
 
@@ -506,43 +504,22 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /// @dev `_forceUpdate` bypasses {_update}, so the reconciliation is repeated here.
     function _forcedTransfer(address from, address to, uint256 amount) internal returns (bool) {
         TokenStorage storage s = _tokenStorage();
-        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
-        _forceUpdate(from, to, amount);
         reconcile(from);
         reconcile(to);
+        require(s.trexRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+        _forceUpdate(from, to, amount);
         s.compliance.transferred(from, to, amount);
         return true;
     }
 
     /// @inheritdoc ITREXToken
-    /// @dev Idempotent, so every balance-touching operation can call it. The claim is resolved on
-    ///      every call: ONCHAINID exposes no per-claim nonce to short-circuit on.
+    /// @dev Idempotent, so every balance-touching operation calls it before moving the balance: the
+    ///      position handed to the modules is the one their aggregates were built on.
     function reconcile(address investor) public {
         TokenStorage storage s = _tokenStorage();
-        ITREXRegistry registry = ITREXRegistry(address(s.identityRegistry));
-
-        address investorIdentity = address(s.identityRegistry.identity(investor));
-        if (investorIdentity == address(0)) return;
-
-        uint256 topic = registry.COUNTRY_CLAIM_TOPIC();
-        uint16 cached = registry.cachedAttribute(investorIdentity, topic);
-        uint16 attested = registry.attestedCountry(investor);
-        bool flagged = registry.isAttributeFlagged(investorIdentity, topic);
-
-        // The claim stopped resolving: keep the investor counted where they are and flag for review.
-        if (attested == 0) {
-            if (cached != 0 && !flagged) registry.syncAttribute(investorIdentity, topic, cached, true);
-            return;
-        }
-
-        if (attested == cached) {
-            if (flagged) registry.syncAttribute(investorIdentity, topic, cached, false);
-            return;
-        }
-
-        registry.syncAttribute(investorIdentity, topic, attested, false);
-        emit ERC3643EventsLib.CountryUpdated(investor, attested);
-        s.compliance.attributeSynced(investor, topic, cached, attested, balanceOf(investor));
+        (uint256 topic, uint16 oldValue, uint16 newValue, bool moved) = s.trexRegistry.reconcileAttribute(investor);
+        if (!moved) return;
+        s.compliance.attributeSynced(investor, topic, oldValue, newValue, balanceOf(investor));
     }
 
     /* ----- Utility Functions ----- */
@@ -574,23 +551,23 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             _autoUnfreezeFor(from, value);
         }
 
+        // Before the checks and the balance move, so compliance evaluates and moves the pre-move
+        // position under the attested country.
+        if (!isMint) reconcile(from);
+        if (!isBurn) reconcile(to);
+
         if (!isBurn) {
-            require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+            require(s.trexRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
             require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());
         }
 
         super._update(from, to, value);
 
-        // Reconcile before the hooks so a module's aggregates are keyed on the attested country.
         if (isMint) {
-            reconcile(to);
             s.compliance.created(to, value);
         } else if (isBurn) {
-            reconcile(from);
             s.compliance.destroyed(from, value);
         } else {
-            reconcile(from);
-            reconcile(to);
             s.compliance.transferred(from, to, value);
         }
     }
