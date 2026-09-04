@@ -150,7 +150,7 @@ library AccessManagerSetupLib {
     /// @notice Role wiring for the `TREXRegistry` contract.
     function setupTREXRegistryRoles(IAccessManager accessManager, address registry) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](11);
+        bytes4[] memory functions = new bytes4[](10);
         functions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
         functions[1] = TREXRegistry.disableEligibilityChecks.selector;
         functions[2] = TREXRegistry.enableEligibilityChecks.selector;
@@ -161,7 +161,6 @@ library AccessManagerSetupLib {
         functions[7] = TREXRegistry.removeClaimTopic.selector;
         functions[8] = TREXRegistry.addClaimTopicForIdentityType.selector;
         functions[9] = TREXRegistry.removeClaimTopicForIdentityType.selector;
-        functions[10] = TREXRegistry.setIdentityFactory.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------

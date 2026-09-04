@@ -18,7 +18,6 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
         registry.init(
             address(identityRegistryStorage),
             address(accessManager),
-            address(idFactory),
             new uint256[](0),
             new address[](0),
             new uint256[][](0)
@@ -27,47 +26,33 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
 
     /// @notice Should reject zero address for identity storage
     function test_init_RevertWhen_IdentityStorageZeroAddress() public {
-        TREXRegistry impl = new TREXRegistry();
+        TREXRegistry impl = new TREXRegistry(address(idFactory));
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ERC1967Proxy(
             address(impl),
             abi.encodeCall(
                 TREXRegistry.init,
-                (
-                    address(0),
-                    address(accessManager),
-                    address(idFactory),
-                    new uint256[](0),
-                    new address[](0),
-                    new uint256[][](0)
-                )
+                (address(0), address(accessManager), new uint256[](0), new address[](0), new uint256[][](0))
             )
         );
     }
 
     /// @notice Should reject zero address for access manager
     function test_init_RevertWhen_AccessManagerZeroAddress() public {
-        TREXRegistry impl = new TREXRegistry();
+        TREXRegistry impl = new TREXRegistry(address(idFactory));
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ERC1967Proxy(
             address(impl),
             abi.encodeCall(
                 TREXRegistry.init,
-                (
-                    address(identityRegistryStorage),
-                    address(0),
-                    address(idFactory),
-                    new uint256[](0),
-                    new address[](0),
-                    new uint256[][](0)
-                )
+                (address(identityRegistryStorage), address(0), new uint256[](0), new address[](0), new uint256[][](0))
             )
         );
     }
 
     /// @notice Should emit the four "init" events and wire the sub-registries to address(this)
     function test_init_EmitsExpectedEventsAndWiresState() public {
-        TREXRegistry impl = new TREXRegistry();
+        TREXRegistry impl = new TREXRegistry(address(idFactory));
 
         vm.recordLogs();
         TREXRegistry newRegistry = TREXRegistry(
@@ -79,7 +64,6 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
                         (
                             address(identityRegistryStorage),
                             address(accessManager),
-                            address(idFactory),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)

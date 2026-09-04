@@ -81,7 +81,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         );
 
         // Deploy TREXRegistry behind a proxy
-        registryImplementation = new TREXRegistry();
+        registryImplementation = new TREXRegistry(address(idFactory));
         registry = TREXRegistry(
             address(
                 new ERC1967Proxy(
@@ -91,7 +91,6 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
                         (
                             address(identityRegistryStorage),
                             address(accessManager),
-                            address(idFactory),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)

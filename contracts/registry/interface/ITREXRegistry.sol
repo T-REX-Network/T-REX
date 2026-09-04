@@ -95,25 +95,10 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// Emits an `EligibilityChecksEnabled` event upon successful execution.
     function enableEligibilityChecks() external;
 
-    /// @dev Sets the ONCHAINID IdentityFactory whose creation-time type record backs the per-type
-    /// claim topic resolution in `isVerified`.
-    ///
-    /// WARNING: a factory that did not mint the registered identities reports type 0 for all of
-    /// them, so every per-type override stops applying and verification falls back to the default
-    /// topics. Only point the registry at the factory its identities actually come from.
-    ///
-    /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `identityFactoryAddress` must not be the zero address; otherwise the call reverts with
-    ///   `ZeroAddress`.
-    ///
-    /// Emits an `IdentityFactorySet` event upon successful execution.
-    /// @param identityFactoryAddress the IdentityFactory to read identity types from
-    function setIdentityFactory(address identityFactoryAddress) external;
-
     /// @dev Returns the ONCHAINID IdentityFactory whose type record backs per-type claim topic
-    /// resolution. `identityTypeOf` on it returns 0 for identities it did not mint, which resolve to
-    /// the default claim topics.
+    /// resolution. Baked into the implementation at construction, so changing it takes a new
+    /// implementation published through the beacon. `identityTypeOf` on it returns 0 for identities
+    /// it did not mint, which resolve to the default claim topics.
     function identityFactory() external view returns (IIdentityFactory);
 
     /// @dev Adds a claim topic to the override set of an identity type.

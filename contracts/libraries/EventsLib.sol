@@ -93,9 +93,6 @@ library EventsLib {
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
 
-    /// @notice Emitted when the IdentityFactory backing per-type claim topic resolution changes.
-    event IdentityFactorySet(address identityFactory);
-
     // TREXFactory Events
 
     event Deployed(address indexed addr);

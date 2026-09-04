@@ -236,7 +236,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         tokenImplementation = new Token();
         identityRegistryStorageImplementation = new IdentityRegistryStorage();
         modularComplianceImplementation = new ModularCompliance();
-        trexRegistryImplementation = new TREXRegistry();
+        trexRegistryImplementation = new TREXRegistry(address(idFactory));
     }
 
     function _deployFactories() internal {

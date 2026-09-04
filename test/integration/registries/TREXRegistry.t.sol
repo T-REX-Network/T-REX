@@ -121,9 +121,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         address irs = address(registry.identityStorage());
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        registry.init(
-            irs, address(accessManager), address(idFactory), new uint256[](0), new address[](0), new uint256[][](0)
-        );
+        registry.init(irs, address(accessManager), new uint256[](0), new address[](0), new uint256[][](0));
     }
 
     // =============================================================================================

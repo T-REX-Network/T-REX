@@ -22,8 +22,9 @@ All notable changes to this project will be documented in this file.
   - The identity type is read from the ONCHAINID IdentityFactory's creation-time record
     (`identityTypeOf`), never from the identity contract itself: the record is written once at
     minting with no update path, so a hostile identity can neither lie about its type nor block
-    resolution by reverting. The registry holds the factory reference (`init` parameter,
-    OWNER-gated `setIdentityFactory`, `identityFactory()` getter, `IdentityFactorySet` event).
+    resolution by reverting. The factory is a constructor immutable of the registry implementation
+    (exposed via `identityFactory()`), so repointing it takes a new implementation published
+    through the beacon rather than a runtime call.
   - Default fallback always applies: type 0 (including identities the factory did not mint) or a
     type without a configured set is evaluated against the default ERC-3643 claim topics. A
     deployment that never touches the new functions behaves exactly as before.

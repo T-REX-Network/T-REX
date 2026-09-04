@@ -312,7 +312,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     (
                         identityStorage,
                         tokenDetails.accessManager,
-                        _idFactory,
                         claimDetails.claimTopics,
                         claimDetails.issuers,
                         claimDetails.issuerClaims

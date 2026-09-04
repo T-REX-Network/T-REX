@@ -94,11 +94,6 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         // ----- IdentityRegistry storage -----
         IIdentityRegistryStorage tokenIdentityStorage;
         bool checksDisabled;
-
-        /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The
-        ///  factory records the type once at minting and never updates it, so it is a safer source
-        ///  than asking the identity contract itself.
-        IIdentityFactory identityFactory;
         // ----- TrustedIssuersRegistry storage -----
         /// @dev Set containing all TrustedIssuers identity contract addresses.
         EnumerableSet.AddressSet trustedIssuers;
@@ -120,42 +115,43 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXRegistry")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0x5fe6836edad2306552d236f378d4a0a2ef1c78da81818168b2b776323acb4300;
 
-    constructor() {
+    /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The factory
+    ///  records the type once at minting and never updates it, so it is a safer source than asking
+    ///  the identity contract itself. Baked into the implementation so it cannot be repointed at
+    ///  runtime; changing it takes a new implementation published through the beacon.
+    IIdentityFactory private immutable _IDENTITY_FACTORY;
+
+    /// @param identityFactoryAddress the ONCHAINID IdentityFactory whose type record backs the
+    ///        per-type claim topic resolution
+    constructor(address identityFactoryAddress) {
+        require(identityFactoryAddress != address(0), ErrorsLib.ZeroAddress());
+        _IDENTITY_FACTORY = IIdentityFactory(identityFactoryAddress);
         _disableInitializers();
     }
 
     /// @notice Initializes the contract
     /// @param identityStorageAddress the address of the (external) identity registry storage
     /// @param accessManagerAddress the address of the access manager
-    /// @param identityFactoryAddress the ONCHAINID IdentityFactory whose type record backs per-type
-    ///        claim topic resolution
     /// @param initialTopics the claim topics required at deployment
     /// @param issuers the trusted issuers to register at deployment
     /// @param issuerClaims the claim topics each entry of `issuers` is trusted for
     function init(
         address identityStorageAddress,
         address accessManagerAddress,
-        address identityFactoryAddress,
         uint256[] memory initialTopics,
         address[] memory issuers,
         uint256[][] memory issuerClaims
     ) external initializer {
-        require(
-            identityStorageAddress != address(0) && accessManagerAddress != address(0)
-                && identityFactoryAddress != address(0),
-            ErrorsLib.ZeroAddress()
-        );
+        require(identityStorageAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         require(issuers.length == issuerClaims.length, ErrorsLib.InvalidClaimPattern());
 
         Storage storage s = _getStorage();
         s.tokenIdentityStorage = IIdentityRegistryStorage(identityStorageAddress);
-        s.identityFactory = IIdentityFactory(identityFactoryAddress);
         s.checksDisabled = false;
 
         emit ERC3643EventsLib.ClaimTopicsRegistrySet(address(this));
         emit ERC3643EventsLib.TrustedIssuersRegistrySet(address(this));
         emit ERC3643EventsLib.IdentityStorageSet(identityStorageAddress);
-        emit EventsLib.IdentityFactorySet(identityFactoryAddress);
         emit EventsLib.EligibilityChecksEnabled();
 
         __AccessManaged_init(accessManagerAddress);
@@ -210,15 +206,8 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc ITREXRegistry
-    function setIdentityFactory(address identityFactoryAddress) external override restricted {
-        require(identityFactoryAddress != address(0), ErrorsLib.ZeroAddress());
-        _getStorage().identityFactory = IIdentityFactory(identityFactoryAddress);
-        emit EventsLib.IdentityFactorySet(identityFactoryAddress);
-    }
-
-    /// @inheritdoc ITREXRegistry
     function identityFactory() external view override returns (IIdentityFactory) {
-        return _getStorage().identityFactory;
+        return _IDENTITY_FACTORY;
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -510,7 +499,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     ///  contract, so a hostile identity cannot lie about its type or block the resolution.
     ///  Identities the factory did not mint have type 0 and use the default set.
     function _requiredClaimTopics(Storage storage s, IIdentity userIdentity) internal view returns (uint256[] memory) {
-        uint256 identityType = s.identityFactory.identityTypeOf(address(userIdentity));
+        uint256 identityType = _IDENTITY_FACTORY.identityTypeOf(address(userIdentity));
         if (identityType != 0) {
             uint256[] memory typeTopics = s.claimTopicsByIdentityType[identityType].values();
             if (typeTopics.length > 0) {
