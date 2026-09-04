@@ -122,6 +122,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
+     *  @dev The country argument is ignored: the storage may be shared by several registries, and the
+     *  cache is per token.
      */
     function addIdentityToStorage(
         address _userAddress,
@@ -153,6 +155,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
+     *  @dev DEPRECATED, always reverts: this storage holds no country.
      */
     function modifyStoredInvestorCountry(address, uint16) external override restricted {
         revert ErrorsLib.Deprecated();
@@ -236,8 +239,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedInvestorCountry}.
-     *  @dev Returns 0 for wallets that only exist in the global identity registry fallback, because the
-     *  global registry does not track investor country.
+     *  @dev DEPRECATED, always returns 0: read `investorCountry` on the Identity Registry.
      */
     function storedInvestorCountry(address) external pure override returns (uint16) {
         return 0;

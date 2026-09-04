@@ -97,4 +97,39 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// ignoring the global identity registry fallback.
     function isLocallyRegistered(address userAddress) external view returns (bool);
 
+    /// @notice Binds this registry to the token it serves.
+    /// @dev A registry serves exactly one token. Callable by the token itself while unbound, or by the owner.
+    /// @param token the token this registry serves
+    function bindToken(address token) external;
+
+    /// @notice Writes the cached value of a claim-derived attribute for an identity.
+    /// @dev Callable only by the bound token, during reconciliation.
+    /// @param identity the identity the attribute belongs to
+    /// @param topic claim topic identifying the attribute
+    /// @param newValue value now attested by the claim, or the value being kept while flagged
+    /// @param flagged true when the attesting claim no longer resolves and the identity needs review
+    function syncAttribute(address identity, uint256 topic, uint16 newValue, bool flagged) external;
+
+    /// @notice Claim topic carrying the investor's attested residence.
+    function COUNTRY_CLAIM_TOPIC() external view returns (uint256);
+
+    /// @notice Returns the token this registry is bound to, or the zero address when it serves none.
+    function tokenBound() external view returns (address);
+
+    /// @notice Returns the country attested in the investor's residence claim right now.
+    /// @dev Disagreeing with `investorCountry` means a reconcile is pending.
+    /// @param userAddress the wallet of the investor
+    function attestedCountry(address userAddress) external view returns (uint16);
+
+    /// @notice Returns the cached value of a claim-derived attribute.
+    /// @param identity the identity the attribute belongs to
+    /// @param topic claim topic identifying the attribute
+    function cachedAttribute(address identity, uint256 topic) external view returns (uint16);
+
+    /// @notice Returns true when the identity's attesting claim no longer resolves.
+    /// @dev The cached value stays counted; the flag marks the identity for review.
+    /// @param identity the identity the attribute belongs to
+    /// @param topic claim topic identifying the attribute
+    function isAttributeFlagged(address identity, uint256 topic) external view returns (bool);
+
 }

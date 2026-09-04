@@ -199,6 +199,60 @@ contract UndeclaredCheckModule is RecordingModule {
 
 }
 
+/// @dev Declares the attribute-sync dispatch point and records everything it is handed, so a test can
+///      assert the compliance forwarded the exact payload it was given.
+contract MockAttributeSyncModule is RecordingModule {
+
+    uint256 public attributeSyncCalls;
+    address public lastInvestor;
+    uint256 public lastTopic;
+    uint16 public lastOldValue;
+    uint16 public lastNewValue;
+    uint256 public lastPosition;
+
+    function moduleAttributeSync(address investor, uint256 topic, uint16 oldValue, uint16 newValue, uint256 position)
+        external
+        override
+        onlyComplianceCall
+    {
+        attributeSyncCalls++;
+        lastInvestor = investor;
+        lastTopic = topic;
+        lastOldValue = oldValue;
+        lastNewValue = newValue;
+        lastPosition = position;
+    }
+
+    function moduleCapabilities() external pure returns (uint256) {
+        return ModuleCapabilitiesLib.HOOK_ATTRIBUTE_SYNC;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "MockAttributeSyncModule";
+    }
+
+}
+
+/// @dev Declares the attribute-sync dispatch point and reverts in it. The compliance must absorb that
+///      without reverting, so a module like this cannot brick the operations that trigger a sync.
+contract MockRevertingSyncModule is RecordingModule {
+
+    error SyncRefused();
+
+    function moduleAttributeSync(address, uint256, uint16, uint16, uint256) external view override onlyComplianceCall {
+        revert SyncRefused();
+    }
+
+    function moduleCapabilities() external pure returns (uint256) {
+        return ModuleCapabilitiesLib.HOOK_ATTRIBUTE_SYNC;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "MockRevertingSyncModule";
+    }
+
+}
+
 /// @dev Declares nothing: must be rejected at binding time.
 contract ZeroCapabilityModule is RecordingModule {
 

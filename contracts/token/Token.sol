@@ -88,8 +88,9 @@ import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
+import { ITREXToken } from "./interface/ITREXToken.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, IERC3643 {
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, ITREXToken {
 
     string internal constant VERSION = "5.0.0";
 
@@ -151,6 +152,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         s.onchainId = onchainIdAddress;
 
         s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        ITREXRegistry(identityRegistryAddress).bindToken(address(this));
         s.compliance = IModularCompliance(complianceAddress);
         _emitUpdatedTokenInformation();
 
@@ -189,6 +191,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         onlySharedAuthority(identityRegistryAddress)
     {
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        ITREXRegistry(identityRegistryAddress).bindToken(address(this));
         emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
@@ -402,6 +405,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         _migrateAddressFrozen(lostWallet, newWallet);
         _migrateIdentity(lostWallet, newWallet, investorOnchainId);
 
+        // After the migration: the new wallet resolves to the recovered identity only once registered.
+        reconcile(newWallet);
+
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
 
         return true;
@@ -497,12 +503,46 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         }
     }
 
+    /// @dev `_forceUpdate` bypasses {_update}, so the reconciliation is repeated here.
     function _forcedTransfer(address from, address to, uint256 amount) internal returns (bool) {
         TokenStorage storage s = _tokenStorage();
         require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
+        reconcile(from);
+        reconcile(to);
         s.compliance.transferred(from, to, amount);
         return true;
+    }
+
+    /// @inheritdoc ITREXToken
+    /// @dev Idempotent, so every balance-touching operation can call it. The claim is resolved on
+    ///      every call: ONCHAINID exposes no per-claim nonce to short-circuit on.
+    function reconcile(address investor) public {
+        TokenStorage storage s = _tokenStorage();
+        ITREXRegistry registry = ITREXRegistry(address(s.identityRegistry));
+
+        address investorIdentity = address(s.identityRegistry.identity(investor));
+        if (investorIdentity == address(0)) return;
+
+        uint256 topic = registry.COUNTRY_CLAIM_TOPIC();
+        uint16 cached = registry.cachedAttribute(investorIdentity, topic);
+        uint16 attested = registry.attestedCountry(investor);
+        bool flagged = registry.isAttributeFlagged(investorIdentity, topic);
+
+        // The claim stopped resolving: keep the investor counted where they are and flag for review.
+        if (attested == 0) {
+            if (cached != 0 && !flagged) registry.syncAttribute(investorIdentity, topic, cached, true);
+            return;
+        }
+
+        if (attested == cached) {
+            if (flagged) registry.syncAttribute(investorIdentity, topic, cached, false);
+            return;
+        }
+
+        registry.syncAttribute(investorIdentity, topic, attested, false);
+        emit ERC3643EventsLib.CountryUpdated(investor, attested);
+        s.compliance.attributeSynced(investor, topic, cached, attested, balanceOf(investor));
     }
 
     /* ----- Utility Functions ----- */
@@ -541,9 +581,18 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
         super._update(from, to, value);
 
-        if (isMint) s.compliance.created(to, value);
-        else if (isBurn) s.compliance.destroyed(from, value);
-        else s.compliance.transferred(from, to, value);
+        // Reconcile before the hooks so a module's aggregates are keyed on the attested country.
+        if (isMint) {
+            reconcile(to);
+            s.compliance.created(to, value);
+        } else if (isBurn) {
+            reconcile(from);
+            s.compliance.destroyed(from, value);
+        } else {
+            reconcile(from);
+            reconcile(to);
+            s.compliance.transferred(from, to, value);
+        }
     }
 
     function _forceUpdate(address from, address to, uint256 value) private {

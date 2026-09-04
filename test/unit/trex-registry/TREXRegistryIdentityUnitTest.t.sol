@@ -58,18 +58,19 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
     // ============ updateCountry() ============
 
-    /// @notice `updateCountry` is no longer wired to AGENT, so an agent is stopped by the
-    ///         AccessManager before reaching the deprecated body.
-    function test_updateCountry_RevertWhen_NotAdmin() public {
+    /// @notice A caller without AGENT is stopped by the AccessManager before reaching the body.
+    function test_updateCountry_RevertWhen_NotAgent() public {
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         registry.updateCountry(bob, 999);
     }
 
-    /// @notice The investor country now lives in a claim on the identity, so `updateCountry` is
-    ///         deprecated. The selector defaults to ADMIN_ROLE, which this contract holds.
-    function test_updateCountry_RevertWhen_Deprecated() public {
-        vm.expectRevert(ErrorsLib.Deprecated.selector);
+    /// @notice A registry serving no token has no compliance to reconcile through, so the alias has
+    ///         nowhere to delegate. This bare registry is never bound to one.
+    function test_updateCountry_RevertWhen_NoTokenBound() public {
+        assertEq(registry.tokenBound(), address(0));
+
+        vm.expectRevert(ErrorsLib.NoTokenBound.selector);
         registry.updateCountry(bob, 999);
     }
 

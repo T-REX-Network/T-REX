@@ -163,12 +163,18 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        functions = new bytes4[](4);
+        functions = new bytes4[](5);
         functions[0] = TREXRegistry.registerIdentity.selector;
         functions[1] = TREXRegistry.batchRegisterIdentity.selector;
         functions[2] = TREXRegistry.updateIdentity.selector;
         functions[3] = TREXRegistry.deleteIdentity.selector;
+        functions[4] = TREXRegistry.updateCountry.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.AGENT);
+
+        // ------ OWNER role, via the synthetic bind selector `bindToken` self-checks ------
+        functions = new bytes4[](1);
+        functions[0] = RolesLib.BIND_UNBIND_TOKEN;
+        accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
     }
 
     function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance) internal {

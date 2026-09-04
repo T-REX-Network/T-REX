@@ -5,6 +5,7 @@ import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
@@ -69,6 +70,26 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         );
 
         vm.mockCall(identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.deleteIdentity.selector), "");
+
+        // Reconciliation runs on every balance move. Left inert here — no identity, nothing cached and
+        // nothing attested — so it writes nothing and these suites keep testing their own subject.
+        // Tests that care about it override these.
+        vm.mockCall(
+            identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.identity.selector), abi.encode(address(0))
+        );
+        vm.mockCall(
+            identityRegistry, abi.encodeWithSelector(ITREXRegistry.COUNTRY_CLAIM_TOPIC.selector), abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            identityRegistry, abi.encodeWithSelector(ITREXRegistry.cachedAttribute.selector), abi.encode(uint16(0))
+        );
+        vm.mockCall(
+            identityRegistry, abi.encodeWithSelector(ITREXRegistry.attestedCountry.selector), abi.encode(uint16(0))
+        );
+        vm.mockCall(
+            identityRegistry, abi.encodeWithSelector(ITREXRegistry.isAttributeFlagged.selector), abi.encode(false)
+        );
+        vm.mockCall(identityRegistry, abi.encodeWithSelector(ITREXRegistry.syncAttribute.selector), "");
     }
 
 }

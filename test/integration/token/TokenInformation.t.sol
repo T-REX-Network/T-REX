@@ -17,6 +17,7 @@ import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 import { PausableUpgradeable, Token } from "contracts/token/Token.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
@@ -119,8 +120,7 @@ contract TokenInformationTest is TREXSuiteTest {
     /// @notice Should revert when the new Identity Registry does not authorize the token for recovery calls
     /// @notice Should swap to a new Identity Registry that authorizes the token through the shared AccessManager
     function test_setIdentityRegistry_Success() public {
-        Token secondToken = _deployToken("token2", "Second Token", "TK2");
-        address newIR = address(secondToken.identityRegistry());
+        address newIR = _deployUnboundRegistry();
 
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.IdentityRegistryAdded(newIR);
@@ -129,6 +129,47 @@ contract TokenInformationTest is TREXSuiteTest {
         token.setIdentityRegistry(newIR);
 
         assertEq(address(token.identityRegistry()), newIR);
+        assertEq(ITREXRegistry(newIR).tokenBound(), address(token));
+    }
+
+    /// @notice A registry already serving another token cannot be adopted: its cache is that token's,
+    ///         and a cache shared between tokens is the state the per-token placement exists to avoid.
+    function test_setIdentityRegistry_RevertWhen_RegistryServesAnotherToken() public {
+        Token secondToken = _deployToken("token2", "Second Token", "TK2");
+        address foreignIR = address(secondToken.identityRegistry());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
+        token.setIdentityRegistry(foreignIR);
+    }
+
+    /// @notice Re-pointing a token at the registry it already uses is a no-op, not a rejection.
+    function test_setIdentityRegistry_Success_WhenAlreadyBoundToThisToken() public {
+        address currentIR = address(token.identityRegistry());
+
+        vm.prank(deployer);
+        token.setIdentityRegistry(currentIR);
+
+        assertEq(ITREXRegistry(currentIR).tokenBound(), address(token));
+    }
+
+    /// @dev A registry deployed straight on the suite beacon, serving no token yet.
+    function _deployUnboundRegistry() private returns (address) {
+        return address(
+            new BeaconProxy(
+                trexImplementationAuthority.beacons().trexRegistryBeacon,
+                abi.encodeCall(
+                    TREXRegistry.init,
+                    (
+                        address(token.identityRegistry().identityStorage()),
+                        address(accessManager),
+                        new uint256[](0),
+                        new address[](0),
+                        new uint256[][](0)
+                    )
+                )
+            )
+        );
     }
 
     // ============ totalSupply() Tests ============

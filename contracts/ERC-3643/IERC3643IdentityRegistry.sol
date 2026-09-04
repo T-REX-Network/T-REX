@@ -78,7 +78,7 @@ interface IERC3643IdentityRegistry {
      *  This function can only be called by a wallet set as agent of the smart contract
      *  @param _userAddress The address of the user
      *  @param _identity The address of the user's identity contract
-     *  @param _country The country of the investor
+     *  @param _country DEPRECATED, ignored: the country is derived from the residence claim
      *  emits `IdentityRegistered` event
      */
     function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) external;
@@ -93,12 +93,12 @@ interface IERC3643IdentityRegistry {
     function deleteIdentity(address _userAddress) external;
 
     /**
-     *  @dev Updates the country corresponding to a user address.
-     *  Requires that the user should have an identity contract already deployed that will be replaced.
+     *  @dev Reconciles the cached country of a user address against their residence claim.
+     *  Requires that the user should have an identity contract already deployed.
      *  This function can only be called by a wallet set as agent of the smart contract
      *  @param _userAddress The address of the user
-     *  @param _country The new country of the user
-     *  emits `CountryUpdated` event
+     *  @param _country DEPRECATED, ignored: the country is derived from the residence claim
+     *  emits `CountryUpdated` event carrying the claim-derived value
      */
     function updateCountry(address _userAddress, uint16 _country) external;
 
@@ -121,7 +121,7 @@ interface IERC3643IdentityRegistry {
      *  USE WITH CARE OR YOU COULD LOSE TX FEES WITH AN "OUT OF GAS" TRANSACTION
      *  @param _userAddresses The addresses of the users
      *  @param _identities The addresses of the corresponding identity contracts
-     *  @param _countries The countries of the corresponding investors
+     *  @param _countries DEPRECATED, ignored: see {registerIdentity}
      *  emits _userAddresses.length `IdentityRegistered` events
      */
     function batchRegisterIdentity(
@@ -156,7 +156,9 @@ interface IERC3643IdentityRegistry {
     function identity(address _userAddress) external view returns (IIdentity);
 
     /**
-     *  @dev Returns the country code of an investor.
+     *  @dev Returns the country code of an investor, as cached from the residence claim. Compliance
+     *  runs on this value; it moves only through reconciliation, so a divergence from the live claim
+     *  means a reconciliation is pending.
      *  @param _userAddress The wallet of the investor
      */
     function investorCountry(address _userAddress) external view returns (uint16);

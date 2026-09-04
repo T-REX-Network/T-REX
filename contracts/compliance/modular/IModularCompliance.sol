@@ -141,6 +141,20 @@ interface IModularCompliance is IERC3643Compliance {
     function addAndSetModule(address _module, bytes[] calldata _interactions) external;
 
     /**
+     *  @dev propagates a moved claim-derived attribute to every module declaring the attribute-sync
+     *  dispatch point
+     *  never reverts: a failing module is skipped and reported through `AttributeSyncFailed`
+     *  @param _investor address of the investor whose attribute moved
+     *  @param _topic claim topic identifying the attribute
+     *  @param _oldValue value the modules' aggregates are currently built on
+     *  @param _newValue value now attested by the claim
+     *  @param _position aggregate holding of the investor to move between aggregates
+     *  can be called only by the token bound to this compliance
+     */
+    function attributeSynced(address _investor, uint256 _topic, uint16 _oldValue, uint16 _newValue, uint256 _position)
+        external;
+
+    /**
      *  @dev getter for the modules bound to the compliance contract
      *  returns address array of module contracts bound to the compliance
      */

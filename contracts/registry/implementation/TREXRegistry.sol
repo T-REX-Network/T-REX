@@ -65,6 +65,7 @@ pragma solidity ^0.8.30;
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
+import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -76,6 +77,8 @@ import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643Identity
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { RolesLib } from "../../libraries/RolesLib.sol";
+import { ITREXToken } from "../../token/interface/ITREXToken.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
@@ -105,6 +108,16 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
         // ----- ClaimTopicsRegistry storage -----
         EnumerableSet.UintSet claimTopics;
+
+        // ----- Claim-derived attribute cache -----
+        /// @dev Token this registry serves; the cache is per token.
+        address tokenBound;
+
+        /// @dev Last value synced from a claim, keyed by identity so every linked wallet shares it.
+        mapping(address identity => mapping(uint256 topic => uint16 value)) attributeCache;
+
+        /// @dev Identities whose attesting claim no longer resolves; the cached value stays counted.
+        mapping(address identity => mapping(uint256 topic => bool flagged)) attributeFlagged;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXRegistry")) - 1)) & ~bytes32(uint256(0xff));
@@ -112,6 +125,11 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
     // TODO: claim topic value to be specified
     uint256 public constant COUNTRY_CLAIM_TOPIC = 2_000_008;
+
+    modifier onlyBoundedToken() {
+        require(msg.sender == _getStorage().tokenBound, ErrorsLib.AddressNotATokenBoundToRegistry());
+        _;
+    }
 
     constructor() {
         _disableInitializers();
@@ -157,6 +175,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     // ============================================================
 
     /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev The `countries` argument is advisory and never stored, as in {registerIdentity}.
     function batchRegisterIdentity(
         address[] calldata userAddresses,
         IIdentity[] calldata identities,
@@ -175,9 +194,36 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev DEPRECATED: the investor country now lives in a claim on the identity; always reverts.
-    function updateCountry(address, uint16) external override restricted {
-        revert ErrorsLib.Deprecated();
+    /// @dev The `uint16` argument is ignored. Agent-gated for ERC-3643 compatibility only: the same
+    ///  effect is open to anyone through the token's `reconcile`.
+    function updateCountry(address _userAddress, uint16) external override restricted {
+        address token = _getStorage().tokenBound;
+        require(token != address(0), ErrorsLib.NoTokenBound());
+        ITREXToken(token).reconcile(_userAddress);
+    }
+
+    /// @inheritdoc ITREXRegistry
+    function bindToken(address _token) external {
+        Storage storage s = _getStorage();
+        require(
+            ((s.tokenBound == address(0) || s.tokenBound == _token) && msg.sender == _token) || _isOwner(msg.sender),
+            ErrorsLib.OnlyOwnerOrTokenCanCall()
+        );
+        require(_token != address(0), ErrorsLib.ZeroAddress());
+        s.tokenBound = _token;
+        emit ERC3643EventsLib.TokenBound(_token);
+    }
+
+    /// @inheritdoc ITREXRegistry
+    function syncAttribute(address _identity, uint256 _topic, uint16 _newValue, bool _flagged)
+        external
+        onlyBoundedToken
+    {
+        Storage storage s = _getStorage();
+        uint16 oldValue = s.attributeCache[_identity][_topic];
+        s.attributeCache[_identity][_topic] = _newValue;
+        s.attributeFlagged[_identity][_topic] = _flagged;
+        emit EventsLib.AttributeCacheSynced(_identity, _topic, oldValue, _newValue, _flagged);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -280,27 +326,29 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev Reads the country from a claim on the wallet's identity contract.
-    // TODO: no issuer validation — trusts whatever country claim is on the identity
+    /// @dev A disagreement with {attestedCountry} means a reconcile is pending.
     function investorCountry(address _userAddress) external view override returns (uint16) {
-        IIdentity id = identity(_userAddress);
-        if (address(id) == address(0)) return 0;
+        return _getStorage().attributeCache[address(identity(_userAddress))][COUNTRY_CLAIM_TOPIC];
+    }
 
-        bytes32[] memory claimIds = id.getClaimIdsByTopic(COUNTRY_CLAIM_TOPIC);
-        if (claimIds.length == 0) return 0;
+    /// @inheritdoc ITREXRegistry
+    function attestedCountry(address _userAddress) external view override returns (uint16) {
+        return _resolveCountryFromClaim(_userAddress);
+    }
 
-        (,,,, Structs.ClaimData memory data,) = id.getClaim(claimIds[0]);
-        if (data.payload.length == 0) return 0;
+    /// @inheritdoc ITREXRegistry
+    function cachedAttribute(address _identity, uint256 _topic) external view override returns (uint16) {
+        return _getStorage().attributeCache[_identity][_topic];
+    }
 
-        // The claim is read straight off the identity without asking the issuer, so the validity
-        // window has to be honoured here; `isClaimValid` would otherwise be the one enforcing it.
-        // Block-timestamp drift is not material against windows measured in days or longer.
-        /// forge-lint: disable-next-line(block-timestamp)
-        if (block.timestamp < data.issuedAt) return 0;
-        /// forge-lint: disable-next-line(block-timestamp)
-        if (data.validUntil != 0 && block.timestamp > data.validUntil) return 0;
+    /// @inheritdoc ITREXRegistry
+    function isAttributeFlagged(address _identity, uint256 _topic) external view override returns (bool) {
+        return _getStorage().attributeFlagged[_identity][_topic];
+    }
 
-        return abi.decode(data.payload, (uint16));
+    /// @inheritdoc ITREXRegistry
+    function tokenBound() external view override returns (address) {
+        return _getStorage().tokenBound;
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -326,6 +374,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev The `_country` argument is ignored.
     function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) public override restricted {
         _registerIdentity(_userAddress, _identity, _country);
     }
@@ -470,6 +519,46 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
     }
 
+    /// @dev Resolves the country attested in the residence claim, or 0 when no issuer trusted for
+    ///  {COUNTRY_CLAIM_TOPIC} attests one. Never reverts: a hostile issuer or a malformed payload must
+    ///  not take down the view paths reading this.
+    function _resolveCountryFromClaim(address userAddress) internal view returns (uint16) {
+        IIdentity userIdentity = identity(userAddress);
+        if (address(userIdentity) == address(0)) return 0;
+
+        address[] memory trustedIssuersForTopic =
+            _getStorage().claimTopicsToTrustedIssuers[COUNTRY_CLAIM_TOPIC].values();
+
+        for (uint256 i = 0; i < trustedIssuersForTopic.length; i++) {
+            bytes32 claimId = keccak256(abi.encode(trustedIssuersForTopic[i], COUNTRY_CLAIM_TOPIC));
+            (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
+                userIdentity.getClaim(claimId);
+
+            if (foundClaimTopic != COUNTRY_CLAIM_TOPIC) continue;
+
+            // `abi.decode` would revert on any other width.
+            if (data.payload.length != 32) continue;
+
+            // Timestamp drift is not material against validity windows measured in days.
+            /// forge-lint: disable-next-line(block-timestamp)
+            if (block.timestamp < data.issuedAt) continue;
+            /// forge-lint: disable-next-line(block-timestamp)
+            if (data.validUntil != 0 && block.timestamp > data.validUntil) continue;
+
+            (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
+                issuer, abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, COUNTRY_CLAIM_TOPIC, sig, data))
+            );
+            if (!success || result == bytes32(0)) continue;
+
+            uint256 raw = abi.decode(data.payload, (uint256));
+            if (raw > type(uint16).max) continue;
+
+            return uint16(raw);
+        }
+
+        return 0;
+    }
+
     function _addClaimTopic(uint256 claimTopic) internal {
         Storage storage s = _getStorage();
         require(s.claimTopics.length() < 15, ErrorsLib.MaxClaimTopicsReached(15));
@@ -477,6 +566,13 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         require(s.claimTopics.add(claimTopic), ErrorsLib.ClaimTopicAlreadyExists());
 
         emit ERC3643EventsLib.ClaimTopicAdded(claimTopic);
+    }
+
+    /// @dev Owner check for {bindToken} against the synthetic bind selector, as in {ModularCompliance}.
+    function _isOwner(address caller) internal view returns (bool) {
+        (bool isOwner,) =
+            AuthorityUtils.canCallWithDelay(authority(), caller, address(this), RolesLib.BIND_UNBIND_TOKEN);
+        return isOwner;
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
