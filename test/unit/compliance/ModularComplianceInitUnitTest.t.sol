@@ -10,16 +10,15 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
-import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
-import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
 
 import { TestModule } from "test/integration/mocks/TestModule.sol";
+import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
 contract ModularComplianceInitUnitTest is Test {
 
     ModularCompliance private mcImplementation;
     AccessManager private accessManager;
-    address private implementationAuthority = makeAddr("ImplementationAuthorityMock");
+    address private mcBeacon;
 
     address private notOwner = makeAddr("NotOwner");
     address private token = makeAddr("Token");
@@ -28,11 +27,7 @@ contract ModularComplianceInitUnitTest is Test {
         mcImplementation = new ModularCompliance();
         accessManager = new AccessManager(address(this));
         accessManager.grantRole(RolesLib.OWNER, address(this), 0);
-        vm.mockCall(
-            implementationAuthority,
-            abi.encodeWithSelector(ITREXImplementationAuthority.getMCImplementation.selector),
-            abi.encode(address(mcImplementation))
-        );
+        mcBeacon = BeaconProxyDeployer.newBeacon(address(mcImplementation));
     }
 
     function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
@@ -108,14 +103,12 @@ contract ModularComplianceInitUnitTest is Test {
 
     function test_init_RevertWhen_TokenIsZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new ModularComplianceProxy(
-            implementationAuthority, address(0), address(accessManager), _emptyModules(), _emptySettings()
-        );
+        _newMcProxy(address(0), address(accessManager), _emptyModules(), _emptySettings());
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new ModularComplianceProxy(implementationAuthority, token, address(0), _emptyModules(), _emptySettings());
+        _newMcProxy(token, address(0), _emptyModules(), _emptySettings());
     }
 
     function test_init_RevertWhen_MoreSettingsThanModules() public {
@@ -127,7 +120,7 @@ contract ModularComplianceInitUnitTest is Test {
         settings[1] = abi.encodeWithSignature("blockModule(bool)", false);
 
         vm.expectRevert(ErrorsLib.InvalidCompliancePattern.selector);
-        new ModularComplianceProxy(implementationAuthority, token, address(accessManager), modules, settings);
+        _newMcProxy(token, address(accessManager), modules, settings);
     }
 
     function test_init_RevertWhen_MoreThan25Modules() public {
@@ -137,7 +130,7 @@ contract ModularComplianceInitUnitTest is Test {
         }
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxModulesReached.selector, 25));
-        new ModularComplianceProxy(implementationAuthority, token, address(accessManager), modules, _emptySettings());
+        _newMcProxy(token, address(accessManager), modules, _emptySettings());
     }
 
     function test_bindToken_RevertWhen_DifferentTokenTriesToBindOverExistingBinding() public {
@@ -153,15 +146,20 @@ contract ModularComplianceInitUnitTest is Test {
         private
         returns (ModularCompliance)
     {
-        ModularCompliance mc = ModularCompliance(
-            address(
-                new ModularComplianceProxy(
-                    implementationAuthority, _token, address(accessManager), _modules, _moduleSettings
-                )
-            )
-        );
+        ModularCompliance mc = ModularCompliance(_newMcProxy(_token, address(accessManager), _modules, _moduleSettings));
         AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc));
         return mc;
+    }
+
+    function _newMcProxy(
+        address _token,
+        address _accessManager,
+        address[] memory _modules,
+        bytes[] memory _moduleSettings
+    ) private returns (address) {
+        return BeaconProxyDeployer.newProxy(
+            mcBeacon, abi.encodeCall(ModularCompliance.init, (_token, _accessManager, _modules, _moduleSettings))
+        );
     }
 
     function _deployTestModuleWithProxy() private returns (address) {

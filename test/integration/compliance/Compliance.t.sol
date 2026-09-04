@@ -3,6 +3,8 @@
 pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
@@ -16,9 +18,6 @@ import {
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
-import { ModularComplianceProxy } from "contracts/proxy/ModularComplianceProxy.sol";
-import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
-import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
 import { Token } from "contracts/token/Token.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
@@ -80,43 +79,25 @@ contract ComplianceTest is TREXSuiteTest {
     // Constructor Tests
     // ============================================
 
-    /// @notice Should revert when implementation authority is zero address
-    function test_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new ModularComplianceProxy(address(0), address(token), deployer, new address[](0), new bytes[](0));
+    /// @notice Should revert when the beacon is the zero address
+    function test_constructor_RevertWhen_BeaconIsZeroAddress() public {
+        vm.expectRevert();
+        new BeaconProxy(
+            address(0),
+            abi.encodeCall(ModularCompliance.init, (address(token), deployer, new address[](0), new bytes[](0)))
+        );
     }
 
-    /// @notice Should revert when initialization fails (invalid implementation)
+    /// @notice Should revert when initialization fails (implementation without init())
     function test_constructor_RevertWhen_InitializationFails() public {
-        // Deploy a mock contract that doesn't have init() function
         MockContract mockImpl = new MockContract();
+        address beacon = address(new UpgradeableBeacon(address(mockImpl), address(this)));
 
-        // Deploy an IA and manually set an invalid MC implementation
-        TREXImplementationAuthority incompleteIA =
-            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-
-        // Create a version with invalid MC implementation (mock contract without init())
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
-
-        ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
-            tokenImplementation: address(mockImpl), // Invalid - doesn't have proper init
-            ctrImplementation: address(mockImpl), // Invalid
-            irImplementation: address(mockImpl), // Invalid
-            irsImplementation: address(mockImpl), // Invalid
-            tirImplementation: address(mockImpl), // Invalid
-            mcImplementation: address(mockImpl) // Invalid - doesn't have init() function
-        });
-
-        // Add version to IA (need to be owner)
-        _authorizeIAGovernance(address(incompleteIA));
-        vm.prank(deployer);
-        incompleteIA.addAndUseTREXVersion(version, contracts);
-
-        // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
-        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
+        // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
         vm.expectRevert();
-        new ModularComplianceProxy(address(incompleteIA), address(token), deployer, new address[](0), new bytes[](0));
+        new BeaconProxy(
+            beacon, abi.encodeCall(ModularCompliance.init, (address(token), deployer, new address[](0), new bytes[](0)))
+        );
     }
 
     // ============================================

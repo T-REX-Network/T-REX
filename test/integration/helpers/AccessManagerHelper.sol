@@ -41,12 +41,11 @@ abstract contract AccessManagerHelper is Test {
     }
 
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
-    function _setupSuiteRoles(address token, address ir, address irs, address ctr, address tir, address mc) internal {
+    /// @dev `registry` is the TREXRegistry, which serves as the suite's IR, CTR and TIR.
+    function _setupSuiteRoles(address token, address registry, address irs, address mc) internal {
         AccessManagerSetupLib.setupTokenRoles(accessManager, token);
-        AccessManagerSetupLib.setupIdentityRegistryRoles(accessManager, ir);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry);
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs);
-        AccessManagerSetupLib.setupClaimTopicsRegistryRoles(accessManager, ctr);
-        AccessManagerSetupLib.setupTrustedIssuersRegistryRoles(accessManager, tir);
         AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc);
     }
 
@@ -58,9 +57,20 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.AGENT, account, NO_EXECUTION_DELAY);
     }
 
+    /// @notice Grants VERSION_MANAGER, which gates publish/upgrade on the TREXImplementationAuthority.
+    function _grantVersionManagerRole(address account) internal {
+        accessManager.grantRole(RolesLib.VERSION_MANAGER, account, NO_EXECUTION_DELAY);
+    }
+
     /// @notice Grants the transient IRS_BINDER role (gates IdentityRegistryStorage.bindIdentityRegistry).
     function _grantIRSBinderRole(address account) internal {
         accessManager.grantRole(RolesLib.IRS_BINDER, account, NO_EXECUTION_DELAY);
+    }
+
+    /// @notice Grants ASSET_DEPLOYER, which the ONCHAINID IdentityFactory resolves when minting
+    ///         IdentityTypes.ASSET identities (the TREXFactory token-OID auto-mint path).
+    function _grantTokenOidMinterRole(address account) internal {
+        accessManager.grantRole(RolesLib.ASSET_DEPLOYER, account, NO_EXECUTION_DELAY);
     }
 
     function _grantAgentAdminRole(address account) internal {

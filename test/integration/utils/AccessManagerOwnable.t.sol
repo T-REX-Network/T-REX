@@ -14,17 +14,18 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 ///         AccessManager rather than ERC-173.
 contract AccessManagerOwnableTest is TREXSuiteTest {
 
-    /// @dev Every suite contract that previously implemented Ownable and now inherits AccessManagerOwnable.
+    /// @dev Every suite contract inheriting AccessManagerOwnable.
+    /// @dev The registry answers `topicsRegistry()` and `issuersRegistry()` with its own address,
+    ///      so it is listed once. Listing it three times would make the rotation tests rotate the same
+    ///      contract repeatedly, and every call after the first would come from a stale authority.
     function _shimmedContracts() internal view returns (IERC173[] memory contractsList) {
-        contractsList = new IERC173[](8);
+        contractsList = new IERC173[](6);
         contractsList[0] = IERC173(address(token));
         contractsList[1] = IERC173(address(token.identityRegistry()));
         contractsList[2] = IERC173(address(token.compliance()));
-        contractsList[3] = IERC173(address(token.identityRegistry().topicsRegistry()));
-        contractsList[4] = IERC173(address(token.identityRegistry().issuersRegistry()));
-        contractsList[5] = IERC173(address(token.identityRegistry().identityStorage()));
-        contractsList[6] = IERC173(address(trexFactory));
-        contractsList[7] = IERC173(address(trexImplementationAuthority));
+        contractsList[3] = IERC173(address(token.identityRegistry().identityStorage()));
+        contractsList[4] = IERC173(address(trexFactory));
+        contractsList[5] = IERC173(address(trexImplementationAuthority));
     }
 
     // ============ owner() Tests ============
@@ -47,6 +48,17 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
         IAccessManaged(address(token)).setAuthority(address(newAuthority));
 
         assertEq(IERC173(address(token)).owner(), address(newAuthority));
+    }
+
+    /// @notice The non-upgradeable shim exposes the same public setter as the upgradeable one: the
+    ///         current authority can rotate `trexFactory` straight through `setAuthority`.
+    function test_setAuthority_RotatesNonUpgradeableContract() public {
+        AccessManager newAuthority = new AccessManager(address(this));
+
+        vm.prank(address(accessManager));
+        IAccessManaged(address(trexFactory)).setAuthority(address(newAuthority));
+
+        assertEq(IERC173(address(trexFactory)).owner(), address(newAuthority));
     }
 
     // ============ transferOwnership() Tests ============

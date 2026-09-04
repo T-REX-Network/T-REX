@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenRecoveryTest is TREXSuiteTest {
 
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
 
     function setUp() public override {
         super.setUp();
 
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         vm.prank(agent);
         token.mint(bob, 500);
@@ -29,10 +30,11 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
     /// @notice Should revert when sender is not an agent
     function test_recoveryAddress_RevertWhen_NotAgent() public {
-        // Add key to bobIdentity for another address
-        bytes32 keyHash = keccak256(abi.encode(another));
+        // Add key to bobIdentity for another address. addKey now derives the signer bytes from the
+        // module, so a freshly-referenced address must be registered via the data-carrying entry point.
+        bytes memory signerData = abi.encodePacked(another);
         vm.prank(bob);
-        bobIdentity.addKey(keyHash, 1, 1);
+        Identity(payable(address(bobIdentity))).addKeyWithData(keccak256(signerData), 1, 1, signerData, "");
 
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
@@ -53,10 +55,11 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
     /// @notice Should recover and freeze tokens on the new wallet when wallet has frozen token
     function test_recoveryAddress_Success_WithFrozenTokens() public {
-        // Add key to bobIdentity for another address
-        bytes32 keyHash = keccak256(abi.encode(another));
+        // Add key to bobIdentity for another address. addKey now derives the signer bytes from the
+        // module, so a freshly-referenced address must be registered via the data-carrying entry point.
+        bytes memory signerData = abi.encodePacked(another);
         vm.prank(bob);
-        bobIdentity.addKey(keyHash, 1, 1);
+        Identity(payable(address(bobIdentity))).addKeyWithData(keccak256(signerData), 1, 1, signerData, "");
 
         // Freeze partial tokens on bob
         vm.prank(agent);

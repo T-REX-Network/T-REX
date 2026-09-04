@@ -85,6 +85,10 @@ library RolesLib {
     uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
     uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
 
+    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
+    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
+    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
+
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
     // AccessManager's setRoleAdmin semantics. They let grants be delegated without
@@ -102,5 +106,13 @@ library RolesLib {
     // IRS during deployTREXSuite without standing OWNER. Unassigned at rest, self-granted for the bind call
     // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
     uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
+
+    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
+
+    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
+    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
+    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
+    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
+    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
 
 }

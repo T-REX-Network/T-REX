@@ -64,15 +64,19 @@
 pragma solidity 0.8.30;
 
 import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
+import { ModuleCapabilitiesLib } from "../libraries/ModuleCapabilitiesLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
 contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable {
@@ -122,7 +126,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
         IIdentity identity = identityRegistry.identity(_userAddress);
 
-        uint256[] memory requiredClaimTopics = identityRegistry.topicsRegistry().getClaimTopics();
+        uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
         _details = new EligibilityCheckDetails[](topicsCount);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
@@ -139,6 +143,28 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
     }
 
+    /// @dev Mirrors the type-aware topic resolution of `TREXRegistry.isVerified`: a non-empty override
+    ///  set for the identity's type replaces the default topics. The registry lookup is done through a
+    ///  try/catch so the checker still works against registries without per-type overrides.
+    function _requiredClaimTopics(IERC3643IdentityRegistry identityRegistry, IIdentity identity)
+        internal
+        view
+        returns (uint256[] memory)
+    {
+        IERC3643ClaimTopicsRegistry topicsRegistry = identityRegistry.topicsRegistry();
+        if (address(identity) != address(0)) {
+            try ITREXRegistry(address(topicsRegistry))
+                .getClaimTopicsForIdentityType(identity.getIdentityType()) returns (
+                uint256[] memory typeTopics
+            ) {
+                if (typeTopics.length > 0) {
+                    return typeTopics;
+                }
+            } catch { }
+        }
+        return topicsRegistry.getClaimTopics();
+    }
+
     /// @dev Function splitted to avoid stack too deep error
     function _getEligibility(address trustedIssuer, uint256 topic, IIdentity identity)
         internal
@@ -147,7 +173,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     {
         /// forge-lint: disable-next-line(asm-keccak256)
         bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
-        (uint256 foundClaimTopic,, address issuer, bytes memory sig, bytes memory data,) = identity.getClaim(claimId);
+        (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
+            identity.getClaim(claimId);
         if (foundClaimTopic != topic) return (false, false);
         topicMatch = true;
 
@@ -182,7 +209,9 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
-        address[] memory modules = compliance.getModules();
+        // Only the modules that declared the transfer check are consulted, matching what the
+        // compliance actually calls. Listing the others would report a pass they never gave.
+        address[] memory modules = compliance.getModulesByCapability(ModuleCapabilitiesLib.CHECK_TRANSFER);
         uint256 length = modules.length;
         _details = new ComplianceCheckDetails[](length);
         for (uint256 i; i < length; i++) {

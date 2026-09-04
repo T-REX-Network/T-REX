@@ -65,6 +65,20 @@ contract TokenBurnUnitTest is TokenBaseUnitTest {
         assertEq(token.getFrozenTokens(user1), frozenAmount - tokensToUnfreeze); // 300 - 100 = 200
     }
 
+    function testTokenBatchBurnRevertsWhenNotAgent(address caller) public {
+        vm.assume(caller != agent);
+
+        address[] memory froms = new address[](1);
+        froms[0] = user1;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = burnAmount;
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
+        vm.prank(caller);
+        token.batchBurn(froms, amounts);
+    }
+
     function testTokenBatchBurnNominal() public {
         uint256 amount1 = 1000;
         uint256 amount2 = 500;

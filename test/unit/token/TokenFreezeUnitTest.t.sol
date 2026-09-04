@@ -143,6 +143,20 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
         assertFalse(token.isFrozen(user));
     }
 
+    function testTokenBatchFreezePartialTokensRevertsWhenNotAgent(address caller) public {
+        vm.assume(caller != agent);
+
+        address[] memory users = new address[](1);
+        users[0] = user;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = freezeAmount;
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
+        vm.prank(caller);
+        token.batchFreezePartialTokens(users, amounts);
+    }
+
     function testTokenBatchFreezePartialTokensNominal() public {
         address user1 = makeAddr("User1");
         address user2 = makeAddr("User2");
@@ -169,6 +183,20 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
         assertEq(token.getFrozenTokens(user1), freezeAmount1);
         assertEq(token.getFrozenTokens(user2), freezeAmount2);
+    }
+
+    function testTokenBatchUnfreezePartialTokensRevertsWhenNotAgent(address caller) public {
+        vm.assume(caller != agent);
+
+        address[] memory users = new address[](1);
+        users[0] = user;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = freezeAmount;
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
+        vm.prank(caller);
+        token.batchUnfreezePartialTokens(users, amounts);
     }
 
     function testTokenBatchUnfreezePartialTokensNominal() public {
@@ -203,6 +231,20 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
         assertEq(token.getFrozenTokens(user1), freezeAmount1 - unfreezeAmount1);
         assertEq(token.getFrozenTokens(user2), freezeAmount2 - unfreezeAmount2);
+    }
+
+    function testTokenBatchSetAddressFrozenRevertsWhenNotAgent(address caller) public {
+        vm.assume(caller != agent);
+
+        address[] memory users = new address[](1);
+        users[0] = user;
+
+        bool[] memory freezes = new bool[](1);
+        freezes[0] = true;
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
+        vm.prank(caller);
+        token.batchSetAddressFrozen(users, freezes);
     }
 
     function testTokenBatchSetAddressFrozenNominal() public {

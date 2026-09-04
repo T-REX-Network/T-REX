@@ -70,6 +70,20 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
         assertEq(token.totalSupply(), mintAmount);
     }
 
+    function testTokenBatchMintRevertsWhenNotAgent(address caller) public {
+        vm.assume(caller != agent);
+
+        address[] memory tos = new address[](1);
+        tos[0] = user1;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = mintAmount;
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
+        vm.prank(caller);
+        token.batchMint(tos, amounts);
+    }
+
     function testTokenBatchMintNominal() public {
         uint256 amount1 = 500;
         uint256 amount2 = 300;

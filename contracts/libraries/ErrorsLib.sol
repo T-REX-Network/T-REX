@@ -80,13 +80,16 @@ library ErrorsLib {
     error ComplianceAlreadyBoundToToken();
     error NoTokenToRecover();
     error RecoveryNotPossible();
+    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
     error ComplianceNotSuitableForBindingToModule(address module);
+    error InvalidModuleCapabilities(uint256 capabilities);
     error MaxModulesReached(uint256 maxValue);
     error ModuleAlreadyBound();
+    error ModuleHasNoCapabilities();
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
@@ -94,9 +97,10 @@ library ErrorsLib {
     // Module Errors
     error ComplianceNotBound();
     error ComplianceAlreadyBound();
-    error NotUpgradeAdmin();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
+    error SpenderAlreadyAllowed(address spender);
+    error SpenderNotListed(address spender);
 
     // TREXFactory Errors
     error AuthorityMismatch();
@@ -127,19 +131,14 @@ library ErrorsLib {
     error NotATrustedIssuer();
     error TrustedClaimTopicsCannotBeEmpty();
     error TrustedIssuerAlreadyExists();
-    error TrustedIssuerDoesNotExist();
 
     // TREXImplementationAuthority Errors
-    error CannotCallOnReferenceContract();
-    error NewIAIsNotAReferenceContract();
-    error NonExistingVersion();
-    error OnlyReferenceContractCanCall();
-    error VersionAlreadyFetched();
-    error VersionAlreadyExists();
-    error VersionAlreadyInUse();
-    error VersionOfNewIAMustBeTheSameAsCurrentIA();
+    error EmptyImplementations();
+    error UnknownVersion();
+    error VersionAlreadyPublished();
+    error VersionNotNewer();
 
-    // AbstractProxy Errors
-    error OnlyCurrentImplementationAuthorityCanCall();
+    // TREXRegistry Errors
+    error Deprecated();
 
 }

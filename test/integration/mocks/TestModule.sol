@@ -63,9 +63,12 @@
 pragma solidity 0.8.30;
 
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 contract TestModule is AbstractModuleUpgradeable {
+
+    /// @dev raised when a caller other than the upgrade admin tries to move upgrade authority
+    error NotUpgradeAdmin();
 
     /// @dev address authorized to upgrade this test module
     address private _upgradeAdmin;
@@ -89,12 +92,12 @@ contract TestModule is AbstractModuleUpgradeable {
     address private _pendingUpgradeAdmin;
 
     function transferUpgradeAdmin(address newAdmin) external {
-        require(msg.sender == _upgradeAdmin, ErrorsLib.NotUpgradeAdmin());
+        require(msg.sender == _upgradeAdmin, NotUpgradeAdmin());
         _pendingUpgradeAdmin = newAdmin;
     }
 
     function acceptUpgradeAdmin() external {
-        require(msg.sender == _pendingUpgradeAdmin, ErrorsLib.NotUpgradeAdmin());
+        require(msg.sender == _pendingUpgradeAdmin, NotUpgradeAdmin());
         _upgradeAdmin = _pendingUpgradeAdmin;
         _pendingUpgradeAdmin = address(0);
     }
@@ -120,24 +123,6 @@ contract TestModule is AbstractModuleUpgradeable {
     }
 
     /**
-     *  @dev See {IModule-moduleTransferAction}.
-     *  no transfer action required in this module
-     */
-    function moduleTransferAction(address, address, uint256) external override onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-moduleMintAction}.
-     *  no mint action required in this module
-     */
-    function moduleMintAction(address, uint256) external override onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-moduleBurnAction}.
-     *  no burn action required in this module
-     */
-    function moduleBurnAction(address, uint256) external override onlyComplianceCall { }
-
-    /**
      *  @dev See {IModule-moduleCheck}.
      *  always returns true (just a test module)
      */
@@ -157,6 +142,14 @@ contract TestModule is AbstractModuleUpgradeable {
             return false;
         }
         return true;
+    }
+
+    /**
+     *  @dev See {IModule-moduleCapabilities}.
+     *  only the transfer check is implemented, the hooks keep the base defaults
+     */
+    function moduleCapabilities() external pure returns (uint256) {
+        return ModuleCapabilitiesLib.CHECK_TRANSFER;
     }
 
     /**
@@ -187,7 +180,7 @@ contract TestModule is AbstractModuleUpgradeable {
 
     /// @dev Upgrade guard: only the upgrade admin may authorize an upgrade.
     function _authorizeUpgrade(address) internal virtual override {
-        require(msg.sender == _upgradeAdmin, ErrorsLib.NotUpgradeAdmin());
+        require(msg.sender == _upgradeAdmin, NotUpgradeAdmin());
     }
 
     // Fallback function to accept any callData (used for testing _selector with short callData)

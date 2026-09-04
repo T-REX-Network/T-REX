@@ -6,6 +6,8 @@ import { IERC20Permit } from "@openzeppelin/contracts-upgradeable/token/ERC20/ex
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -14,10 +16,7 @@ import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { TokenProxy } from "contracts/proxy/TokenProxy.sol";
-import { ITREXImplementationAuthority } from "contracts/proxy/authority/ITREXImplementationAuthority.sol";
-import { TREXImplementationAuthority } from "contracts/proxy/authority/TREXImplementationAuthority.sol";
-import { IdentityRegistry } from "contracts/registry/implementation/IdentityRegistry.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { PausableUpgradeable, Token } from "contracts/token/Token.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
@@ -26,12 +25,12 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenInformationTest is TREXSuiteTest {
 
-    IdentityRegistry public identityRegistry;
+    TREXRegistry public identityRegistry;
 
     function setUp() public override {
         super.setUp();
 
-        identityRegistry = IdentityRegistry(address(token.identityRegistry()));
+        identityRegistry = TREXRegistry(address(token.identityRegistry()));
 
         vm.prank(agent);
         token.unpause();
@@ -100,11 +99,10 @@ contract TokenInformationTest is TREXSuiteTest {
 
     /// @notice Should set the onchainID
     function test_setOnchainID_Success() public {
-        // create an identity using IdFactory
-        vm.startPrank(deployer);
-        IIdentity newIdentity = IIdentity(idFactory.createIdentity(deployer, "deployer-salt"));
+        // create an identity using the IdentityFactory
+        IIdentity newIdentity = _deployIdentity(deployer, "deployer-salt");
+        vm.prank(deployer);
         token.setOnchainID(address(newIdentity));
-        vm.stopPrank();
 
         assertEq(token.onchainID(), address(newIdentity));
     }
@@ -430,116 +428,101 @@ contract TokenInformationTest is TREXSuiteTest {
         );
     }
 
-    /// @notice Should revert when implementation authority is zero address
-    function test_TokenProxy_constructor_RevertWhen_ImplementationAuthorityZeroAddress() public {
+    /// @notice Should revert when the beacon is the zero address
+    function test_TokenProxy_constructor_RevertWhen_BeaconZeroAddress() public {
         address randomAddress = vm.addr(999);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TokenProxy(address(0), randomAddress, randomAddress, "Test", "TST", 18, address(0), deployer);
+        vm.expectRevert();
+        new BeaconProxy(address(0), _tokenInit(randomAddress, randomAddress, "Test", "TST", 18, address(0), deployer));
     }
 
     /// @notice Should revert when identity registry is zero address
     function test_TokenProxy_constructor_RevertWhen_IdentityRegistryZeroAddress() public {
         address randomAddress = vm.addr(999);
+        address beacon = _tokenBeacon();
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TokenProxy(
-            address(trexImplementationAuthority), address(0), randomAddress, "Test", "TST", 18, address(0), deployer
-        );
+        _newTokenProxy(beacon, address(0), randomAddress, "Test", "TST", 18, address(0), deployer);
     }
 
     /// @notice Should revert when compliance is zero address
     function test_TokenProxy_constructor_RevertWhen_ComplianceZeroAddress() public {
         address randomAddress = vm.addr(999);
+        address beacon = _tokenBeacon();
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TokenProxy(
-            address(trexImplementationAuthority), randomAddress, address(0), "Test", "TST", 18, address(0), deployer
-        );
+        _newTokenProxy(beacon, randomAddress, address(0), "Test", "TST", 18, address(0), deployer);
     }
 
     /// @notice Should revert when name is empty string
     function test_TokenProxy_constructor_RevertWhen_NameEmpty() public {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
+        address beacon = _tokenBeacon();
         vm.expectRevert(ErrorsLib.EmptyString.selector);
-        new TokenProxy(
-            address(trexImplementationAuthority),
-            randomAddress,
-            address(complianceProxy),
-            "",
-            "TST",
-            18,
-            address(0),
-            deployer
-        );
+        _newTokenProxy(beacon, randomAddress, address(complianceProxy), "", "TST", 18, address(0), deployer);
     }
 
     /// @notice Should revert when symbol is empty string
     function test_TokenProxy_constructor_RevertWhen_SymbolEmpty() public {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
+        address beacon = _tokenBeacon();
         vm.expectRevert(ErrorsLib.EmptyString.selector);
-        new TokenProxy(
-            address(trexImplementationAuthority),
-            randomAddress,
-            address(complianceProxy),
-            "Test",
-            "",
-            18,
-            address(0),
-            deployer
-        );
+        _newTokenProxy(beacon, randomAddress, address(complianceProxy), "Test", "", 18, address(0), deployer);
     }
 
     /// @notice Should revert when decimals is greater than 18
     function test_TokenProxy_constructor_RevertWhen_DecimalsGreaterThan18() public {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         address randomAddress = vm.addr(999);
+        address beacon = _tokenBeacon();
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DecimalsOutOfRange.selector, uint8(19)));
-        new TokenProxy(
-            address(trexImplementationAuthority),
-            randomAddress,
-            address(complianceProxy),
-            "Test",
-            "TST",
-            19,
-            address(0),
-            deployer
+        _newTokenProxy(beacon, randomAddress, address(complianceProxy), "Test", "TST", 19, address(0), deployer);
+    }
+
+    /// @notice Should revert when initialization fails (implementation without init())
+    function test_TokenProxy_constructor_RevertWhen_InitializationFails() public {
+        MockContract mockImpl = new MockContract();
+        address beacon = address(new UpgradeableBeacon(address(mockImpl), address(this)));
+
+        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        address randomAddress = vm.addr(999);
+
+        // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
+        vm.expectRevert();
+        _newTokenProxy(beacon, randomAddress, address(complianceProxy), "Test", "TST", 18, address(0), deployer);
+    }
+
+    function _tokenBeacon() private view returns (address) {
+        return trexImplementationAuthority.beacons().tokenBeacon;
+    }
+
+    function _tokenInit(
+        address identityRegistry_,
+        address compliance,
+        string memory name,
+        string memory symbol,
+        uint8 decimals,
+        address onchainId,
+        address accessManager_
+    ) private pure returns (bytes memory) {
+        return abi.encodeCall(
+            Token.init, (name, symbol, decimals, identityRegistry_, compliance, onchainId, accessManager_)
         );
     }
 
-    /// @notice Should revert when initialization fails (invalid implementation)
-    function test_TokenProxy_constructor_RevertWhen_InitializationFails() public {
-        // Deploy a mock contract that doesn't have init() function
-        MockContract mockImpl = new MockContract();
-
-        // Deploy an IA and manually set an invalid Token implementation
-        TREXImplementationAuthority incompleteIA =
-            new TREXImplementationAuthority(true, address(0), address(0), address(accessManager));
-
-        // Create a version with invalid Token implementation (mock contract without init())
-        ITREXImplementationAuthority.Version memory version =
-            ITREXImplementationAuthority.Version({ major: 4, minor: 0, patch: 0 });
-
-        ITREXImplementationAuthority.TREXContracts memory contracts = ITREXImplementationAuthority.TREXContracts({
-            tokenImplementation: address(mockImpl), // Invalid - doesn't have init() function
-            ctrImplementation: address(mockImpl), // Invalid
-            irImplementation: address(mockImpl), // Invalid
-            irsImplementation: address(mockImpl), // Invalid
-            tirImplementation: address(mockImpl), // Invalid
-            mcImplementation: address(mockImpl) // Invalid
-        });
-
-        // Add version to IA (need to be owner)
-        _authorizeIAGovernance(address(incompleteIA));
-        vm.prank(deployer);
-        incompleteIA.addAndUseTREXVersion(version, contracts);
-
-        // Now try to deploy proxy - delegatecall to mockImpl.init() will fail
-        // because MockContract doesn't have init() function, so the proxy constructor bubbles the empty revert
-        ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
-        address randomAddress = vm.addr(999);
-        vm.expectRevert();
-        new TokenProxy(
-            address(incompleteIA), randomAddress, address(complianceProxy), "Test", "TST", 18, address(0), deployer
+    function _newTokenProxy(
+        address beacon,
+        address identityRegistry_,
+        address compliance,
+        string memory name,
+        string memory symbol,
+        uint8 decimals,
+        address onchainId,
+        address accessManager_
+    ) private returns (address) {
+        return address(
+            new BeaconProxy(
+                beacon, _tokenInit(identityRegistry_, compliance, name, symbol, decimals, onchainId, accessManager_)
+            )
         );
     }
 

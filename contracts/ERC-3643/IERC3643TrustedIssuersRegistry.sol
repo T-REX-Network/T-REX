@@ -67,9 +67,12 @@ interface IERC3643TrustedIssuersRegistry {
 
     /**
      *  @dev Updates the set of claim topics that a trusted issuer is allowed to emit.
+     *  The provided set replaces the issuer's current set in full.
      *  Requires that this ClaimIssuer contract already exists in the registry
      *  Requires that the provided claimTopics set is not empty
      *  Requires that there is no more than 15 claimTopics
+     *  An empty set is rejected, so this function cannot clear an issuer's topics. Stripping an issuer
+     *  of every topic is done with `removeTrustedIssuer`, which drops the issuer and unbinds all of its topics.
      *  @param _trustedIssuer the claim issuer to update.
      *  @param _claimTopics the set of claim topics that the trusted issuer is allowed to emit
      *  Restricted to the configured AccessManager role (OWNER).
@@ -101,9 +104,9 @@ interface IERC3643TrustedIssuersRegistry {
 
     /**
      *  @dev Function for getting all the claim topic of trusted claim issuer
-     *  Requires the provided ClaimIssuer contract to be registered in the trusted issuers registry.
      *  @param _trustedIssuer the trusted issuer concerned.
-     *  @return The set of claim topics that the trusted issuer is allowed to emit
+     *  @return The set of claim topics that the trusted issuer is allowed to emit,
+     *  empty if the provided ClaimIssuer contract is not registered.
      */
     function getTrustedIssuerClaimTopics(address _trustedIssuer) external view returns (uint256[] memory);
 

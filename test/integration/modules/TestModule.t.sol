@@ -224,7 +224,7 @@ contract TestModuleTest is TREXSuiteTest {
         TestModule newImplementation = new TestModule();
 
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.NotUpgradeAdmin.selector);
+        vm.expectRevert(TestModule.NotUpgradeAdmin.selector);
         UUPSUpgradeable(address(testModule)).upgradeToAndCall(address(newImplementation), "");
     }
 

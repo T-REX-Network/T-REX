@@ -63,15 +63,15 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
-import { TREXImplementationAuthority } from "../proxy/authority/TREXImplementationAuthority.sol";
-import { ClaimTopicsRegistry } from "../registry/implementation/ClaimTopicsRegistry.sol";
-import { IdentityRegistry } from "../registry/implementation/IdentityRegistry.sol";
+import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
-import { TrustedIssuersRegistry } from "../registry/implementation/TrustedIssuersRegistry.sol";
+import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { Token } from "../token/Token.sol";
 import { RolesLib } from "./RolesLib.sol";
 
@@ -128,49 +128,13 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);
     }
 
-    function setupClaimTopicsRegistryRoles(IAccessManager accessManager, address claimTopicsRegistry) internal {
-        // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](4);
-        functions[0] = ClaimTopicsRegistry.addClaimTopic.selector;
-        functions[1] = ClaimTopicsRegistry.removeClaimTopic.selector;
-        functions[2] = ClaimTopicsRegistry.addClaimTopicForIdentityType.selector;
-        functions[3] = ClaimTopicsRegistry.removeClaimTopicForIdentityType.selector;
-        accessManager.setTargetFunctionRole(claimTopicsRegistry, functions, RolesLib.OWNER);
-    }
-
-    function setupIdentityRegistryRoles(IAccessManager accessManager, address identityRegistry) internal {
-        // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](5);
-        functions[0] = IdentityRegistry.setIdentityRegistryStorage.selector;
-        functions[1] = IdentityRegistry.setClaimTopicsRegistry.selector;
-        functions[2] = IdentityRegistry.setTrustedIssuersRegistry.selector;
-        functions[3] = IdentityRegistry.disableEligibilityChecks.selector;
-        functions[4] = IdentityRegistry.enableEligibilityChecks.selector;
-        accessManager.setTargetFunctionRole(identityRegistry, functions, RolesLib.OWNER);
-
-        // ------ AGENT role ------
-        functions = new bytes4[](4);
-        functions[0] = IdentityRegistry.updateIdentity.selector;
-        functions[1] = IdentityRegistry.updateCountry.selector;
-        functions[2] = IdentityRegistry.deleteIdentity.selector;
-        functions[3] = IdentityRegistry.registerIdentity.selector;
-        accessManager.setTargetFunctionRole(identityRegistry, functions, RolesLib.AGENT);
-    }
-
     function setupIdentityRegistryStorageRoles(IAccessManager accessManager, address identityRegistryStorage) internal {
         // ------ IRS_BINDER role ------
-        // bindIdentityRegistry is gated to IRS_BINDER, NOT OWNER: the factory must attach a new IR
-        // onto a reused IRS during deployTREXSuite without holding standing OWNER. IRS_BINDER is a
-        // transient role the factory self-grants (admin = AGENT_ADMIN, which the factory holds) for
-        // the bind window and revokes before returning. Governance (OWNER/ADMIN_ROLE) can still bind
-        // by granting itself IRS_BINDER if ever needed.
         bytes4[] memory functions = new bytes4[](1);
         functions[0] = IdentityRegistryStorage.bindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.IRS_BINDER);
 
         // ------ OWNER role ------
-        // unbindIdentityRegistry stays a governance operation: removing an IR from the bound set is
-        // not a deploy-time action and must not be reachable through the transient bind path.
         functions[0] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.OWNER);
 
@@ -183,49 +147,91 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.AGENT);
     }
 
-    function setupTrustedIssuersRegistryRoles(IAccessManager accessManager, address trustedIssuersRegistry) internal {
+    /// @notice Role wiring for the `TREXRegistry` contract.
+    function setupTREXRegistryRoles(IAccessManager accessManager, address registry) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](3);
-        functions[0] = TrustedIssuersRegistry.addTrustedIssuer.selector;
-        functions[1] = TrustedIssuersRegistry.removeTrustedIssuer.selector;
-        functions[2] = TrustedIssuersRegistry.updateIssuerClaimTopics.selector;
-        accessManager.setTargetFunctionRole(trustedIssuersRegistry, functions, RolesLib.OWNER);
+        bytes4[] memory functions = new bytes4[](10);
+        functions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
+        functions[1] = TREXRegistry.disableEligibilityChecks.selector;
+        functions[2] = TREXRegistry.enableEligibilityChecks.selector;
+        functions[3] = TREXRegistry.addTrustedIssuer.selector;
+        functions[4] = TREXRegistry.removeTrustedIssuer.selector;
+        functions[5] = TREXRegistry.updateIssuerClaimTopics.selector;
+        functions[6] = TREXRegistry.addClaimTopic.selector;
+        functions[7] = TREXRegistry.removeClaimTopic.selector;
+        functions[8] = TREXRegistry.addClaimTopicForIdentityType.selector;
+        functions[9] = TREXRegistry.removeClaimTopicForIdentityType.selector;
+        accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
+
+        // ------ AGENT role ------
+        functions = new bytes4[](5);
+        functions[0] = TREXRegistry.registerIdentity.selector;
+        functions[1] = TREXRegistry.batchRegisterIdentity.selector;
+        functions[2] = TREXRegistry.updateIdentity.selector;
+        functions[3] = TREXRegistry.updateCountry.selector;
+        functions[4] = TREXRegistry.deleteIdentity.selector;
+        accessManager.setTargetFunctionRole(registry, functions, RolesLib.AGENT);
     }
 
     function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance) internal {
         // ------ OWNER role ------
         // bindToken/unbindToken are not `restricted`; they self-check via the shared BIND_UNBIND_TOKEN
         // capability, so that single selector is registered here rather than each real selector separately.
-        bytes4[] memory functions = new bytes4[](5);
+        bytes4[] memory functions = new bytes4[](6);
         functions[0] = ModularCompliance.removeModule.selector;
         functions[1] = ModularCompliance.addAndSetModule.selector;
         functions[2] = ModularCompliance.addModule.selector;
         functions[3] = ModularCompliance.callModuleFunction.selector;
         functions[4] = RolesLib.BIND_UNBIND_TOKEN;
+        functions[5] = ModularCompliance.refreshModuleCapabilities.selector;
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.OWNER);
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](3);
+        bytes4[] memory functions = new bytes4[](5);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
-        functions[2] = TREXFactory.deployTREXSuite.selector;
+        functions[2] = TREXFactory.setIdentityModules.selector;
+        functions[3] = TREXFactory.deployTREXSuite.selector;
+        functions[4] = TREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
+    }
+
+    /// @notice Wires the two prerequisites the {TREXFactory} auto-mint path needs, so a deployer does
+    ///         not have to rediscover them. Without both, `deployTREXSuite` reverts with
+    ///         `NotAuthorizedForIdentityType` whenever `TokenDetails.ONCHAINID` is left at zero.
+    /// @dev Call order does not matter, but both must land before the first auto-mint deploy.
+    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind ASSET_DEPLOYER and
+    ///         with self-deploy off: only a registered factory mints token OIDs, and a token must not
+    ///         be able to sign one for itself.
+    ///      2. Grant ASSET_DEPLOYER to the TREX factory.
+    /// @dev `accessManager` MUST be the IdentityFactory's own authority, which is not necessarily the
+    ///      suite AccessManager: `createIdentityFor` resolves the role against `authority()` on the
+    ///      IdentityFactory. Granting the role on the wrong manager leaves the auto-mint path reverting.
+    /// @dev The caller must be able to reach both calls: `setIdentityTypePolicy` is `restricted` on the
+    ///      IdentityFactory, and `grantRole` requires the caller to be ASSET_DEPLOYER's role admin.
+    /// @param accessManager The IdentityFactory's authority, where ASSET_DEPLOYER is resolved
+    /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
+    /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
+    function setupIdentityFactoryPolicy(
+        IAccessManager accessManager,
+        IIdentityFactory identityFactory,
+        address trexFactory
+    ) internal {
+        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
+        accessManager.grantRole(RolesLib.ASSET_DEPLOYER, trexFactory, 0);
     }
 
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
         internal
     {
-        // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](6);
-        functions[0] = TREXImplementationAuthority.setTREXFactory.selector;
-        functions[1] = TREXImplementationAuthority.setIAFactory.selector;
-        functions[2] = TREXImplementationAuthority.addTREXVersion.selector;
-        functions[3] = TREXImplementationAuthority.useTREXVersion.selector;
-        functions[4] = TREXImplementationAuthority.addAndUseTREXVersion.selector;
-        functions[5] = TREXImplementationAuthority.changeImplementationAuthority.selector;
-        accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.OWNER);
+        // ------ VERSION_MANAGER role ------
+        bytes4[] memory functions = new bytes4[](3);
+        functions[0] = TREXImplementationAuthority.publish.selector;
+        functions[1] = TREXImplementationAuthority.upgrade.selector;
+        functions[2] = TREXImplementationAuthority.publishAndUpgrade.selector;
+        accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, RolesLib.VERSION_MANAGER);
     }
 
     /// @notice Wires the role-giver hierarchy. Call once, before any operational grant.
@@ -265,6 +271,7 @@ library AccessManagerSetupLib {
 
         accessManager.labelRole(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
         accessManager.labelRole(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
+        accessManager.labelRole(RolesLib.VERSION_MANAGER, "TREX-Suite Manager: Version");
 
         // Role-givers
         accessManager.labelRole(RolesLib.AGENT_ADMIN, "TREX-Suite Admin: Agent");
@@ -272,6 +279,9 @@ library AccessManagerSetupLib {
 
         // Transient deploy-time role
         accessManager.labelRole(RolesLib.IRS_BINDER, "TREX-Suite IRS Binder (transient)");
+
+        // Resolved by the ONCHAINID IdentityFactory, not by any TREX selector mapping
+        accessManager.labelRole(RolesLib.ASSET_DEPLOYER, "TREX-Suite Asset Deployer");
     }
 
 }
