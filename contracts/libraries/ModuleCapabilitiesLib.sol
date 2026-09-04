@@ -87,7 +87,11 @@ library ModuleCapabilitiesLib {
     /// @dev The module implements {IModule-moduleBurnAction}.
     uint256 internal constant HOOK_BURN = 1 << 4;
 
+    /// @dev The module implements {IModule-moduleAttributeSync}.
+    uint256 internal constant HOOK_ATTRIBUTE_SYNC = 1 << 5;
+
     /// @dev Mask of every defined flag, used to reject undefined bits at binding time.
-    uint256 internal constant ALL = CHECK_TRANSFER | CHECK_SPENDER | HOOK_TRANSFER | HOOK_MINT | HOOK_BURN;
+    uint256 internal constant ALL =
+        CHECK_TRANSFER | CHECK_SPENDER | HOOK_TRANSFER | HOOK_MINT | HOOK_BURN | HOOK_ATTRIBUTE_SYNC;
 
 }

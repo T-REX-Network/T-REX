@@ -4,6 +4,8 @@ pragma solidity 0.8.30;
 import { StdInvariant } from "@forge-std/StdInvariant.sol";
 import { console } from "@forge-std/console.sol";
 
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
+
 import { TREXSuiteTest } from "../integration/helpers/TREXSuiteTest.sol";
 import { TokenHandler } from "./handlers/TokenHandler.sol";
 
@@ -19,12 +21,31 @@ import { TokenHandler } from "./handlers/TokenHandler.sol";
 ///   INV-4  compliance.getTokenBound() == address(token)               (binding is stable)
 ///   INV-5  no transfer ever succeeded while paused                    (pause gate holds)
 ///   INV-6  no successful transfer landed on an unverified recipient   (eligibility gate holds)
+///   INV-7  a holder's cached country matches the claim, or the identity is flagged (reconcile holds)
 contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
     TokenHandler internal handler;
 
+    TREXRegistry internal registry;
+
+    uint256 internal countryTopic;
+
     function setUp() public override {
         super.setUp();
+
+        // The default suite trusts no issuer, which would make INV-7 vacuous: nothing is ever attested,
+        // so nothing can ever diverge. This one requires a claim topic and trusts the suite issuer for
+        // residence, so the reconciliation loop is genuinely exercised.
+        token = _deployTokenWithClaimTopic("invariants", "Invariant Token", "INV");
+        registry = TREXRegistry(address(token.identityRegistry()));
+        countryTopic = registry.COUNTRY_CLAIM_TOPIC();
+
+        _registerIdentities(token);
+
+        bytes memory claimData = "Some claim public data.";
+        _addClaim(aliceIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), alice);
+        _addClaim(bobIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), bob);
+        _addClaim(charlieIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), charlie);
 
         address[] memory actors = new address[](3);
         actors[0] = alice;
@@ -90,6 +111,21 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
     /// INV-6: a successful transfer never landed on an unverified recipient.
     function invariant_recipientsAlwaysVerified() public view {
         assertEq(handler.unverifiedRecipientLeak(), false, "INV-6 unverified recipient received tokens");
+    }
+
+    /// INV-7: an actor whose balance ever moved carries a cached country equal to what their residence
+    /// claim attests. A cache still at 0 means no balance of theirs has moved yet, and a flagged identity
+    /// means the claim stopped resolving and the last known value is deliberately held.
+    function invariant_cacheMatchesTheAttestedClaim() public view {
+        uint256 n = handler.actorsLength();
+        for (uint256 i = 0; i < n; i++) {
+            address actor = handler.actorAt(i);
+            address actorIdentity = address(token.identityRegistry().identity(actor));
+            uint16 cached = registry.cachedAttribute(actorIdentity, countryTopic);
+
+            if (cached == 0 || registry.isAttributeFlagged(actorIdentity, countryTopic)) continue;
+            assertEq(cached, registry.attestedCountry(actor), "INV-7 cache diverged from the claim");
+        }
     }
 
     /// @notice Prints how often each transition fired (visible with `forge test -vv`).

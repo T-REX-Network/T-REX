@@ -121,6 +121,25 @@ interface IModule {
     function moduleBurnAction(address _from, uint256 _value) external;
 
     /**
+     *  @dev state-sync performed on the module when a claim-derived attribute of an investor moves
+     *  moves the module's aggregates to match the claim; unlike {moduleCheck} it MUST NOT revert:
+     *  a move that breaks a limit is a passive breach, to be evented and remediated by an agent
+     *  This function can be called ONLY by the compliance contract itself (_compliance)
+     *  @param _investor address of the investor whose attribute moved
+     *  @param _topic claim topic identifying the attribute
+     *  @param _oldValue value the module's aggregates are currently built on
+     *  @param _newValue value now attested by the claim
+     *  @param _position aggregate holding of the investor to move between aggregates
+     */
+    function moduleAttributeSync(
+        address _investor,
+        uint256 _topic,
+        uint16 _oldValue,
+        uint16 _newValue,
+        uint256 _position
+    ) external;
+
+    /**
      *  @dev compliance check on the module for a specific transaction on a specific compliance contract
      *  this function is used to check if the transfer is allowed by the module
      *  This function can be called only on a compliance contract that is bound to the module

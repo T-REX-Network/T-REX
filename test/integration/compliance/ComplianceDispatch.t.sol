@@ -4,12 +4,16 @@ pragma solidity 0.8.30;
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import {
     BurnOnlyModule,
     CheckTransferOnlyModule,
     MintOnlyModule,
+    MockAttributeSyncModule,
+    MockRevertingSyncModule,
     RecordingModule,
     SpenderCheckOnlyModule,
     TransferHookOnlyModule,
@@ -174,6 +178,77 @@ contract ComplianceDispatchTest is TREXSuiteTest {
         assertTrue(mc.canTransfer(alice, bob, 100));
         vm.prank(alice);
         token.transfer(bob, 100);
+    }
+
+    // ==== .attributeSynced routing Tests ====
+
+    /// @notice A sync reaches only the module that declared the dispatch point.
+    function test_attributeSynced_Success_WhenOnlyTheSyncPointIsDeclared() public {
+        MockAttributeSyncModule sync = MockAttributeSyncModule(_deploy(address(new MockAttributeSyncModule())));
+        vm.prank(deployer);
+        mc.addModule(address(sync));
+
+        vm.prank(address(token));
+        mc.attributeSynced(alice, COUNTRY_CLAIM_TOPIC, 250, 724, 1000);
+
+        assertEq(sync.attributeSyncCalls(), 1);
+        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(transferOnly.totalHookCalls(), 0);
+    }
+
+    /// @notice The module receives exactly the payload the compliance was handed.
+    function test_attributeSynced_Success_ForwardsThePayloadVerbatim() public {
+        MockAttributeSyncModule sync = MockAttributeSyncModule(_deploy(address(new MockAttributeSyncModule())));
+        vm.prank(deployer);
+        mc.addModule(address(sync));
+
+        vm.prank(address(token));
+        mc.attributeSynced(alice, COUNTRY_CLAIM_TOPIC, 250, 724, 1000);
+
+        assertEq(sync.lastInvestor(), alice);
+        assertEq(sync.lastTopic(), COUNTRY_CLAIM_TOPIC);
+        assertEq(sync.lastOldValue(), 250);
+        assertEq(sync.lastNewValue(), 724);
+        assertEq(sync.lastPosition(), 1000);
+    }
+
+    /// @notice A module that declared no sync point is never reached, so modules written before the
+    ///         dispatch point existed keep working untouched.
+    function test_attributeSynced_Success_WhenNoModuleDeclaresTheSyncPoint() public {
+        vm.prank(address(token));
+        mc.attributeSynced(alice, COUNTRY_CLAIM_TOPIC, 250, 724, 1000);
+
+        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(transferOnly.totalHookCalls(), 0);
+    }
+
+    /// @notice A module reverting inside the sync is reported and stepped over: the call returns, and
+    ///         the modules bound after it still run. The whole non-reverting design rests on this.
+    function test_attributeSynced_Success_WhenAModuleReverts() public {
+        MockRevertingSyncModule reverting = MockRevertingSyncModule(_deploy(address(new MockRevertingSyncModule())));
+        MockAttributeSyncModule sync = MockAttributeSyncModule(_deploy(address(new MockAttributeSyncModule())));
+
+        vm.startPrank(deployer);
+        mc.addModule(address(reverting));
+        mc.addModule(address(sync));
+        vm.stopPrank();
+
+        vm.expectEmit(true, true, true, false, address(mc));
+        emit EventsLib.AttributeSyncFailed(address(reverting), alice, COUNTRY_CLAIM_TOPIC);
+
+        vm.prank(address(token));
+        mc.attributeSynced(alice, COUNTRY_CLAIM_TOPIC, 250, 724, 1000);
+
+        assertEq(sync.attributeSyncCalls(), 1);
+    }
+
+    /// @notice Only the bound token may drive a sync.
+    function test_attributeSynced_RevertWhen_CallerIsNotTheBoundToken() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
+        mc.attributeSynced(alice, COUNTRY_CLAIM_TOPIC, 250, 724, 1000);
     }
 
     function _deploy(address implementation) private returns (address) {

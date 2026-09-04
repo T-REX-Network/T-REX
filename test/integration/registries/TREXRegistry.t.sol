@@ -61,6 +61,7 @@
  */
 pragma solidity ^0.8.30;
 
+import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
@@ -78,6 +79,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
+import { Countries } from "../helpers/Countries.sol";
 import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { ClaimIssuerTrick } from "../mocks/ClaimIssuerTrick.sol";
 
@@ -191,6 +193,276 @@ contract TREXRegistryTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.setTrustedIssuersRegistry(address(0));
+    }
+
+    /// @notice `updateCountry` reconciles against the claim and ignores the country it is handed: the
+    ///         agent asks for SPAIN and alice keeps the FRANCE her residence claim attests.
+    function test_updateCountry_Success_IgnoresTheArgumentAndReconciles() public {
+        vm.prank(agent);
+        registry.updateCountry(alice, Countries.SPAIN);
+
+        assertEq(registry.investorCountry(alice), Countries.FRANCE);
+    }
+
+    /// @notice A caller without AGENT is stopped by the AccessManager before reaching the body.
+    function test_updateCountry_RevertWhen_NotAgent() public {
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+        registry.updateCountry(alice, Countries.SPAIN);
+    }
+
+    // =============================================================================================
+    // attestedCountry
+    // =============================================================================================
+
+    /// @notice The country is read from the identity's country claim.
+    function test_identity_attestedCountry_ReturnsCountryFromClaim() public view {
+        assertEq(registry.attestedCountry(alice), Countries.FRANCE);
+    }
+
+    /// @notice A wallet with no identity (and so no country claim) reports 0.
+    function test_identity_attestedCountry_ReturnsZero_WhenNoCountryClaim() public view {
+        assertEq(registry.attestedCountry(another), 0);
+    }
+
+    /// @notice A registered identity carrying no country claim reports 0.
+    function test_identity_attestedCountry_ReturnsZero_WhenIdentityHasNoCountryClaim() public {
+        // david has no identity yet -- give him one without a country claim
+        IIdentity davidIdentity = _deployIdentity(david, "david");
+
+        vm.prank(agent);
+        registry.registerIdentity(david, davidIdentity, 0);
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice A country claim whose payload is empty reports 0 rather than reverting on decode.
+    function test_identity_attestedCountry_ReturnsZero_WhenCountryClaimDataIsEmpty() public {
+        IIdentity davidIdentity = _deployIdentity(david, "david");
+
+        vm.prank(agent);
+        registry.registerIdentity(david, davidIdentity, 0);
+
+        // Add a country claim with empty data bytes (signed by claimIssuer).
+        bytes memory emptyData = "";
+        _addClaim(
+            davidIdentity, registry.COUNTRY_CLAIM_TOPIC(), emptyData, claimIssuerSigner.key, address(claimIssuer), david
+        );
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice A payload of the wrong width reports 0 rather than reverting on decode.
+    function test_identity_attestedCountry_ReturnsZero_WhenPayloadWidthIsWrong() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encodePacked(uint64(Countries.SPAIN)),
+            claimIssuerSigner.key,
+            address(claimIssuer),
+            david
+        );
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice A well-formed word that overflows uint16 reports 0: it cannot be a country code.
+    function test_identity_attestedCountry_ReturnsZero_WhenPayloadOverflowsUint16() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(uint256(type(uint16).max) + 1),
+            claimIssuerSigner.key,
+            address(claimIssuer),
+            david
+        );
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice A claim signed by an issuer the registry does not trust at all reports 0.
+    function test_identity_attestedCountry_ReturnsZero_WhenIssuerIsUntrusted() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        Account memory rogueSigner = makeAccount("rogueSigner");
+        Identity rogueIssuer = _deployClaimIssuer(rogueSigner.addr, "rogueIssuer");
+
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(Countries.SPAIN),
+            rogueSigner.key,
+            address(rogueIssuer),
+            david
+        );
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice An issuer trusted for another topic cannot attest residence.
+    function test_identity_attestedCountry_ReturnsZero_WhenIssuerNotTrustedForTopic() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        Account memory otherSigner = makeAccount("otherTopicSigner");
+        Identity otherIssuer = _deployClaimIssuer(otherSigner.addr, "otherTopicIssuer");
+
+        uint256[] memory topics = new uint256[](1);
+        topics[0] = CLAIM_TOPIC_2;
+        vm.prank(deployer);
+        registry.addTrustedIssuer(address(otherIssuer), topics);
+
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(Countries.SPAIN),
+            otherSigner.key,
+            address(otherIssuer),
+            david
+        );
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice A claim outside its validity window reports 0.
+    function test_identity_attestedCountry_ReturnsZero_WhenClaimExpired() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        _addClaimWithValidity(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            Structs.ClaimData({
+                issuedAt: block.timestamp, validUntil: block.timestamp + 1 days, payload: abi.encode(Countries.SPAIN)
+            }),
+            claimIssuerSigner.key,
+            address(claimIssuer),
+            david
+        );
+
+        assertEq(registry.attestedCountry(david), Countries.SPAIN);
+
+        vm.warp(block.timestamp + 2 days);
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice A claim whose issuance is in the future reports 0 until it opens.
+    /// @dev The issuer refuses to sign a future-dated claim, so the window is opened the other way:
+    ///      the claim is issued, then the chain is rewound behind its `issuedAt`.
+    function test_identity_attestedCountry_ReturnsZero_WhenClaimNotYetValid() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        vm.warp(10 days);
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(Countries.SPAIN),
+            claimIssuerSigner.key,
+            address(claimIssuer),
+            david
+        );
+
+        vm.warp(5 days);
+        assertEq(registry.attestedCountry(david), 0);
+
+        vm.warp(10 days);
+        assertEq(registry.attestedCountry(david), Countries.SPAIN);
+    }
+
+    /// @notice An issuer that rejects its own claim reports 0, even though the claim sits on the identity.
+    function test_identity_attestedCountry_ReturnsZero_WhenIssuerRejectsClaim() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(Countries.SPAIN),
+            claimIssuerSigner.key,
+            address(claimIssuer),
+            david
+        );
+
+        vm.mockCall(address(claimIssuer), abi.encodeWithSelector(IClaimIssuer.isClaimValid.selector), abi.encode(false));
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice An issuer that reverts on validation does not take the read down with it.
+    function test_identity_attestedCountry_ReturnsZero_WhenIssuerReverts() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(Countries.SPAIN),
+            claimIssuerSigner.key,
+            address(claimIssuer),
+            david
+        );
+
+        vm.mockCallRevert(
+            address(claimIssuer), abi.encodeWithSelector(IClaimIssuer.isClaimValid.selector), "issuer is down"
+        );
+
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @notice With two trusted issuers, an unusable claim from the first does not mask a valid one
+    ///         from the second.
+    function test_identity_attestedCountry_SkipsUnusableClaim_AndReturnsTheValidOne() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        Account memory secondSigner = makeAccount("secondCountrySigner");
+        Identity secondIssuer = _deployClaimIssuer(secondSigner.addr, "secondCountryIssuer");
+
+        uint256[] memory topics = new uint256[](1);
+        topics[0] = registry.COUNTRY_CLAIM_TOPIC();
+        vm.prank(deployer);
+        registry.addTrustedIssuer(address(secondIssuer), topics);
+
+        // The suite issuer attests an undecodable payload; the second issuer attests a usable one.
+        _addClaim(davidIdentity, registry.COUNTRY_CLAIM_TOPIC(), "", claimIssuerSigner.key, address(claimIssuer), david);
+        _addClaim(
+            davidIdentity,
+            registry.COUNTRY_CLAIM_TOPIC(),
+            abi.encode(Countries.SPAIN),
+            secondSigner.key,
+            address(secondIssuer),
+            david
+        );
+
+        assertEq(registry.attestedCountry(david), Countries.SPAIN);
+    }
+
+    /// @notice With no issuer trusted for the residence topic, nothing is attested and the read is 0.
+    function test_identity_attestedCountry_ReturnsZero_WhenNoIssuerTrustedForTopic() public {
+        vm.prank(deployer);
+        registry.removeTrustedIssuer(address(claimIssuer));
+
+        assertEq(registry.attestedCountry(alice), 0);
+    }
+
+    /// @notice Trusting an issuer for residence does not make a residence claim mandatory: a holder
+    ///         carrying only the required topic still verifies, and simply reports no country.
+    function test_identity_residenceIsTrustedButNotRequired() public {
+        IIdentity davidIdentity = _registerDavidWithoutCountry();
+
+        _addClaim(
+            davidIdentity, CLAIM_TOPIC_1, "Some claim public data.", claimIssuerSigner.key, address(claimIssuer), david
+        );
+
+        assertTrue(registry.isVerified(david));
+        assertEq(registry.attestedCountry(david), 0);
+    }
+
+    /// @dev Gives david an identity registered without any country claim on it.
+    function _registerDavidWithoutCountry() private returns (IIdentity davidIdentity) {
+        davidIdentity = _deployIdentity(david, "david");
+
+        vm.prank(agent);
+        registry.registerIdentity(david, davidIdentity, 0);
     }
 
     /// @notice The registry reports itself for both sibling registries.

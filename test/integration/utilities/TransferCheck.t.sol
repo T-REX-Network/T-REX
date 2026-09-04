@@ -104,8 +104,7 @@ contract TransferCheckTest is TREXSuiteTest {
     /// @notice Should return true in nominal case
     function test_getTransferStatus_ReturnsTrue_WhenNominalCase() public {
         // Update bob's country to ensure eligibility
-        vm.prank(agent);
-        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
+        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);
@@ -116,13 +115,11 @@ contract TransferCheckTest is TREXSuiteTest {
     }
 
     /// @notice Should return false when no identity is registered
-    function test_getTransferStatus_ReturnsFalse_WhenNoIdentityRegistered() public {
-        // Delete bob's identity
-        vm.prank(agent);
-        identityRegistry.deleteIdentity(bob);
-
+    function test_getTransferStatus_ReturnsFalse_WhenNoIdentityRegistered() public view {
+        // `another` has no identity registered locally AND no identity in the global IdFactory fallback,
+        // so eligibility must fail regardless of the fallback semantics.
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
-            utilityChecker.getTransferStatus(address(token), alice, bob, 100);
+            utilityChecker.getTransferStatus(address(token), alice, another, 100);
 
         assertTrue(freezeStatus);
         assertFalse(eligibilityStatus);
@@ -146,8 +143,7 @@ contract TransferCheckTest is TREXSuiteTest {
     /// @notice Should return true after TREXFactorySetup
     function test_getTransferStatus_ReturnsTrue_AfterSetup() public {
         // Update bob's country to ensure eligibility
-        vm.prank(agent);
-        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
+        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);
@@ -177,8 +173,7 @@ contract TransferCheckTest is TREXSuiteTest {
         testModule.blockModule(true);
 
         // Update bob's country to ensure eligibility
-        vm.prank(agent);
-        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
+        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);
@@ -191,8 +186,7 @@ contract TransferCheckTest is TREXSuiteTest {
     /// @notice Should return true when all checks pass including compliance
     function test_getTransferStatus_ReturnsTrue_WhenAllChecksPass() public {
         // Update bob's country to ensure eligibility
-        vm.prank(agent);
-        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
+        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);

@@ -35,6 +35,10 @@ import { Countries } from "test/integration/helpers/Countries.sol";
 contract TREXSuiteTest is AccessManagerHelper {
 
     uint256 public constant CLAIM_TOPIC_1 = uint256(keccak256(abi.encode("CLAIM_TOPIC_1")));
+
+    /// @dev Mirrors {TREXRegistry-COUNTRY_CLAIM_TOPIC}, the topic carrying the attested residence.
+    uint256 public constant COUNTRY_CLAIM_TOPIC = 2_000_008;
+
     uint32 public constant NO_DELAY = 0;
 
     // OnchainID
@@ -344,9 +348,13 @@ contract TREXSuiteTest is AccessManagerHelper {
         address[] memory issuers = new address[](1);
         issuers[0] = address(claimIssuer);
 
+        // The issuer is trusted to attest residence as well, so `_addCountryClaim` produces a claim the
+        // registry will actually accept. Residence stays out of `claimTopics` on purpose: trusted is not
+        // the same as required, and requiring it would make every holder need a country claim to verify.
         uint256[][] memory issuerClaims = new uint256[][](1);
-        uint256[] memory claims = new uint256[](1);
+        uint256[] memory claims = new uint256[](2);
         claims[0] = CLAIM_TOPIC_1;
+        claims[1] = COUNTRY_CLAIM_TOPIC;
         issuerClaims[0] = claims;
 
         ITREXFactory.ClaimDetails memory claimDetails =
@@ -408,10 +416,14 @@ contract TREXSuiteTest is AccessManagerHelper {
     function _registerIdentities(Token _token) internal {
         vm.startPrank(agent);
         IERC3643IdentityRegistry ir = _token.identityRegistry();
-        ir.registerIdentity(alice, aliceIdentity, Countries.FRANCE);
-        ir.registerIdentity(bob, bobIdentity, Countries.UNITED_STATES);
-        ir.registerIdentity(charlie, charlieIdentity, Countries.SPAIN);
+        ir.registerIdentity(alice, aliceIdentity, 0);
+        ir.registerIdentity(bob, bobIdentity, 0);
+        ir.registerIdentity(charlie, charlieIdentity, 0);
         vm.stopPrank();
+
+        _addCountryClaim(aliceIdentity, Countries.FRANCE, alice);
+        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
+        _addCountryClaim(charlieIdentity, Countries.SPAIN, charlie);
     }
 
     /// @notice Helper function to create and add a claim to an identity
@@ -465,6 +477,12 @@ contract TREXSuiteTest is AccessManagerHelper {
         bytes32 digest = IIdentity(_claimIssuer).getClaimHash(address(_identity), _claimTopic, _data);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(_signerPrivateKey, digest);
         return abi.encode(abi.encodePacked(vm.addr(_signerPrivateKey)), abi.encodePacked(r, s, v));
+    }
+
+    /// @notice Helper to add a country claim to an identity using the claim issuer
+    function _addCountryClaim(IIdentity _identity, uint16 _country, address _wallet) internal {
+        bytes memory claimData = abi.encode(_country);
+        _addClaim(_identity, COUNTRY_CLAIM_TOPIC, claimData, claimIssuerSigner.key, address(claimIssuer), _wallet);
     }
 
 }

@@ -223,6 +223,31 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
     }
 
     /**
+     *  @dev See {IModularCompliance-attributeSynced}.
+     *  @dev No gas stipend is forwarded: a module burning the whole allowance starves the ones after
+     *  it. Bound modules are trusted code.
+     */
+    function attributeSynced(address _investor, uint256 _topic, uint16 _oldValue, uint16 _newValue, uint256 _position)
+        external
+        onlyBoundedToken
+    {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.HOOK_ATTRIBUTE_SYNC == 0) continue;
+
+            bool synced = LowLevelCall.callNoReturn(
+                module,
+                abi.encodeCall(IModule.moduleAttributeSync, (_investor, _topic, _oldValue, _newValue, _position))
+            );
+            if (!synced) {
+                emit EventsLib.AttributeSyncFailed(module, _investor, _topic);
+            }
+        }
+    }
+
+    /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */
     function addAndSetModule(address _module, bytes[] calldata _interactions) external restricted {

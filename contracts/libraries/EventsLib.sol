@@ -78,12 +78,22 @@ library EventsLib {
     event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
     event ModuleRemoved(address indexed module);
 
+    /// @dev A bound module failed its attribute sync; its aggregates are behind the claim until an
+    ///  operator intervenes.
+    event AttributeSyncFailed(address indexed module, address indexed investor, uint256 indexed topic);
+
     // AbstractModule / AbstractModuleUpgradeable Events
 
     event ComplianceBound(address indexed compliance);
     event ComplianceUnbound(address indexed compliance);
 
     // IdentityRegistry Events
+
+    /// @dev The cached value of a claim-derived attribute moved, or its review flag changed. `flagged`
+    ///  marks an identity whose attesting claim no longer resolves.
+    event AttributeCacheSynced(
+        address indexed identity, uint256 indexed topic, uint16 oldValue, uint16 newValue, bool flagged
+    );
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();

@@ -62,11 +62,14 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 
@@ -74,10 +77,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @dev struct containing the identity contract and the country of the user
+    /// @dev struct containing the identity contract
     struct Identity {
         IIdentity identityContract;
-        uint16 investorCountry;
     }
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistryStorage
@@ -87,6 +89,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
         /// @dev set of Identity Registries linked to this storage
         EnumerableSet.AddressSet identityRegistries;
+
+        /// @dev global identity registry used as a fallback when no local identity is stored
+        IIdentityFactory idFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
@@ -96,9 +101,19 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         _disableInitializers();
     }
 
-    function init(address accessManagerAddress, address initialIRAddress) external initializer {
-        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+    /// @notice Initializes the contract
+    /// @param accessManagerAddress the address of the access manager
+    /// @param initialIRAddress the Identity Registry to bind at deploy time, or the zero address to bind none
+    /// @param idFactoryAddress the address of the global identity registry (IdFactory) used as fallback
+    function init(address accessManagerAddress, address initialIRAddress, address idFactoryAddress)
+        external
+        initializer
+    {
+        require(accessManagerAddress != address(0) && idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
+
+        _getStorage().idFactory = IIdentityFactory(idFactoryAddress);
+        emit EventsLib.IdFactorySet(idFactoryAddress);
 
         if (initialIRAddress != address(0)) {
             _bindIdentityRegistry(initialIRAddress);
@@ -107,14 +122,22 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
+     *  @dev The country argument is ignored: the storage may be shared by several registries, and the
+     *  cache is per token.
      */
-    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external restricted {
+    function addIdentityToStorage(
+        address _userAddress,
+        IIdentity _identity,
+        uint16 /*_country*/
+    )
+        external
+        restricted
+    {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) == address(0), ErrorsLib.AddressAlreadyStored());
         s.identities[_userAddress].identityContract = _identity;
-        s.identities[_userAddress].investorCountry = _country;
         emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
     }
 
@@ -132,13 +155,10 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
+     *  @dev DEPRECATED, always reverts: this storage holds no country.
      */
-    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external restricted {
-        require(_userAddress != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        s.identities[_userAddress].investorCountry = _country;
-        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
+    function modifyStoredInvestorCountry(address, uint16) external override restricted {
+        revert ErrorsLib.Deprecated();
     }
 
     /**
@@ -172,6 +192,23 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     }
 
     /**
+     *  @notice Sets the global identity registry (IdFactory) used as a fallback when a wallet has no local identity.
+     *  @param idFactoryAddress the address of the global identity registry
+     */
+    function setIdFactory(address idFactoryAddress) external restricted {
+        require(idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
+        _getStorage().idFactory = IIdentityFactory(idFactoryAddress);
+        emit EventsLib.IdFactorySet(idFactoryAddress);
+    }
+
+    /**
+     *  @notice Returns the address of the global identity registry (IdFactory) used as a fallback.
+     */
+    function idFactory() external view returns (address) {
+        return address(_getStorage().idFactory);
+    }
+
+    /**
      *  @dev See {IIdentityRegistryStorage-linkedIdentityRegistries}.
      */
     function linkedIdentityRegistries() external view returns (address[] memory) {
@@ -179,17 +216,33 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     }
 
     /**
+     *  @dev See {IIdentityRegistryStorage-isLocallyStored}.
+     */
+    function isLocallyStored(address _userAddress) external view override returns (bool) {
+        return address(_getStorage().identities[_userAddress].identityContract) != address(0);
+    }
+
+    /**
      *  @dev See {IIdentityRegistryStorage-storedIdentity}.
+     *  @dev Falls back to the global identity registry (IdentityFactory) when no local identity is
+     *  stored. The factory keys wallets by ERC-7930 interoperable address, so the lookup wraps the
+     *  wallet in an EVM envelope for this chain.
      */
     function storedIdentity(address _userAddress) external view returns (IIdentity) {
-        return _getStorage().identities[_userAddress].identityContract;
+        Storage storage s = _getStorage();
+        IIdentity local = s.identities[_userAddress].identityContract;
+        if (address(local) != address(0)) {
+            return local;
+        }
+        return IIdentity(s.idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, _userAddress)));
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedInvestorCountry}.
+     *  @dev DEPRECATED, always returns 0: read `investorCountry` on the Identity Registry.
      */
-    function storedInvestorCountry(address _userAddress) external view returns (uint16) {
-        return _getStorage().identities[_userAddress].investorCountry;
+    function storedInvestorCountry(address) external pure override returns (uint16) {
+        return 0;
     }
 
     /**

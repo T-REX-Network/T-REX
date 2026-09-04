@@ -341,7 +341,10 @@ contract TokenTransferTest is TREXSuiteTest {
     function test_transfer_Success_WhenHolderIdentityDeleted() public {
         vm.prank(agent);
         identityRegistry.deleteIdentity(alice);
-        assertFalse(identityRegistry.isVerified(alice));
+        // Deleting the local entry no longer makes the holder unverified: the identity is still
+        // resolvable through the global IdFactory fallback.
+        assertFalse(identityRegistry.isLocallyRegistered(alice));
+        assertTrue(identityRegistry.isVerified(alice));
 
         vm.prank(alice);
         token.transfer(bob, 100);

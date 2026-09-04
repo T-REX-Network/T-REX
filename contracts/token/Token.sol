@@ -83,12 +83,14 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
+import { ITREXToken } from "./interface/ITREXToken.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, IERC3643 {
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, ITREXToken {
 
     string internal constant VERSION = "5.0.0";
 
@@ -104,7 +106,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         uint8 decimals;
         address onchainId;
         IModularCompliance compliance;
-        IERC3643IdentityRegistry identityRegistry;
+        ITREXRegistry trexRegistry;
         mapping(address user => FrozenStatus) frozenStatus;
     }
 
@@ -149,7 +151,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         s.decimals = tokenDecimals;
         s.onchainId = onchainIdAddress;
 
-        s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        s.trexRegistry = ITREXRegistry(identityRegistryAddress);
+        s.trexRegistry.bindToken(address(this));
         s.compliance = IModularCompliance(complianceAddress);
         _emitUpdatedTokenInformation();
 
@@ -187,7 +190,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         restricted
         onlySharedAuthority(identityRegistryAddress)
     {
-        _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
+        TokenStorage storage s = _tokenStorage();
+        s.trexRegistry = ITREXRegistry(identityRegistryAddress);
+        s.trexRegistry.bindToken(address(this));
         emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
@@ -229,7 +234,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
     /// @inheritdoc IERC3643
     function identityRegistry() external view returns (IERC3643IdentityRegistry) {
-        return _tokenStorage().identityRegistry;
+        return _tokenStorage().trexRegistry;
     }
 
     /// @inheritdoc IERC3643
@@ -390,8 +395,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         uint256 investorTokens = balanceOf(lostWallet);
         require(investorTokens != 0, ErrorsLib.NoTokenToRecover());
         require(
-            s.identityRegistry.contains(lostWallet) || s.identityRegistry.contains(newWallet),
-            ErrorsLib.RecoveryNotPossible()
+            s.trexRegistry.contains(lostWallet) || s.trexRegistry.contains(newWallet), ErrorsLib.RecoveryNotPossible()
         );
 
         uint256 frozenTokens = s.frozenStatus[lostWallet].amount;
@@ -400,6 +404,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
         _migrateIdentity(lostWallet, newWallet, investorOnchainId);
+
+        // After the migration: the new wallet resolves to the recovered identity only once registered.
+        reconcile(newWallet);
 
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
 
@@ -430,25 +437,22 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         }
     }
 
-    /// @dev Moves the on-chain identity from the lost wallet to the new wallet (registering the new wallet only
-    ///      when it is not already known to the identity registry).
+    /// @dev Moves the on-chain identity from the lost wallet to the new wallet. The new wallet is registered
+    ///      whenever it has no *local* entry, since resolving through the global identity registry fallback
+    ///      leaves nothing to delete and no investor country recorded on this IRS.
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
-        TokenStorage storage s = _tokenStorage();
+        ITREXRegistry registry = _tokenStorage().trexRegistry;
 
         require(
-            !s.identityRegistry.contains(newWallet)
-                || s.identityRegistry.identity(newWallet) == IIdentity(investorOnchainId),
+            !registry.contains(newWallet) || registry.identity(newWallet) == IIdentity(investorOnchainId),
             ErrorsLib.RecoveryNotPossible()
         );
 
-        if (s.identityRegistry.contains(lostWallet)) {
-            if (!s.identityRegistry.contains(newWallet)) {
-                s.identityRegistry
-                    .registerIdentity(
-                        newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
-                    );
-            }
-            s.identityRegistry.deleteIdentity(lostWallet);
+        if (!registry.isLocallyRegistered(newWallet)) {
+            registry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
+        }
+        if (registry.isLocallyRegistered(lostWallet)) {
+            registry.deleteIdentity(lostWallet);
         }
     }
 
@@ -497,12 +501,25 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         }
     }
 
+    /// @dev `_forceUpdate` bypasses {_update}, so the reconciliation is repeated here.
     function _forcedTransfer(address from, address to, uint256 amount) internal returns (bool) {
         TokenStorage storage s = _tokenStorage();
-        require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+        reconcile(from);
+        reconcile(to);
+        require(s.trexRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         s.compliance.transferred(from, to, amount);
         return true;
+    }
+
+    /// @inheritdoc ITREXToken
+    /// @dev Idempotent, so every balance-touching operation calls it before moving the balance: the
+    ///      position handed to the modules is the one their aggregates were built on.
+    function reconcile(address investor) public {
+        TokenStorage storage s = _tokenStorage();
+        (uint256 topic, uint16 oldValue, uint16 newValue, bool moved) = s.trexRegistry.reconcileAttribute(investor);
+        if (!moved) return;
+        s.compliance.attributeSynced(investor, topic, oldValue, newValue, balanceOf(investor));
     }
 
     /* ----- Utility Functions ----- */
@@ -534,16 +551,25 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             _autoUnfreezeFor(from, value);
         }
 
+        // Before the checks and the balance move, so compliance evaluates and moves the pre-move
+        // position under the attested country.
+        if (!isMint) reconcile(from);
+        if (!isBurn) reconcile(to);
+
         if (!isBurn) {
-            require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
+            require(s.trexRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
             require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());
         }
 
         super._update(from, to, value);
 
-        if (isMint) s.compliance.created(to, value);
-        else if (isBurn) s.compliance.destroyed(from, value);
-        else s.compliance.transferred(from, to, value);
+        if (isMint) {
+            s.compliance.created(to, value);
+        } else if (isBurn) {
+            s.compliance.destroyed(from, value);
+        } else {
+            s.compliance.transferred(from, to, value);
+        }
     }
 
     function _forceUpdate(address from, address to, uint256 value) private {

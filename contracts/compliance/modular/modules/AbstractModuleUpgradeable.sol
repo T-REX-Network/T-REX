@@ -176,6 +176,12 @@ abstract contract AbstractModuleUpgradeable is
     function moduleBurnAction(address, uint256) external virtual onlyComplianceCall { }
 
     /**
+     *  @dev See {IModule-moduleAttributeSync}.
+     *  Default no-op: a module overrides it only when it declares `HOOK_ATTRIBUTE_SYNC`.
+     */
+    function moduleAttributeSync(address, uint256, uint16, uint16, uint256) external virtual onlyComplianceCall { }
+
+    /**
      *  @dev See {IModule-moduleCheck}.
      *  Default pass: a module overrides it only when it declares `CHECK_TRANSFER`.
      */

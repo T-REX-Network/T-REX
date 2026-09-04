@@ -48,7 +48,9 @@ interface IERC3643IdentityRegistryStorage {
      *  This function can only be called by an address set as agent of the smart contract
      *  @param _userAddress The address of the user
      *  @param _identity The address of the user's identity contract
-     *  @param _country The country of the investor
+     *  @param _country DEPRECATED, advisory only. The value is ignored and never stored. This storage
+     *  holds no country at all: it may be shared by several Identity Registries, while the cached
+     *  country has to be per token so that syncing one token never marks another as up to date.
      *  emits `IdentityStored` event
      */
     function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external;
@@ -63,12 +65,9 @@ interface IERC3643IdentityRegistryStorage {
     function removeIdentityFromStorage(address _userAddress) external;
 
     /**
-     *  @dev Updates the country corresponding to a user address.
-     *  Requires that the user should have an identity contract already deployed that will be replaced.
-     *  This function can only be called by an address set as agent of the smart contract
+     *  @dev DEPRECATED, always reverts: the country is cached per token on the Identity Registry.
      *  @param _userAddress The address of the user
-     *  @param _country The new country of the user
-     *  emits `CountryModified` event
+     *  @param _country ignored
      */
     function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external;
 
@@ -119,7 +118,7 @@ interface IERC3643IdentityRegistryStorage {
     function storedIdentity(address _userAddress) external view returns (IIdentity);
 
     /**
-     *  @dev Returns the country code of an investor.
+     *  @dev DEPRECATED, always returns 0: read `investorCountry` on the Identity Registry.
      *  @param _userAddress The wallet of the investor
      */
     function storedInvestorCountry(address _userAddress) external view returns (uint16);
