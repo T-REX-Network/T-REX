@@ -60,75 +60,41 @@
  *     You should have received a copy of the GNU General Public License
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 pragma solidity 0.8.30;
 
-import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
-import { Version } from "./VersionLib.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
+import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
+import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
 
-library EventsLib {
+/**
+ * @title TrustedGatewayRegistry
+ * @dev The network's set of vetted ERC-7786 gateways.
+ *
+ * A network singleton, deployed once per deployment and shared by every token. It is deliberately not
+ * upgradeable and holds nothing but the set.
+ */
+contract TrustedGatewayRegistry is ITrustedGatewayRegistry, AccessManagedOwnable {
 
-    // Common Events
+    mapping(address gateway => bool) private _trusted;
 
-    event ImplementationAuthoritySet(address implementationAuthority);
+    constructor(address accessManager) AccessManagedOwnable(accessManager) {
+        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+    }
 
-    // ModularCompliance Events
+    /// @inheritdoc ITrustedGatewayRegistry
+    function setTrustedGateway(address gateway, bool trusted) external restricted {
+        require(gateway != address(0), ErrorsLib.ZeroAddress());
 
-    event ModuleInteraction(address indexed target, bytes4 selector);
-    event ModuleAdded(address indexed module);
-    event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
-    event ModuleRemoved(address indexed module);
+        _trusted[gateway] = trusted;
 
-    // AbstractModule / AbstractModuleUpgradeable Events
+        emit EventsLib.TrustedGatewaySet(gateway, trusted);
+    }
 
-    event ComplianceBound(address indexed compliance);
-    event ComplianceUnbound(address indexed compliance);
-
-    // IdentityRegistry Events
-
-    event EligibilityChecksDisabled();
-    event EligibilityChecksEnabled();
-
-    // TREXFactory Events
-
-    event Deployed(address indexed addr);
-    event IdFactorySet(address idFactory);
-
-    /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
-    event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
-    event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
-
-    // TrustedGatewayRegistry Events
-
-    event TrustedGatewaySet(address indexed gateway, bool trusted);
-
-    // TREXMessaging Events
-
-    event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
-    /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
-    event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
-    event PeerSet(bytes32 indexed chainKey, bytes peer);
-    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to the gateway that carried it.
-    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
-    event ProtocolMessageSent(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event ProtocolMessageReceived(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 receiveId);
-    /// @notice Emitted by the token when an attributed burn proof reaches its recall path.
-    event BurnProofReceived(
-        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
-    );
-
-    // ModularCompliance Interop Events
-
-    /// @notice Emitted by the compliance when the token hands it an attributed settlement notification.
-    event SettlementNotified(
-        bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
-    );
-
-    // TREXImplementationAuthority Events
-
-    event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);
-    event VersionPublished(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
-    event SuiteUpgraded(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
+    /// @inheritdoc ITrustedGatewayRegistry
+    function isTrusted(address gateway) external view returns (bool) {
+        return _trusted[gateway];
+    }
 
 }

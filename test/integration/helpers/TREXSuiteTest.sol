@@ -17,6 +17,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
+import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
@@ -67,6 +68,8 @@ contract TREXSuiteTest is AccessManagerHelper {
     Identity public claimIssuer;
 
     // Admin roles
+    TrustedGatewayRegistry public trustedGatewayRegistry;
+
     address public deployer = makeAddr("deployer");
     address public agent = makeAddr("agent");
 
@@ -251,6 +254,11 @@ contract TREXSuiteTest is AccessManagerHelper {
     function _deployFactories() internal {
         trexImplementationAuthority = _deployTREXImplementationAuthority();
 
+        // Network-level, shared by every suite. Deployed here so the interop phases have one to route through.
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(trustedGatewayRegistry));
+        _grantInteropManagerRole(address(this));
+
         trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // The IdentityFactory gates ASSET minting on ASSET_DEPLOYER, resolved against its own
@@ -379,6 +387,11 @@ contract TREXSuiteTest is AccessManagerHelper {
         // registry wiring covers all three sub-surfaces.
         IERC3643IdentityRegistry ir = _token.identityRegistry();
         _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
+
+        // A token opens no chain by default. Pointing it at the registry is the first of the issuer's
+        // interop levers, and every later route or peer call needs it in place.
+        vm.prank(deployer);
+        _token.setTrustedGatewayRegistry(address(trustedGatewayRegistry));
     }
 
     /// @notice Deploys a fresh ModularCompliance proxy with no token bound, managed by the test AccessManager

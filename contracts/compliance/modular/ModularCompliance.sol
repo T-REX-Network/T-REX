@@ -69,15 +69,17 @@ import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableM
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
+import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeable {
+contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessManagedOwnableUpgradeable {
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
@@ -188,6 +190,16 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
                 IModule(module).moduleTransferAction(_from, _to, _value);
             }
         }
+    }
+
+    /// @inheritdoc ISettlementHandler
+    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+        external
+        onlyBoundedToken
+    {
+        emit EventsLib.SettlementNotified(
+            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
+        );
     }
 
     /**
@@ -347,7 +359,8 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643Compliance).interfaceId
+            || interfaceId == type(ISettlementHandler).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.

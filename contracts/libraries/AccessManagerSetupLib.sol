@@ -69,6 +69,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
+import { TrustedGatewayRegistry } from "../interop/TrustedGatewayRegistry.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
@@ -87,11 +88,24 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
         // ------ IDENTITY_MANAGER role ------
-        functions = new bytes4[](3);
+        // Also owns the interop wiring: which registry the token resolves gateway trust against, and
+        // which gateway and peer each chain uses. Same concern as the registry and compliance it points at.
+        functions = new bytes4[](6);
         functions[0] = Token.setOnchainID.selector;
         functions[1] = Token.setIdentityRegistry.selector;
         functions[2] = Token.setCompliance.selector;
+        functions[3] = Token.setTrustedGatewayRegistry.selector;
+        functions[4] = Token.setRoute.selector;
+        functions[5] = Token.setPeer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
+
+        // ------ AGENT role ------
+        // Outbound interop dispatch is an operation, not configuration: it sends, it does not rewire.
+        // The bound compliance reaches dispatchComplianceValidation without a role; this is the human path.
+        functions = new bytes4[](2);
+        functions[0] = Token.dispatchComplianceValidation.selector;
+        functions[1] = Token.dispatchMintInstruction.selector;
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT);
 
         // ------ AGENT_MINTER role ------
         functions = new bytes4[](1);
@@ -219,6 +233,13 @@ library AccessManagerSetupLib {
     ) internal {
         identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
         accessManager.grantRole(RolesLib.ASSET_DEPLOYER, trexFactory, 0);
+    }
+
+    function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {
+        // ------ INTEROP_MANAGER role ------
+        bytes4[] memory functions = new bytes4[](1);
+        functions[0] = TrustedGatewayRegistry.setTrustedGateway.selector;
+        accessManager.setTargetFunctionRole(trustedGatewayRegistry, functions, RolesLib.INTEROP_MANAGER);
     }
 
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)

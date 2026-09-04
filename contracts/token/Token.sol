@@ -82,13 +82,24 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
+import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
+import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
+import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
 
-contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, IERC3643 {
+contract Token is
+    ERC20PermitUpgradeable,
+    PausableUpgradeable,
+    AccessManagedOwnableUpgradeable,
+    TREXMessaging,
+    IERC3643
+{
 
     string internal constant VERSION = "5.0.0";
 
@@ -205,6 +216,54 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         s.compliance = IModularCompliance(complianceAddress);
         s.compliance.bindToken(address(this));
         emit ERC3643EventsLib.ComplianceAdded(complianceAddress);
+    }
+
+    /* ----- Interop Configuration ----- */
+
+    /// @inheritdoc ITREXMessaging
+    function setTrustedGatewayRegistry(address registry) external restricted {
+        _setTrustedGatewayRegistry(registry);
+    }
+
+    /// @inheritdoc ITREXMessaging
+    function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
+        _setRoute(chainType, chainReference, gateway);
+    }
+
+    /// @inheritdoc ITREXMessaging
+    function setPeer(bytes32 chainKey, bytes calldata peer) external restricted {
+        _setPeer(chainKey, peer);
+    }
+
+    /* ----- Interop Dispatch ----- */
+
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
+    ///
+    /// The reference side has two contracts with something to say, the compliance and the token, but
+    /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
+    /// only ever has to trust a single reference address. A cross-chain validation is dispatched once
+    /// per involved chain, under the same `validationId`, and each leg pins its own route.
+    ///
+    /// Callable by the bound compliance without a role, or by a caller the AccessManager authorises for
+    /// this selector. Reverts when the chain was never opened, or when this validation already went out
+    /// toward `chainKey` through another gateway.
+    function dispatchComplianceValidation(bytes32 chainKey, uint256 validationId, bytes calldata body)
+        external
+        returns (bytes32)
+    {
+        if (_msgSender() != address(_tokenStorage().compliance)) {
+            _checkCanCall(_msgSender(), this.dispatchComplianceValidation.selector);
+        }
+
+        return _sendComplianceValidation(chainKey, validationId, body);
+    }
+
+    /// @dev Sends a delegation-out mint instruction to this token's peer on `chainKey`.
+    ///
+    /// One-way by design: delegation-out is atomic and final here, so no reconciliation is expected and
+    /// none is tracked. Reverts when the chain was never opened.
+    function dispatchMintInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
+        return _sendMessage(chainKey, MessageTypesLib.MINT_INSTRUCTION, body);
     }
 
     /// @inheritdoc IERC20Metadata
@@ -565,6 +624,31 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
     function _emitUpdatedTokenInformation() internal {
         emit ERC3643EventsLib.UpdatedTokenInformation(name(), symbol(), decimals(), VERSION, _tokenStorage().onchainId);
+    }
+
+    /// @inheritdoc TREXMessaging
+    /// @dev The destination is structural: the bound compliance owns the slot lifecycle, so an attributed
+    ///      settlement goes there and nowhere else. It is forwarded as decoded; classifying it against
+    ///      the stored validation is the compliance's business, not the token's.
+    function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
+        internal
+        override
+    {
+        ISettlementHandler(address(_tokenStorage().compliance)).handleSettlement(chainKey, notification);
+    }
+
+    /// @inheritdoc TREXMessaging
+    /// @dev The recall path: credits the holder's native wallet against a satellite's burn proof.
+    ///
+    /// The path must check that the destination wallet is linked to the same identity as the burned one,
+    /// because a recall moves location and never ownership, then consume the proof through the bridged
+    /// ledger. Both the identity link and the balance transition arrive with the balance model and the
+    /// movement types; until then the proof is attributed, checked for a destination, and announced with
+    /// its fields intact, without touching the ledger.
+    function _handleBurnProof(bytes32 chainKey, MessageTypesLib.BurnProof memory proof) internal virtual override {
+        require(proof.nativeWallet != address(0), ErrorsLib.ZeroAddress());
+
+        emit EventsLib.BurnProofReceived(chainKey, proof.burnedWallet, proof.nativeWallet, proof.amount);
     }
 
     function _checkCanCall(address caller, bytes4 selector) internal virtual {
