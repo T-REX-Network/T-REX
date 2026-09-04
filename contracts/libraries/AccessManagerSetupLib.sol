@@ -150,7 +150,7 @@ library AccessManagerSetupLib {
     /// @notice Role wiring for the `TREXRegistry` contract.
     function setupTREXRegistryRoles(IAccessManager accessManager, address registry) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](10);
+        bytes4[] memory functions = new bytes4[](11);
         functions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
         functions[1] = TREXRegistry.disableEligibilityChecks.selector;
         functions[2] = TREXRegistry.enableEligibilityChecks.selector;
@@ -161,6 +161,7 @@ library AccessManagerSetupLib {
         functions[7] = TREXRegistry.removeClaimTopic.selector;
         functions[8] = TREXRegistry.addClaimTopicForIdentityType.selector;
         functions[9] = TREXRegistry.removeClaimTopicForIdentityType.selector;
+        functions[10] = TREXRegistry.setIdentityFactory.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
@@ -189,12 +190,11 @@ library AccessManagerSetupLib {
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](5);
+        bytes4[] memory functions = new bytes4[](4);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
-        functions[2] = TREXFactory.setIdentityModules.selector;
-        functions[3] = TREXFactory.deployTREXSuite.selector;
-        functions[4] = TREXFactory.deployTREXSuiteIsolated.selector;
+        functions[2] = TREXFactory.deployTREXSuite.selector;
+        functions[3] = TREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
     }
 
@@ -211,6 +211,10 @@ library AccessManagerSetupLib {
     ///      IdentityFactory. Granting the role on the wrong manager leaves the auto-mint path reverting.
     /// @dev The caller must be able to reach both calls: `setIdentityTypePolicy` is `restricted` on the
     ///      IdentityFactory, and `grantRole` requires the caller to be ASSET_DEPLOYER's role admin.
+    /// @dev The ASSET module bundle is ONCHAINID configuration, registered on the IdentityFactory
+    ///      via `setIdentityTypeModules` as part of its own deployment. An identity minted for a
+    ///      type without modules cannot initialize, so that registration must also land before the
+    ///      first auto-mint deploy.
     /// @param accessManager The IdentityFactory's authority, where ASSET_DEPLOYER is resolved
     /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
     /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
@@ -219,7 +223,8 @@ library AccessManagerSetupLib {
         IIdentityFactory identityFactory,
         address trexFactory
     ) internal {
-        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
+        // ASSET is single-binding: a token OID binds to exactly one token and cannot be re-linked.
+        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true);
         accessManager.grantRole(RolesLib.ASSET_DEPLOYER, trexFactory, 0);
     }
 

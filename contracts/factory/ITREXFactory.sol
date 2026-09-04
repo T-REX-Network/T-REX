@@ -123,19 +123,6 @@ interface ITREXFactory {
     function setIdFactory(address _idFactory) external;
 
     /**
-     *  @dev setter for the ONCHAINID module singletons installed on token ONCHAINIDs minted by
-     *  this factory. ONCHAINID identities install these modules to expose their ERC-734/735
-     *  surface, so an OID minted without them could not hold claims.
-     *  Affects future mints only: identities already deployed keep the modules installed at their
-     *  own mint time, as module installation happens once during identity creation.
-     *  Restricted to the configured AccessManager role (OWNER).
-     *  emits `IdentityModulesSet` event
-     *  @param _keyApprovalModule The address of the ONCHAINID KeyApprovalModule singleton
-     *  @param _validatorModule The address of the ONCHAINID ERC734Validator singleton
-     */
-    function setIdentityModules(address _keyApprovalModule, address _validatorModule) external;
-
-    /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
      *  this function will deploy and set the contracts as follow :
      *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner, agents,
@@ -190,11 +177,6 @@ interface ITREXFactory {
      *  @dev getter for identity factory address
      */
     function getIdFactory() external view returns (address);
-
-    /**
-     *  @dev getter for the ONCHAINID module singletons installed on minted token ONCHAINIDs
-     */
-    function getIdentityModules() external view returns (address _keyApprovalModule, address _validatorModule);
 
     /**
      *  @dev getter for token address corresponding to salt string

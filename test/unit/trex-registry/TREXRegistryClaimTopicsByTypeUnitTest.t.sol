@@ -12,12 +12,12 @@ import { Vm } from "@forge-std/Vm.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
-import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
+import { IdentityModulesHelper } from "test/helpers/IdentityModulesHelper.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
 
-/// @notice Stand-in identity without a `getIdentityType()` entry point: calling it reverts, the way a
-///         hostile or pre-v3 identity would.
+/// @notice Stand-in for an identity contract the suite's IdentityFactory never minted: the factory
+///         holds no type record for it, so `identityTypeOf` reports 0.
 contract NoTypeIdentity { }
 
 contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
@@ -33,7 +33,11 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
 
         // The harness only registers INDIVIDUAL / CLAIM_ISSUER / ASSET policies; open CORPORATE too
         // (this contract is the AccessManager admin) so corporate identities can be minted.
-        idFactory.setIdentityTypePolicy(IdentityTypes.CORPORATE, accessManager.PUBLIC_ROLE(), true);
+        idFactory.setIdentityTypePolicy(IdentityTypes.CORPORATE, accessManager.PUBLIC_ROLE(), true, false);
+        idFactory.setIdentityTypeModules(
+            IdentityTypes.CORPORATE,
+            IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
+        );
         corpIdentity = _deployTypedIdentity(corp, "corp", IdentityTypes.CORPORATE);
         vm.prank(agent);
         registry.registerIdentity(corp, corpIdentity, 442);
@@ -207,15 +211,42 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
         assertTrue(registry.isVerified(corp));
     }
 
-    function test_isVerified_RevertWhen_GetIdentityTypeReverts() public {
-        // Fail-closed: an identity that cannot report its type cannot dodge a stricter per-type set
-        // by resolving to the default topics — verification reverts instead.
-        NoTypeIdentity hostileIdentity = new NoTypeIdentity();
-        vm.prank(agent);
-        registry.registerIdentity(another, IIdentity(address(hostileIdentity)), 250);
+    function test_isVerified_ReadsTypeFromFactoryRecord_NotFromIdentity() public {
+        vm.prank(deployer);
+        registry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_KYB);
+        assertFalse(registry.isVerified(corp));
 
-        vm.expectRevert();
-        registry.isVerified(another);
+        // A hostile corporate identity claims to be INDIVIDUAL to dodge the stricter KYB set. The
+        // registry reads the factory's creation-time record, so the lie changes nothing.
+        vm.mockCall(
+            address(corpIdentity),
+            abi.encodeWithSelector(IIdentity.getIdentityType.selector),
+            abi.encode(IdentityTypes.INDIVIDUAL)
+        );
+        assertFalse(registry.isVerified(corp));
+
+        // Refusing to answer at all changes nothing either: the identity is never consulted.
+        vm.mockCallRevert(
+            address(corpIdentity), abi.encodeWithSelector(IIdentity.getIdentityType.selector), "type unavailable"
+        );
+        assertFalse(registry.isVerified(corp));
+    }
+
+    function test_isVerified_UsesDefaultTopics_WhenIdentityNotFactoryMinted() public {
+        // A contract the factory never minted has no type record: `identityTypeOf` returns 0, which
+        // resolves to the default topics even when per-type overrides exist.
+        NoTypeIdentity foreignIdentity = new NoTypeIdentity();
+        vm.prank(agent);
+        registry.registerIdentity(another, IIdentity(address(foreignIdentity)), 250);
+
+        vm.startPrank(deployer);
+        registry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_KYB);
+        // Empty the default set so the resolution outcome is observable without claims: an empty
+        // required set verifies trivially, so reaching `true` proves the default set was chosen.
+        registry.removeClaimTopic(CLAIM_TOPIC_1);
+        vm.stopPrank();
+
+        assertTrue(registry.isVerified(another));
     }
 
     /// @dev Mirrors the harness's `_deployIdentity` with a caller-chosen identity type.
@@ -227,13 +258,7 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
         keys[0] = _ecdsaKey(wallet, KeyPurposes.MANAGEMENT);
 
         vm.prank(deployer);
-        address identity = idFactory.createIdentityFor(
-            wallet,
-            identityType,
-            salt,
-            keys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
-        );
+        address identity = idFactory.createIdentityFor(wallet, identityType, salt, keys);
         return IIdentity(identity);
     }
 

@@ -62,6 +62,7 @@
 
 pragma solidity ^0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
@@ -93,6 +94,11 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         // ----- IdentityRegistry storage -----
         IIdentityRegistryStorage tokenIdentityStorage;
         bool checksDisabled;
+
+        /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The
+        ///  factory records the type once at minting and never updates it, so it is a safer source
+        ///  than asking the identity contract itself.
+        IIdentityFactory identityFactory;
         // ----- TrustedIssuersRegistry storage -----
         /// @dev Set containing all TrustedIssuers identity contract addresses.
         EnumerableSet.AddressSet trustedIssuers;
@@ -121,26 +127,35 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     /// @notice Initializes the contract
     /// @param identityStorageAddress the address of the (external) identity registry storage
     /// @param accessManagerAddress the address of the access manager
+    /// @param identityFactoryAddress the ONCHAINID IdentityFactory whose type record backs per-type
+    ///        claim topic resolution
     /// @param initialTopics the claim topics required at deployment
     /// @param issuers the trusted issuers to register at deployment
     /// @param issuerClaims the claim topics each entry of `issuers` is trusted for
     function init(
         address identityStorageAddress,
         address accessManagerAddress,
+        address identityFactoryAddress,
         uint256[] memory initialTopics,
         address[] memory issuers,
         uint256[][] memory issuerClaims
     ) external initializer {
-        require(identityStorageAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        require(
+            identityStorageAddress != address(0) && accessManagerAddress != address(0)
+                && identityFactoryAddress != address(0),
+            ErrorsLib.ZeroAddress()
+        );
         require(issuers.length == issuerClaims.length, ErrorsLib.InvalidClaimPattern());
 
         Storage storage s = _getStorage();
         s.tokenIdentityStorage = IIdentityRegistryStorage(identityStorageAddress);
+        s.identityFactory = IIdentityFactory(identityFactoryAddress);
         s.checksDisabled = false;
 
         emit ERC3643EventsLib.ClaimTopicsRegistrySet(address(this));
         emit ERC3643EventsLib.TrustedIssuersRegistrySet(address(this));
         emit ERC3643EventsLib.IdentityStorageSet(identityStorageAddress);
+        emit EventsLib.IdentityFactorySet(identityFactoryAddress);
         emit EventsLib.EligibilityChecksEnabled();
 
         __AccessManaged_init(accessManagerAddress);
@@ -194,6 +209,18 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         emit ERC3643EventsLib.IdentityStorageSet(_identityRegistryStorage);
     }
 
+    /// @inheritdoc ITREXRegistry
+    function setIdentityFactory(address identityFactoryAddress) external override restricted {
+        require(identityFactoryAddress != address(0), ErrorsLib.ZeroAddress());
+        _getStorage().identityFactory = IIdentityFactory(identityFactoryAddress);
+        emit EventsLib.IdentityFactorySet(identityFactoryAddress);
+    }
+
+    /// @inheritdoc ITREXRegistry
+    function identityFactory() external view override returns (IIdentityFactory) {
+        return _getStorage().identityFactory;
+    }
+
     /// @inheritdoc IERC3643IdentityRegistry
     /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts.
     function setClaimTopicsRegistry(address) external pure override {
@@ -223,10 +250,10 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev The required topics are resolved per identity type: when the identity's
-    ///  `getIdentityType()` has a non-empty override set (`getClaimTopicsForIdentityType`), that set
-    ///  replaces the default `getClaimTopics()` entirely; type 0 or a type without an override falls
-    ///  back to the default topics. A revert of `getIdentityType()` propagates (fail-closed).
+    /// @dev The required topics depend on the identity type, read from the IdentityFactory record.
+    ///  A non-empty override set for that type fully replaces the default `getClaimTopics()`. Type 0
+    ///  (including identities the factory did not mint) or a type without an override uses the
+    ///  default topics.
     function isVerified(address userAddress) external view override returns (bool) {
         Storage storage s = _getStorage();
 
@@ -477,13 +504,13 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
     }
 
-    /// @dev Resolves the claim topics an identity must satisfy: the override set registered for its
-    ///  identity type when non-empty, the default `claimTopics` otherwise. Identities reporting type 0
-    ///  always resolve to the default set. A `getIdentityType()` revert propagates on purpose — falling
-    ///  back silently would let a hostile identity dodge a stricter type-specific set by refusing to
-    ///  report its type.
+    /// @dev Resolves the claim topics an identity must satisfy. When the identity type has a
+    ///  non-empty override set, that set is used. Otherwise the default `claimTopics` apply. The
+    ///  type comes from the IdentityFactory record (`identityTypeOf`), never from the identity
+    ///  contract, so a hostile identity cannot lie about its type or block the resolution.
+    ///  Identities the factory did not mint have type 0 and use the default set.
     function _requiredClaimTopics(Storage storage s, IIdentity userIdentity) internal view returns (uint256[] memory) {
-        uint256 identityType = userIdentity.getIdentityType();
+        uint256 identityType = s.identityFactory.identityTypeOf(address(userIdentity));
         if (identityType != 0) {
             uint256[] memory typeTopics = s.claimTopicsByIdentityType[identityType].values();
             if (typeTopics.length > 0) {

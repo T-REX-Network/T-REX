@@ -63,6 +63,9 @@ pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
+import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
+import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -72,7 +75,6 @@ import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
-import { IdentityModulesLib } from "../libraries/IdentityModulesLib.sol";
 import { RolesLib } from "../libraries/RolesLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
@@ -90,27 +92,16 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// the address of the Identity Factory used to deploy token OIDs
     address private _idFactory;
 
-    /// the ONCHAINID KeyApprovalModule singleton installed on token OIDs minted by this factory
-    address private _keyApprovalModule;
-
-    /// the ONCHAINID ERC734Validator singleton installed on token OIDs minted by this factory
-    address private _validatorModule;
-
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
-    constructor(
-        address implementationAuthority,
-        address idFactory,
-        address keyApprovalModule,
-        address validatorModule,
-        address accessManager
-    ) AccessManagedOwnable(accessManager) {
+    constructor(address implementationAuthority, address idFactory, address accessManager)
+        AccessManagedOwnable(accessManager)
+    {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
-        _setIdentityModules(keyApprovalModule, validatorModule);
     }
 
     /**
@@ -219,13 +210,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /**
-     *  @dev See {ITREXFactory-getIdentityModules}.
-     */
-    function getIdentityModules() external view returns (address keyApprovalModule, address validatorModule) {
-        return (_keyApprovalModule, _validatorModule);
-    }
-
-    /**
      *  @dev See {ITREXFactory-getToken}.
      */
     function getToken(string calldata salt) external view returns (address) {
@@ -244,13 +228,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
      */
     function setIdFactory(address idFactoryAddress) public restricted {
         _setIdFactory(idFactoryAddress);
-    }
-
-    /**
-     *  @dev See {ITREXFactory-setIdentityModules}.
-     */
-    function setIdentityModules(address keyApprovalModuleAddress, address validatorModuleAddress) public restricted {
-        _setIdentityModules(keyApprovalModuleAddress, validatorModuleAddress);
     }
 
     /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
@@ -273,14 +250,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         _idFactory = idFactoryAddress;
         emit EventsLib.IdFactorySet(idFactoryAddress);
-    }
-
-    /// internal setter for the ONCHAINID module singletons, see {ITREXFactory-setIdentityModules}
-    function _setIdentityModules(address keyApprovalModuleAddress, address validatorModuleAddress) internal {
-        require(keyApprovalModuleAddress != address(0) && validatorModuleAddress != address(0), ErrorsLib.ZeroAddress());
-        _keyApprovalModule = keyApprovalModuleAddress;
-        _validatorModule = validatorModuleAddress;
-        emit EventsLib.IdentityModulesSet(keyApprovalModuleAddress, validatorModuleAddress);
     }
 
     /**
@@ -343,6 +312,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     (
                         identityStorage,
                         tokenDetails.accessManager,
+                        _idFactory,
                         claimDetails.claimTopics,
                         claimDetails.issuers,
                         claimDetails.issuerClaims
@@ -405,9 +375,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
     /// against its own authority, so this factory must hold that role there for the auto-mint path
     /// (i.e. tokenDetails.ONCHAINID == address(0)):
-    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false)`
+    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true)`
     ///   2. `accessManager.grantRole(RolesLib.ASSET_DEPLOYER, address(this), 0)`
-    /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both.
+    /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both. The ASSET module bundle is
+    /// registered on the IdentityFactory itself (`setIdentityTypeModules`) as part of its deployment.
     function _deployToken(
         string memory salt,
         address tokenBeacon,
@@ -420,16 +391,26 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         if (oid == address(0)) {
             oid = IIdentityFactory(_idFactory)
                 .createIdentityFor(
-                    predictedToken,
-                    IdentityTypes.ASSET,
-                    salt,
-                    IdentityModulesLib.managementKeys(tokenDetails.accessManager),
-                    IdentityModulesLib.legacyQueueModules(_keyApprovalModule, _validatorModule)
+                    predictedToken, IdentityTypes.ASSET, salt, _managementKeys(tokenDetails.accessManager)
                 );
         }
         address token =
             _deploy(salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, identityRegistry, compliance, oid));
         return token;
+    }
+
+    /// @dev Builds the single-entry MANAGEMENT key set granting `managementKey` control of the minted
+    ///  token OID. Modules are not passed here: the IdentityFactory installs the bundle registered for
+    ///  the ASSET type via `setIdentityTypeModules`.
+    function _managementKeys(address managementKey) private pure returns (Structs.KeyParam[] memory keys) {
+        keys = new Structs.KeyParam[](1);
+        keys[0] = Structs.KeyParam({
+            keyHash: keccak256(abi.encodePacked(managementKey)),
+            purpose: KeyPurposes.MANAGEMENT,
+            keyType: KeyTypes.ECDSA,
+            signerData: abi.encodePacked(managementKey),
+            clientData: ""
+        });
     }
 
     function _tokenBytecode(

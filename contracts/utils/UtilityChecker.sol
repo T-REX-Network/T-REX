@@ -63,6 +63,7 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
@@ -143,9 +144,10 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
     }
 
-    /// @dev Mirrors the type-aware topic resolution of `TREXRegistry.isVerified`: a non-empty override
-    ///  set for the identity's type replaces the default topics. The registry lookup is done through a
-    ///  try/catch so the checker still works against registries without per-type overrides.
+    /// @dev Mirrors the type-aware topic resolution of `TREXRegistry.isVerified`: the identity type is
+    ///  read from the IdentityFactory's creation-time record, and a non-empty override set for that
+    ///  type replaces the default topics. The registry lookup is done through a try/catch so the
+    ///  checker still works against registries without per-type overrides.
     function _requiredClaimTopics(IERC3643IdentityRegistry identityRegistry, IIdentity identity)
         internal
         view
@@ -153,12 +155,14 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     {
         IERC3643ClaimTopicsRegistry topicsRegistry = identityRegistry.topicsRegistry();
         if (address(identity) != address(0)) {
-            try ITREXRegistry(address(topicsRegistry))
-                .getClaimTopicsForIdentityType(identity.getIdentityType()) returns (
-                uint256[] memory typeTopics
-            ) {
-                if (typeTopics.length > 0) {
-                    return typeTopics;
+            try ITREXRegistry(address(topicsRegistry)).identityFactory() returns (IIdentityFactory factory) {
+                uint256 identityType = factory.identityTypeOf(address(identity));
+                if (identityType != 0) {
+                    uint256[] memory typeTopics =
+                        ITREXRegistry(address(topicsRegistry)).getClaimTopicsForIdentityType(identityType);
+                    if (typeTopics.length > 0) {
+                        return typeTopics;
+                    }
                 }
             } catch { }
         }

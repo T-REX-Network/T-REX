@@ -18,6 +18,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
         registry.init(
             address(identityRegistryStorage),
             address(accessManager),
+            address(idFactory),
             new uint256[](0),
             new address[](0),
             new uint256[][](0)
@@ -32,7 +33,14 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
             address(impl),
             abi.encodeCall(
                 TREXRegistry.init,
-                (address(0), address(accessManager), new uint256[](0), new address[](0), new uint256[][](0))
+                (
+                    address(0),
+                    address(accessManager),
+                    address(idFactory),
+                    new uint256[](0),
+                    new address[](0),
+                    new uint256[][](0)
+                )
             )
         );
     }
@@ -45,7 +53,14 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
             address(impl),
             abi.encodeCall(
                 TREXRegistry.init,
-                (address(identityRegistryStorage), address(0), new uint256[](0), new address[](0), new uint256[][](0))
+                (
+                    address(identityRegistryStorage),
+                    address(0),
+                    address(idFactory),
+                    new uint256[](0),
+                    new address[](0),
+                    new uint256[][](0)
+                )
             )
         );
     }
@@ -64,6 +79,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
                         (
                             address(identityRegistryStorage),
                             address(accessManager),
+                            address(idFactory),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)

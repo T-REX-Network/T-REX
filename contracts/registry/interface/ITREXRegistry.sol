@@ -62,6 +62,8 @@
 
 pragma solidity ^0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
@@ -93,11 +95,31 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// Emits an `EligibilityChecksEnabled` event upon successful execution.
     function enableEligibilityChecks() external;
 
+    /// @dev Sets the ONCHAINID IdentityFactory whose creation-time type record backs the per-type
+    /// claim topic resolution in `isVerified`.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `identityFactoryAddress` must not be the zero address; otherwise the call reverts with
+    ///   `ZeroAddress`.
+    ///
+    /// Emits an `IdentityFactorySet` event upon successful execution.
+    /// @param identityFactoryAddress the IdentityFactory to read identity types from
+    function setIdentityFactory(address identityFactoryAddress) external;
+
+    /// @dev Returns the ONCHAINID IdentityFactory whose type record backs per-type claim topic
+    /// resolution. `identityTypeOf` on it returns 0 for identities it did not mint, which resolve to
+    /// the default claim topics.
+    function identityFactory() external view returns (IIdentityFactory);
+
     /// @dev Adds a claim topic to the override set of an identity type.
     ///
     /// A non-empty override set fully REPLACES the default claim topics inside `isVerified` for
-    /// identities of that type — it is not additive. Later changes to the default topics do not reach
+    /// identities of that type. It is not additive. Later changes to the default topics do not reach
     /// types holding an override; a topic meant for everyone must be added to each override too.
+    ///
+    /// The identity type checked by `isVerified` is the IdentityFactory record (`identityTypeOf`),
+    /// never what the identity contract says about itself.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

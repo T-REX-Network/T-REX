@@ -167,15 +167,16 @@ contract EligibilityCheckTest is TREXSuiteTest {
         aliceIdentity.removeClaim(claimIds[0]);
 
         // Add tricky claim (will throw error when isClaimValid is called)
+        // Built before the prank: computing the metadata hash calls the validator, which would
+        // otherwise consume the prank meant for addClaim.
+        Structs.ClaimData memory trickyData = Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, ""),
+            payload: "0x00"
+        });
         vm.prank(alice);
-        aliceIdentity.addClaim(
-            topic,
-            1,
-            address(trickyClaimIssuer),
-            "0x00",
-            Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: "0x00" }),
-            ""
-        );
+        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", trickyData, "");
 
         // getVerifiedDetails should handle the error and return false
         UtilityChecker.EligibilityCheckDetails[] memory results =
