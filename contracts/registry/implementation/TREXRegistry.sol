@@ -62,6 +62,7 @@
 
 pragma solidity ^0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
@@ -105,12 +106,26 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
         // ----- ClaimTopicsRegistry storage -----
         EnumerableSet.UintSet claimTopics;
+
+        /// @dev Per-identity-type claim topic overrides; a non-empty set fully replaces `claimTopics`
+        ///  for identities of that type inside `isVerified`.
+        mapping(uint256 identityType => EnumerableSet.UintSet claimTopics) claimTopicsByIdentityType;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXRegistry")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0x5fe6836edad2306552d236f378d4a0a2ef1c78da81818168b2b776323acb4300;
 
-    constructor() {
+    /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The factory
+    ///  records the type once at minting and never updates it, so it is a safer source than asking
+    ///  the identity contract itself. Baked into the implementation so it cannot be repointed at
+    ///  runtime; changing it takes a new implementation published through the beacon.
+    IIdentityFactory private immutable _IDENTITY_FACTORY;
+
+    /// @param identityFactoryAddress the ONCHAINID IdentityFactory whose type record backs the
+    ///        per-type claim topic resolution
+    constructor(address identityFactoryAddress) {
+        require(identityFactoryAddress != address(0), ErrorsLib.ZeroAddress());
+        _IDENTITY_FACTORY = IIdentityFactory(identityFactoryAddress);
         _disableInitializers();
     }
 
@@ -190,6 +205,11 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         emit ERC3643EventsLib.IdentityStorageSet(_identityRegistryStorage);
     }
 
+    /// @inheritdoc ITREXRegistry
+    function identityFactory() external view override returns (IIdentityFactory) {
+        return _IDENTITY_FACTORY;
+    }
+
     /// @inheritdoc IERC3643IdentityRegistry
     /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts.
     function setClaimTopicsRegistry(address) external pure override {
@@ -219,12 +239,17 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev The required topics depend on the identity type, read from the IdentityFactory record.
+    ///  A non-empty override set for that type fully replaces the default `getClaimTopics()`. Type 0
+    ///  (including identities the factory did not mint) or a type without an override uses the
+    ///  default topics.
     function isVerified(address userAddress) external view override returns (bool) {
         Storage storage s = _getStorage();
 
         if (s.checksDisabled) return true;
-        if (address(identity(userAddress)) == address(0)) return false;
-        uint256[] memory requiredClaimTopics = s.claimTopics.values();
+        IIdentity userIdentity = identity(userAddress);
+        if (address(userIdentity) == address(0)) return false;
+        uint256[] memory requiredClaimTopics = _requiredClaimTopics(s, userIdentity);
         if (requiredClaimTopics.length == 0) {
             return true;
         }
@@ -247,7 +272,6 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
             }
 
             for (uint256 j = 0; j < claimIds.length; j++) {
-                IIdentity userIdentity = identity(userAddress);
                 (foundClaimTopic, scheme, issuer, sig, data,) = userIdentity.getClaim(claimIds[j]);
 
                 if (foundClaimTopic == requiredClaimTopics[claimTopic]) {
@@ -394,6 +418,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     // ============================================================
 
     /// @inheritdoc IERC3643ClaimTopicsRegistry
+    /// @dev Changes to the default topics do NOT reach identity types holding an override: such types
+    ///  keep verifying against their own set only. When a topic must apply to everyone, add it to every
+    ///  registered override as well.
     function addClaimTopic(uint256 claimTopic) external restricted {
         _addClaimTopic(claimTopic);
     }
@@ -408,6 +435,29 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     /// @inheritdoc IERC3643ClaimTopicsRegistry
     function getClaimTopics() external view returns (uint256[] memory) {
         return _getStorage().claimTopics.values();
+    }
+
+    /// @inheritdoc ITREXRegistry
+    function addClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external restricted {
+        require(identityType != 0, ErrorsLib.InvalidIdentityType());
+        EnumerableSet.UintSet storage typeTopics = _getStorage().claimTopicsByIdentityType[identityType];
+        require(typeTopics.length() < 15, ErrorsLib.MaxClaimTopicsReached(15));
+        require(typeTopics.add(claimTopic), ErrorsLib.ClaimTopicAlreadyExists());
+        emit EventsLib.ClaimTopicAddedForIdentityType(identityType, claimTopic);
+    }
+
+    /// @inheritdoc ITREXRegistry
+    /// @dev Removing an absent topic is a silent no-op, mirroring `removeClaimTopic`.
+    function removeClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external restricted {
+        require(identityType != 0, ErrorsLib.InvalidIdentityType());
+        if (_getStorage().claimTopicsByIdentityType[identityType].remove(claimTopic)) {
+            emit EventsLib.ClaimTopicRemovedForIdentityType(identityType, claimTopic);
+        }
+    }
+
+    /// @inheritdoc ITREXRegistry
+    function getClaimTopicsForIdentityType(uint256 identityType) external view returns (uint256[] memory) {
+        return _getStorage().claimTopicsByIdentityType[identityType].values();
     }
 
     // ============================================================
@@ -441,6 +491,22 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         // This event will re-emit eventual duplicated _claimTopics.
         // They won't be added to storage (.add ignores them) but will be emitted here regardless.
         emit ERC3643EventsLib.TrustedIssuerAdded(_trustedIssuer, _claimTopics);
+    }
+
+    /// @dev Resolves the claim topics an identity must satisfy. When the identity type has a
+    ///  non-empty override set, that set is used. Otherwise the default `claimTopics` apply. The
+    ///  type comes from the IdentityFactory record (`identityTypeOf`), never from the identity
+    ///  contract, so a hostile identity cannot lie about its type or block the resolution.
+    ///  Identities the factory did not mint have type 0 and use the default set.
+    function _requiredClaimTopics(Storage storage s, IIdentity userIdentity) internal view returns (uint256[] memory) {
+        uint256 identityType = _IDENTITY_FACTORY.identityTypeOf(address(userIdentity));
+        if (identityType != 0) {
+            uint256[] memory typeTopics = s.claimTopicsByIdentityType[identityType].values();
+            if (typeTopics.length > 0) {
+                return typeTopics;
+            }
+        }
+        return s.claimTopics.values();
     }
 
     function _addClaimTopic(uint256 claimTopic) internal {

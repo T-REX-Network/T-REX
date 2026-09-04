@@ -112,6 +112,7 @@ library ErrorsLib {
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
+    error InvalidIdentityType();
 
     // IdentityRegistry Errors
     error EligibilityChecksDisabledAlready();

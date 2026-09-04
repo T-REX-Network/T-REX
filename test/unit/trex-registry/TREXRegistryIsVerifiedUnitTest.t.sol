@@ -114,8 +114,11 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
         // Alice keeps her valid claim from setUp and gains a second one from the tricky issuer.
         // Claim ids are keyed by (issuer, topic), so the two coexist rather than overwrite. The valid
         // claim is deliberately left untouched: removing a claim revokes its digest for good.
+        // Built before the prank: constructing the claim data calls the validator, which would
+        // otherwise consume the prank meant for addClaim.
+        Structs.ClaimData memory trickyData = _trickyClaimData();
         vm.prank(alice);
-        aliceIdentity.addClaim(CLAIM_TOPIC_1, 1, address(trickyIssuer), "0x00", _trickyClaimData(), "");
+        aliceIdentity.addClaim(CLAIM_TOPIC_1, 1, address(trickyIssuer), "0x00", trickyData, "");
 
         assertTrue(registry.isVerified(alice));
     }
@@ -130,8 +133,11 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
         bytes32[] memory claimIds = aliceIdentity.getClaimIdsByTopic(CLAIM_TOPIC_1);
         vm.prank(alice);
         aliceIdentity.removeClaim(claimIds[0]);
+        // Built before the prank: constructing the claim data calls the validator, which would
+        // otherwise consume the prank meant for addClaim.
+        Structs.ClaimData memory trickyData = _trickyClaimData();
         vm.prank(alice);
-        aliceIdentity.addClaim(CLAIM_TOPIC_1, 1, address(trickyIssuer), "0x00", _trickyClaimData(), "");
+        aliceIdentity.addClaim(CLAIM_TOPIC_1, 1, address(trickyIssuer), "0x00", trickyData, "");
 
         assertFalse(registry.isVerified(alice));
     }
@@ -141,7 +147,12 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
     /// @dev Claim envelope for the tricky issuer: the payload is never read because the issuer
     ///      reverts before inspecting it, but `issuedAt` must be set for the claim to be stored.
     function _trickyClaimData() private view returns (Structs.ClaimData memory) {
-        return Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: "0x00" });
+        return Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, ""),
+            payload: "0x00"
+        });
     }
 
 }

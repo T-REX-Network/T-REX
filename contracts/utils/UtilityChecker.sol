@@ -63,6 +63,7 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
@@ -70,11 +71,13 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { ModuleCapabilitiesLib } from "../libraries/ModuleCapabilitiesLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
 contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable {
@@ -124,7 +127,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
         IIdentity identity = identityRegistry.identity(_userAddress);
 
-        uint256[] memory requiredClaimTopics = identityRegistry.topicsRegistry().getClaimTopics();
+        uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
         _details = new EligibilityCheckDetails[](topicsCount);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
@@ -139,6 +142,31 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
                 }
             }
         }
+    }
+
+    /// @dev Mirrors the type-aware topic resolution of `TREXRegistry.isVerified`: the identity type is
+    ///  read from the IdentityFactory's creation-time record, and a non-empty override set for that
+    ///  type replaces the default topics. The registry lookup is done through a try/catch so the
+    ///  checker still works against registries without per-type overrides.
+    function _requiredClaimTopics(IERC3643IdentityRegistry identityRegistry, IIdentity identity)
+        internal
+        view
+        returns (uint256[] memory)
+    {
+        IERC3643ClaimTopicsRegistry topicsRegistry = identityRegistry.topicsRegistry();
+        if (address(identity) != address(0)) {
+            try ITREXRegistry(address(topicsRegistry)).identityFactory() returns (IIdentityFactory factory) {
+                uint256 identityType = factory.identityTypeOf(address(identity));
+                if (identityType != 0) {
+                    uint256[] memory typeTopics =
+                        ITREXRegistry(address(topicsRegistry)).getClaimTopicsForIdentityType(identityType);
+                    if (typeTopics.length > 0) {
+                        return typeTopics;
+                    }
+                }
+            } catch { }
+        }
+        return topicsRegistry.getClaimTopics();
     }
 
     /// @dev Function splitted to avoid stack too deep error

@@ -26,7 +26,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
 
     /// @notice Should reject zero address for identity storage
     function test_init_RevertWhen_IdentityStorageZeroAddress() public {
-        TREXRegistry impl = new TREXRegistry();
+        TREXRegistry impl = new TREXRegistry(address(idFactory));
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ERC1967Proxy(
             address(impl),
@@ -39,7 +39,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
 
     /// @notice Should reject zero address for access manager
     function test_init_RevertWhen_AccessManagerZeroAddress() public {
-        TREXRegistry impl = new TREXRegistry();
+        TREXRegistry impl = new TREXRegistry(address(idFactory));
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new ERC1967Proxy(
             address(impl),
@@ -52,7 +52,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
 
     /// @notice Should emit the four "init" events and wire the sub-registries to address(this)
     function test_init_EmitsExpectedEventsAndWiresState() public {
-        TREXRegistry impl = new TREXRegistry();
+        TREXRegistry impl = new TREXRegistry(address(idFactory));
 
         vm.recordLogs();
         TREXRegistry newRegistry = TREXRegistry(

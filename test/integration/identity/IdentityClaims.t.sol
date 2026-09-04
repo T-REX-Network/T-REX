@@ -19,7 +19,12 @@ contract IdentityClaimsTest is TREXSuiteTest {
     bytes internal constant CLAIM_PAYLOAD = "Some claim public data.";
 
     function _claimData(bytes memory payload) internal view returns (Structs.ClaimData memory) {
-        return Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: payload });
+        return Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, "uri"),
+            payload: payload
+        });
     }
 
     /// @dev Claim ids are keyed by (issuer, topic), mirroring `ERC734Validator._addClaim`.

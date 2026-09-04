@@ -50,7 +50,7 @@ forge-std = "1.16.2"
 "@openzeppelin-contracts" = "5.7.0"
 "@openzeppelin-contracts-upgradeable" = "5.7.0"
 # TODO: repin to the ONCHAINID v3 release tag once it is cut.
-onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "d2096509e3bed2589fff36f6f673498f47e23d73" }
+onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "edcc9f34fa0d326cb41bf009c1992ebca9c71723" }
 
 [rpc_endpoints]
 ethereum = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"

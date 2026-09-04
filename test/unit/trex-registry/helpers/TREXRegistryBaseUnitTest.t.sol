@@ -15,10 +15,10 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
-import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
+import { IdentityModulesHelper } from "test/helpers/IdentityModulesHelper.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 
@@ -81,7 +81,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         );
 
         // Deploy TREXRegistry behind a proxy
-        registryImplementation = new TREXRegistry();
+        registryImplementation = new TREXRegistry(address(idFactory));
         registry = TREXRegistry(
             address(
                 new ERC1967Proxy(
@@ -131,16 +131,14 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     function _deployOnchainId() internal {
         vm.startPrank(deployer);
         idFactory = new IdentityFactory(address(accessManager));
-        vm.stopPrank();
-
-        _registerIdentityTypePolicies(idFactory);
-
-        vm.startPrank(deployer);
         keyApprovalModule = new KeyApprovalModule();
         reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
         validatorModule = new ERC734Validator(address(idFactory), address(reputationRegistry));
         identityImplementation = new Identity(address(validatorModule), address(idFactory));
         vm.stopPrank();
+
+        // Registered after the module singletons exist: the per-type module bundles reference them.
+        _registerIdentityTypePolicies(idFactory);
 
         // The factory's beacon owner is the AccessManager, so initializeBeacon is restricted; this
         // test contract is the AM admin and drives it.
@@ -150,13 +148,19 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     }
 
     /// @dev The factory rejects unregistered identity types from both deploy paths. INDIVIDUAL and
-    ///      CLAIM_ISSUER are open for test convenience; ASSET stays gated as in production.
+    ///      CLAIM_ISSUER are open for test convenience; ASSET stays gated and single-binding as in
+    ///      production. Modules are registered per type on the factory; deploy callers pass none.
     function _registerIdentityTypePolicies(IdentityFactory factory) internal {
         uint64 publicRole = accessManager.PUBLIC_ROLE();
+        Structs.ModuleInstall[] memory standardModules =
+            IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule));
 
-        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true);
-        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true);
-        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
+        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true, false);
+        factory.setIdentityTypeModules(IdentityTypes.INDIVIDUAL, standardModules);
+        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
+        factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
+        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true);
+        factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
 
     /// @dev A claim issuer is an Identity of type CLAIM_ISSUER holding a CLAIM_SIGNER key. The
@@ -168,13 +172,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         issuerKeys[1] = _ecdsaKey(signer, KeyPurposes.CLAIM_SIGNER);
 
         vm.prank(deployer);
-        address issuer = idFactory.createIdentityFor(
-            signer,
-            IdentityTypes.CLAIM_ISSUER,
-            salt,
-            issuerKeys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
-        );
+        address issuer = idFactory.createIdentityFor(signer, IdentityTypes.CLAIM_ISSUER, salt, issuerKeys);
         return Identity(payable(issuer));
     }
 
@@ -184,13 +182,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         keys[0] = _ecdsaKey(wallet, KeyPurposes.MANAGEMENT);
 
         vm.prank(deployer);
-        address identity = idFactory.createIdentityFor(
-            wallet,
-            IdentityTypes.INDIVIDUAL,
-            salt,
-            keys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
-        );
+        address identity = idFactory.createIdentityFor(wallet, IdentityTypes.INDIVIDUAL, salt, keys);
         return IIdentity(identity);
     }
 
@@ -210,7 +202,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     function _setupTREXRegistryRoles(address registryAddress) internal {
         // ------ OWNER role ------
         // Identity registry owner-restricted functions
-        bytes4[] memory ownerFunctions = new bytes4[](10);
+        bytes4[] memory ownerFunctions = new bytes4[](12);
         ownerFunctions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
         ownerFunctions[1] = TREXRegistry.setClaimTopicsRegistry.selector;
         ownerFunctions[2] = TREXRegistry.setTrustedIssuersRegistry.selector;
@@ -223,6 +215,8 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         // Claim topics registry owner-restricted functions
         ownerFunctions[8] = TREXRegistry.addClaimTopic.selector;
         ownerFunctions[9] = TREXRegistry.removeClaimTopic.selector;
+        ownerFunctions[10] = TREXRegistry.addClaimTopicForIdentityType.selector;
+        ownerFunctions[11] = TREXRegistry.removeClaimTopicForIdentityType.selector;
         IAccessManager(accessManager).setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.OWNER);
 
         // ------ AGENT role ------
@@ -247,7 +241,10 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         address _caller
     ) internal {
         Structs.ClaimData memory data = Structs.ClaimData({
-            issuedAt: block.timestamp, validUntil: 0, payload: _claimData
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, "uri"),
+            payload: _claimData
         });
 
         bytes32 digest = IIdentity(_claimIssuer).getClaimHash(address(_identity), _claimTopic, data);
