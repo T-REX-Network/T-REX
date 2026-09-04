@@ -2,7 +2,7 @@
 
 ![GitHub](https://img.shields.io/github/license/T-REX-Network/T-REX?color=green)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/T-REX-Network/T-REX)
-![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/T-REX-Network/T-REX/test.yml?branch=trex-v5-develop)
+![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/T-REX-Network/T-REX/test.yml?branch=develop)
 ![GitHub repo size](https://img.shields.io/github/repo-size/T-REX-Network/T-REX)
 ![GitHub Release Date](https://img.shields.io/github/release-date/T-REX-Network/T-REX)
 
@@ -78,20 +78,18 @@ forge test --gas-report  # Run tests with gas report
 
 ### Coverage
 
-Generate coverage reports using the provided script:
-
-```
-bash ./generate_coverage.sh
-
+```bash
+npm run coverage         # terminal summary
+npm run coverage:report  # LCOV + HTML report, then opens it
 ```
 
-This will generate:
+`npm run coverage` prints a terminal summary with coverage percentages. Tests, dependencies,
+scripts and vendored code are excluded from the report.
 
-- Terminal summary with coverage percentages
-- LCOV report (`coverage/lcov.info`) for CI/CD integration
-- HTML report (`coverage/lcov-report/index.html`) for interactive viewing
+`npm run coverage:report` additionally writes an LCOV report to `coverage/lcov.info` for CI/CD
+integration and an HTML report to `coverage/report/index.html` for interactive viewing.
 
-**Note:** For HTML reports, `lcov` must be installed. Install with:
+**Note:** The HTML report needs `lcov` installed:
 
 ```bash
 brew install lcov  # macOS

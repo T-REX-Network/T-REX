@@ -60,75 +60,34 @@
  *     You should have received a copy of the GNU General Public License
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 pragma solidity 0.8.30;
 
-import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
-import { Version } from "./VersionLib.sol";
+interface ITrustedGatewayRegistry {
 
-library EventsLib {
+    /// @dev Adds a gateway to, or removes it from, the network's vetted set.
+    ///
+    /// A gateway in this set attests the authorship of every message a token routed through it acts
+    /// on, so a malicious or broken one can impersonate any account on any chain in any message.
+    /// Addition is therefore a deliberate governance act following review of the gateway and its
+    /// underlying protocol. Removal is an emergency lever: it severs every token route through the
+    /// gateway with no further call, because routes are checked against this set on use, not on write.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `gateway` must not be the zero address; otherwise the call reverts with `ZeroAddress`.
+    ///
+    /// Emits a `TrustedGatewaySet` event, including when the value did not change.
+    /// @param gateway The ERC-7786 gateway to vet or unvet.
+    /// @param trusted True to add the gateway to the vetted set, false to remove it.
+    function setTrustedGateway(address gateway, bool trusted) external;
 
-    // Common Events
-
-    event ImplementationAuthoritySet(address implementationAuthority);
-
-    // ModularCompliance Events
-
-    event ModuleInteraction(address indexed target, bytes4 selector);
-    event ModuleAdded(address indexed module);
-    event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
-    event ModuleRemoved(address indexed module);
-
-    // AbstractModule / AbstractModuleUpgradeable Events
-
-    event ComplianceBound(address indexed compliance);
-    event ComplianceUnbound(address indexed compliance);
-
-    // IdentityRegistry Events
-
-    event EligibilityChecksDisabled();
-    event EligibilityChecksEnabled();
-
-    // TREXFactory Events
-
-    event Deployed(address indexed addr);
-    event IdFactorySet(address idFactory);
-
-    /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
-    event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
-    event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
-
-    // TrustedGatewayRegistry Events
-
-    event TrustedGatewaySet(address indexed gateway, bool trusted);
-
-    // TREXMessaging Events
-
-    event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
-    /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
-    event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
-    event PeerSet(bytes32 indexed chainKey, bytes peer);
-    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to the gateway that carried it.
-    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
-    event ProtocolMessageSent(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event ProtocolMessageReceived(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 receiveId);
-    /// @notice Emitted by the token when an attributed burn proof reaches its recall path.
-    event BurnProofReceived(
-        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
-    );
-
-    // ModularCompliance Interop Events
-
-    /// @notice Emitted by the compliance when the token hands it an attributed settlement notification.
-    event SettlementNotified(
-        bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
-    );
-
-    // TREXImplementationAuthority Events
-
-    event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);
-    event VersionPublished(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
-    event SuiteUpgraded(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
+    /// @dev Whether `gateway` is currently vetted by the network.
+    ///
+    /// Callers must read this at the moment they rely on the gateway rather than caching it, so that a
+    /// removal takes effect immediately.
+    /// @param gateway The ERC-7786 gateway to look up.
+    /// @return True when the gateway is in the vetted set right now.
+    function isTrusted(address gateway) external view returns (bool);
 
 }

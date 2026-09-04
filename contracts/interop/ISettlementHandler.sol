@@ -36,7 +36,6 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-
 /**
  *     NOTICE
  *
@@ -60,75 +59,36 @@
  *     You should have received a copy of the GNU General Public License
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+pragma solidity ^0.8.30;
+
 pragma solidity 0.8.30;
 
-import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
-import { Version } from "./VersionLib.sol";
+import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 
-library EventsLib {
+/**
+ * @title ISettlementHandler
+ * @dev The compliance contract's inbound entry point for satellite settlements.
+ *
+ * A settlement notification arrives at the token, which proves who sent it and forwards the body here
+ * untouched.
+ * The processing itself belongs to the compliance-slot lifecycle; only the entry point lives here.
+ */
+interface ISettlementHandler {
 
-    // Common Events
-
-    event ImplementationAuthoritySet(address implementationAuthority);
-
-    // ModularCompliance Events
-
-    event ModuleInteraction(address indexed target, bytes4 selector);
-    event ModuleAdded(address indexed module);
-    event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
-    event ModuleRemoved(address indexed module);
-
-    // AbstractModule / AbstractModuleUpgradeable Events
-
-    event ComplianceBound(address indexed compliance);
-    event ComplianceUnbound(address indexed compliance);
-
-    // IdentityRegistry Events
-
-    event EligibilityChecksDisabled();
-    event EligibilityChecksEnabled();
-
-    // TREXFactory Events
-
-    event Deployed(address indexed addr);
-    event IdFactorySet(address idFactory);
-
-    /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
-    event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
-    event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
-
-    // TrustedGatewayRegistry Events
-
-    event TrustedGatewaySet(address indexed gateway, bool trusted);
-
-    // TREXMessaging Events
-
-    event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
-    /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
-    event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
-    event PeerSet(bytes32 indexed chainKey, bytes peer);
-    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to the gateway that carried it.
-    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
-    event ProtocolMessageSent(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event ProtocolMessageReceived(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 receiveId);
-    /// @notice Emitted by the token when an attributed burn proof reaches its recall path.
-    event BurnProofReceived(
-        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
-    );
-
-    // ModularCompliance Interop Events
-
-    /// @notice Emitted by the compliance when the token hands it an attributed settlement notification.
-    event SettlementNotified(
-        bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
-    );
-
-    // TREXImplementationAuthority Events
-
-    event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);
-    event VersionPublished(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
-    event SuiteUpgraded(Version version, ITREXImplementationAuthority.SuiteImplementations implementations);
+    /// @dev Acts on a settlement the token has already attributed to its peer on `originChainKey`.
+    ///
+    /// The token guarantees three things:
+    /// - the delivering gateway is trusted by the network,
+    /// - it is the gateway the validation was dispatched through toward `originChainKey` (or the current
+    /// route when the token never dispatched that id there),
+    /// - the message's author is the token's peer on that chain.
+    ///
+    /// The notification is decoded and passed on as is; nothing in it is verified.
+    /// Must revert on failure. A silent failure leaves the message marked as received and unretryable.
+    /// @param originChainKey The key of the chain the notification came from, `keccak256(chainType, chainReference)`.
+    /// @param notification The decoded settlement leg, exactly as the satellite sent it.
+    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+        external;
 
 }

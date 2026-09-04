@@ -62,6 +62,10 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.VERSION_MANAGER, account, NO_EXECUTION_DELAY);
     }
 
+    function _grantInteropManagerRole(address account) internal {
+        accessManager.grantRole(RolesLib.INTEROP_MANAGER, account, NO_EXECUTION_DELAY);
+    }
+
     /// @notice Grants the transient IRS_BINDER role (gates IdentityRegistryStorage.bindIdentityRegistry).
     function _grantIRSBinderRole(address account) internal {
         accessManager.grantRole(RolesLib.IRS_BINDER, account, NO_EXECUTION_DELAY);

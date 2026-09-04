@@ -40,6 +40,45 @@ All notable changes to this project will be documented in this file.
   bound module blocks every `transferFrom` until an operator is listed, so bind it with
   `addAndSetModule` to list several at once. Entries are scoped by the bind nonce, so an unbind
   discards the list rather than resurrecting it on rebind.
+- **ERC-7786 messaging endpoint**: the T-REX side of the interop boundary, developed and tested
+  against a mocked gateway so production adapters plug in later behind the same interface.
+  - `TrustedGatewayRegistry`: the network's vetted gateway set, a non-upgradeable singleton gated by
+    the new `INTEROP_MANAGER` role. Tokens re-read it on every send and receive, so
+    `setTrustedGateway(gateway, false)` severs every route through that gateway with no further call.
+  - `TREXMessaging`, inherited by `Token`: issuer-managed routes and peers, in their own ERC-7201
+    namespace. `setRoute(chainType, chainReference, gateway)` opens a chain through a registry-trusted
+    gateway (zero closes it) and records the ERC-7930 prefix behind `chainKey`, which is what lets
+    the peer default to the token's own address on an EVM chain; `setPeer(chainKey, peer)` registers a
+    Lite elsewhere, refusing a padded envelope or one on another chain. Both sit with the
+    `IDENTITY_MANAGER` role. `isChainOpen`, `routeFor`, `peerFor`, `chainOf` and `pinnedRouteFor`
+    expose the state.
+  - **Single author per side.** The bound compliance dispatches validations through
+    `Token.dispatchComplianceValidation(chainKey, validationId, body)` with no role of its own;
+    `dispatchMintInstruction` is the agent's fire-and-forget delegation-out. Inbound, the token proves
+    the gateway is trusted, is the one it expects for that message, and that the ERC-7930 author is its
+    peer on the origin chain, then forwards a settlement to `ISettlementHandler.handleSettlement` on
+    the compliance and a burn proof to its own recall path. `ModularCompliance` implements the handler,
+    callable by the bound token only; classifying the notification is the slot lifecycle's work.
+  - **Routes are snapshot at dispatch.** Each validation leg pins the gateway it went out through,
+    per `(validationId, chainKey)`, announced by `ValidationRoutePinned`. Its settlements from that
+    chain are accepted from the pinned gateway and no other, so a route switch affects new validations
+    only; a re-dispatch through the pinned gateway is allowed, through another one refused with
+    `ValidationAlreadyRouted`. An id the token never dispatched, and every burn proof, follows the
+    current route. Removing a pinned gateway from the registry orphans its legs, which the lifecycle
+    will then expire and discard.
+  - `MessageTypesLib`: the four message types (`COMPLIANCE_VALIDATION`, `MINT_INSTRUCTION`,
+    `SETTLEMENT_NOTIFICATION`, `BURN_PROOF`) in a versioned `abi.encode(type, version, body)`
+    envelope, refusing an unknown type or version before any handler runs, plus the typed
+    `SettlementNotification` and `BurnProof` bodies with their codecs and the `chainKey` derivation.
+  - Transport-level replay protection per `(gateway, receiveId)`, distinct from the semantic replay the
+    slot lifecycle detects: a fresh id carrying consumed content is passed through untouched.
+  - Events: `TrustedGatewaySet`, `TrustedGatewayRegistrySet`, `ChainRegistered`, `RouteSet`, `PeerSet`,
+    `ValidationRoutePinned`, `ProtocolMessageSent` and `ProtocolMessageReceived` carrying the type,
+    the chain key and the gateway's id, `SettlementNotified` on the compliance and `BurnProofReceived`
+    on the token.
+  - `ERC7786GatewayMock`, a test asset: a same-chain loopback that queues on send and delivers on an
+    explicit `relay`, so ordering, duplication and loss are controllable, presenting every delivery as
+    coming from its configured origin chain.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
   and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
   single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.

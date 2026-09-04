@@ -89,6 +89,11 @@ library RolesLib {
     // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
     uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
 
+    // Gates the network-level set of vetted ERC-7786 gateways on TrustedGatewayRegistry. Held by network
+    // governance, not by an issuer: a gateway in that set attests the authorship of every message a token
+    // routed through it acts on, so adding one is deliberate and removing one is an emergency lever.
+    uint64 constant INTEROP_MANAGER = ROLE_PREFIX + 17;
+
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
     // AccessManager's setRoleAdmin semantics. They let grants be delegated without
