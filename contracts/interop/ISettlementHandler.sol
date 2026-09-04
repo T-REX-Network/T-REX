@@ -36,7 +36,6 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-
 /**
  *     NOTICE
  *
@@ -61,105 +60,35 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+pragma solidity ^0.8.30;
+
 pragma solidity 0.8.30;
 
-library ErrorsLib {
+import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error InvalidImplementationAuthority();
+/**
+ * @title ISettlementHandler
+ * @dev The compliance contract's inbound entry point for satellite settlements.
+ *
+ * A settlement notification arrives at the token, which proves who sent it and forwards the body here
+ * untouched.
+ * The processing itself belongs to the compliance-slot lifecycle; only the entry point lives here.
+ */
+interface ISettlementHandler {
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error NoTokenToRecover();
-    error RecoveryNotPossible();
-    error SameWalletRecovery();
-    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
-    error UnverifiedIdentity();
-
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
-
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
-
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
-    error TokenAlreadyDeployed();
-    error IsolatedSuiteCannotReuseIRS();
-
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
-    error InvalidIdentityType();
-
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-    error InvalidIdentityRegistryStorage();
-
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-
-    // TREXImplementationAuthority Errors
-    error EmptyImplementations();
-    error UnknownVersion();
-    error VersionAlreadyPublished();
-    error VersionNotNewer();
-
-    // TREXRegistry Errors
-    error Deprecated();
-
-    // Interop Errors
-    error ChainNotOpen(bytes32 chainKey);
-    error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
-    error GatewayNotTrusted(address gateway);
-    error InvalidChainReference(bytes2 chainType, bytes chainReference);
-    error InvalidPeer(bytes peer);
-    error MessageAlreadyReceived(address gateway, bytes32 receiveId);
-    error MessageTypeNotInbound(uint8 messageType);
-    error RegistryNotSet();
-    error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
-    error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error UnknownMessageType(uint8 messageType);
-    error UnsupportedMessageVersion(uint8 messageVersion);
-    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
+    /// @dev Acts on a settlement the token has already attributed to its peer on `originChainKey`.
+    ///
+    /// The token guarantees three things:
+    /// - the delivering gateway is trusted by the network,
+    /// - it is the gateway the validation was dispatched through toward `originChainKey` (or the current
+    /// route when the token never dispatched that id there),
+    /// - the message's author is the token's peer on that chain.
+    ///
+    /// The notification is decoded and passed on as is; nothing in it is verified.
+    /// Must revert on failure. A silent failure leaves the message marked as received and unretryable.
+    /// @param originChainKey The key of the chain the notification came from, `keccak256(chainType, chainReference)`.
+    /// @param notification The decoded settlement leg, exactly as the satellite sent it.
+    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+        external;
 
 }

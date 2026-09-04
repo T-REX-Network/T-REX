@@ -63,103 +63,38 @@
 
 pragma solidity 0.8.30;
 
-library ErrorsLib {
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
+import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
+import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error InvalidImplementationAuthority();
+/**
+ * @title TrustedGatewayRegistry
+ * @dev The network's set of vetted ERC-7786 gateways.
+ *
+ * A network singleton, deployed once per deployment and shared by every token. It is deliberately not
+ * upgradeable and holds nothing but the set.
+ */
+contract TrustedGatewayRegistry is ITrustedGatewayRegistry, AccessManagedOwnable {
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error NoTokenToRecover();
-    error RecoveryNotPossible();
-    error SameWalletRecovery();
-    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
-    error UnverifiedIdentity();
+    mapping(address gateway => bool) private _trusted;
 
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
+    constructor(address accessManager) AccessManagedOwnable(accessManager) {
+        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+    }
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
+    /// @inheritdoc ITrustedGatewayRegistry
+    function setTrustedGateway(address gateway, bool trusted) external restricted {
+        require(gateway != address(0), ErrorsLib.ZeroAddress());
 
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
-    error TokenAlreadyDeployed();
-    error IsolatedSuiteCannotReuseIRS();
+        _trusted[gateway] = trusted;
 
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
-    error InvalidIdentityType();
+        emit EventsLib.TrustedGatewaySet(gateway, trusted);
+    }
 
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-    error InvalidIdentityRegistryStorage();
-
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-
-    // TREXImplementationAuthority Errors
-    error EmptyImplementations();
-    error UnknownVersion();
-    error VersionAlreadyPublished();
-    error VersionNotNewer();
-
-    // TREXRegistry Errors
-    error Deprecated();
-
-    // Interop Errors
-    error ChainNotOpen(bytes32 chainKey);
-    error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
-    error GatewayNotTrusted(address gateway);
-    error InvalidChainReference(bytes2 chainType, bytes chainReference);
-    error InvalidPeer(bytes peer);
-    error MessageAlreadyReceived(address gateway, bytes32 receiveId);
-    error MessageTypeNotInbound(uint8 messageType);
-    error RegistryNotSet();
-    error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
-    error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error UnknownMessageType(uint8 messageType);
-    error UnsupportedMessageVersion(uint8 messageVersion);
-    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
+    /// @inheritdoc ITrustedGatewayRegistry
+    function isTrusted(address gateway) external view returns (bool) {
+        return _trusted[gateway];
+    }
 
 }
