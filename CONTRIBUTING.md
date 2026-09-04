@@ -46,7 +46,24 @@ We use Foundry's built-in linting and formatting tools for Solidity code. Lintin
 
 ## Commit Messages
 
-We encourage the use of [Gitmoji](https://gitmoji.dev/) for commit messages. It's a fun and easy way to identify the purpose or intent of a commit with a simple emoji.
+We use [Gitmoji](https://gitmoji.dev/) for commit messages: the emoji identifies the purpose of a
+commit at a glance, in place of a `feat:` / `fix:` keyword.
+
+```
+<emoji> [scope?][:?] <message>
+```
+
+```
+♻️ Reuse the publish helper when seeding the initial version
+📝 (compliance): Explain how the bind nonce wipes module storage
+🐛 Fix the domain separator after a rename
+```
+
+Keep it to a single line, in an informal tone. Say what the change does, not which files it touches.
+
+This is enforced by [commitlint](https://commitlint.js.org/) through the `commit-msg` git hook, using
+the rules in `commitlint.config.js`. Run `npm install` once after cloning to activate the hooks —
+that also installs the `pre-commit` hook running `forge fmt --check`. Set `HUSKY=0` to skip them.
 
 ## License
 
