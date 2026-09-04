@@ -157,8 +157,8 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     /// @dev Registers the identity types the suite mints; the factory rejects unregistered types from
-    ///      both deploy paths. INDIVIDUAL and CLAIM_ISSUER are open (PUBLIC_ROLE, self-deployable) for
-    ///      test convenience. ASSET is gated behind ASSET_DEPLOYER with self-deploy off, mirroring
+    ///      both deploy paths. INDIVIDUAL, CORPORATE and CLAIM_ISSUER are open (PUBLIC_ROLE,
+    ///      self-deployable) for test convenience. ASSET is gated behind ASSET_DEPLOYER with self-deploy off, mirroring
     ///      production: only a registered token factory mints token OIDs, and a token cannot sign for
     ///      itself.
     /// @dev Called as the test contract, which is the AccessManager admin (see AccessManagerHelper);
@@ -171,6 +171,8 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.INDIVIDUAL, standardModules);
+        factory.setIdentityTypePolicy(IdentityTypes.CORPORATE, publicRole, true, false);
+        factory.setIdentityTypeModules(IdentityTypes.CORPORATE, standardModules);
         factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
         // ASSET is single-binding as in production: a token OID binds to exactly one token.
@@ -213,6 +215,17 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         vm.prank(deployer);
         address identity = factory.createIdentityFor(wallet, IdentityTypes.INDIVIDUAL, salt, keys);
+        return IIdentity(identity);
+    }
+
+    /// @dev Deploys a CORPORATE identity whose sole wallet and management key is `wallet`, for the
+    ///      tests that need a business investor rather than a natural person.
+    function _deployCorporateIdentity(address wallet, string memory salt) internal returns (IIdentity) {
+        Structs.KeyParam[] memory keys = new Structs.KeyParam[](1);
+        keys[0] = _ecdsaKey(wallet, KeyPurposes.MANAGEMENT);
+
+        vm.prank(deployer);
+        address identity = idFactory.createIdentityFor(wallet, IdentityTypes.CORPORATE, salt, keys);
         return IIdentity(identity);
     }
 

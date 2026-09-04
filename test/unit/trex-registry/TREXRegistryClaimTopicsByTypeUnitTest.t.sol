@@ -167,16 +167,34 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_isVerified_UsesTypeTopics_WhenOverrideSetForIdentityType() public {
-        // Corporate KYB end-to-end: the CORPORATE override replaces the default set entirely.
+        // Corporate KYB end-to-end, written the way an issuer would configure it: businesses need
+        // the same KYC as everyone plus KYB, so the override restates KYC and adds KYB.
+        vm.startPrank(deployer);
+        registry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_1);
+        registry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_KYB);
+        vm.stopPrank();
+
+        // corp holds KYC but not KYB yet.
+        assertFalse(registry.isVerified(corp));
+        // alice is a natural person: still on the default KYC-only set.
+        assertTrue(registry.isVerified(alice));
+
+        // Once the KYB claim is attached, corp satisfies both topics and verifies.
+        _addClaim(corpIdentity, CLAIM_TOPIC_KYB, "KYB data", claimIssuerSigner.key, address(claimIssuer), corp);
+        assertTrue(registry.isVerified(corp));
+    }
+
+    function test_isVerified_OverrideOmittingDefaultTopic_DropsThatRequirement() public {
+        // The override is a replacement, not an addition: an override listing only KYB stops
+        // requiring the default KYC topic of corporates. This is the documented foot-gun, pinned
+        // here so a future change to additive semantics fails loudly.
         vm.prank(deployer);
         registry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_KYB);
 
-        // corp only holds the default (KYC-style) claim, which no longer counts for its type.
+        // corp holds KYC only, which its type no longer asks for, and lacks KYB: not verified.
         assertFalse(registry.isVerified(corp));
-        // alice is INDIVIDUAL and stays on the default set.
-        assertTrue(registry.isVerified(alice));
 
-        // Once the KYB claim is attached, corp verifies again.
+        // Adding KYB alone is enough, even though the default KYC topic is absent from the set.
         _addClaim(corpIdentity, CLAIM_TOPIC_KYB, "KYB data", claimIssuerSigner.key, address(claimIssuer), corp);
         assertTrue(registry.isVerified(corp));
     }
