@@ -98,6 +98,10 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// @dev Sets the ONCHAINID IdentityFactory whose creation-time type record backs the per-type
     /// claim topic resolution in `isVerified`.
     ///
+    /// WARNING: a factory that did not mint the registered identities reports type 0 for all of
+    /// them, so every per-type override stops applying and verification falls back to the default
+    /// topics. Only point the registry at the factory its identities actually come from.
+    ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - `identityFactoryAddress` must not be the zero address; otherwise the call reverts with
