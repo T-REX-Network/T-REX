@@ -398,9 +398,7 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
             LowLevelCall.bubbleRevert();
         }
 
-        // For calldata shorter than 4 bytes the emitted "selector" is a zero-padded partial value rather than a real selector.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        emit EventsLib.ModuleInteraction(_module, bytes4(callData));
+        emit EventsLib.ModuleInteraction(_module, callData);
     }
 
     function _isOwner(address caller) internal view returns (bool) {

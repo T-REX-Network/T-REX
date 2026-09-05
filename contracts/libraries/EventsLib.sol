@@ -73,7 +73,7 @@ library EventsLib {
 
     // ModularCompliance Events
 
-    event ModuleInteraction(address indexed target, bytes4 selector);
+    event ModuleInteraction(address indexed target, bytes data);
     event ModuleAdded(address indexed module);
     event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
     event ModuleRemoved(address indexed module);
@@ -83,10 +83,21 @@ library EventsLib {
     event ComplianceBound(address indexed compliance);
     event ComplianceUnbound(address indexed compliance);
 
-    // IdentityRegistry Events
+    // IdentityRegistry / IdentityRegistryStorage Events
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
+    /// @notice Emitted by `IdentityRegistryStorage.modifyStoredIdentity` right after the standard
+    ///         `IdentityModified(oldIdentity, newIdentity)`, which omits the investor wallet. Pair the two logs of
+    ///         the same transaction; the identities are not repeated here.
+    event InvestorIdentityChanged(address investor);
+
+    // Token Events
+
+    /// @notice Emitted right after the standard `Transfer` of each `forcedTransfer` / `batchForcedTransfer` item,
+    ///         which alone cannot be told apart from a regular transfer. `agent` is the authorized caller
+    ///         (`_msgSender()`); from / to / value are in the paired `Transfer`.
+    event ForcedTransfer(address agent);
 
     // TREXFactory Events
 
