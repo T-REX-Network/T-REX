@@ -10,6 +10,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 contract TokenTransferUnitTest is TokenBaseUnitTest {
 
@@ -76,6 +77,8 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenForcedTransferNominal() public {
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.ForcedTransfer(agent);
         vm.prank(agent);
         bool success = token.forcedTransfer(from, to, transferAmount);
 
@@ -129,6 +132,10 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         amounts[0] = transferAmount1;
         amounts[1] = transferAmount2;
 
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.ForcedTransfer(agent);
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.ForcedTransfer(agent);
         vm.prank(agent);
         token.batchForcedTransfer(froms, tos, amounts);
 
