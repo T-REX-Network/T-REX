@@ -128,6 +128,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     ) external restricted {
         _validateDeploymentInputs(salt, tokenDetails, claimDetails);
 
+        // A reused IRS keeps the beacon that deployed it, so shared upgrades would still reach this suite.
+        // A BeaconProxy exposes no beacon getter, so it cannot be checked: isolated suites deploy their own.
+        require(tokenDetails.irs == address(0), ErrorsLib.IsolatedSuiteCannotReuseIRS());
+
         ITREXImplementationAuthority authority = ITREXImplementationAuthority(_implementationAuthority);
         ITREXImplementationAuthority.SuiteImplementations memory impls =
             authority.implementationsFor(authority.currentVersion());

@@ -156,6 +156,8 @@ interface ITREXFactory {
      *  Clones 4 fresh `UpgradeableBeacon`s from the authority's active implementations and points the
      *  suite at those clones instead of the shared beacons, so later `publish` / `upgrade` calls on the
      *  authority never reach this suite. The clones are owned by `_tokenDetails.accessManager`.
+     *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always
+     *  deploys its own identity storage through the cloned IRS beacon.
      *  Restricted to the configured AccessManager role (OWNER).
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events
      *  @param _salt the salt used to make the contracts deployments with CREATE3

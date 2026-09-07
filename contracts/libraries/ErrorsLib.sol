@@ -109,6 +109,7 @@ library ErrorsLib {
     error MaxClaimIssuersReached(uint256 max);
     error MaxAgentsReached(uint256 max);
     error TokenAlreadyDeployed();
+    error IsolatedSuiteCannotReuseIRS();
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
