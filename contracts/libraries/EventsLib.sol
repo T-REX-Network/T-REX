@@ -84,6 +84,12 @@ library EventsLib {
     event ComplianceUnbound(address indexed compliance);
 
     // IdentityRegistry / IdentityRegistryStorage Events
+    // ClaimTopicsRegistry Events
+
+    event ClaimTopicAddedForIdentityType(uint256 indexed identityType, uint256 indexed claimTopic);
+    event ClaimTopicRemovedForIdentityType(uint256 indexed identityType, uint256 indexed claimTopic);
+
+    // IdentityRegistry Events
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
@@ -105,8 +111,6 @@ library EventsLib {
     event Deployed(address indexed addr);
     event IdFactorySet(address idFactory);
 
-    /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
     event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
 

@@ -726,13 +726,14 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///      `restricted` `setIdentityTypePolicy`, and it is ASSET_DEPLOYER's role admin.
     function test_setupIdentityFactoryPolicy_RestoresAutoMintPath() public {
         // Undo both prerequisites the suite wires by hand in `_registerIdentityTypePolicies` and
-        // `_deployFactories`. roleId 0 unregisters the type, so even a role holder is rejected.
-        idFactory.setIdentityTypePolicy(IdentityTypes.ASSET, 0, false);
+        // `_deployFactories`. Removing the policy unregisters the type, so even a role holder is
+        // rejected.
+        idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
         accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
 
         AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
 
-        (uint64 roleId, bool selfDeployable) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
+        (uint64 roleId, bool selfDeployable,,) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
         assertEq(roleId, RolesLib.ASSET_DEPLOYER, "ASSET minting must be gated behind ASSET_DEPLOYER");
         assertFalse(selfDeployable, "A token must not be able to self-deploy its own OID");
 
@@ -759,7 +760,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///         ASSET_DEPLOYER against the IdentityFactory's own `authority()`, so passing any other
     ///         manager grants the role somewhere the check never looks and auto-mint still reverts.
     function test_setupIdentityFactoryPolicy_RevertWhen_RoleGrantedOnForeignAuthority() public {
-        idFactory.setIdentityTypePolicy(IdentityTypes.ASSET, 0, false);
+        idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
         accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
 
         // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
@@ -1009,51 +1010,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_constructor_RevertWhen_AccessManagerZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(keyApprovalModule),
-            address(validatorModule),
-            address(0)
-        );
-    }
-
-    function test_constructor_RevertWhen_IdentityModuleZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(0),
-            address(validatorModule),
-            address(accessManager)
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(keyApprovalModule),
-            address(0),
-            address(accessManager)
-        );
-    }
-
-    function test_setIdentityModules_Success() public {
-        address newKeyApprovalModule = makeAddr("newKeyApprovalModule");
-        address newValidatorModule = makeAddr("newValidatorModule");
-
-        vm.prank(deployer);
-        trexFactory.setIdentityModules(newKeyApprovalModule, newValidatorModule);
-
-        (address keyApproval, address validator) = trexFactory.getIdentityModules();
-        assertEq(keyApproval, newKeyApprovalModule);
-        assertEq(validator, newValidatorModule);
-    }
-
-    function test_setIdentityModules_RevertWhen_NotOwner() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        trexFactory.setIdentityModules(address(keyApprovalModule), address(validatorModule));
+        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(0));
     }
 
     // ============ setImplementationAuthority() Tests ============
@@ -1086,13 +1043,8 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_deployTREXSuite_RevertWhen_CREATE2Fails() public {
         // Deploy test factory that invoke the internal functon _deploy
-        TestTREXFactory testFactory = new TestTREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(keyApprovalModule),
-            address(validatorModule),
-            address(accessManager)
-        );
+        TestTREXFactory testFactory =
+            new TestTREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         // Use empty bytecode so the CREATE2 will return address(0)
         bytes memory emptyBytecode = new bytes(0);
