@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -85,6 +87,29 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         assertTrue(success);
         assertEq(token.balanceOf(from), mintAmount - transferAmount);
         assertEq(token.balanceOf(to), transferAmount);
+    }
+
+    function testTokenForcedTransferEventFollowsTransferImmediately() public {
+        vm.recordLogs();
+        vm.prank(agent);
+        token.forcedTransfer(from, to, transferAmount);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 forcedIndex = type(uint256).max;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == address(token) && logs[i].topics[0] == EventsLib.ForcedTransfer.selector) {
+                forcedIndex = i;
+            }
+        }
+        assertTrue(forcedIndex != type(uint256).max && forcedIndex > 0, "ForcedTransfer not emitted");
+        assertEq(address(uint160(uint256(logs[forcedIndex].topics[1]))), agent);
+
+        Vm.Log memory previous = logs[forcedIndex - 1];
+        assertEq(previous.emitter, address(token));
+        assertEq(previous.topics[0], IERC20.Transfer.selector);
+        assertEq(address(uint160(uint256(previous.topics[1]))), from);
+        assertEq(address(uint160(uint256(previous.topics[2]))), to);
+        assertEq(abi.decode(previous.data, (uint256)), transferAmount);
     }
 
     function testTokenBatchForcedTransferRevertsWhenNotAgent(address caller) public {

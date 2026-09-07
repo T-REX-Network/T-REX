@@ -502,8 +502,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         TokenStorage storage s = _tokenStorage();
         require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
-        s.compliance.transferred(from, to, amount);
+        // Emitted before the compliance hook so that no module log can land between `Transfer` and this event.
         emit EventsLib.ForcedTransfer(_msgSender());
+        s.compliance.transferred(from, to, amount);
         return true;
     }
 

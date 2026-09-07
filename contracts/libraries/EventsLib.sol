@@ -94,10 +94,11 @@ library EventsLib {
 
     // Token Events
 
-    /// @notice Emitted right after the standard `Transfer` of each `forcedTransfer` / `batchForcedTransfer` item,
-    ///         which alone cannot be told apart from a regular transfer. `agent` is the authorized caller
+    /// @notice Emitted as the very next log after the standard `Transfer` of each `forcedTransfer` /
+    ///         `batchForcedTransfer` item, before the compliance hook runs, so nothing can sit between the two.
+    ///         A `Transfer` alone cannot be told apart from a regular transfer. `agent` is the authorized caller
     ///         (`_msgSender()`); from / to / value are in the paired `Transfer`.
-    event ForcedTransfer(address agent);
+    event ForcedTransfer(address indexed agent);
 
     // TREXFactory Events
 

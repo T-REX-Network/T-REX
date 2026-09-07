@@ -54,6 +54,18 @@ All notable changes to this project will be documented in this file.
 - Per-token opt-out is deploy-time only, via `TREXFactory.deployTREXSuiteIsolated(...)`, which clones
   the four beacons under the issuer's own AccessManager so later `publish` / `upgrade` calls on the
   shared authority never reach that suite.
+- **Indexer events**: two events in `EventsLib` and one extra emit, so the graph can read state that
+  was in no log. A value another log of the same transaction already carries is not repeated.
+  - `InvestorIdentityChanged(address indexed investor)`, emitted by
+    `IdentityRegistryStorage.modifyStoredIdentity` right after the standard
+    `IdentityModified(oldIdentity, newIdentity)`, which names the identities but not the wallet.
+  - `ForcedTransfer(address indexed agent)`, emitted as the very next log after the standard
+    `Transfer` of every `forcedTransfer` / `batchForcedTransfer` item, before the compliance hook so
+    no module log can land between the two. A forced transfer was indistinguishable from a regular
+    one in the logs and the agent (`_msgSender()`) appeared nowhere.
+  - `IdentityRegistryStorage.addIdentityToStorage` now emits the standard
+    `CountryModified(investor, country)` after `IdentityStored`; before, only
+    `modifyStoredInvestorCountry` did, so the country given at registration was in no log.
 
 ### Changed
 
@@ -101,6 +113,10 @@ All notable changes to this project will be documented in this file.
 - Binding validates fully before writing state, so `canComplianceBind` now sees the module as not yet
   bound. A module declaring nothing, or carrying an undefined bit, cannot be bound
   (`ModuleHasNoCapabilities`, `InvalidModuleCapabilities`).
+- **Breaking, `ModuleInteraction`**: now `(address indexed target, bytes data)` instead of
+  `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
+  through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
+  logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
 
 Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
 ~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;
