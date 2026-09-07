@@ -139,6 +139,30 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         assertEq(token.balanceOf(newWallet), mintAmount);
     }
 
+    function testTokenRecoveryAddressRevertsWhenLostWalletIsNewWallet() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+
+        vm.expectRevert(ErrorsLib.SameWalletRecovery.selector);
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, lostWallet, investorOnchainId);
+    }
+
+    /// @dev The guard runs before any state change, so a same-wallet call leaves the holder's
+    ///      registry entry and balance untouched rather than deleting the identity in place.
+    function testTokenRecoveryAddressSameWalletLeavesIdentityAndBalanceIntact() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+
+        vm.expectRevert(ErrorsLib.SameWalletRecovery.selector);
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, lostWallet, investorOnchainId);
+
+        assertEq(token.balanceOf(lostWallet), mintAmount);
+    }
+
     /// ----- Helpers ------
 
     function mockIdentityRegistryContains(address wallet, bool contains) internal {
