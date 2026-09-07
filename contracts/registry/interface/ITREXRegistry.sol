@@ -62,6 +62,8 @@
 
 pragma solidity ^0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
@@ -92,5 +94,54 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     ///
     /// Emits an `EligibilityChecksEnabled` event upon successful execution.
     function enableEligibilityChecks() external;
+
+    /// @dev Returns the ONCHAINID IdentityFactory whose type record backs per-type claim topic
+    /// resolution. Baked into the implementation at construction, so changing it takes a new
+    /// implementation published through the beacon. `identityTypeOf` on it returns 0 for identities
+    /// it did not mint, which resolve to the default claim topics.
+    function identityFactory() external view returns (IIdentityFactory);
+
+    /// @dev Adds a claim topic to the override set of an identity type.
+    ///
+    /// A non-empty override set fully REPLACES the default claim topics inside `isVerified` for
+    /// identities of that type. It is not additive. Later changes to the default topics do not reach
+    /// types holding an override; a topic meant for everyone must be added to each override too.
+    ///
+    /// The identity type checked by `isVerified` is the IdentityFactory record (`identityTypeOf`),
+    /// never what the identity contract says about itself.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `identityType` must not be 0 (reserved for "unknown", which always resolves to the default
+    ///   topics); otherwise the call reverts with `InvalidIdentityType`.
+    /// - The override set must hold fewer than 15 topics; otherwise the call reverts with
+    ///   `MaxClaimTopicsReached`.
+    /// - The topic must not already be in the set; otherwise the call reverts with
+    ///   `ClaimTopicAlreadyExists`.
+    ///
+    /// Emits a `ClaimTopicAddedForIdentityType` event upon successful execution.
+    /// @param identityType the ONCHAINID identity type the topic is required for
+    /// @param claimTopic the claim topic to require for that identity type
+    function addClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external;
+
+    /// @dev Removes a claim topic from the override set of an identity type.
+    ///
+    /// Once the set becomes empty, identities of that type fall back to the default claim topics.
+    /// Removing a topic that is not in the set is a silent no-op, mirroring `removeClaimTopic`.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `identityType` must not be 0; otherwise the call reverts with `InvalidIdentityType`.
+    ///
+    /// Emits a `ClaimTopicRemovedForIdentityType` event when a topic is actually removed.
+    /// @param identityType the ONCHAINID identity type the topic is no longer required for
+    /// @param claimTopic the claim topic to remove for that identity type
+    function removeClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external;
+
+    /// @dev Returns the override claim topics registered for an identity type.
+    ///
+    /// An empty array means identities of that type verify against the default `getClaimTopics()`.
+    /// @param identityType the ONCHAINID identity type to query
+    function getClaimTopicsForIdentityType(uint256 identityType) external view returns (uint256[] memory);
 
 }
