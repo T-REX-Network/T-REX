@@ -90,7 +90,7 @@ library EventsLib {
     /// @notice Emitted by `IdentityRegistryStorage.modifyStoredIdentity` right after the standard
     ///         `IdentityModified(oldIdentity, newIdentity)`, which omits the investor wallet. Pair the two logs of
     ///         the same transaction; the identities are not repeated here.
-    event InvestorIdentityChanged(address investor);
+    event InvestorIdentityChanged(address indexed investor);
 
     // Token Events
 
