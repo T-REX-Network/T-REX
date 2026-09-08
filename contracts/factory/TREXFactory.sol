@@ -71,6 +71,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
@@ -127,6 +128,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         ClaimDetails calldata claimDetails
     ) external restricted {
         _validateDeploymentInputs(salt, tokenDetails, claimDetails);
+
+        // A reused IRS keeps the beacon that deployed it, so shared upgrades would still reach this suite.
+        // A BeaconProxy exposes no beacon getter, so it cannot be checked: isolated suites deploy their own.
+        require(tokenDetails.irs == address(0), ErrorsLib.IsolatedSuiteCannotReuseIRS());
 
         ITREXImplementationAuthority authority = ITREXImplementationAuthority(_implementationAuthority);
         ITREXImplementationAuthority.SuiteImplementations memory impls =
@@ -368,8 +373,9 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /// Resolves the OID (caller-supplied or minted via `IIdentityFactory.createIdentityFor` against the
-    /// Token's predicted CREATE3 address) and deploys the Token proxy. Asserts the deployed Token's
-    /// CREATE3 address matches the prediction used by the MC + OID wiring.
+    /// Token's predicted CREATE3 address) and deploys the Token proxy. A caller-supplied OID is checked
+    /// against the IdentityFactory's binding for that same predicted address, so the suite cannot deploy
+    /// onto an address the factory already resolves to a different identity.
     ///
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
     /// against its own authority, so this factory must hold that role there for the auto-mint path
@@ -392,6 +398,17 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                 .createIdentityFor(
                     predictedToken, IdentityTypes.ASSET, salt, _managementKeys(tokenDetails.accessManager)
                 );
+        } else {
+            // The token address is predictable, so anyone allowed to create ASSET identities can
+            // bind it to their own identity before this deploy runs. The binding is permanent, and
+            // the token would then answer to one identity while the IdentityFactory answers another.
+            // Revoked slots are dead but still occupied, so ask for those too, not just active ones.
+            (address boundIdentity,) = IIdentityFactory(_idFactory)
+                .getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, predictedToken));
+            require(
+                boundIdentity == address(0) || boundIdentity == oid,
+                ErrorsLib.TokenIdentityAlreadyBound(predictedToken, boundIdentity)
+            );
         }
         address token =
             _deploy(salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, identityRegistry, compliance, oid));

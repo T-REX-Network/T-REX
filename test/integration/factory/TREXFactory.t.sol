@@ -4,6 +4,8 @@ pragma solidity 0.8.30;
 import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
 import { Errors } from "@onchain-id/solidity/contracts/libraries/Errors.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
+import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -712,6 +714,55 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         Token deployedToken = Token(trexFactory.getToken("no-oid-minter-supplied-salt"));
         assertEq(deployedToken.onchainID(), suppliedOID, "Supplied ONCHAINID must survive the missing role");
+    }
+
+    /// @notice L-05: the token's CREATE3 address is public before the suite exists, and the
+    ///         IdentityFactory's ASSET binding is write-once. Another ASSET_DEPLOYER can bind that
+    ///         address to its own identity first. The auto-mint path fails loudly inside
+    ///         `createIdentityFor`, but a caller-supplied ONCHAINID skips that call, so `_deployToken`
+    ///         checks the binding itself rather than deploying onto a squatted address.
+    function test_deployTREXSuite_RevertWhen_PredictedTokenBoundToAnotherIdentity() public {
+        string memory salt = "squatted-token-salt";
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+
+        // A second holder of ASSET_DEPLOYER binds the predicted address before the suite deploys.
+        address squatter = makeAddr("Squatter");
+        _grantTokenOidMinterRole(squatter);
+        Structs.KeyParam[] memory squatterKeys = new Structs.KeyParam[](1);
+        squatterKeys[0] = _ecdsaKey(squatter, KeyPurposes.MANAGEMENT);
+        vm.prank(squatter);
+        address squattedIdentity =
+            idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, "squatter-salt", squatterKeys);
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = makeAddr("SuppliedOID");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityAlreadyBound.selector, predictedToken, squattedIdentity)
+        );
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
+    }
+
+    /// @notice Pre-creating the token identity and passing it in is the normal flow, so a binding that
+    ///         already resolves to the supplied ONCHAINID must deploy rather than trip the guard.
+    function test_deployTREXSuite_Succeeds_WhenPredictedTokenBoundToSuppliedONCHAINID() public {
+        string memory salt = "prebound-token-salt";
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+
+        _grantTokenOidMinterRole(address(this));
+        Structs.KeyParam[] memory ownerKeys = new Structs.KeyParam[](1);
+        ownerKeys[0] = _ecdsaKey(address(this), KeyPurposes.MANAGEMENT);
+        address boundIdentity =
+            idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, "prebound-salt", ownerKeys);
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = boundIdentity;
+
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
+
+        Token deployedToken = Token(trexFactory.getToken(salt));
+        assertEq(address(deployedToken), predictedToken, "Deployed Token must land on the predicted address");
+        assertEq(deployedToken.onchainID(), boundIdentity, "Token.onchainID must equal the pre-bound identity");
     }
 
     // ============ AccessManagerSetupLib.setupIdentityFactoryPolicy() Tests ============
