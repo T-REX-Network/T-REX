@@ -200,7 +200,19 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    function setIdentityRegistryStorage(address _identityRegistryStorage) external override restricted {
+    /// @dev A storage that cannot answer identity reads halts the token, which calls `isVerified` on
+    ///      every transfer. `onlySharedAuthority` is a misconfiguration guard only: `authority()` is spoofable.
+    function setIdentityRegistryStorage(address _identityRegistryStorage)
+        external
+        override
+        restricted
+        onlySharedAuthority(_identityRegistryStorage)
+    {
+        require(
+            IERC165(_identityRegistryStorage).supportsInterface(type(IERC3643IdentityRegistryStorage).interfaceId),
+            ErrorsLib.InvalidIdentityRegistryStorage()
+        );
+
         _getStorage().tokenIdentityStorage = IIdentityRegistryStorage(_identityRegistryStorage);
         emit ERC3643EventsLib.IdentityStorageSet(_identityRegistryStorage);
     }

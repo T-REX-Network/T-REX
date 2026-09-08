@@ -3,10 +3,12 @@ pragma solidity ^0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
 
@@ -152,12 +154,61 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_setIdentityRegistryStorage_Success_EmitsEvent() public {
+        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage();
+
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityStorageSet(address(0));
+        emit ERC3643EventsLib.IdentityStorageSet(address(replacement));
+        registry.setIdentityRegistryStorage(address(replacement));
+
+        assertEq(address(registry.identityStorage()), address(replacement));
+    }
+
+    /// @notice Behavior: the zero address is refused. `onlySharedAuthority` reports it as
+    ///         `AuthorityMismatch`, since it checks both clauses in one require.
+    function test_setIdentityRegistryStorage_RevertWhen_ZeroAddress() public {
+        address before = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         registry.setIdentityRegistryStorage(address(0));
 
-        assertEq(address(registry.identityStorage()), address(0));
+        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
+    }
+
+    /// @notice Behavior: an account with no code is refused, so a mistyped address cannot brick the registry.
+    function test_setIdentityRegistryStorage_RevertWhen_NotAContract() public {
+        address before = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert();
+        registry.setIdentityRegistryStorage(makeAddr("notAContract"));
+
+        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
+    }
+
+    /// @notice Behavior: a contract that is not an IRS is refused, so it fails here and not at the
+    ///         next transfer.
+    function test_setIdentityRegistryStorage_RevertWhen_WrongInterface() public {
+        address before = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.InvalidIdentityRegistryStorage.selector);
+        registry.setIdentityRegistryStorage(address(registry));
+
+        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
+    }
+
+    /// @dev Shares the suite AccessManager so the new IRS passes `onlySharedAuthority`.
+    function _deployIdentityRegistryStorage() private returns (IdentityRegistryStorage) {
+        return IdentityRegistryStorage(
+            address(
+                new ERC1967Proxy(
+                    address(identityRegistryStorageImpl),
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+                )
+            )
+        );
     }
 
     // ============ setClaimTopicsRegistry() / setTrustedIssuersRegistry() — deprecated ============

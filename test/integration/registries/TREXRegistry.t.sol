@@ -149,14 +149,28 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.setIdentityRegistryStorage(address(0));
     }
 
-    /// @notice The owner can swap the identity storage and `IdentityStorageSet` is emitted.
+    /// @notice The owner can swap the identity storage and `IdentityStorageSet` is emitted. The suite's
+    ///         own storage is used, since the replacement must be a real IRS sharing the suite authority.
     function test_identity_setIdentityRegistryStorage_Success() public {
+        address irs = address(registry.identityStorage());
+
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.IdentityStorageSet(address(0));
-        registry.setIdentityRegistryStorage(address(0));
+        emit ERC3643EventsLib.IdentityStorageSet(irs);
+        registry.setIdentityRegistryStorage(irs);
 
-        assertEq(address(registry.identityStorage()), address(0));
+        assertEq(address(registry.identityStorage()), irs);
+    }
+
+    /// @notice A contract that is not an IRS is refused, so it cannot halt the token at the next transfer.
+    function test_identity_setIdentityRegistryStorage_RevertWhen_NotAnIdentityStorage() public {
+        address before = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.InvalidIdentityRegistryStorage.selector);
+        registry.setIdentityRegistryStorage(address(registry));
+
+        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
     }
 
     // =============================================================================================

@@ -80,6 +80,7 @@ library ErrorsLib {
     error ComplianceAlreadyBoundToToken();
     error NoTokenToRecover();
     error RecoveryNotPossible();
+    error SameWalletRecovery();
     error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
 
@@ -111,6 +112,7 @@ library ErrorsLib {
     /// @dev The IdentityFactory already binds the predicted token address to a different identity.
     error TokenIdentityAlreadyBound(address token, address boundIdentity);
     error TokenAlreadyDeployed();
+    error IsolatedSuiteCannotReuseIRS();
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
@@ -119,6 +121,7 @@ library ErrorsLib {
     // IdentityRegistry Errors
     error EligibilityChecksDisabledAlready();
     error EligibilityChecksEnabledAlready();
+    error InvalidIdentityRegistryStorage();
 
     // IdentityRegistryStorage Errors
     error AddressAlreadyStored();
