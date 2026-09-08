@@ -278,17 +278,17 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
             if (trustedIssuersForTopic.length == 0) return false;
 
-            bytes32[] memory claimIds = new bytes32[](trustedIssuersForTopic.length);
-            for (uint256 i = 0; i < trustedIssuersForTopic.length; i++) {
-                claimIds[i] = keccak256(abi.encode(trustedIssuersForTopic[i], requiredClaimTopics[claimTopic]));
-            }
+            for (uint256 j = 0; j < trustedIssuersForTopic.length; j++) {
+                address trustedIssuer = trustedIssuersForTopic[j];
+                bytes32 claimId = keccak256(abi.encode(trustedIssuer, requiredClaimTopics[claimTopic]));
+                (foundClaimTopic, scheme, issuer, sig, data,) = userIdentity.getClaim(claimId);
 
-            for (uint256 j = 0; j < claimIds.length; j++) {
-                (foundClaimTopic, scheme, issuer, sig, data,) = userIdentity.getClaim(claimIds[j]);
-
-                if (foundClaimTopic == requiredClaimTopics[claimTopic]) {
+                // The identity answers `getClaim`, so the issuer it returns is untrusted input:
+                // only a claim from `trustedIssuer` hashes to `claimId`. Validity is asked of the
+                // configured issuer, never of the address the identity supplied.
+                if (foundClaimTopic == requiredClaimTopics[claimTopic] && issuer == trustedIssuer) {
                     (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
-                        issuer,
+                        trustedIssuer,
                         abi.encodeCall(
                             IClaimIssuer.isClaimValid, (userIdentity, requiredClaimTopics[claimTopic], sig, data)
                         )
@@ -296,10 +296,10 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
                     if (success && result != bytes32(0)) {
                         break;
-                    } else if (j == (claimIds.length - 1)) {
+                    } else if (j == (trustedIssuersForTopic.length - 1)) {
                         return false;
                     }
-                } else if (j == (claimIds.length - 1)) {
+                } else if (j == (trustedIssuersForTopic.length - 1)) {
                     return false;
                 }
             }
