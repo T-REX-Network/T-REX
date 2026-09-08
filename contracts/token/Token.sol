@@ -539,6 +539,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             _autoUnfreezeFor(from, value);
         }
 
+        // a mint reaches canTransfer with `from` at the zero address so that distribution rules stay enforced at
+        // issuance, which is the convention modules read to tell a mint from a transfer
         if (!isBurn) {
             require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
             require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());
