@@ -387,6 +387,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     {
         TokenStorage storage s = _tokenStorage();
 
+        require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
+
         uint256 investorTokens = balanceOf(lostWallet);
         require(investorTokens != 0, ErrorsLib.NoTokenToRecover());
         require(
