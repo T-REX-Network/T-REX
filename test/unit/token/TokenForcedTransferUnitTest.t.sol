@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -10,6 +12,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 contract TokenTransferUnitTest is TokenBaseUnitTest {
 
@@ -76,12 +79,37 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenForcedTransferNominal() public {
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.ForcedTransfer(agent);
         vm.prank(agent);
         bool success = token.forcedTransfer(from, to, transferAmount);
 
         assertTrue(success);
         assertEq(token.balanceOf(from), mintAmount - transferAmount);
         assertEq(token.balanceOf(to), transferAmount);
+    }
+
+    function testTokenForcedTransferEventFollowsTransferImmediately() public {
+        vm.recordLogs();
+        vm.prank(agent);
+        token.forcedTransfer(from, to, transferAmount);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 forcedIndex = type(uint256).max;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == address(token) && logs[i].topics[0] == EventsLib.ForcedTransfer.selector) {
+                forcedIndex = i;
+            }
+        }
+        assertTrue(forcedIndex != type(uint256).max && forcedIndex > 0, "ForcedTransfer not emitted");
+        assertEq(address(uint160(uint256(logs[forcedIndex].topics[1]))), agent);
+
+        Vm.Log memory previous = logs[forcedIndex - 1];
+        assertEq(previous.emitter, address(token));
+        assertEq(previous.topics[0], IERC20.Transfer.selector);
+        assertEq(address(uint160(uint256(previous.topics[1]))), from);
+        assertEq(address(uint160(uint256(previous.topics[2]))), to);
+        assertEq(abi.decode(previous.data, (uint256)), transferAmount);
     }
 
     function testTokenBatchForcedTransferRevertsWhenNotAgent(address caller) public {
@@ -129,6 +157,10 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         amounts[0] = transferAmount1;
         amounts[1] = transferAmount2;
 
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.ForcedTransfer(agent);
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.ForcedTransfer(agent);
         vm.prank(agent);
         token.batchForcedTransfer(froms, tos, amounts);
 

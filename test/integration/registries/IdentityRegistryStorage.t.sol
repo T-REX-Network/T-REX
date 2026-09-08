@@ -18,6 +18,7 @@ import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -80,7 +81,31 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.addIdentityToStorage(bob, charlieIdentity, Countries.FRANCE);
     }
 
+    /// @notice Storing an identity also emits `CountryModified`, so the country is observable from logs.
+    function test_addIdentityToStorage_EmitsIdentityStoredAndCountryModified() public {
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.CountryModified(another, Countries.FRANCE);
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, Countries.FRANCE);
+
+        assertEq(identityRegistryStorage.storedInvestorCountry(another), Countries.FRANCE);
+    }
+
     // ============ modifyStoredIdentity() Tests ============
+
+    /// @notice `InvestorIdentityChanged` names the wallet the standard `IdentityModified` omits.
+    function test_modifyStoredIdentity_EmitsInvestorIdentityChanged() public {
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityModified(bobIdentity, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.InvestorIdentityChanged(bob);
+        vm.prank(agent);
+        identityRegistryStorage.modifyStoredIdentity(bob, charlieIdentity);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(charlieIdentity));
+    }
 
     /// @notice Should revert when sender is not agent
     function test_modifyStoredIdentity_RevertWhen_NotAgent() public {
