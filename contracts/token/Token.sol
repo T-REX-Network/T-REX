@@ -76,6 +76,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
@@ -183,17 +184,29 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     }
 
     /// @inheritdoc IERC3643
+    /// @dev A wrong registry halts the token: `isVerified` is called on every transfer.
     function setIdentityRegistry(address identityRegistryAddress)
         public
         restricted
         onlySharedAuthority(identityRegistryAddress)
     {
+        require(
+            ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
+            ErrorsLib.InvalidIdentityRegistry()
+        );
+
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
         emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
     /// @inheritdoc IERC3643
     function setCompliance(address complianceAddress) public restricted onlySharedAuthority(complianceAddress) {
+        // Checked before getTokenBound() so a wrong contract gives a named error.
+        require(
+            ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),
+            ErrorsLib.InvalidCompliance()
+        );
+
         // A compliance already bound to a different token would make every transferred/created/destroyed
         // hook revert (onlyBoundedToken), silently breaking transfers after the swap.
         address boundToken = IModularCompliance(complianceAddress).getTokenBound();

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
@@ -61,6 +63,13 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.created.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.destroyed.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.transferred.selector), "");
+    }
+
+    /// @dev Makes a mock pass the ERC165Checker guard on the token's dependency setters.
+    function mockSupportsInterface(address target, bytes4 interfaceId) internal {
+        vm.mockCall(target, abi.encodeCall(IERC165.supportsInterface, (type(IERC165).interfaceId)), abi.encode(true));
+        vm.mockCall(target, abi.encodeCall(IERC165.supportsInterface, (bytes4(0xffffffff))), abi.encode(false));
+        vm.mockCall(target, abi.encodeCall(IERC165.supportsInterface, (interfaceId)), abi.encode(true));
     }
 
     function mockIdentityRegistry() internal {

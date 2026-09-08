@@ -5,6 +5,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -33,6 +34,9 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         vm.mockCall(
             newCompliance, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
         );
+
+        // setCompliance also requires the target to advertise IERC3643Compliance via ERC-165.
+        mockSupportsInterface(newCompliance, type(IERC3643Compliance).interfaceId);
     }
 
     function testTokenSetComplianceRevertsWhenUnauthorized(address caller) public {
@@ -57,6 +61,33 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         // since address(0) cannot share the Token's authority.
         vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         token.setCompliance(address(0));
+    }
+
+    /// @notice A target with no ERC-165 support is refused, so a mistyped address cannot break transfers.
+    function testTokenSetComplianceRevertsWhenNoERC165() public {
+        address notAContract = makeAddr("NotAContract");
+        vm.mockCall(
+            notAContract, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+
+        vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
+        token.setCompliance(notAContract);
+
+        assertEq(address(token.compliance()), compliance, "rejected compliance must not be recorded");
+    }
+
+    /// @notice A contract that is not a compliance is refused, ahead of the getTokenBound() probe.
+    function testTokenSetComplianceRevertsWhenWrongInterface() public {
+        address wrongType = makeAddr("IdentityRegistryNotCompliance");
+        vm.mockCall(
+            wrongType, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        mockSupportsInterface(wrongType, type(IERC3643IdentityRegistry).interfaceId);
+
+        vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
+        token.setCompliance(wrongType);
+
+        assertEq(address(token.compliance()), compliance, "rejected compliance must not be recorded");
     }
 
     function testTokenSetComplianceRevertsWhenAlreadyBoundToAnotherToken() public {
