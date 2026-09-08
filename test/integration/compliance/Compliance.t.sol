@@ -534,10 +534,9 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.addModule(moduleAddress);
 
         bytes memory callData = abi.encodeWithSignature("blockModule(bool)", true);
-        bytes4 expectedSelector = bytes4(callData);
 
-        vm.expectEmit(true, true, false, false, address(compliance));
-        emit EventsLib.ModuleInteraction(moduleAddress, expectedSelector);
+        vm.expectEmit(address(compliance));
+        emit EventsLib.ModuleInteraction(moduleAddress, callData);
 
         vm.prank(deployer);
         compliance.callModuleFunction(callData, moduleAddress);
@@ -589,8 +588,8 @@ contract ComplianceTest is TREXSuiteTest {
 
         // The fallback function accepts any callData, so the module call succeeds
         // This allows _selector to be called with short callData, testing the explicit return
-        vm.expectEmit(true, true, false, false, address(compliance));
-        emit EventsLib.ModuleInteraction(moduleAddress, bytes4(0));
+        vm.expectEmit(address(compliance));
+        emit EventsLib.ModuleInteraction(moduleAddress, shortCallData);
         vm.prank(deployer);
         compliance.callModuleFunction(shortCallData, moduleAddress);
     }
@@ -632,8 +631,8 @@ contract ComplianceTest is TREXSuiteTest {
         vm.expectEmit(true, false, false, false, address(compliance));
         emit EventsLib.ModuleAdded(moduleAddress);
 
-        vm.expectEmit(true, true, false, false, address(compliance));
-        emit EventsLib.ModuleInteraction(moduleAddress, bytes4(interactions[0]));
+        vm.expectEmit(address(compliance));
+        emit EventsLib.ModuleInteraction(moduleAddress, interactions[0]);
 
         vm.prank(deployer);
         compliance.addAndSetModule(moduleAddress, interactions);
