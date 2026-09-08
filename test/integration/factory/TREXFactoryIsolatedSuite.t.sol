@@ -6,6 +6,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { ITREXFactory } from "contracts/factory/ITREXFactory.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 
@@ -227,6 +228,19 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
         );
         vm.expectRevert();
         MockTokenV2(address(token)).mockTokenV2Version();
+    }
+
+    /// @notice Behavior: an isolated suite refuses a caller-supplied IRS, because a reused IRS keeps the
+    ///         beacon that deployed it and would stay reachable by shared upgrades.
+    function test_deployIsolatedSuite_RejectsReusedIRS() public {
+        ITREXFactory.TokenDetails memory tokenDetails = _isolatedTokenDetails("Iso", "ISO");
+        tokenDetails.irs = makeAddr("existingIRS");
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.IsolatedSuiteCannotReuseIRS.selector);
+        trexFactory.deployTREXSuiteIsolated("isolated-reused-irs", tokenDetails, _emptyClaims());
+
+        assertEq(trexFactory.getToken("isolated-reused-irs"), address(0), "rejected suite must not be recorded");
     }
 
     /// @notice Behavior: calling `upgradeTo` directly never works, whoever the caller is: the beacon is
