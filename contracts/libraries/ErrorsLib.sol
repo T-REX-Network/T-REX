@@ -108,6 +108,8 @@ library ErrorsLib {
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
     error MaxAgentsReached(uint256 max);
+    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
+    error TokenIdentityAlreadyBound(address token, address boundIdentity);
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
 
