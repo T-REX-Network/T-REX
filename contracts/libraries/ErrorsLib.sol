@@ -120,6 +120,7 @@ library ErrorsLib {
     // IdentityRegistry Errors
     error EligibilityChecksDisabledAlready();
     error EligibilityChecksEnabledAlready();
+    error InvalidIdentityRegistryStorage();
 
     // IdentityRegistryStorage Errors
     error AddressAlreadyStored();
