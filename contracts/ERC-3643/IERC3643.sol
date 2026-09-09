@@ -242,6 +242,8 @@ interface IERC3643 is IERC20, IERC20Metadata {
      * - Updates the identity registry:
      *   - If `_lostWallet` is listed in the identity registry, it will be removed,
      *     and `_newWallet` will be registered unless already present.
+     * - Tells the compliance contract about the move, as a transfer from `_lostWallet` to `_newWallet`,
+     *   so that modules tracking balances stay in sync with the token.
      *
      * Emits the following events:
      * - `TokensUnfrozen` if there are frozen tokens on `_lostWallet` that are transferred.

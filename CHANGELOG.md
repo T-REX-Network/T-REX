@@ -96,6 +96,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`recoveryAddress` now notifies compliance**: recovery moves the balance through `_forceUpdate`,
+  which skips `_update` and therefore its compliance hooks, so `Token.recoveryAddress` now calls
+  `compliance.transferred(lostWallet, newWallet, investorTokens)` after the frozen / address-frozen /
+  identity migrations and before `RecoverySuccess`, the same way `forcedTransfer` does. Previously
+  (v4 behaviour) a recovery was invisible to bound modules: a module tracking balances through the
+  `transferred` / `created` / `destroyed` callbacks kept crediting the lost wallet, and since the lost
+  wallet is removed from the identity registry by the same call, the drift could not be corrected
+  afterwards. Modules that count transfer operations rather than track balances now see a recovery as
+  one transfer.
 - **ONCHAINID dependency synced** to the latest develop (audit fixes and the factory identity-type
   record). Breaking ripples absorbed here: `Structs.ClaimData` gained `metadataHash` (binds scheme
   and uri to the claim signature), `createIdentityFor` no longer takes a module bundle (modules are
