@@ -394,6 +394,10 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /* ----- Recovery Functions ----- */
 
     /// @inheritdoc IERC3643
+    /// @dev `_forceUpdate` skips {_update}, so it does not call the compliance hooks. Compliance is told about
+    ///      the move here instead, like {_forcedTransfer} does. Without this call, modules that track balances
+    ///      would still credit the lost wallet forever, because `_migrateIdentity` removes it from the registry.
+    ///      Modules that count transfers rather than track balances will see a recovery as one transfer.
     function recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         external
         restricted
@@ -416,6 +420,10 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
         _migrateIdentity(lostWallet, newWallet, investorOnchainId);
+
+        // Called after the migrations so modules see the final state, and before the event so that no module
+        // log can land between the recovery's own logs and `RecoverySuccess`.
+        s.compliance.transferred(lostWallet, newWallet, investorTokens);
 
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
 
@@ -552,6 +560,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             _autoUnfreezeFor(from, value);
         }
 
+        // a mint reaches canTransfer with `from` at the zero address so that distribution rules stay enforced at
+        // issuance, which is the convention modules read to tell a mint from a transfer
         if (!isBurn) {
             require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
             require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());
