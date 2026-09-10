@@ -170,13 +170,16 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     // ============================================================
 
     /// @inheritdoc IERC3643IdentityRegistry
-    function batchRegisterIdentity(
-        address[] calldata userAddresses,
-        IIdentity[] calldata identities,
-        uint16[] calldata countries
-    ) external override restricted {
+    /// @dev The countries argument is ignored. The country is a compliance concern: this registry
+    ///      stores none. Read the effective value from the country module bound to the token's
+    ///      `ModularCompliance`.
+    function batchRegisterIdentity(address[] calldata userAddresses, IIdentity[] calldata identities, uint16[] calldata)
+        external
+        override
+        restricted
+    {
         for (uint256 i = 0; i < userAddresses.length; i++) {
-            _registerIdentity(userAddresses[i], identities[i], countries[i]);
+            _registerIdentity(userAddresses[i], identities[i]);
         }
     }
 
@@ -188,9 +191,10 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    function updateCountry(address _userAddress, uint16 _country) external override restricted {
-        _getStorage().tokenIdentityStorage.modifyStoredInvestorCountry(_userAddress, _country);
-        emit ERC3643EventsLib.CountryUpdated(_userAddress, _country);
+    /// @dev DEPRECATED: this registry stores no country; always reverts. The country is a compliance
+    ///      concern, owned by the country module bound to the token's `ModularCompliance`.
+    function updateCountry(address, uint16) external pure override {
+        revert ErrorsLib.Deprecated();
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -316,8 +320,10 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    function investorCountry(address _userAddress) external view override returns (uint16) {
-        return _getStorage().tokenIdentityStorage.storedInvestorCountry(_userAddress);
+    /// @dev DEPRECATED: this registry stores no country; always returns 0. Read the effective value
+    ///      from the country module bound to the token's `ModularCompliance`.
+    function investorCountry(address) external pure override returns (uint16) {
+        return 0;
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
@@ -343,12 +349,15 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) public override restricted {
-        _registerIdentity(_userAddress, _identity, _country);
+    /// @dev The country argument is ignored. The country is a compliance concern: this registry
+    ///      stores none. Read the effective value from the country module bound to the token's
+    ///      `ModularCompliance`.
+    function registerIdentity(address _userAddress, IIdentity _identity, uint16) public override restricted {
+        _registerIdentity(_userAddress, _identity);
     }
 
-    function _registerIdentity(address userAddress, IIdentity userIdentity, uint16 country) internal {
-        _getStorage().tokenIdentityStorage.addIdentityToStorage(userAddress, userIdentity, country);
+    function _registerIdentity(address userAddress, IIdentity userIdentity) internal {
+        _getStorage().tokenIdentityStorage.addIdentityToStorage(userAddress, userIdentity, 0);
         emit ERC3643EventsLib.IdentityRegistered(userAddress, userIdentity);
     }
 

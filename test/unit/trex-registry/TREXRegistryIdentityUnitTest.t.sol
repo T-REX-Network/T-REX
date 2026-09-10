@@ -36,6 +36,8 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         assertTrue(registry.contains(another));
         assertEq(address(registry.identity(another)), address(newIdentity));
+        // The country argument is ignored: the registry stores none.
+        assertEq(registry.investorCountry(another), 0);
     }
 
     // ============ updateIdentity() ============
@@ -58,21 +60,19 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         assertEq(address(registry.identity(bob)), address(charlieIdentity));
     }
 
-    // ============ updateCountry() ============
+    // ============ updateCountry() — deprecated ============
 
-    function test_updateCountry_RevertWhen_NotAgent() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+    function test_updateCountry_RevertWhen_Deprecated_AsAgent() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.updateCountry(bob, 999);
     }
 
-    function test_updateCountry_Success() public {
-        vm.prank(agent);
-        vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.CountryUpdated(bob, 999);
+    function test_updateCountry_RevertWhen_Deprecated_AsOther() public {
+        // Deprecation takes precedence — even non-agents get Deprecated, never the access-managed error.
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.updateCountry(bob, 999);
-
-        assertEq(registry.investorCountry(bob), 999);
     }
 
     // ============ deleteIdentity() ============
@@ -146,8 +146,9 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         assertEq(address(registry.identity(second)), address(secondIdentity));
         assertTrue(registry.isLocallyRegistered(another));
         assertTrue(registry.isLocallyRegistered(second));
-        assertEq(registry.investorCountry(another), 250);
-        assertEq(registry.investorCountry(second), 840);
+        // The countries argument is ignored: the registry stores none.
+        assertEq(registry.investorCountry(another), 0);
+        assertEq(registry.investorCountry(second), 0);
     }
 
     // ============ setIdentityRegistryStorage() ============

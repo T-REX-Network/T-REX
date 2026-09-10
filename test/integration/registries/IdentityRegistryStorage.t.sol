@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
 import { IIdentity, Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
 import { ERC734Validator } from "@onchain-id/solidity/contracts/modules/validators/ERC734Validator.sol";
@@ -95,16 +96,16 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.addIdentityToStorage(bob, charlieIdentity, Countries.FRANCE);
     }
 
-    /// @notice Storing an identity also emits `CountryModified`, so the country is observable from logs.
-    function test_addIdentityToStorage_EmitsIdentityStoredAndCountryModified() public {
-        vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.CountryModified(another, Countries.FRANCE);
+    /// @notice The country argument is ignored: only `IdentityStored` is emitted and no country is recorded.
+    function test_addIdentityToStorage_IgnoresCountry() public {
+        vm.recordLogs();
         vm.prank(agent);
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, Countries.FRANCE);
 
-        assertEq(identityRegistryStorage.storedInvestorCountry(another), Countries.FRANCE);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
+        assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
     }
 
     // ============ modifyStoredIdentity() Tests ============
@@ -152,29 +153,19 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
     }
 
-    // ============ modifyStoredInvestorCountry() Tests ============
+    // ============ modifyStoredInvestorCountry() — deprecated ============
 
-    /// @notice Should revert when sender is not agent
-    function test_modifyStoredInvestorCountry_RevertWhen_NotAgent() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+    /// @notice Deprecated: the storage keeps no country, so even an agent hits `Deprecated()`.
+    function test_modifyStoredInvestorCountry_RevertWhen_Deprecated_AsAgent() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
     }
 
-    /// @notice Should revert when wallet is zero address
-    function test_modifyStoredInvestorCountry_RevertWhen_WalletZeroAddress() public {
-        vm.prank(agent);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        identityRegistryStorage.modifyStoredInvestorCountry(address(0), Countries.UNITED_STATES);
-    }
-
-    /// @notice Should revert when wallet is not registered
-    function test_modifyStoredInvestorCountry_RevertWhen_NotStored() public {
-        vm.prank(agent);
-        identityRegistryStorage.removeIdentityFromStorage(charlie);
-
-        vm.prank(agent);
-        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+    /// @notice Deprecation takes precedence — non-agents get `Deprecated()`, never the access-managed error.
+    function test_modifyStoredInvestorCountry_RevertWhen_Deprecated_AsOther() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
     }
 
@@ -356,7 +347,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(updated[1], extraIR);
     }
 
-    // ============ storedIdentity() / storedInvestorCountry() Fallback Tests ============
+    // ============ storedIdentity() fallback / storedInvestorCountry() deprecated ============
 
     /// @notice storedIdentity returns the local identity when present (no fallback to global)
     function test_storedIdentity_UsesLocal_WhenPresent() public view {
@@ -377,9 +368,10 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
     }
 
-    /// @notice storedInvestorCountry returns 0 for wallets only present in the global registry
-    function test_storedInvestorCountry_ReturnsZero_ForGlobalOnlyWallet() public {
+    /// @notice storedInvestorCountry returns 0 for every wallet, local or global-only
+    function test_storedInvestorCountry_ReturnsZero_ForAnyWallet() public {
         _deployIdentity(another, "another");
+        assertEq(identityRegistryStorage.storedInvestorCountry(bob), 0);
         assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
     }
 
