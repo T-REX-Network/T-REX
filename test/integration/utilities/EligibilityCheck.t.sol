@@ -2,6 +2,8 @@
 pragma solidity 0.8.30;
 
 import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
@@ -166,15 +168,16 @@ contract EligibilityCheckTest is TREXSuiteTest {
         aliceIdentity.removeClaim(claimIds[0]);
 
         // Add tricky claim (will throw error when isClaimValid is called)
+        // Built before the prank: computing the metadata hash calls the validator, which would
+        // otherwise consume the prank meant for addClaim.
+        Structs.ClaimData memory trickyData = Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, ""),
+            payload: "0x00"
+        });
         vm.prank(alice);
-        aliceIdentity.addClaim(
-            topic,
-            1,
-            address(trickyClaimIssuer),
-            "0x00",
-            Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: "0x00" }),
-            ""
-        );
+        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", trickyData, "");
 
         // getVerifiedDetails should handle the error and return false
         UtilityChecker.EligibilityCheckDetails[] memory results =
@@ -184,6 +187,55 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertEq(address(results[0].issuer), address(trickyClaimIssuer));
         assertEq(results[0].topic, topic);
         assertFalse(results[0].pass); // Should be false because isClaimValid threw an error
+    }
+
+    /// @notice Should resolve the per-identity-type topics, mirroring isVerified. The default set is
+    ///         the KYC topic every investor needs; corporates must additionally pass KYB.
+    function test_getVerifiedDetails_UsesTypeTopics_WhenOverrideSetForIdentityType() public {
+        uint256 claimTopicKyb = uint256(keccak256(abi.encode("CLAIM_TOPIC_KYB")));
+
+        // A business investor: a CORPORATE identity holding the same KYC claim as everyone else.
+        address business = makeAddr("business");
+        IIdentity businessIdentity = _deployCorporateIdentity(business, "business");
+        vm.prank(agent);
+        identityRegistry.registerIdentity(business, businessIdentity, Countries.FRANCE);
+        _addClaim(businessIdentity, CLAIM_TOPIC_1, "KYC data", claimIssuerSigner.key, address(claimIssuer), business);
+
+        // Trust the issuer for KYB as well, then require KYC + KYB of corporates only.
+        uint256[] memory issuerTopics = new uint256[](2);
+        issuerTopics[0] = CLAIM_TOPIC_1;
+        issuerTopics[1] = claimTopicKyb;
+        vm.startPrank(deployer);
+        trustedIssuersRegistry.updateIssuerClaimTopics(address(claimIssuer), issuerTopics);
+        identityRegistry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_1);
+        identityRegistry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, claimTopicKyb);
+        vm.stopPrank();
+
+        // The corporate set replaces the default one: KYC passes, KYB is missing.
+        UtilityChecker.EligibilityCheckDetails[] memory results =
+            utilityChecker.getVerifiedDetails(address(token), business);
+        assertEq(results.length, 2);
+        assertTrue(results[0].pass, "KYC claim must pass for the corporate investor");
+        assertEq(address(results[1].issuer), address(0), "KYB has no matching claim yet");
+        assertFalse(results[1].pass);
+        assertFalse(identityRegistry.isVerified(business));
+
+        // alice is a natural person: still on the default KYC-only set, unaffected by the override.
+        UtilityChecker.EligibilityCheckDetails[] memory aliceResults =
+            utilityChecker.getVerifiedDetails(address(token), alice);
+        assertEq(aliceResults.length, 1);
+        assertEq(aliceResults[0].topic, CLAIM_TOPIC_1);
+        assertTrue(aliceResults[0].pass);
+        assertTrue(identityRegistry.isVerified(alice));
+
+        // With the KYB claim attached, the corporate row passes and diagnostics agree with isVerified.
+        _addClaim(businessIdentity, claimTopicKyb, "KYB data", claimIssuerSigner.key, address(claimIssuer), business);
+        results = utilityChecker.getVerifiedDetails(address(token), business);
+        assertEq(results.length, 2);
+        assertEq(address(results[1].issuer), address(claimIssuer));
+        assertEq(results[1].topic, claimTopicKyb);
+        assertTrue(results[1].pass);
+        assertTrue(identityRegistry.isVerified(business));
     }
 
 }

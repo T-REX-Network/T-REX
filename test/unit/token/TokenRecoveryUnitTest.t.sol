@@ -6,6 +6,7 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
@@ -84,6 +85,24 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         assertEq(token.balanceOf(newWallet), mintAmount);
     }
 
+    /// @dev Recovery moves the balance without going through `_update`, so compliance must be told about it
+    ///      explicitly. Otherwise modules that track balances keep crediting the lost wallet.
+    function testTokenRecoveryAddressNotifiesCompliance() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryContains(newWallet, false);
+        mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
+        mockIdentityRegistryIsLocallyRegistered(newWallet, false);
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+
+        vm.expectCall(
+            compliance,
+            abi.encodeWithSelector(IERC3643Compliance.transferred.selector, lostWallet, newWallet, mintAmount)
+        );
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+    }
+
     function testTokenRecoveryAddressTransfersFrozenTokens() public {
         // Freeze some tokens
         vm.prank(agent);
@@ -146,6 +165,30 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
 
         assertEq(token.balanceOf(lostWallet), 0);
         assertEq(token.balanceOf(newWallet), mintAmount);
+    }
+
+    function testTokenRecoveryAddressRevertsWhenLostWalletIsNewWallet() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+
+        vm.expectRevert(ErrorsLib.SameWalletRecovery.selector);
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, lostWallet, investorOnchainId);
+    }
+
+    /// @dev The guard runs before any state change, so a same-wallet call leaves the holder's
+    ///      registry entry and balance untouched rather than deleting the identity in place.
+    function testTokenRecoveryAddressSameWalletLeavesIdentityAndBalanceIntact() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
+        mockIdentityRegistryInvestorCountry(lostWallet, 1);
+
+        vm.expectRevert(ErrorsLib.SameWalletRecovery.selector);
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, lostWallet, investorOnchainId);
+
+        assertEq(token.balanceOf(lostWallet), mintAmount);
     }
 
     /// ----- Helpers ------

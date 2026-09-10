@@ -16,7 +16,8 @@ import {
     MODULE_TYPE_VALIDATOR
 } from "@openzeppelin/contracts/interfaces/draft-IERC7579.sol";
 
-/// @notice Builds the ONCHAINID module bundle and key set used when this project mints identities.
+/// @notice Test-only mirror of the ONCHAINID module bundle registered per identity type on the
+///         IdentityFactory (`setIdentityTypeModules`).
 ///
 /// @dev ONCHAINID's `Identity` is a {SmartAccount} with no native ERC-734/735 surface: `addClaim`,
 ///      `getClaim`, `getClaimIdsByTopic`, `isClaimValid`, the ERC-734 key getters and friends are all
@@ -28,26 +29,14 @@ import {
 ///      install (and the KeyApprovalModule executor) satisfy that.
 ///
 ///      This mirrors the reference `legacyQueueModules` bundle from ONCHAINID's own test helpers
-///      (`IdentityHelper.legacyQueueModules`), which is not part of the library's published contracts.
-library IdentityModulesLib {
+///      (`IdentityHelper.legacyQueueModules`), which cannot be imported here because its internal
+///      `contracts/...` imports resolve against this repo's remappings. Keep it in sync manually.
+library IdentityModulesHelper {
 
     /// @notice Number of module installs in {legacyQueueModules}: 1 validator install for the merged
     ///         ERC734Validator, 4 for the KeyApprovalModule (1 executor + 3 fallbacks), and 15 for the
     ///         ERC734Validator claim/getter surface (1 executor + 14 fallbacks).
     uint256 private constant MODULE_INSTALL_COUNT = 20;
-
-    /// @notice Builds the single-entry MANAGEMENT key set granting `managementKey` control of the identity.
-    /// @param managementKey the address to register as the identity's ECDSA management key
-    function managementKeys(address managementKey) internal pure returns (Structs.KeyParam[] memory keys) {
-        keys = new Structs.KeyParam[](1);
-        keys[0] = Structs.KeyParam({
-            keyHash: keccak256(abi.encodePacked(managementKey)),
-            purpose: KeyPurposes.MANAGEMENT,
-            keyType: KeyTypes.ECDSA,
-            signerData: abi.encodePacked(managementKey),
-            clientData: ""
-        });
-    }
 
     /// @notice Builds the module bundle that restores the legacy ERC-734/735 surface on a new identity.
     /// @param keyApprovalModule the KeyApprovalModule singleton (executor + execute/approve/getCurrentNonce

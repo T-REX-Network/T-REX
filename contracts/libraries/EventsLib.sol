@@ -73,7 +73,7 @@ library EventsLib {
 
     // ModularCompliance Events
 
-    event ModuleInteraction(address indexed target, bytes4 selector);
+    event ModuleInteraction(address indexed target, bytes data);
     event ModuleAdded(address indexed module);
     event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
     event ModuleRemoved(address indexed module);
@@ -83,18 +83,34 @@ library EventsLib {
     event ComplianceBound(address indexed compliance);
     event ComplianceUnbound(address indexed compliance);
 
+    // IdentityRegistry / IdentityRegistryStorage Events
+    // ClaimTopicsRegistry Events
+
+    event ClaimTopicAddedForIdentityType(uint256 indexed identityType, uint256 indexed claimTopic);
+    event ClaimTopicRemovedForIdentityType(uint256 indexed identityType, uint256 indexed claimTopic);
+
     // IdentityRegistry Events
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
+    /// @notice Emitted by `IdentityRegistryStorage.modifyStoredIdentity` right after the standard
+    ///         `IdentityModified(oldIdentity, newIdentity)`, which omits the investor wallet. Pair the two logs of
+    ///         the same transaction; the identities are not repeated here.
+    event InvestorIdentityChanged(address indexed investor);
+
+    // Token Events
+
+    /// @notice Emitted as the very next log after the standard `Transfer` of each `forcedTransfer` /
+    ///         `batchForcedTransfer` item, before the compliance hook runs, so nothing can sit between the two.
+    ///         A `Transfer` alone cannot be told apart from a regular transfer. `agent` is the authorized caller
+    ///         (`_msgSender()`); from / to / value are in the paired `Transfer`.
+    event ForcedTransfer(address indexed agent);
 
     // TREXFactory Events
 
     event Deployed(address indexed addr);
     event IdFactorySet(address idFactory);
 
-    /// @notice Emitted when the ONCHAINID module singletons installed on minted token OIDs change.
-    event IdentityModulesSet(address keyApprovalModule, address validatorModule);
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
     event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
 

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Identity-type-aware claim requirements** (per-type claim topics with default fallback):
+  - The `TREXRegistry` can hold an alternative set of required claim topics per ONCHAINID identity
+    type (`IdentityTypes`: ASSET, INDIVIDUAL, CORPORATE, IOT, CLAIM_ISSUER, SMART_CONTRACT,
+    PUBLIC_AUTHORITY, AI_AGENT), on top of the default ERC-3643 set managed by
+    `addClaimTopic` / `removeClaimTopic` / `getClaimTopics`.
+  - New OWNER-gated functions on `ITREXRegistry`: `addClaimTopicForIdentityType`,
+    `removeClaimTopicForIdentityType`, and the view `getClaimTopicsForIdentityType`. Identity type 0
+    is rejected, as it means "no type" and always resolves to the default topics. Each per-type set
+    is capped at 15 topics, like the default set.
+  - `isVerified()` resolves the investor's identity type and evaluates the topic set registered
+    for that type. **Override semantics, not additive**: a
+    non-empty set for a type fully replaces the default set for identities of that type; a type that
+    should require the default topics plus extras must list the default topics in its set
+    explicitly. Adding a topic to the default set later does not reach types holding an override.
+  - The identity type is read from the ONCHAINID IdentityFactory's creation-time record
+    (`identityTypeOf`), never from the identity contract itself: the record is written once at
+    minting with no update path, so a hostile identity can neither lie about its type nor block
+    resolution by reverting. The factory is a constructor immutable of the registry implementation
+    (exposed via `identityFactory()`), so repointing it takes a new implementation published
+    through the beacon rather than a runtime call.
+  - Default fallback always applies: type 0 (including identities the factory did not mint) or a
+    type without a configured set is evaluated against the default ERC-3643 claim topics. A
+    deployment that never touches the new functions behaves exactly as before.
+  - `UtilityChecker.getVerifiedDetails` resolves the same per-type topics, so its diagnostics match
+    `isVerified`.
+  - New events: `ClaimTopicAddedForIdentityType`, `ClaimTopicRemovedForIdentityType`. New custom
+    error: `InvalidIdentityType`.
 - **Capabilities-based selective module dispatch**: a module declares which dispatch points are
   meaningful for it, and `ModularCompliance` only calls it there.
   - `IModule.moduleCapabilities()` returns a bitmask built from the flags of the new
@@ -54,8 +81,39 @@ All notable changes to this project will be documented in this file.
 - Per-token opt-out is deploy-time only, via `TREXFactory.deployTREXSuiteIsolated(...)`, which clones
   the four beacons under the issuer's own AccessManager so later `publish` / `upgrade` calls on the
   shared authority never reach that suite.
+- **Indexer events**: two events in `EventsLib` and one extra emit, so the graph can read state that
+  was in no log. A value another log of the same transaction already carries is not repeated.
+  - `InvestorIdentityChanged(address indexed investor)`, emitted by
+    `IdentityRegistryStorage.modifyStoredIdentity` right after the standard
+    `IdentityModified(oldIdentity, newIdentity)`, which names the identities but not the wallet.
+  - `ForcedTransfer(address indexed agent)`, emitted as the very next log after the standard
+    `Transfer` of every `forcedTransfer` / `batchForcedTransfer` item, before the compliance hook so
+    no module log can land between the two. A forced transfer was indistinguishable from a regular
+    one in the logs and the agent (`_msgSender()`) appeared nowhere.
+  - `IdentityRegistryStorage.addIdentityToStorage` now emits the standard
+    `CountryModified(investor, country)` after `IdentityStored`; before, only
+    `modifyStoredInvestorCountry` did, so the country given at registration was in no log.
 
 ### Changed
+
+- **`recoveryAddress` now notifies compliance**: recovery moves the balance through `_forceUpdate`,
+  which skips `_update` and therefore its compliance hooks, so `Token.recoveryAddress` now calls
+  `compliance.transferred(lostWallet, newWallet, investorTokens)` after the frozen / address-frozen /
+  identity migrations and before `RecoverySuccess`, the same way `forcedTransfer` does. Previously
+  (v4 behaviour) a recovery was invisible to bound modules: a module tracking balances through the
+  `transferred` / `created` / `destroyed` callbacks kept crediting the lost wallet, and since the lost
+  wallet is removed from the identity registry by the same call, the drift could not be corrected
+  afterwards. Modules that count transfer operations rather than track balances now see a recovery as
+  one transfer.
+- **ONCHAINID dependency synced** to the latest develop (audit fixes and the factory identity-type
+  record). Breaking ripples absorbed here: `Structs.ClaimData` gained `metadataHash` (binds scheme
+  and uri to the claim signature), `createIdentityFor` no longer takes a module bundle (modules are
+  registered per identity type on the IdentityFactory via `setIdentityTypeModules`), and
+  `setIdentityTypePolicy` gained a `singleBinding` flag (ASSET registers as single-binding).
+- **`TREXFactory` module plumbing removed**: identity module configuration now belongs to the
+  ONCHAINID IdentityFactory, so `setIdentityModules` / `getIdentityModules`, the constructor's
+  module parameters, the `IdentityModulesSet` event and the `IdentityModulesLib` library are gone.
+  Token OIDs mint with the per-type bundle the IdentityFactory holds for ASSET.
 
 - **Breaking, registries merged**: `IdentityRegistry`, `TrustedIssuersRegistry` and
   `ClaimTopicsRegistry` are gone, together with `IIdentityRegistry`, `ITrustedIssuersRegistry`,
@@ -101,6 +159,10 @@ All notable changes to this project will be documented in this file.
 - Binding validates fully before writing state, so `canComplianceBind` now sees the module as not yet
   bound. A module declaring nothing, or carrying an undefined bit, cannot be bound
   (`ModuleHasNoCapabilities`, `InvalidModuleCapabilities`).
+- **Breaking, `ModuleInteraction`**: now `(address indexed target, bytes data)` instead of
+  `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
+  through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
+  logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
 
 Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
 ~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;

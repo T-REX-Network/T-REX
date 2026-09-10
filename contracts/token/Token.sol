@@ -76,6 +76,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
@@ -83,6 +84,7 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
@@ -183,17 +185,29 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     }
 
     /// @inheritdoc IERC3643
+    /// @dev A wrong registry halts the token: `isVerified` is called on every transfer.
     function setIdentityRegistry(address identityRegistryAddress)
         public
         restricted
         onlySharedAuthority(identityRegistryAddress)
     {
+        require(
+            ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
+            ErrorsLib.InvalidIdentityRegistry()
+        );
+
         _tokenStorage().identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
         emit ERC3643EventsLib.IdentityRegistryAdded(identityRegistryAddress);
     }
 
     /// @inheritdoc IERC3643
     function setCompliance(address complianceAddress) public restricted onlySharedAuthority(complianceAddress) {
+        // Checked before getTokenBound() so a wrong contract gives a named error.
+        require(
+            ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),
+            ErrorsLib.InvalidCompliance()
+        );
+
         // A compliance already bound to a different token would make every transferred/created/destroyed
         // hook revert (onlyBoundedToken), silently breaking transfers after the swap.
         address boundToken = IModularCompliance(complianceAddress).getTokenBound();
@@ -381,12 +395,18 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /* ----- Recovery Functions ----- */
 
     /// @inheritdoc IERC3643
+    /// @dev `_forceUpdate` skips {_update}, so it does not call the compliance hooks. Compliance is told about
+    ///      the move here instead, like {_forcedTransfer} does. Without this call, modules that track balances
+    ///      would still credit the lost wallet forever, because `_migrateIdentity` removes it from the registry.
+    ///      Modules that count transfers rather than track balances will see a recovery as one transfer.
     function recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         external
         restricted
         returns (bool)
     {
         TokenStorage storage s = _tokenStorage();
+
+        require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
 
         uint256 investorTokens = balanceOf(lostWallet);
         require(investorTokens != 0, ErrorsLib.NoTokenToRecover());
@@ -401,6 +421,10 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
         _migrateIdentity(lostWallet, newWallet, investorOnchainId);
+
+        // Called after the migrations so modules see the final state, and before the event so that no module
+        // log can land between the recovery's own logs and `RecoverySuccess`.
+        s.compliance.transferred(lostWallet, newWallet, investorTokens);
 
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
 
@@ -504,6 +528,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         TokenStorage storage s = _tokenStorage();
         require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
+        // Emitted before the compliance hook so that no module log can land between `Transfer` and this event.
+        emit EventsLib.ForcedTransfer(_msgSender());
         s.compliance.transferred(from, to, amount);
         return true;
     }
@@ -537,6 +563,8 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             _autoUnfreezeFor(from, value);
         }
 
+        // a mint reaches canTransfer with `from` at the zero address so that distribution rules stay enforced at
+        // issuance, which is the convention modules read to tell a mint from a transfer
         if (!isBurn) {
             require(s.identityRegistry.isVerified(to), ErrorsLib.UnverifiedIdentity());
             require(s.compliance.canTransfer(from, to, value), ErrorsLib.ComplianceNotFollowed());

@@ -18,7 +18,6 @@ import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityReg
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
-import { IdentityModulesLib } from "contracts/libraries/IdentityModulesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { VersionLib } from "contracts/libraries/VersionLib.sol";
 import {
@@ -28,6 +27,7 @@ import {
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
+import { IdentityModulesHelper } from "test/helpers/IdentityModulesHelper.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
@@ -113,14 +113,16 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      (needs factory + registry) -> Identity impl (the validator is its enshrined registry
     ///      immutable) -> factory.initializeBeacon (deploys the beacon at its predetermined CREATE3 slot).
     function _deployOnchainId() internal {
-        idFactory = _newIdentityFactory();
-
         vm.startPrank(deployer);
+        idFactory = new IdentityFactory(address(accessManager));
         keyApprovalModule = new KeyApprovalModule();
         reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
         validatorModule = new ERC734Validator(address(idFactory), address(reputationRegistry));
         identityImplementation = new Identity(address(validatorModule), address(idFactory));
         vm.stopPrank();
+
+        // Registered after the module singletons exist: the per-type module bundles reference them.
+        _registerIdentityTypePolicies(idFactory);
 
         // The factory's beacon owner is the suite AccessManager, so initializeBeacon is restricted;
         // the test contract is the AM admin and drives it.
@@ -130,21 +132,15 @@ contract TREXSuiteTest is AccessManagerHelper {
         claimIssuer = _deployClaimIssuer();
     }
 
-    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory and ONCHAINID module singletons.
-    ///      The modules are constructor config because a token OID minted without them could not hold
-    ///      claims.
+    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory. The ASSET module bundle is
+    ///      registered on the IdentityFactory per type (`setIdentityTypeModules`), so the TREX factory
+    ///      carries no module configuration of its own.
     function _newTREXFactory(address implementationAuthority, address accessManagerAddress)
         internal
         returns (TREXFactory factory)
     {
         vm.startPrank(deployer);
-        factory = new TREXFactory(
-            implementationAuthority,
-            address(idFactory),
-            address(keyApprovalModule),
-            address(validatorModule),
-            accessManagerAddress
-        );
+        factory = new TREXFactory(implementationAuthority, address(idFactory), accessManagerAddress);
         vm.stopPrank();
     }
 
@@ -161,18 +157,27 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     /// @dev Registers the identity types the suite mints; the factory rejects unregistered types from
-    ///      both deploy paths. INDIVIDUAL and CLAIM_ISSUER are open (PUBLIC_ROLE, self-deployable) for
-    ///      test convenience. ASSET is gated behind ASSET_DEPLOYER with self-deploy off, mirroring
+    ///      both deploy paths. INDIVIDUAL, CORPORATE and CLAIM_ISSUER are open (PUBLIC_ROLE,
+    ///      self-deployable) for test convenience. ASSET is gated behind ASSET_DEPLOYER with self-deploy off, mirroring
     ///      production: only a registered token factory mints token OIDs, and a token cannot sign for
     ///      itself.
     /// @dev Called as the test contract, which is the AccessManager admin (see AccessManagerHelper);
     ///      `setIdentityTypePolicy` is restricted and its selector defaults to ADMIN_ROLE.
     function _registerIdentityTypePolicies(IdentityFactory factory) internal {
         uint64 publicRole = accessManager.PUBLIC_ROLE();
+        // Modules are registered per type on the factory; deploy callers pass none.
+        Structs.ModuleInstall[] memory standardModules =
+            IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule));
 
-        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true);
-        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true);
-        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false);
+        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true, false);
+        factory.setIdentityTypeModules(IdentityTypes.INDIVIDUAL, standardModules);
+        factory.setIdentityTypePolicy(IdentityTypes.CORPORATE, publicRole, true, false);
+        factory.setIdentityTypeModules(IdentityTypes.CORPORATE, standardModules);
+        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
+        factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
+        // ASSET is single-binding as in production: a token OID binds to exactly one token.
+        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true);
+        factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
 
     /// @dev A claim issuer is an Identity of type CLAIM_ISSUER holding a CLAIM_SIGNER key. The
@@ -189,13 +194,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         issuerKeys[1] = _ecdsaKey(signer, KeyPurposes.CLAIM_SIGNER);
 
         vm.prank(deployer);
-        address issuer = idFactory.createIdentityFor(
-            signer,
-            IdentityTypes.CLAIM_ISSUER,
-            salt,
-            issuerKeys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
-        );
+        address issuer = idFactory.createIdentityFor(signer, IdentityTypes.CLAIM_ISSUER, salt, issuerKeys);
         return Identity(payable(issuer));
     }
 
@@ -215,13 +214,18 @@ contract TREXSuiteTest is AccessManagerHelper {
         keys[0] = _ecdsaKey(wallet, KeyPurposes.MANAGEMENT);
 
         vm.prank(deployer);
-        address identity = factory.createIdentityFor(
-            wallet,
-            IdentityTypes.INDIVIDUAL,
-            salt,
-            keys,
-            IdentityModulesLib.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
-        );
+        address identity = factory.createIdentityFor(wallet, IdentityTypes.INDIVIDUAL, salt, keys);
+        return IIdentity(identity);
+    }
+
+    /// @dev Deploys a CORPORATE identity whose sole wallet and management key is `wallet`, for the
+    ///      tests that need a business investor rather than a natural person.
+    function _deployCorporateIdentity(address wallet, string memory salt) internal returns (IIdentity) {
+        Structs.KeyParam[] memory keys = new Structs.KeyParam[](1);
+        keys[0] = _ecdsaKey(wallet, KeyPurposes.MANAGEMENT);
+
+        vm.prank(deployer);
+        address identity = idFactory.createIdentityFor(wallet, IdentityTypes.CORPORATE, salt, keys);
         return IIdentity(identity);
     }
 
@@ -245,7 +249,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         tokenImplementation = new Token();
         identityRegistryStorageImplementation = new IdentityRegistryStorage();
         modularComplianceImplementation = new ModularCompliance();
-        trexRegistryImplementation = new TREXRegistry();
+        trexRegistryImplementation = new TREXRegistry(address(idFactory));
     }
 
     function _deployFactories() internal {
@@ -427,7 +431,12 @@ contract TREXSuiteTest is AccessManagerHelper {
         _addClaimWithValidity(
             _identity,
             _claimTopic,
-            Structs.ClaimData({ issuedAt: block.timestamp, validUntil: 0, payload: _claimData }),
+            Structs.ClaimData({
+                issuedAt: block.timestamp,
+                validUntil: 0,
+                metadataHash: validatorModule.getMetadataHash(1, "uri"),
+                payload: _claimData
+            }),
             _signerPrivateKey,
             _claimIssuer,
             _caller

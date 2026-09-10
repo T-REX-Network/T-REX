@@ -132,6 +132,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         s.identities[_userAddress].identityContract = _identity;
         s.identities[_userAddress].investorCountry = _country;
         emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
+        // The standard store event omits the country; emit the same event `modifyStoredInvestorCountry` uses.
+        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
     }
 
     /**
@@ -144,6 +146,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         IIdentity oldIdentity = s.identities[_userAddress].identityContract;
         s.identities[_userAddress].identityContract = _identity;
         emit ERC3643EventsLib.IdentityModified(oldIdentity, _identity);
+        emit EventsLib.InvestorIdentityChanged(_userAddress);
     }
 
     /**

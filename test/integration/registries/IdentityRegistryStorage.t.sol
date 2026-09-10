@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentity, Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
-import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { ERC734Validator } from "@onchain-id/solidity/contracts/modules/validators/ERC734Validator.sol";
+import { ReputationRegistry } from "@onchain-id/solidity/contracts/reputation/ReputationRegistry.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -19,6 +21,7 @@ import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -92,7 +95,31 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.addIdentityToStorage(bob, charlieIdentity, Countries.FRANCE);
     }
 
+    /// @notice Storing an identity also emits `CountryModified`, so the country is observable from logs.
+    function test_addIdentityToStorage_EmitsIdentityStoredAndCountryModified() public {
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.CountryModified(another, Countries.FRANCE);
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, Countries.FRANCE);
+
+        assertEq(identityRegistryStorage.storedInvestorCountry(another), Countries.FRANCE);
+    }
+
     // ============ modifyStoredIdentity() Tests ============
+
+    /// @notice `InvestorIdentityChanged` names the wallet the standard `IdentityModified` omits.
+    function test_modifyStoredIdentity_EmitsInvestorIdentityChanged() public {
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityModified(bobIdentity, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.InvestorIdentityChanged(bob);
+        vm.prank(agent);
+        identityRegistryStorage.modifyStoredIdentity(bob, charlieIdentity);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(charlieIdentity));
+    }
 
     /// @notice Should revert when sender is not agent
     function test_modifyStoredIdentity_RevertWhen_NotAgent() public {
@@ -374,9 +401,15 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     /// @notice Should update the idFactory and affect subsequent fallbacks
     function test_setIdFactory_Success() public {
-        // Deploy a fresh IdentityFactory and register `another` only in it.
+        // Deploy a fresh IdentityFactory and register `another` only in it. The factory only accepts
+        // an implementation whose trust anchors name it, so the validator and identity are rebuilt.
         IdentityFactory newIdFactory = _newIdentityFactory();
-        newIdFactory.initializeBeacon(address(identityImplementation));
+        vm.startPrank(deployer);
+        ReputationRegistry newReputationRegistry = new ReputationRegistry(address(accessManager), address(newIdFactory));
+        ERC734Validator newValidator = new ERC734Validator(address(newIdFactory), address(newReputationRegistry));
+        Identity newImplementation = new Identity(address(newValidator), address(newIdFactory));
+        vm.stopPrank();
+        newIdFactory.initializeBeacon(address(newImplementation));
         address newGlobalIdentity = address(_deployIdentityIn(newIdFactory, another, "another"));
 
         vm.prank(deployer);

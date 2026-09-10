@@ -4,6 +4,8 @@ pragma solidity 0.8.30;
 import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
 import { Errors } from "@onchain-id/solidity/contracts/libraries/Errors.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
+import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
+import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -714,6 +716,55 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(deployedToken.onchainID(), suppliedOID, "Supplied ONCHAINID must survive the missing role");
     }
 
+    /// @notice L-05: the token's CREATE3 address is public before the suite exists, and the
+    ///         IdentityFactory's ASSET binding is write-once. Another ASSET_DEPLOYER can bind that
+    ///         address to its own identity first. The auto-mint path fails loudly inside
+    ///         `createIdentityFor`, but a caller-supplied ONCHAINID skips that call, so `_deployToken`
+    ///         checks the binding itself rather than deploying onto a squatted address.
+    function test_deployTREXSuite_RevertWhen_PredictedTokenBoundToAnotherIdentity() public {
+        string memory salt = "squatted-token-salt";
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+
+        // A second holder of ASSET_DEPLOYER binds the predicted address before the suite deploys.
+        address squatter = makeAddr("Squatter");
+        _grantTokenOidMinterRole(squatter);
+        Structs.KeyParam[] memory squatterKeys = new Structs.KeyParam[](1);
+        squatterKeys[0] = _ecdsaKey(squatter, KeyPurposes.MANAGEMENT);
+        vm.prank(squatter);
+        address squattedIdentity =
+            idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, "squatter-salt", squatterKeys);
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = makeAddr("SuppliedOID");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityAlreadyBound.selector, predictedToken, squattedIdentity)
+        );
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
+    }
+
+    /// @notice Pre-creating the token identity and passing it in is the normal flow, so a binding that
+    ///         already resolves to the supplied ONCHAINID must deploy rather than trip the guard.
+    function test_deployTREXSuite_Succeeds_WhenPredictedTokenBoundToSuppliedONCHAINID() public {
+        string memory salt = "prebound-token-salt";
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+
+        _grantTokenOidMinterRole(address(this));
+        Structs.KeyParam[] memory ownerKeys = new Structs.KeyParam[](1);
+        ownerKeys[0] = _ecdsaKey(address(this), KeyPurposes.MANAGEMENT);
+        address boundIdentity =
+            idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, "prebound-salt", ownerKeys);
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = boundIdentity;
+
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
+
+        Token deployedToken = Token(trexFactory.getToken(salt));
+        assertEq(address(deployedToken), predictedToken, "Deployed Token must land on the predicted address");
+        assertEq(deployedToken.onchainID(), boundIdentity, "Token.onchainID must equal the pre-bound identity");
+    }
+
     // ============ AccessManagerSetupLib.setupIdentityFactoryPolicy() Tests ============
 
     /// @notice The helper must be sufficient wiring on its own: starting from a fully unwired state
@@ -726,13 +777,14 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///      `restricted` `setIdentityTypePolicy`, and it is ASSET_DEPLOYER's role admin.
     function test_setupIdentityFactoryPolicy_RestoresAutoMintPath() public {
         // Undo both prerequisites the suite wires by hand in `_registerIdentityTypePolicies` and
-        // `_deployFactories`. roleId 0 unregisters the type, so even a role holder is rejected.
-        idFactory.setIdentityTypePolicy(IdentityTypes.ASSET, 0, false);
+        // `_deployFactories`. Removing the policy unregisters the type, so even a role holder is
+        // rejected.
+        idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
         accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
 
         AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
 
-        (uint64 roleId, bool selfDeployable) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
+        (uint64 roleId, bool selfDeployable,,) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
         assertEq(roleId, RolesLib.ASSET_DEPLOYER, "ASSET minting must be gated behind ASSET_DEPLOYER");
         assertFalse(selfDeployable, "A token must not be able to self-deploy its own OID");
 
@@ -759,7 +811,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///         ASSET_DEPLOYER against the IdentityFactory's own `authority()`, so passing any other
     ///         manager grants the role somewhere the check never looks and auto-mint still reverts.
     function test_setupIdentityFactoryPolicy_RevertWhen_RoleGrantedOnForeignAuthority() public {
-        idFactory.setIdentityTypePolicy(IdentityTypes.ASSET, 0, false);
+        idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
         accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
 
         // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
@@ -1009,51 +1061,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_constructor_RevertWhen_AccessManagerZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(keyApprovalModule),
-            address(validatorModule),
-            address(0)
-        );
-    }
-
-    function test_constructor_RevertWhen_IdentityModuleZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(0),
-            address(validatorModule),
-            address(accessManager)
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(keyApprovalModule),
-            address(0),
-            address(accessManager)
-        );
-    }
-
-    function test_setIdentityModules_Success() public {
-        address newKeyApprovalModule = makeAddr("newKeyApprovalModule");
-        address newValidatorModule = makeAddr("newValidatorModule");
-
-        vm.prank(deployer);
-        trexFactory.setIdentityModules(newKeyApprovalModule, newValidatorModule);
-
-        (address keyApproval, address validator) = trexFactory.getIdentityModules();
-        assertEq(keyApproval, newKeyApprovalModule);
-        assertEq(validator, newValidatorModule);
-    }
-
-    function test_setIdentityModules_RevertWhen_NotOwner() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        trexFactory.setIdentityModules(address(keyApprovalModule), address(validatorModule));
+        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(0));
     }
 
     // ============ setImplementationAuthority() Tests ============
@@ -1086,13 +1094,8 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_deployTREXSuite_RevertWhen_CREATE2Fails() public {
         // Deploy test factory that invoke the internal functon _deploy
-        TestTREXFactory testFactory = new TestTREXFactory(
-            address(trexImplementationAuthority),
-            address(idFactory),
-            address(keyApprovalModule),
-            address(validatorModule),
-            address(accessManager)
-        );
+        TestTREXFactory testFactory =
+            new TestTREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
 
         // Use empty bytecode so the CREATE2 will return address(0)
         bytes memory emptyBytecode = new bytes(0);

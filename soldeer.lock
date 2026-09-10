@@ -20,7 +20,3 @@ checksum = "405dccc9d60d753f6abc412b4adf0359f4390f65dbadbbb277a12b4946ed8969"
 integrity = "5fb4325b60d7d4194bd0481e2f94398cf1d9c6561dd12a66fb2748ef4a68205f"
 
 [[dependencies]]
-name = "onchain-id"
-version = "develop"
-git = "https://github.com/T-REX-Network/ONCHAINID.git"
-rev = "d2096509e3bed2589fff36f6f673498f47e23d73"
