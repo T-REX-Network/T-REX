@@ -72,9 +72,16 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
         mockIdentityRegistryIsLocallyRegistered(newWallet, false);
-        mockIdentityRegistryInvestorCountry(lostWallet, 1);
-        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
+        // The registry stores no country, so the new wallet is registered with 0 and no country is read.
+        vm.expectCall(
+            identityRegistry,
+            abi.encodeWithSelector(
+                IERC3643IdentityRegistry.registerIdentity.selector, newWallet, IIdentity(investorOnchainId), uint16(0)
+            ),
+            1
+        );
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
         vm.prank(agent);
@@ -92,8 +99,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
         mockIdentityRegistryIsLocallyRegistered(newWallet, false);
-        mockIdentityRegistryInvestorCountry(lostWallet, 1);
-        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectCall(
             compliance,
@@ -112,8 +118,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
         mockIdentityRegistryIsLocallyRegistered(newWallet, false);
-        mockIdentityRegistryInvestorCountry(lostWallet, 1);
-        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.TokensUnfrozen(lostWallet, frozenAmount);
@@ -135,8 +140,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
         mockIdentityRegistryIsLocallyRegistered(newWallet, false);
-        mockIdentityRegistryInvestorCountry(lostWallet, 1);
-        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 1);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.AddressFrozen(lostWallet, false, address(token));
@@ -170,7 +174,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
     function testTokenRecoveryAddressRevertsWhenLostWalletIsNewWallet() public {
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
-        mockIdentityRegistryInvestorCountry(lostWallet, 1);
 
         vm.expectRevert(ErrorsLib.SameWalletRecovery.selector);
         vm.prank(agent);
@@ -182,7 +185,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
     function testTokenRecoveryAddressSameWalletLeavesIdentityAndBalanceIntact() public {
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
-        mockIdentityRegistryInvestorCountry(lostWallet, 1);
 
         vm.expectRevert(ErrorsLib.SameWalletRecovery.selector);
         vm.prank(agent);
@@ -214,14 +216,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
             identityRegistry,
             abi.encodeWithSelector(ITREXRegistry.isLocallyRegistered.selector, wallet),
             abi.encode(locallyRegistered)
-        );
-    }
-
-    function mockIdentityRegistryInvestorCountry(address wallet, uint16 country) internal {
-        vm.mockCall(
-            identityRegistry,
-            abi.encodeWithSelector(IERC3643IdentityRegistry.investorCountry.selector, wallet),
-            abi.encode(country)
         );
     }
 

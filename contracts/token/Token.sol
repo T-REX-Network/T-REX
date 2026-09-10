@@ -457,7 +457,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
 
     /// @dev Moves the on-chain identity from the lost wallet to the new wallet. The new wallet is registered
     ///      whenever it has no *local* entry, since resolving through the global identity registry fallback
-    ///      leaves nothing to delete and no investor country recorded on this IRS.
+    ///      leaves nothing to delete. The registry stores no country, so the registration passes 0.
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
         TokenStorage storage s = _tokenStorage();
         ITREXRegistry registry = ITREXRegistry(address(s.identityRegistry));
@@ -469,10 +469,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         );
 
         if (!registry.isLocallyRegistered(newWallet)) {
-            s.identityRegistry
-                .registerIdentity(
-                    newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
-                );
+            s.identityRegistry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
         }
         if (registry.isLocallyRegistered(lostWallet)) {
             s.identityRegistry.deleteIdentity(lostWallet);
