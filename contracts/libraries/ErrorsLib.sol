@@ -140,10 +140,4 @@ library ErrorsLib {
     // TREXRegistry Errors
     error Deprecated();
 
-    /// @dev Caller is not the token this registry is bound to.
-    error AddressNotATokenBoundToRegistry();
-
-    /// @dev The registry serves no token, so there is no compliance to reconcile through.
-    error NoTokenBound();
-
 }

@@ -13,7 +13,6 @@ import {
     BurnOnlyModule,
     CheckTransferOnlyModule,
     MintOnlyModule,
-    MockAttributeSyncModule,
     RecordingModule,
     SpenderCheckOnlyModule,
     TransferHookOnlyModule,
@@ -31,14 +30,8 @@ contract ModuleCapabilitiesUnitTest is Test {
 
     /// @notice Every flag is a distinct single bit.
     function test_capabilityFlags_Success_WhenEachIsADistinctSingleBit() public pure {
-        uint256[6] memory flags = [
-            Caps.CHECK_TRANSFER,
-            Caps.CHECK_SPENDER,
-            Caps.HOOK_TRANSFER,
-            Caps.HOOK_MINT,
-            Caps.HOOK_BURN,
-            Caps.HOOK_ATTRIBUTE_SYNC
-        ];
+        uint256[5] memory flags =
+            [Caps.CHECK_TRANSFER, Caps.CHECK_SPENDER, Caps.HOOK_TRANSFER, Caps.HOOK_MINT, Caps.HOOK_BURN];
 
         uint256 seen;
         for (uint256 i = 0; i < flags.length; i++) {
@@ -50,14 +43,12 @@ contract ModuleCapabilitiesUnitTest is Test {
         }
     }
 
-    /// @notice ALL is exactly the union of the six flags.
+    /// @notice ALL is exactly the union of the five flags.
     function test_capabilityFlags_Success_WhenAllIsTheUnionOfEveryFlag() public pure {
         assertEq(
-            Caps.ALL,
-            Caps.CHECK_TRANSFER | Caps.CHECK_SPENDER | Caps.HOOK_TRANSFER | Caps.HOOK_MINT | Caps.HOOK_BURN
-                | Caps.HOOK_ATTRIBUTE_SYNC
+            Caps.ALL, Caps.CHECK_TRANSFER | Caps.CHECK_SPENDER | Caps.HOOK_TRANSFER | Caps.HOOK_MINT | Caps.HOOK_BURN
         );
-        assertEq(Caps.ALL, 0x3f);
+        assertEq(Caps.ALL, 0x1f);
     }
 
     // ==== .moduleCapabilities declaration Tests ====
@@ -69,9 +60,6 @@ contract ModuleCapabilitiesUnitTest is Test {
         assertEq(IModule(_deploy(address(new TransferHookOnlyModule()))).moduleCapabilities(), Caps.HOOK_TRANSFER);
         assertEq(IModule(_deploy(address(new CheckTransferOnlyModule()))).moduleCapabilities(), Caps.CHECK_TRANSFER);
         assertEq(IModule(_deploy(address(new SpenderCheckOnlyModule()))).moduleCapabilities(), Caps.CHECK_SPENDER);
-        assertEq(
-            IModule(_deploy(address(new MockAttributeSyncModule()))).moduleCapabilities(), Caps.HOOK_ATTRIBUTE_SYNC
-        );
         assertEq(IModule(_deploy(address(new AllCapabilitiesModule()))).moduleCapabilities(), Caps.ALL);
     }
 
@@ -117,9 +105,6 @@ contract ModuleCapabilitiesUnitTest is Test {
 
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
         module.moduleBurnAction(_stranger, 1);
-
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        module.moduleAttributeSync(_stranger, 1, 250, 724, 1);
         vm.stopPrank();
     }
 

@@ -58,20 +58,19 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
     // ============ updateCountry() ============
 
-    /// @notice A caller without AGENT is stopped by the AccessManager before reaching the body.
     function test_updateCountry_RevertWhen_NotAgent() public {
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         registry.updateCountry(bob, 999);
     }
 
-    /// @notice A registry serving no token has no compliance to reconcile through, so the alias has
-    ///         nowhere to delegate. This bare registry is never bound to one.
-    function test_updateCountry_RevertWhen_NoTokenBound() public {
-        assertEq(registry.tokenBound(), address(0));
-
-        vm.expectRevert(ErrorsLib.NoTokenBound.selector);
+    function test_updateCountry_Success() public {
+        vm.prank(agent);
+        vm.expectEmit(true, true, false, false, address(registry));
+        emit ERC3643EventsLib.CountryUpdated(bob, 999);
         registry.updateCountry(bob, 999);
+
+        assertEq(registry.investorCountry(bob), 999);
     }
 
     // ============ deleteIdentity() ============
@@ -145,10 +144,8 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         assertEq(address(registry.identity(second)), address(secondIdentity));
         assertTrue(registry.isLocallyRegistered(another));
         assertTrue(registry.isLocallyRegistered(second));
-        // The country passed to register is vestigial: `investorCountry` reads the identity's
-        // country claim, and neither of these freshly deployed identities carries one.
-        assertEq(registry.investorCountry(another), 0);
-        assertEq(registry.investorCountry(second), 0);
+        assertEq(registry.investorCountry(another), 250);
+        assertEq(registry.investorCountry(second), 840);
     }
 
     // ============ setIdentityRegistryStorage() ============

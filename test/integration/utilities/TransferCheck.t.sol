@@ -104,7 +104,8 @@ contract TransferCheckTest is TREXSuiteTest {
     /// @notice Should return true in nominal case
     function test_getTransferStatus_ReturnsTrue_WhenNominalCase() public {
         // Update bob's country to ensure eligibility
-        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
+        vm.prank(agent);
+        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);
@@ -143,7 +144,8 @@ contract TransferCheckTest is TREXSuiteTest {
     /// @notice Should return true after TREXFactorySetup
     function test_getTransferStatus_ReturnsTrue_AfterSetup() public {
         // Update bob's country to ensure eligibility
-        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
+        vm.prank(agent);
+        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);
@@ -173,7 +175,8 @@ contract TransferCheckTest is TREXSuiteTest {
         testModule.blockModule(true);
 
         // Update bob's country to ensure eligibility
-        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
+        vm.prank(agent);
+        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);
@@ -186,7 +189,8 @@ contract TransferCheckTest is TREXSuiteTest {
     /// @notice Should return true when all checks pass including compliance
     function test_getTransferStatus_ReturnsTrue_WhenAllChecksPass() public {
         // Update bob's country to ensure eligibility
-        _addCountryClaim(bobIdentity, Countries.UNITED_STATES, bob);
+        vm.prank(agent);
+        identityRegistry.updateCountry(bob, Countries.UNITED_STATES);
 
         (bool freezeStatus, bool eligibilityStatus, bool complianceStatus) =
             utilityChecker.getTransferStatus(address(token), alice, bob, 100);

@@ -77,9 +77,10 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @dev struct containing the identity contract
+    /// @dev struct containing the identity contract and the country of the user
     struct Identity {
         IIdentity identityContract;
+        uint16 investorCountry;
     }
 
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistryStorage
@@ -122,22 +123,14 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
-     *  @dev The country argument is ignored: the storage may be shared by several registries, and the
-     *  cache is per token.
      */
-    function addIdentityToStorage(
-        address _userAddress,
-        IIdentity _identity,
-        uint16 /*_country*/
-    )
-        external
-        restricted
-    {
+    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
         require(address(s.identities[_userAddress].identityContract) == address(0), ErrorsLib.AddressAlreadyStored());
         s.identities[_userAddress].identityContract = _identity;
+        s.identities[_userAddress].investorCountry = _country;
         emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
     }
 
@@ -155,10 +148,13 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
-     *  @dev DEPRECATED, always reverts: this storage holds no country.
      */
-    function modifyStoredInvestorCountry(address, uint16) external override restricted {
-        revert ErrorsLib.Deprecated();
+    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external restricted {
+        require(_userAddress != address(0), ErrorsLib.ZeroAddress());
+        Storage storage s = _getStorage();
+        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
+        s.identities[_userAddress].investorCountry = _country;
+        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
     }
 
     /**
@@ -239,10 +235,11 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedInvestorCountry}.
-     *  @dev DEPRECATED, always returns 0: read `investorCountry` on the Identity Registry.
+     *  @dev Returns 0 for wallets that only exist in the global identity registry fallback, because the
+     *  global registry does not track investor country.
      */
-    function storedInvestorCountry(address) external pure override returns (uint16) {
-        return 0;
+    function storedInvestorCountry(address _userAddress) external view returns (uint16) {
+        return _getStorage().identities[_userAddress].investorCountry;
     }
 
     /**
