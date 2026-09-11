@@ -37,8 +37,10 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
         _grantOwnerRole(address(this));
         _grantComplianceManagerRole(address(this));
         _grantAgentRole(agentAccount);
+        _grantValidationKeeperRole(keeperAccount);
     }
 
     address public agentAccount = makeAddr("Agent");
+    address public keeperAccount = makeAddr("Keeper");
 
 }

@@ -98,6 +98,8 @@ abstract contract TransferValidation is ITransferValidation {
         uint256 nextValidationId;
         /// What the slot lifecycle keys on.
         mapping(uint256 validationId => ValidationRecord record) validations;
+        /// What settlement moves.
+        mapping(uint256 validationId => ValidationState state) states;
     }
 
     /// @dev Both sides of a movement, parsed once. Native means a non-zero EVM address on this chain.
@@ -169,6 +171,22 @@ abstract contract TransferValidation is ITransferValidation {
         return _validationStorage().validations[validationId];
     }
 
+    /// @inheritdoc ITransferValidation
+    function statusOf(uint256 validationId) public view returns (ValidationStatus) {
+        ValidationStorage storage s = _validationStorage();
+        require(_isIssued(s, validationId), ErrorsLib.UnknownValidation(validationId));
+        ValidationStatus status = s.states[validationId].status;
+        if (status == ValidationStatus.Pending && block.timestamp > s.validations[validationId].releaseAt) {
+            return ValidationStatus.Expired;
+        }
+        return status;
+    }
+
+    /// @inheritdoc ITransferValidation
+    function stateOf(uint256 validationId) public view returns (ValidationState memory) {
+        return _validationStorage().states[validationId];
+    }
+
     /* ----- What the compliance provides ----- */
 
     /// @dev The token this compliance is bound to.
@@ -232,6 +250,35 @@ abstract contract TransferValidation is ITransferValidation {
         require(s.issuancePaused[chainKey], ErrorsLib.ValidationIssuanceNotPaused(chainKey));
         s.issuancePaused[chainKey] = false;
         emit EventsLib.ValidationIssuanceUnpaused(chainKey);
+    }
+
+    /* ----- Discard ----- */
+
+    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a `BurnConfirmed` one is
+    ///  refused whatever the clock says. One refused id reverts the whole batch.
+    function _discardExpired(uint256[] calldata validationIds) internal {
+        ValidationStorage storage s = _validationStorage();
+        for (uint256 i = 0; i < validationIds.length; i++) {
+            uint256 validationId = validationIds[i];
+            require(_isIssued(s, validationId), ErrorsLib.UnknownValidation(validationId));
+            ValidationState storage state = s.states[validationId];
+            require(
+                state.status == ValidationStatus.Pending,
+                ErrorsLib.ValidationNotDiscardable(validationId, uint8(state.status))
+            );
+            uint64 releaseAt = s.validations[validationId].releaseAt;
+            require(block.timestamp > releaseAt, ErrorsLib.ValidationNotReleasable(validationId, releaseAt));
+
+            state.status = ValidationStatus.Discarded;
+            _releaseSlots(validationId);
+
+            emit EventsLib.ValidationDiscarded(validationId);
+        }
+    }
+
+    /// @dev Ids start at 1 and `nextValidationId` is the last one issued.
+    function _isIssued(ValidationStorage storage s, uint256 validationId) internal view returns (bool) {
+        return validationId != 0 && validationId <= s.nextValidationId;
     }
 
     /// @dev A settlement of `validationId` arrived from `chainKey` after `releaseAt`. The slot lifecycle records it
@@ -361,7 +408,10 @@ abstract contract TransferValidation is ITransferValidation {
             expiry: validation.expiry,
             releaseAt: validation.expiry + validation.reconciliationWindow,
             fromChainKey: legs.fromChainKey,
-            toChainKey: legs.toChainKey
+            toChainKey: legs.toChainKey,
+            fromKey: WalletKeyLib.canonicalKey(validation.from),
+            toKey: WalletKeyLib.canonicalKey(validation.to),
+            twoLegs: !legs.fromNative && !legs.toNative && legs.fromChainKey != legs.toChainKey
         });
     }
 

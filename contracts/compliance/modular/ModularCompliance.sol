@@ -271,6 +271,11 @@ contract ModularCompliance is
         _unpauseIssuance(chainKey);
     }
 
+    /// @inheritdoc ITransferValidation
+    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+        _discardExpired(validationIds);
+    }
+
     /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */

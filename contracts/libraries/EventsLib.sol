@@ -177,6 +177,8 @@ library EventsLib {
     /// @notice Warning: a reconciliation of `validationId` arrived from `chainKey` after its release deadline.
     ///         The settlement is recorded regardless, and issuance for that chain is paused until unpaused.
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
+    /// @notice Emitted when the keeper discards an expired validation and its slots are released.
+    event ValidationDiscarded(uint256 indexed validationId);
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

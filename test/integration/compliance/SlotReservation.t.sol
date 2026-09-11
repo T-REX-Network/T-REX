@@ -140,6 +140,21 @@ contract SlotReservationTest is InteropSuiteTest {
         assertEq(_max(_issue(10, 60)), 40);
     }
 
+    /// @notice The keeper's discard releases the reservation, so the next validation gets the full cap.
+    function test_discardExpiredValidations_Success_WhenReissuingAfterADiscard() public {
+        uint256 id = _issue(10, CAP);
+        assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
+
+        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.prank(keeper);
+        boundCompliance.discardExpiredValidations(ids);
+
+        assertEq(slots.heldOf(address(boundCompliance), bobSat), 0);
+        assertEq(_max(_issue(10, CAP)), CAP);
+    }
+
     /// @notice A commit for an id the module never reserved applies the delta anyway.
     function test_commitSlots_Success_WhenThereIsNoLiveReservation() public {
         harness.exposed_commitSlots(42, 30);

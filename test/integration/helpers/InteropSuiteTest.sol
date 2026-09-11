@@ -29,9 +29,13 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
     /// @dev The suite token's compliance, with the validation windows an issuance needs already set.
     ModularCompliance boundCompliance;
 
+    /// @dev Holds VALIDATION_KEEPER and nothing else.
+    address public keeper = makeAddr("keeper");
+
     function setUp() public virtual override {
         super.setUp();
         boundCompliance = ModularCompliance(address(token.compliance()));
+        _grantValidationKeeperRole(keeper);
         vm.startPrank(deployer);
         boundCompliance.setDefaultValidityWindow(VALIDITY_WINDOW);
         boundCompliance.setReconciliationWindow(polygon, POLYGON_WINDOW);

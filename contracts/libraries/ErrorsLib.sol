@@ -171,6 +171,12 @@ library ErrorsLib {
     error UnverifiedWallet(bytes wallet);
     /// @dev Both wallets live on the reference chain: nothing for a satellite to execute.
     error NoSatelliteLeg();
+    /// @dev The id was never issued by this compliance.
+    error UnknownValidation(uint256 validationId);
+    /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
+    error ValidationNotDiscardable(uint256 validationId, uint8 status);
+    /// @dev The validation's release deadline has not passed yet.
+    error ValidationNotReleasable(uint256 validationId, uint64 releaseAt);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error ChainNotOpen(bytes32 chainKey);

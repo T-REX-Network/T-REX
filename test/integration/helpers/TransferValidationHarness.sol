@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 
 /// @title TransferValidationHarness
@@ -18,6 +19,11 @@ contract TransferValidationHarness is ModularCompliance {
 
     function exposed_releaseSlots(uint256 validationId) external {
         _releaseSlots(validationId);
+    }
+
+    /// @dev Writes a stored status directly, for states the real paths do not produce yet.
+    function exposed_setStatus(uint256 validationId, ITransferValidation.ValidationStatus status) external {
+        _validationStorage().states[validationId].status = status;
     }
 
 }

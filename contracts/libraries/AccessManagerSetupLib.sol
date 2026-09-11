@@ -217,6 +217,11 @@ library AccessManagerSetupLib {
         functions = new bytes4[](1);
         functions[0] = ITransferValidation.requestTransferValidation.selector;
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.AGENT);
+
+        // ------ VALIDATION_KEEPER role ------
+        // The garbage collector: releases the slots of validations a satellite never consumed, in batches.
+        functions[0] = ModularCompliance.discardExpiredValidations.selector;
+        accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.VALIDATION_KEEPER);
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
@@ -278,7 +283,7 @@ library AccessManagerSetupLib {
     }
 
     /// @notice Wires the role-giver hierarchy. Call once, before any operational grant.
-    ///         AGENT_ADMIN administers AGENT and every granular AGENT_* role; SUITE_ADMIN
+    ///         AGENT_ADMIN administers AGENT, every granular AGENT_* role and VALIDATION_KEEPER; SUITE_ADMIN
     ///         administers TOKEN_MANAGER, IDENTITY_MANAGER and COMPLIANCE_MANAGER. OWNER is intentionally left
     ///         under ADMIN_ROLE (0) so only the governance multisig can grant it.
     function setupRoleAdmins(IAccessManager accessManager) internal {
@@ -291,6 +296,7 @@ library AccessManagerSetupLib {
         accessManager.setRoleAdmin(RolesLib.AGENT_RECOVERY_ADDRESS, RolesLib.AGENT_ADMIN);
         accessManager.setRoleAdmin(RolesLib.AGENT_FORCED_TRANSFER, RolesLib.AGENT_ADMIN);
         accessManager.setRoleAdmin(RolesLib.AGENT_PAUSER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.VALIDATION_KEEPER, RolesLib.AGENT_ADMIN);
 
         // ------ SUITE_ADMIN administers the token-config roles ------
         accessManager.setRoleAdmin(RolesLib.TOKEN_MANAGER, RolesLib.SUITE_ADMIN);
@@ -312,6 +318,7 @@ library AccessManagerSetupLib {
         accessManager.labelRole(RolesLib.AGENT_RECOVERY_ADDRESS, "TREX-Suite Agent: Recovery Address");
         accessManager.labelRole(RolesLib.AGENT_FORCED_TRANSFER, "TREX-Suite Agent: Forced Transfer");
         accessManager.labelRole(RolesLib.AGENT_PAUSER, "TREX-Suite Agent: Pauser");
+        accessManager.labelRole(RolesLib.VALIDATION_KEEPER, "TREX-Suite Validation Keeper");
 
         accessManager.labelRole(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
         accessManager.labelRole(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
