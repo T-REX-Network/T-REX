@@ -93,6 +93,10 @@ library RolesLib {
     // governance, not by an issuer: a gateway in that set attests the authorship of every message a token
     // routed through it acts on, so adding one is deliberate and removing one is an emergency lever.
     uint64 constant INTEROP_MANAGER = ROLE_PREFIX + 17;
+    // Gates the issuer's validation policy on ModularCompliance: the validity window, the per-chain reconciliation
+    // windows, the global clamp and the per-chain issuance pause. Administered by SUITE_ADMIN like the other
+    // manager roles.
+    uint64 constant COMPLIANCE_MANAGER = ROLE_PREFIX + 18;
 
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching

@@ -77,9 +77,16 @@ import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol
 import { RolesLib } from "../../libraries/RolesLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
+import { ITransferValidation } from "./ITransferValidation.sol";
+import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessManagedOwnableUpgradeable {
+contract ModularCompliance is
+    IModularCompliance,
+    ISettlementHandler,
+    TransferValidation,
+    AccessManagedOwnableUpgradeable
+{
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
@@ -234,6 +241,33 @@ contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessMana
         }
     }
 
+    /* ----- Validation settings ----- */
+
+    /// @inheritdoc ITransferValidation
+    function setDefaultValidityWindow(uint64 duration) external restricted {
+        _setDefaultValidityWindow(duration);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function setReconciliationWindow(bytes32 chainKey, uint64 duration) external restricted {
+        _setReconciliationWindow(chainKey, duration);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function setValidationClamp(uint256 maxAmount) external restricted {
+        _setValidationClamp(maxAmount);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function pauseValidationIssuance(bytes32 chainKey) external restricted {
+        _pauseIssuance(chainKey);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function unpauseValidationIssuance(bytes32 chainKey) external restricted {
+        _unpauseIssuance(chainKey);
+    }
+
     /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */
@@ -360,7 +394,8 @@ contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessMana
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
             || interfaceId == type(IERC3643Compliance).interfaceId
-            || interfaceId == type(ISettlementHandler).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(ISettlementHandler).interfaceId
+            || interfaceId == type(ITransferValidation).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.
