@@ -179,6 +179,12 @@ library EventsLib {
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event ValidationDiscarded(uint256 indexed validationId);
+    /// @notice Emitted when every expected leg of a validation was received: slots committed, ledger updated.
+    ///         `chainKey` is the chain of the leg that completed it.
+    event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    /// @notice Emergency: a trusted gateway delivered a leg already consumed, or an id never issued. Nothing is
+    ///         applied and the token pauses itself until an agent unpauses it.
+    event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

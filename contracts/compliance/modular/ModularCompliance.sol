@@ -206,10 +206,12 @@ contract ModularCompliance is
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
         onlyBoundedToken
+        returns (bool haltToken)
     {
         emit EventsLib.SettlementNotified(
             originChainKey, notification.validationId, notification.from, notification.to, notification.amount
         );
+        return _handleSettlement(originChainKey, notification);
     }
 
     /**
@@ -488,6 +490,14 @@ contract ModularCompliance is
     /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
     function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
         Token(_getStorage().tokenBound).dispatchComplianceValidation(chainKey, validationId, body);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId)
+        internal
+        override
+    {
+        _boundToken().settleValidation(from, to, amount, validationId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.

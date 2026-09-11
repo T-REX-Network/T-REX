@@ -218,6 +218,9 @@ abstract contract TransferValidation is ITransferValidation {
     /// @dev Sends one leg of a validation toward `chainKey`, through the token.
     function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal virtual;
 
+    /// @dev Applies a settled validation to the ledger, through the token, once.
+    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal virtual;
+
     /* ----- Settings ----- */
 
     function _setDefaultValidityWindow(uint64 duration) internal {
@@ -250,6 +253,82 @@ abstract contract TransferValidation is ITransferValidation {
         require(s.issuancePaused[chainKey], ErrorsLib.ValidationIssuanceNotPaused(chainKey));
         s.issuancePaused[chainKey] = false;
         emit EventsLib.ValidationIssuanceUnpaused(chainKey);
+    }
+
+    /* ----- Settlement ----- */
+
+    /// @dev Which leg of a validation a notification is: the single one of a one-leg validation, or the burn or
+    ///  mint leg of a two-leg one.
+    enum Leg {
+        Single,
+        Burn,
+        Mint
+    }
+
+    /// @dev Classifies an attributed settlement against the stored validation. Reverts on a leg that does not
+    ///  match; returns `true` on the two emergencies, which write nothing. See {ISettlementHandler}.
+    function _handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata n)
+        internal
+        returns (bool halt)
+    {
+        require(n.token == address(_boundToken()), ErrorsLib.SettlementTokenMismatch(n.token));
+        ValidationStorage storage s = _validationStorage();
+        if (!_isIssued(s, n.validationId)) return _emergency(n.validationId, originChainKey);
+
+        ValidationRecord storage record = s.validations[n.validationId];
+        ValidationState storage state = s.states[n.validationId];
+        Leg leg = _matchLeg(record, originChainKey, n);
+        require(
+            record.amountMin <= n.amount && n.amount <= record.amountMax,
+            ErrorsLib.SettlementOutOfBounds(n.validationId, n.amount)
+        );
+
+        bool consumed = leg == Leg.Mint ? state.toLegConsumed : state.fromLegConsumed;
+        if (consumed) return _emergency(n.validationId, originChainKey);
+
+        require(state.status == ValidationStatus.Pending, ErrorsLib.ValidationNotSettleable(n.validationId));
+        state.fromLegConsumed = true;
+        state.toLegConsumed = true;
+        _settle(state, n, originChainKey, ValidationStatus.Settled);
+    }
+
+    /// @dev A leg is matched by the wallets it carries and the chain it comes from. A one-leg validation expects
+    ///  both wallets, the issued ones, from either recorded chain (the satellite side; the reference chain has no
+    ///  peer). A two-leg validation is matched in the cross-chain lifecycle.
+    function _matchLeg(
+        ValidationRecord storage record,
+        bytes32 originChainKey,
+        MessageTypesLib.SettlementNotification calldata n
+    ) private view returns (Leg) {
+        bool fromMatches = n.from.length != 0 && keccak256(n.from) == record.fromKey;
+        bool toMatches = n.to.length != 0 && keccak256(n.to) == record.toKey;
+        bool originMatches = originChainKey == record.fromChainKey || originChainKey == record.toChainKey;
+        require(
+            !record.twoLegs && fromMatches && toMatches && originMatches,
+            ErrorsLib.SettlementLegMismatch(n.validationId)
+        );
+        return Leg.Single;
+    }
+
+    /// @dev Every expected leg is in: commit the modules at the exact amount, move the ledger once, mark, announce.
+    function _settle(
+        ValidationState storage state,
+        MessageTypesLib.SettlementNotification calldata n,
+        bytes32 originChainKey,
+        ValidationStatus status
+    ) private {
+        state.executedAmount = n.amount;
+        state.status = status;
+        _commitSlots(n.validationId, n.amount);
+        _settleOnToken(n.from, n.to, n.amount, n.validationId);
+
+        emit EventsLib.ValidationSettled(n.validationId, originChainKey, n.amount);
+    }
+
+    /// @dev A replayed leg or a never-issued id: nothing applied, announced, and the token told to halt.
+    function _emergency(uint256 validationId, bytes32 originChainKey) private returns (bool) {
+        emit EventsLib.ReplayedSettlement(validationId, originChainKey);
+        return true;
     }
 
     /* ----- Discard ----- */

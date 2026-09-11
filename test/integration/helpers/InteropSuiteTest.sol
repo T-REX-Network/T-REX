@@ -145,6 +145,15 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         );
     }
 
+    /// @dev Queues a settlement authored by `_token`'s Lite on `gateway`'s chain, returning its index.
+    function _liteSettles(
+        ERC7786GatewayMock gateway,
+        Token _token,
+        MessageTypesLib.SettlementNotification memory notification
+    ) internal returns (uint256) {
+        return _liteSends(gateway, _token, MessageTypesLib.encodeSettlement(notification));
+    }
+
     function _burnProof(uint256 chainId, address burned, uint256 amount, address nativeWallet)
         internal
         pure

@@ -85,6 +85,8 @@ library ErrorsLib {
     error UnverifiedIdentity();
     /// @dev Only a wallet on another chain can hold a bridged position; this envelope designates this chain.
     error NotASatelliteWallet(bytes wallet);
+    /// @dev Only the bound compliance applies a settlement to the ledger.
+    error OnlyBoundCompliance();
     /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
 
@@ -177,6 +179,14 @@ library ErrorsLib {
     error ValidationNotDiscardable(uint256 validationId, uint8 status);
     /// @dev The validation's release deadline has not passed yet.
     error ValidationNotReleasable(uint256 validationId, uint64 releaseAt);
+    /// @dev A settlement notification names another asset than the bound token.
+    error SettlementTokenMismatch(address token);
+    /// @dev The leg's wallets, their emptiness, or its origin chain do not match the issued validation.
+    error SettlementLegMismatch(uint256 validationId);
+    /// @dev The executed amount sits outside the issued `[amountMin, amountMax]`.
+    error SettlementOutOfBounds(uint256 validationId, uint256 amount);
+    /// @dev A settlement reached a validation in a state that cannot take it yet.
+    error ValidationNotSettleable(uint256 validationId);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error ChainNotOpen(bytes32 chainKey);

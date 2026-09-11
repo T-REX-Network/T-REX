@@ -84,4 +84,17 @@ interface IToken is IERC3643 {
     /// @notice Returns the sum of every bridged position: the part of `totalSupply` active on satellites.
     function totalBridged() external view returns (uint256);
 
+    /// @notice Applies a settled validation to the ledger, once, by the shape of its wallets: a native `from` is a
+    ///  delegation-out of the holder's free balance to `to`, a native `to` is a recall of `from` onto the holder,
+    ///  and two satellite wallets are a bridged transfer under `validationId`.
+    /// @dev Callable by the bound compliance only, which classified the settlement against the validation it
+    ///  issued; reverts with `OnlyBoundCompliance` otherwise. A native `from` whose free balance no longer covers
+    ///  `amount` reverts with `ERC20InsufficientBalance` and leaves the settlement retryable: nothing locks the
+    ///  native side at issuance. Bypasses `_update`, like every ledger transition.
+    /// @param from the ERC-7930 envelope of the sender
+    /// @param to the ERC-7930 envelope of the recipient
+    /// @param amount the exact amount the satellite executed
+    /// @param validationId the validation the settlement consumed
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external;
+
 }

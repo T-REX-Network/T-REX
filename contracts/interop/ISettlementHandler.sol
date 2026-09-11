@@ -84,11 +84,20 @@ interface ISettlementHandler {
     /// route when the token never dispatched that id there),
     /// - the message's author is the token's peer on that chain.
     ///
-    /// The notification is decoded and passed on as is; nothing in it is verified.
-    /// Must revert on failure. A silent failure leaves the message marked as received and unretryable.
+    /// The notification is decoded and passed on as is; classifying it is this handler's job, against the
+    /// validation it issued: the token and the wallets must be the issued ones, the leg must come from the chain
+    /// recorded for its side, and the amount must sit inside the issued bounds. A leg that fails any of these
+    /// reverts, which leaves the message deliverable again. A leg for a `Pending` validation settles it, whatever
+    /// the clock says; one for a `Discarded` validation reconciles it late.
+    ///
+    /// Two emergencies never revert and return `haltToken` instead: a leg already consumed, and an id that was
+    /// never issued. Both mean a trusted gateway delivered something the protocol cannot account for, so the
+    /// token pauses itself until an agent has investigated.
     /// @param originChainKey The key of the chain the notification came from, `keccak256(chainType, chainReference)`.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
+    /// @return haltToken Whether the token must pause itself: a replayed or never-issued settlement.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
-        external;
+        external
+        returns (bool haltToken);
 
 }

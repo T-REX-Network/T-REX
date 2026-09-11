@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Recipient.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -25,8 +26,10 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     bytes32 originChain = polygon;
 
-    uint256 validationId = 7;
+    uint256 validationId;
     uint256 amount = 500;
+    bytes satelliteFrom;
+    bytes satelliteTo;
 
     function setUp() public override {
         super.setUp();
@@ -38,10 +41,21 @@ contract InboundMessagingTest is InteropSuiteTest {
         compliance = address(token.compliance());
 
         _openEvmChain(token, POLYGON, address(routedGateway));
+
+        // The compliance halts the token on a never-issued id, so the transport cases below run on a real one.
+        vm.prank(agent);
+        token.unpause();
+        satelliteFrom = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), 1000);
+        satelliteTo = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
+        validationId = _requestValidation(address(aliceIdentity), satelliteFrom, satelliteTo, 1, amount);
     }
 
-    function _settlementPayload() private returns (bytes memory) {
-        return MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, token, POLYGON, amount));
+    function _issuedSettlement() private view returns (MessageTypesLib.SettlementNotification memory) {
+        return _settlement(validationId, token, satelliteFrom, satelliteTo, amount);
+    }
+
+    function _settlementPayload() private view returns (bytes memory) {
+        return MessageTypesLib.encodeSettlement(_issuedSettlement());
     }
 
     function _peerSendsSettlement() private returns (uint256) {
@@ -60,9 +74,9 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /* ----- Settlement delivery: one leg, two legs ----- */
 
-    /// @dev Same-chain transfer: one notification with real `from` and `to`, forwarded as decoded.
+    /// @dev Same-chain transfer: one notification with real `from` and `to`, forwarded as decoded and settled.
     function testOneLegSettlementReachesTheBoundComplianceIntact() public {
-        MessageTypesLib.SettlementNotification memory n = _sameChainSettlement(validationId, token, POLYGON, amount);
+        MessageTypesLib.SettlementNotification memory n = _issuedSettlement();
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(n));
 
         vm.expectCall(compliance, abi.encodeCall(ISettlementHandler.handleSettlement, (originChain, n)));
@@ -71,19 +85,24 @@ contract InboundMessagingTest is InteropSuiteTest {
         routedGateway.relay(index);
 
         assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(index)));
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount);
+        assertFalse(token.paused());
     }
 
-    /// @dev Cross-chain transfer: a burn leg from one chain and a mint leg from another, under one id.
-    ///      Each arrives through its own chain's gateway and each reaches the compliance on its own.
+    /// @dev Cross-chain transfer: a burn leg from one chain and a mint leg from another, under one id. Each
+    ///      arrives through its own chain's gateway and each reaches the compliance on its own, in any order.
+    ///      The id was never issued here, so the compliance raises its emergency and the token halts on the
+    ///      first leg; the second is then refused by the pause and stays deliverable.
     function testTwoLegSettlementDeliversBothLegsUnderOneId() public {
         ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
+        uint256 neverIssued = validationId + 1;
 
         bytes memory from = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From"));
         bytes memory to = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("To"));
 
-        MessageTypesLib.SettlementNotification memory burnLeg = _settlement(validationId, token, from, "", amount);
-        MessageTypesLib.SettlementNotification memory mintLeg = _settlement(validationId, token, "", to, amount);
+        MessageTypesLib.SettlementNotification memory burnLeg = _settlement(neverIssued, token, from, "", amount);
+        MessageTypesLib.SettlementNotification memory mintLeg = _settlement(neverIssued, token, "", to, amount);
 
         uint256 burnIndex = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(burnLeg));
         uint256 mintIndex = _liteSends(optimismGateway, token, MessageTypesLib.encodeSettlement(mintLeg));
@@ -91,16 +110,27 @@ contract InboundMessagingTest is InteropSuiteTest {
         // The mint leg lands first: the transport imposes no ordering, the lifecycle does.
         vm.expectCall(compliance, abi.encodeCall(ISettlementHandler.handleSettlement, (optimism, mintLeg)));
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.SettlementNotified(optimism, validationId, "", to, amount);
+        emit EventsLib.SettlementNotified(optimism, neverIssued, "", to, amount);
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(neverIssued, optimism);
         optimismGateway.relay(mintIndex);
+        assertTrue(token.paused());
 
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        routedGateway.relay(burnIndex);
+        _assertNothingApplied(routedGateway, burnIndex);
+
+        vm.prank(agent);
+        token.unpause();
         vm.expectCall(compliance, abi.encodeCall(ISettlementHandler.handleSettlement, (polygon, burnLeg)));
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.SettlementNotified(polygon, validationId, from, "", amount);
+        emit EventsLib.SettlementNotified(polygon, neverIssued, from, "", amount);
         routedGateway.relay(burnIndex);
+        assertTrue(token.paused());
     }
 
-    /// @dev One side on the reference chain: a single leg, from the one satellite involved.
+    /// @dev One side on the reference chain: a single leg, from the one satellite involved, reaches the
+    ///      compliance intact.
     function testSingleLegSettlementWhenOneSideIsTheReferenceChain() public {
         MessageTypesLib.SettlementNotification memory leg = _settlement(
             validationId,
@@ -112,7 +142,11 @@ contract InboundMessagingTest is InteropSuiteTest {
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(leg));
 
         vm.expectCall(compliance, abi.encodeCall(ISettlementHandler.handleSettlement, (originChain, leg)), 1);
+        // Not the issued wallets: the compliance refuses the leg, and the refusal rolls the delivery back.
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, validationId));
         routedGateway.relay(index);
+
+        _assertNothingApplied(routedGateway, index);
     }
 
     function testReceiveIsAnnounced() public {
@@ -128,7 +162,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /// @dev The compliance's entry point belongs to the token alone.
     function testOnlyTheBoundTokenMayHandASettlementToTheCompliance() public {
-        MessageTypesLib.SettlementNotification memory n = _sameChainSettlement(validationId, token, POLYGON, amount);
+        MessageTypesLib.SettlementNotification memory n = _issuedSettlement();
 
         vm.expectRevert(ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
         vm.prank(impostor);
@@ -198,8 +232,12 @@ contract InboundMessagingTest is InteropSuiteTest {
         _assertNothingApplied(untrustedGateway, index);
     }
 
+    /// @dev The issued validation is pinned to the routed gateway, so an unpinned id is what exercises the
+    ///      current-route check.
     function testTrustedButUnroutedGatewayIsRefused() public {
-        uint256 index = _liteSends(otherTrustedGateway, token, _settlementPayload());
+        bytes memory unpinned =
+            MessageTypesLib.encodeSettlement(_settlement(validationId + 1, token, satelliteFrom, satelliteTo, amount));
+        uint256 index = _liteSends(otherTrustedGateway, token, unpinned);
 
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.GatewayNotRouted.selector, address(otherTrustedGateway), originChain)
@@ -261,7 +299,13 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 2);
         routedGateway.relay(first);
+
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(validationId, originChain);
         routedGateway.relay(second);
+
+        assertTrue(token.paused(), "the emergency halts the token");
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
     }
 
     /* ----- Envelope refusals ----- */
