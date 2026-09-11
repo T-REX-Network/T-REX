@@ -135,9 +135,8 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.IRS_BINDER);
 
         // ------ OWNER role ------
-        functions = new bytes4[](2);
+        functions = new bytes4[](1);
         functions[0] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
-        functions[1] = IdentityRegistryStorage.setIdFactory.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------

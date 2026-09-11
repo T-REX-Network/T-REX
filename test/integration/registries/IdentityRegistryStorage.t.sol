@@ -2,10 +2,7 @@
 pragma solidity 0.8.30;
 
 import { Vm } from "@forge-std/Vm.sol";
-import { IIdentity, Identity } from "@onchain-id/solidity/contracts/Identity.sol";
-import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
-import { ERC734Validator } from "@onchain-id/solidity/contracts/modules/validators/ERC734Validator.sol";
-import { ReputationRegistry } from "@onchain-id/solidity/contracts/reputation/ReputationRegistry.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -51,18 +48,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     function test_init_RevertWhen_AlreadyInitialized() public {
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        identityRegistryStorage.init(deployer, address(0), address(idFactory));
-    }
-
-    /// @notice Should revert when idFactory is the zero address. The proxy bubbles init's revert,
-    ///         so the ZeroAddress error surfaces as-is.
-    function test_init_RevertWhen_IdFactoryZeroAddress() public {
-        address irsBeacon = trexImplementationAuthority.beacons().irsBeacon;
-
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new BeaconProxy(
-            irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), address(0)))
-        );
+        identityRegistryStorage.init(deployer, address(0));
     }
 
     // ============ addIdentityToStorage() Tests ============
@@ -375,40 +361,15 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
     }
 
-    // ============ setIdFactory() Tests ============
-
-    /// @notice Should revert when sender is not authorized
-    function test_setIdFactory_RevertWhen_NotOwner() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        identityRegistryStorage.setIdFactory(address(idFactory));
-    }
-
-    /// @notice Should revert when the new idFactory is the zero address
-    function test_setIdFactory_RevertWhen_ZeroAddress() public {
+    /// @notice With no registry bound there is no factory to fall back to: a global-only wallet
+    ///         resolves to the zero identity
+    function test_storedIdentity_ReturnsZero_WhenNoRegistryBound() public {
+        address globalIdentity = address(_deployIdentity(another, "another"));
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        identityRegistryStorage.setIdFactory(address(0));
-    }
+        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
 
-    /// @notice Should update the idFactory and affect subsequent fallbacks
-    function test_setIdFactory_Success() public {
-        // Deploy a fresh IdentityFactory and register `another` only in it. The factory only accepts
-        // an implementation whose trust anchors name it, so the validator and identity are rebuilt.
-        IdentityFactory newIdFactory = _newIdentityFactory();
-        vm.startPrank(deployer);
-        ReputationRegistry newReputationRegistry = new ReputationRegistry(address(accessManager), address(newIdFactory));
-        ERC734Validator newValidator = new ERC734Validator(address(newIdFactory), address(newReputationRegistry));
-        Identity newImplementation = new Identity(address(newValidator), address(newIdFactory));
-        vm.stopPrank();
-        newIdFactory.initializeBeacon(address(newImplementation));
-        address newGlobalIdentity = address(_deployIdentityIn(newIdFactory, another, "another"));
-
-        vm.prank(deployer);
-        identityRegistryStorage.setIdFactory(address(newIdFactory));
-
-        assertEq(identityRegistryStorage.idFactory(), address(newIdFactory));
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), newGlobalIdentity);
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
+        assertNotEq(globalIdentity, address(0));
     }
 
     // ============ supportsInterface() Tests ============
@@ -439,9 +400,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when the beacon is the zero address
     function test_constructor_RevertWhen_BeaconIsZeroAddress() public {
         vm.expectRevert();
-        new BeaconProxy(
-            address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0), address(idFactory)))
-        );
+        new BeaconProxy(address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
     }
 
     /// @notice Should revert when initialization fails (implementation without init())
@@ -451,9 +410,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
         vm.expectRevert();
-        new BeaconProxy(
-            beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0), address(idFactory)))
-        );
+        new BeaconProxy(beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
     }
 
 }

@@ -75,9 +75,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
                 new ERC1967Proxy(
                     address(identityRegistryStorageImpl),
                     // No initial identity registry: the registry is deployed below and bound explicitly.
-                    abi.encodeCall(
-                        IdentityRegistryStorage.init, (address(accessManager), address(0), address(idFactory))
-                    )
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
                 )
             )
         );
