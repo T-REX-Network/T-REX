@@ -185,8 +185,6 @@ library ErrorsLib {
     error SettlementLegMismatch(uint256 validationId);
     /// @dev The executed amount sits outside the issued `[amountMin, amountMax]`.
     error SettlementOutOfBounds(uint256 validationId, uint256 amount);
-    /// @dev A settlement reached a validation in a state that cannot take it yet.
-    error ValidationNotSettleable(uint256 validationId);
     /// @dev The second leg of a cross-chain validation does not repeat the first one's amount.
     error SettlementAmountMismatch(uint256 validationId, uint256 expected, uint256 amount);
     // Interop Errors

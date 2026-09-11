@@ -49,6 +49,11 @@ contract SlotsModule is AbstractModuleUpgradeable {
         return _held[compliance][WalletKeyLib.canonicalKey(to)];
     }
 
+    /// @dev What was committed with no live reservation lands on the zero key.
+    function heldByKey(address compliance, bytes32 key) external view returns (uint256) {
+        return _held[compliance][key];
+    }
+
     function reservationOf(address compliance, uint256 validationId) external view returns (Reservation memory) {
         return _reservations[compliance][validationId];
     }

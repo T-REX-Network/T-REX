@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
@@ -131,17 +132,112 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _assertUntouched(id);
     }
 
-    function test_handleSettlement_RevertWhen_TheValidationIsDiscarded() public {
+    // ==== late reconciliation Tests ====
+
+    function test_handleSettlement_Success_WhenADiscardedValidationReconcilesLate() public {
+        address slots = _bindSlotsModule();
         uint256 id = _issue();
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        _discard(id);
+        assertEq(SlotsOnlyModule(slots).releaseCalls(), 1);
+
+        vm.expectCall(slots, abi.encodeCall(IModule.commitSlot, (id, 50)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toSat, 50, id)), 1);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationSettled(id, polygon, 50);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.LateReconciliation(id, polygon);
+        vm.expectEmit(true, false, false, true, address(mc));
+        emit EventsLib.ValidationIssuancePaused(polygon);
+        vm.prank(token);
+        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        assertFalse(halt);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(mc.stateOf(id).executedAmount, 50);
+        assertTrue(mc.isIssuancePaused(polygon));
+        assertEq(SlotsOnlyModule(slots).commitCalls(), 1);
+    }
+
+    function test_handleSettlement_Success_WhenALateLegIsReplayed() public {
+        uint256 id = _issue();
+        _discard(id);
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ReplayedSettlement(id, polygon);
+        vm.prank(token);
+        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        assertTrue(halt);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+    }
+
+    function test_handleSettlement_Success_WhenTheChainIsAlreadyPausedOnALateLeg() public {
+        uint256 id = _issue();
+        _discard(id);
+        mc.pauseValidationIssuance(polygon);
+
+        vm.recordLogs();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertTrue(mc.isIssuancePaused(polygon));
+        assertEq(_countTopic(EventsLib.LateReconciliation.selector), 1);
+        assertEq(_countTopic(EventsLib.ValidationIssuancePaused.selector), 0, "already paused: no second pause");
+    }
+
+    function test_handleSettlement_Success_WhenADiscardedCrossChainValidationReconcilesLegByLeg() public {
+        address slots = _bindSlotsModule();
+        uint256 id = _issueCrossChain();
+        _discard(id);
+
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.LateReconciliation(id, polygon);
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded), "still discarded");
+        ITransferValidation.ValidationState memory state = mc.stateOf(id);
+        assertTrue(state.fromLegConsumed);
+        assertFalse(state.toLegConsumed);
+        assertEq(state.executedAmount, 50);
+        assertTrue(mc.isIssuancePaused(polygon));
+        assertFalse(mc.isIssuancePaused(optimism));
+        assertEq(SlotsOnlyModule(slots).commitCalls(), 0);
+
+        vm.expectCall(slots, abi.encodeCall(IModule.commitSlot, (id, 50)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toOptimism, 50, id)), 1);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationSettled(id, optimism, 50);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.LateReconciliation(id, optimism);
+        vm.prank(token);
+        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertTrue(mc.isIssuancePaused(optimism));
+    }
+
+    function test_discardExpiredValidations_RevertWhen_ALateFirstLegLanded() public {
+        uint256 id = _issueCrossChain();
+        _discard(id);
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(keeperAccount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.ValidationNotDiscardable.selector, id, uint8(ITransferValidation.ValidationStatus.Discarded)
+            )
+        );
         mc.discardExpiredValidations(ids);
-
-        vm.prank(token);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotSettleable.selector, id));
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
     }
 
     // ==== settlement Tests ====
@@ -365,6 +461,21 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.stopPrank();
 
         _assertUntouched(id);
+    }
+
+    function _discard(uint256 id) private {
+        vm.warp(block.timestamp + VALIDITY_WINDOW + OPTIMISM_WINDOW + 1);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.prank(keeperAccount);
+        mc.discardExpiredValidations(ids);
+    }
+
+    function _countTopic(bytes32 topic) private returns (uint256 count) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == topic) count++;
+        }
     }
 
     function _issueCrossChain() private returns (uint256 id) {

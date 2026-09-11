@@ -172,6 +172,53 @@ All notable changes to this project will be documented in this file.
     `NoSatelliteLeg`.
   - Test assets: `BoundsModule`, `TransferValidationHarness`, `ModularComplianceBaseUnitTest`, and
     the satellite-wallet fixtures on `TREXSuiteTest`.
+- **Compliance slots: reservation, settlement and discard lifecycle.** Once a validation is issued the
+  engine treats the movement as executed for every distribution-dependent rule, so concurrent
+  validations cannot jointly breach a cap; ownership hard-commits only when the settlement comes back.
+  - `IModule.reserveSlot(validationId, from, to, amountMax)`, `commitSlot(validationId, executedAmount)`
+    and `releaseSlot(validationId)` behind the new `ModuleCapabilitiesLib.SLOTS` flag; static modules
+    are untouched. A reservation counts the worst case at `amountMax`; a commit reconciles to the exact
+    amount and MUST tolerate an id the module never reserved (bound after issuance, or a late
+    reconciliation) by applying the delta anyway; a release undoes it entirely. `ModularCompliance`
+    dispatches to declaring modules only, right after the record is written.
+  - `ITransferValidation.ValidationStatus` (`Pending`, `BurnConfirmed`, `Settled`, `Expired`,
+    `Discarded`, `LateReconciled`) and `ValidationState` (status, the two per-leg consumption flags,
+    the executed amount, the wallet the first of two legs carried), read through `statusOf` and
+    `stateOf`. `Expired` is derived, never written: a stored `Pending` past `releaseAt`. Records and
+    states are kept forever, since classifying an incoming notification depends on them.
+    `ValidationRecord` gained `fromKey`, `toKey` and `twoLegs`.
+  - Settlement classification in `handleSettlement`: the token and the wallets must be the issued ones,
+    the leg must come from the chain recorded for its side, and the amount must sit inside the issued
+    bounds; any mismatch reverts (`SettlementTokenMismatch`, `SettlementLegMismatch`,
+    `SettlementOutOfBounds`) and leaves the message deliverable. A same-chain movement, or one with a
+    native side, settles on one leg carrying both wallets. A cross-chain movement takes two legs under
+    one id, the burn leg with `to` empty from the sender's chain and the mint leg with `from` empty from
+    the recipient's chain: the first to arrive, whichever it is, pins the validation as `BurnConfirmed`
+    (`ValidationLegConfirmed`), the second must repeat its amount (`SettlementAmountMismatch`) and
+    settles the pair. A leg for a `Pending` validation settles whatever the clock says.
+  - `IToken.settleValidation(from, to, amount, validationId)`: the ledger entry, callable by the bound
+    compliance only (`OnlyBoundCompliance`), routing by wallet shape to a delegation-out (native
+    sender), a recall (native recipient) or a bridged transfer. The ledger moves once per settled
+    validation; the burn leg alone moves nothing. Nothing locks a native sender at issuance: a native
+    leg whose free balance no longer covers the amount reverts and stays deliverable.
+  - `VALIDATION_KEEPER`, administered by `AGENT_ADMIN`, over
+    `discardExpiredValidations(uint256[])`: each id must be stored `Pending` and past `releaseAt`
+    (`UnknownValidation`, `ValidationNotDiscardable`, `ValidationNotReleasable`); the batch is atomic.
+    A discard releases the slots and emits `ValidationDiscarded`; `BurnConfirmed` is never discardable.
+  - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the modules catch up
+    through `commitSlot` with no live reservation, the status becomes `LateReconciled`,
+    `LateReconciliation` fires and the leg's chain is paused for issuance until the manager unpauses
+    it. A late first leg of two stays `Discarded` with its flag set and warns for its own chain.
+  - Emergencies: a leg already consumed, or an id never issued, applies nothing, emits
+    `ReplayedSettlement` and halts the whole token through its pause (`handleSettlement` returns
+    `haltToken`); only `AGENT_PAUSER` lifts it through `unpause`. While the token is paused every
+    settlement delivery reverts with `EnforcedPause` and stays deliverable.
+  - Events: `ValidationLegConfirmed`, `ValidationSettled`, `ValidationDiscarded`, `ReplayedSettlement`.
+    Errors: `OnlyBoundCompliance`, `UnknownValidation`, `ValidationNotDiscardable`,
+    `ValidationNotReleasable`, `SettlementTokenMismatch`, `SettlementLegMismatch`,
+    `SettlementOutOfBounds`, `SettlementAmountMismatch`.
+  - Test assets: `SlotsModule` (a max-balance-per-recipient counter over reservations),
+    `SlotsOnlyModule`, and the settlement-leg builders on `InteropSuiteTest`.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
   and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
   single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
@@ -247,8 +294,11 @@ All notable changes to this project will be documented in this file.
   functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
   are immutable per implementation; an upgrade that changes them needs a refresh on every bound
   compliance.
-- **Breaking, interface ids**: `type(IModule).interfaceId` and `type(IModularCompliance).interfaceId`
-  both change.
+- **Breaking, interface ids**: `type(IModule).interfaceId` (capabilities, then `validationBounds`, then
+  the three slot hooks), `type(IModularCompliance).interfaceId`, `type(ITREXRegistry).interfaceId`
+  (the two wallet views), `type(ITransferValidation).interfaceId` (the lifecycle views and the keeper's
+  discard), `type(ISettlementHandler).interfaceId` (`handleSettlement` now returns `haltToken`) and
+  `type(IToken).interfaceId` (`settleValidation`) all change. `ValidationRecord` gained three fields.
 - `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
   (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
   routing decision. Ordering is not preserved across a removal or a refresh.
