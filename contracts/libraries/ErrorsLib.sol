@@ -88,6 +88,10 @@ library ErrorsLib {
     error SameWalletRecovery();
     error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
+    /// @dev Only a wallet on another chain can hold a bridged position; this envelope designates this chain.
+    error NotASatelliteWallet(bytes wallet);
+    /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
+    error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
@@ -152,6 +156,7 @@ library ErrorsLib {
     error Deprecated();
 
     // Interop Errors
+    error NonCanonicalInteroperableAddress(bytes envelope);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
