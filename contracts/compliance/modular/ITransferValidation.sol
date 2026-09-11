@@ -89,6 +89,49 @@ interface ITransferValidation {
         bytes32 toChainKey;
     }
 
+    /// @dev Issues a `ComplianceValidation` for a movement between two ERC-7930 wallets, at least one of them on a
+    /// satellite, and dispatches it to the involved Lite deployment or deployments through the token's trusted
+    /// gateway. The caller derives the requested range from an amount and a slippage tolerance; only the range is
+    /// ever seen here, and it is only ever narrowed.
+    ///
+    /// The five steps, in order:
+    /// 1. Authorization: `from` itself when it lives on this chain, the identity `from` is linked to, or a caller
+    ///    the AccessManager authorises for this selector.
+    /// 2. Eligibility: `from` must resolve to an identity (revoked included, it owns the position); `to` must pass
+    ///    `isWalletVerified`. Two wallets of one identity make a movement that is not a change of ownership: it
+    ///    is issued, recorded and reconciled like any other, but no module is consulted.
+    /// 3. Bounds: the request intersected with `[0, from's balance on its chain]`, narrowed by every module
+    ///    declaring `BOUNDS`, each receiving the running range, then by the clamp. Empty reverts.
+    /// 4. Slot reservation, by the slot lifecycle.
+    /// 5. Issuance: a fresh id, the record, `TransferValidationIssued`, one leg per involved satellite chain.
+    ///
+    /// Requirements:
+    /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
+    /// - Both envelopes canonical; otherwise reverts with `NonCanonicalInteroperableAddress`.
+    /// - At least one side on a satellite; otherwise reverts with `NoSatelliteLeg`.
+    /// - The caller authorised over `from`; otherwise reverts with `NotAuthorizedForWallet`.
+    /// - A validity window set; otherwise reverts with `ValidityWindowNotSet`.
+    /// - No involved satellite chain paused; otherwise reverts with `ValidationIssuancePaused`.
+    /// - Every involved satellite chain with a reconciliation window; otherwise `ReconciliationWindowNotSet`.
+    /// - `from` bound and `to` eligible; otherwise reverts with `UnverifiedWallet`.
+    /// - A non-empty final range; otherwise reverts with `EmptyValidationRange`.
+    /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
+    ///
+    /// Emits `TransferValidationIssued`, then the token's `ValidationRoutePinned` and `ProtocolMessageSent` per leg.
+    /// @param from ERC-7930 interoperable address of the sender.
+    /// @param to ERC-7930 interoperable address of the recipient.
+    /// @param requestedMin Inclusive lower bound the caller proposes.
+    /// @param requestedMax Inclusive upper bound the caller proposes.
+    /// @param spender ERC-7930 address allowed to execute through `transferFrom`, or empty for `from` alone.
+    /// @return validationId The single-use id of the issued validation.
+    function requestTransferValidation(
+        bytes calldata from,
+        bytes calldata to,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        bytes calldata spender
+    ) external returns (uint256 validationId);
+
     /// @dev Sets how long a validation stays executable on the satellite: `expiry` is issuance time plus this.
     ///
     /// Requirements:

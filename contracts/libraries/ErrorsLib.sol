@@ -157,6 +157,20 @@ library ErrorsLib {
     error ValidationIssuancePaused(bytes32 chainKey);
     /// @dev Unpausing a chain that is not paused.
     error ValidationIssuanceNotPaused(bytes32 chainKey);
+    /// @dev Issuance needs a validity window; none was configured.
+    error ValidityWindowNotSet();
+    /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
+    error ReconciliationWindowNotSet(bytes32 chainKey);
+    /// @dev The requested range is inverted.
+    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
+    /// @dev The balance cap, the modules or the clamp left no amount to authorize.
+    error EmptyValidationRange(uint256 min, uint256 max);
+    /// @dev The caller is neither the wallet, its identity, nor authorised by the AccessManager.
+    error NotAuthorizedForWallet(address caller, bytes wallet);
+    /// @dev `from` has no identity, or `to` is not eligible for new activity.
+    error UnverifiedWallet(bytes wallet);
+    /// @dev Both wallets live on the reference chain: nothing for a satellite to execute.
+    error NoSatelliteLeg();
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error ChainNotOpen(bytes32 chainKey);

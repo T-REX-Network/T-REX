@@ -67,6 +67,7 @@ import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdenti
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
+import { ITransferValidation } from "../compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TrustedGatewayRegistry } from "../interop/TrustedGatewayRegistry.sol";
@@ -209,6 +210,13 @@ library AccessManagerSetupLib {
         functions[3] = ModularCompliance.pauseValidationIssuance.selector;
         functions[4] = ModularCompliance.unpauseValidationIssuance.selector;
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.COMPLIANCE_MANAGER);
+
+        // ------ AGENT role ------
+        // The role path of issuance: an agent may request a validation for any wallet. The holder of a native
+        // wallet and the identity a wallet is linked to need no role; the compliance checks those two itself.
+        functions = new bytes4[](1);
+        functions[0] = ITransferValidation.requestTransferValidation.selector;
+        accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.AGENT);
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {

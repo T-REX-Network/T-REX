@@ -41,6 +41,7 @@ contract BoundsModule is AbstractModuleUpgradeable {
     function validationBounds(bytes calldata, bytes calldata, uint256 currentMin, uint256 currentMax, address)
         external
         view
+        virtual
         override
         returns (uint256 min, uint256 max)
     {
@@ -67,6 +68,24 @@ contract BoundsModule is AbstractModuleUpgradeable {
     }
 
     function _authorizeUpgrade(address) internal override { }
+
+}
+
+/// @dev Answers wider than what it received: the engine must intersect it back to the running range.
+contract WideningBoundsModule is BoundsModule {
+
+    function validationBounds(bytes calldata, bytes calldata, uint256, uint256, address)
+        external
+        pure
+        override
+        returns (uint256 min, uint256 max)
+    {
+        return (0, type(uint256).max);
+    }
+
+    function name() external pure override returns (string memory) {
+        return "WideningBoundsModule";
+    }
 
 }
 
