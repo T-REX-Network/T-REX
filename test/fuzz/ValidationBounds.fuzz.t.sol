@@ -87,12 +87,14 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
         if (ceilingB != 0) expectedMax = _min(expectedMax, ceilingB);
         if (clamp != 0) expectedMax = _min(expectedMax, clamp);
 
-        if (expectedMin > expectedMax) {
+        if (expectedMin > expectedMax || expectedMax == 0) {
+            bytes4 expected =
+                expectedMin > expectedMax ? ErrorsLib.EmptyValidationRange.selector : ErrorsLib.ZeroValue.selector;
             vm.prank(aliceIdentity);
-            vm.expectPartialRevert(ErrorsLib.EmptyValidationRange.selector);
+            vm.expectPartialRevert(expected);
             mc.requestTransferValidation(from, to, requestedMin, requestedMax, "");
             vm.prank(aliceIdentity);
-            vm.expectPartialRevert(ErrorsLib.EmptyValidationRange.selector);
+            vm.expectPartialRevert(expected);
             reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "");
             return;
         }
@@ -104,15 +106,12 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
         ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
         ITransferValidation.ValidationRecord memory reversedRecord = reversed.validationOf(reversedId);
 
-        // inside the request, never above the balance
         assertGe(record.amountMin, requestedMin);
         assertLe(record.amountMax, requestedMax);
         assertLe(record.amountMax, balance);
         assertLe(record.amountMin, record.amountMax);
-        // exactly the intersection of every rule
         assertEq(record.amountMin, expectedMin);
         assertEq(record.amountMax, expectedMax);
-        // the bind order changes nothing
         assertEq(reversedRecord.amountMin, record.amountMin);
         assertEq(reversedRecord.amountMax, record.amountMax);
     }

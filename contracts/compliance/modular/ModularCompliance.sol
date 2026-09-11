@@ -420,8 +420,7 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev Every module that declared `BOUNDS`, each receiving the range as the ones before it left it. The
-    ///  answer is intersected with the running range rather than trusted, so no module can widen it.
+    /// @dev Each module receives the range as the ones before it left it; its answer is intersected, never trusted.
     function _moduleBounds(bytes memory from, bytes memory to, uint256 currentMin, uint256 currentMax)
         internal
         view
@@ -442,7 +441,7 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The wire has one author, the token: it pins the route per leg and refuses a closed chain.
+    /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
     function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
         Token(_getStorage().tokenBound).dispatchComplianceValidation(chainKey, validationId, body);
     }

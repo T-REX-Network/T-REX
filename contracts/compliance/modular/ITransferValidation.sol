@@ -63,11 +63,9 @@ pragma solidity 0.8.30;
 
 /**
  * @title ITransferValidation
- * @dev The compliance contract's issuance surface for satellite movements: the settings a COMPLIANCE_MANAGER
- * tunes, the per-chain issuance pause, and the views the slot lifecycle reads.
- *
- * A satellite never decides compliance. It executes a transfer only against a `ComplianceValidation` the
- * reference chain issued for that exact transfer; this interface is where that object comes from.
+ * @dev The compliance's issuance surface for satellite movements: the settings a COMPLIANCE_MANAGER tunes, the
+ * per-chain issuance pause, and the views the slot lifecycle reads. A satellite executes a transfer only against
+ * a `ComplianceValidation` the reference chain issued for that exact transfer; this is where it comes from.
  */
 interface ITransferValidation {
 
@@ -89,32 +87,22 @@ interface ITransferValidation {
         bytes32 toChainKey;
     }
 
-    /// @dev Issues a `ComplianceValidation` for a movement between two ERC-7930 wallets, at least one of them on a
-    /// satellite, and dispatches it to the involved Lite deployment or deployments through the token's trusted
-    /// gateway. The caller derives the requested range from an amount and a slippage tolerance; only the range is
-    /// ever seen here, and it is only ever narrowed.
-    ///
-    /// The five steps, in order:
-    /// 1. Authorization: `from` itself when it lives on this chain, the identity `from` is linked to, or a caller
-    ///    the AccessManager authorises for this selector.
-    /// 2. Eligibility: `from` must resolve to an identity (revoked included, it owns the position); `to` must pass
-    ///    `isWalletVerified`. Two wallets of one identity make a movement that is not a change of ownership: it
-    ///    is issued, recorded and reconciled like any other, but no module is consulted.
-    /// 3. Bounds: the request intersected with `[0, from's balance on its chain]`, narrowed by every module
-    ///    declaring `BOUNDS`, each receiving the running range, then by the clamp. Empty reverts.
-    /// 4. Slot reservation, by the slot lifecycle.
-    /// 5. Issuance: a fresh id, the record, `TransferValidationIssued`, one leg per involved satellite chain.
+    /// @dev Issues a `ComplianceValidation` for a movement between two ERC-7930 wallets, at least one on a
+    /// satellite, and dispatches one leg per involved satellite chain through the token. The caller derives the
+    /// requested range from an amount and a slippage tolerance; the range is only ever narrowed: capped at `from`'s
+    /// balance on its chain, narrowed by every module declaring `BOUNDS` (skipped when both wallets belong to one
+    /// identity), then clamped.
     ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
-    /// - Both envelopes canonical; otherwise reverts with `NonCanonicalInteroperableAddress`.
+    /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - At least one side on a satellite; otherwise reverts with `NoSatelliteLeg`.
-    /// - The caller authorised over `from`; otherwise reverts with `NotAuthorizedForWallet`.
-    /// - A validity window set; otherwise reverts with `ValidityWindowNotSet`.
-    /// - No involved satellite chain paused; otherwise reverts with `ValidationIssuancePaused`.
-    /// - Every involved satellite chain with a reconciliation window; otherwise `ReconciliationWindowNotSet`.
-    /// - `from` bound and `to` eligible; otherwise reverts with `UnverifiedWallet`.
-    /// - A non-empty final range; otherwise reverts with `EmptyValidationRange`.
+    /// - The caller is `from` (native only), the identity `from` is linked to, or authorised by the AccessManager
+    ///   for this selector; otherwise reverts with `NotAuthorizedForWallet`.
+    /// - A validity window set, no involved satellite chain paused, and each with a reconciliation window;
+    ///   otherwise `ValidityWindowNotSet`, `ValidationIssuancePaused` or `ReconciliationWindowNotSet`.
+    /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
+    /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
     /// Emits `TransferValidationIssued`, then the token's `ValidationRoutePinned` and `ProtocolMessageSent` per leg.
@@ -142,9 +130,8 @@ interface ITransferValidation {
     /// @param duration The validity window in seconds.
     function setDefaultValidityWindow(uint64 duration) external;
 
-    /// @dev Sets the worst-case reconciliation latency of a chain: how long T-REX keeps a slot reserved past
-    /// `expiry` for a leg on that chain. Snapshot into each validation at issuance, so a later change never
-    /// moves the deadline of an outstanding one.
+    /// @dev Sets how long T-REX keeps a slot reserved past `expiry` for a leg on that chain. Snapshot at issuance,
+    /// so a later change never moves an outstanding deadline.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -164,8 +151,7 @@ interface ITransferValidation {
     /// @param maxAmount The ceiling, or zero to clear it.
     function setValidationClamp(uint256 maxAmount) external;
 
-    /// @dev Stops issuing validations that involve `chainKey`, on either side of the movement. Also triggered
-    /// automatically when a reconciliation from that chain arrives late.
+    /// @dev Stops issuing validations involving `chainKey`. Also triggered by a late reconciliation from it.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -175,8 +161,7 @@ interface ITransferValidation {
     /// @param chainKey `keccak256(chainType, chainReference)` of the chain.
     function pauseValidationIssuance(bytes32 chainKey) external;
 
-    /// @dev Resumes issuance for `chainKey`. The explicit step after the issuer resolved a late-reconciliation
-    /// exception, so the exceptional state cannot compound unnoticed.
+    /// @dev Resumes issuance for `chainKey`, the explicit step after a late-reconciliation exception is resolved.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -186,8 +171,7 @@ interface ITransferValidation {
     /// @param chainKey `keccak256(chainType, chainReference)` of the chain.
     function unpauseValidationIssuance(bytes32 chainKey) external;
 
-    /// @dev The validity window added to the issuance timestamp to compute `expiry`. Zero until set, and
-    /// issuance refuses to run while it is zero.
+    /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);
 
     /// @dev The reconciliation window configured for `chainKey`, zero when unset.

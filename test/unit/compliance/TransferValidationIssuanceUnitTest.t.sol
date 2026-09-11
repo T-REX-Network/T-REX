@@ -132,6 +132,17 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.requestTransferValidation(nativeAlice, nativeBob, 10, 40, "");
     }
 
+    function test_requestTransferValidation_RevertWhen_SpenderIsNotCanonical() public configured {
+        bytes memory padded = abi.encodePacked(toSat, hex"00");
+        vm.prank(aliceIdentity);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, padded);
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, hex"deadbeef"));
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, hex"deadbeef");
+    }
+
     function test_requestTransferValidation_RevertWhen_EnvelopeIsNotCanonical() public configured {
         bytes memory padded = abi.encodePacked(toSat, hex"00");
         vm.prank(aliceIdentity);
@@ -224,6 +235,20 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 150, BRIDGED_BALANCE));
         mc.requestTransferValidation(fromSat, toSat, 150, 200, "");
+
+        assertEq(mc.nextValidationId(), 0);
+    }
+
+    /// @notice A validation authorizing nothing is never issued, whichever step made the maximum zero.
+    function test_requestTransferValidation_RevertWhen_TheMaximumIsZero() public configured {
+        vm.prank(aliceIdentity);
+        vm.expectRevert(ErrorsLib.ZeroValue.selector);
+        mc.requestTransferValidation(fromSat, toSat, 0, 0, "");
+
+        vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(uint256(0)));
+        vm.prank(aliceIdentity);
+        vm.expectRevert(ErrorsLib.ZeroValue.selector);
+        mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
 
         assertEq(mc.nextValidationId(), 0);
     }
