@@ -85,9 +85,11 @@ interface ITransferValidation {
         Settled,
         /// Derived: `Pending` and past `releaseAt`, not yet discarded.
         Expired,
-        /// The keeper released the slots; issuance proceeds as if the validation never happened.
+        /// The keeper released the slots; issuance proceeds as if the validation never happened. A late first
+        /// leg of two keeps this status with its flag set in `ValidationState`.
         Discarded,
-        /// A settlement arrived after the discard: applied, recorded, flagged as a compliance exception.
+        /// Every leg arrived after the discard: applied anyway, the modules caught up with no live reservation,
+        /// `LateReconciliation` emitted per late leg and that leg's chain paused for issuance.
         LateReconciled
     }
 

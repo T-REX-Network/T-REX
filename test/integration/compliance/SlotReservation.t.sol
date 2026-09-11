@@ -10,6 +10,7 @@ import { ModuleCapabilitiesLib as Caps } from "contracts/libraries/ModuleCapabil
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
 import { CheckTransferOnlyModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
+import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 import { SlotsModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev Why reservations exist: two validations issued against one cap cannot jointly breach it, because the
@@ -153,6 +154,34 @@ contract SlotReservationTest is InteropSuiteTest {
 
         assertEq(slots.heldOf(address(boundCompliance), bobSat), 0);
         assertEq(_max(_issue(10, CAP)), CAP);
+    }
+
+    /// @notice A late settlement commits with no live reservation: the counter catches up, the breach stands, and
+    ///         the next issuance toward that recipient sees it.
+    function test_handleSettlement_Success_WhenALateCommitBreachesTheCap() public {
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        vm.prank(agent);
+        token.unpause();
+        uint256 late = _issue(10, CAP);
+        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = late;
+        vm.prank(keeper);
+        boundCompliance.discardExpiredValidations(ids);
+        uint256 fresh = _issue(10, CAP);
+        assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
+
+        gateway.relay(_liteSettles(gateway, token, _settlement(late, token, aliceSat, bobSat, CAP)));
+
+        assertEq(slots.heldByKey(address(boundCompliance), bytes32(0)), CAP, "committed with no reservation");
+        assertEq(slots.reservationOf(address(boundCompliance), fresh).amount, CAP, "the fresh one still holds");
+        assertTrue(boundCompliance.isIssuancePaused(polygon));
+
+        vm.prank(deployer);
+        boundCompliance.unpauseValidationIssuance(polygon);
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "");
     }
 
     /// @notice A commit for an id the module never reserved applies the delta anyway.
