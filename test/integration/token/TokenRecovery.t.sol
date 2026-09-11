@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -67,6 +68,30 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         assertTrue(identityRegistry.isLocallyRegistered(another));
         assertFalse(identityRegistry.isLocallyRegistered(bob));
+    }
+
+    /// @notice Should not register the new wallet locally when the global identity registry already binds it
+    ///         to the investor: a local copy would outlive the global binding and stop following it.
+    function test_recoveryAddress_Success_NewWalletOnlyGloballyRegistered_StaysGlobal() public {
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, another)
+            ),
+            abi.encode(address(bobIdentity))
+        );
+        assertTrue(identityRegistry.contains(another));
+        assertFalse(identityRegistry.isLocallyRegistered(another));
+
+        vm.prank(agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertFalse(identityRegistry.isLocallyRegistered(another));
+        assertEq(address(identityRegistry.identity(another)), address(bobIdentity));
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertEq(token.balanceOf(another), 500);
     }
 
     /// @notice Should recover and freeze tokens on the new wallet when wallet has frozen token

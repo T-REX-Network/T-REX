@@ -71,7 +71,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
-        mockIdentityRegistryIsLocallyRegistered(newWallet, false);
         mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         // The registry stores no country, so the new wallet is registered with 0 and no country is read.
@@ -98,7 +97,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
-        mockIdentityRegistryIsLocallyRegistered(newWallet, false);
         mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectCall(
@@ -117,7 +115,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
-        mockIdentityRegistryIsLocallyRegistered(newWallet, false);
         mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
@@ -139,7 +136,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryContains(lostWallet, true);
         mockIdentityRegistryContains(newWallet, false);
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
-        mockIdentityRegistryIsLocallyRegistered(newWallet, false);
         mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
@@ -160,7 +156,6 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         // New wallet's identity must match investorOnchainId, otherwise recovery is rejected
         mockIdentityRegistryIdentity(newWallet, IIdentity(investorOnchainId));
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
-        mockIdentityRegistryIsLocallyRegistered(newWallet, true);
 
         vm.expectEmit(true, true, true, true, address(token));
         emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
@@ -168,6 +163,27 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
 
         assertEq(token.balanceOf(lostWallet), 0);
+        assertEq(token.balanceOf(newWallet), mintAmount);
+    }
+
+    /// @dev A new wallet the global identity registry already binds to the investor is not registered
+    ///      locally: a local copy would outlive the global binding and pin this token to a stale identity.
+    function testTokenRecoveryAddressSkipsRegistrationWhenNewWalletResolvesGlobally() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryContains(newWallet, true);
+        mockIdentityRegistryIdentity(newWallet, IIdentity(investorOnchainId));
+        mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
+
+        vm.expectCall(
+            identityRegistry,
+            abi.encodeWithSelector(
+                IERC3643IdentityRegistry.registerIdentity.selector, newWallet, IIdentity(investorOnchainId), uint16(0)
+            ),
+            0
+        );
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+
         assertEq(token.balanceOf(newWallet), mintAmount);
     }
 
