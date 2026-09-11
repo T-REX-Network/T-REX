@@ -71,6 +71,22 @@ library EventsLib {
 
     event ImplementationAuthoritySet(address implementationAuthority);
 
+    // Token Events
+
+    /// @notice Emitted on a delegation-out. Carries the full envelope so indexers need no reverse key table.
+    event DelegatedOut(address indexed holder, bytes32 indexed toKey, bytes toWallet, uint256 amount);
+    /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
+    event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
+    /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
+    event BridgedTransfer(
+        bytes32 indexed fromKey,
+        bytes32 indexed toKey,
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        uint256 amount
+    );
+
     // ModularCompliance Events
 
     event ModuleInteraction(address indexed target, bytes data);

@@ -248,7 +248,8 @@ contract TREXSuiteTest is AccessManagerHelper {
         });
     }
 
-    function _deployImplementations() internal {
+    /// @dev Virtual so a suite can swap the token implementation, e.g. for {TokenLedgerHarness}.
+    function _deployImplementations() internal virtual {
         tokenImplementation = new Token();
         identityRegistryStorageImplementation = new IdentityRegistryStorage();
         modularComplianceImplementation = new ModularCompliance();

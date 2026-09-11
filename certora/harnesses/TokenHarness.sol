@@ -39,12 +39,6 @@ contract TokenHarness is Token {
         return this.getFrozenTokens(user);
     }
 
-    /// @return the spendable balance: balanceOf(user) - frozenTokens(user). Reverts on underflow, which itself
-    ///         is the property INV-3 (frozen never exceeds balance) guarantees can never happen.
-    function freeBalanceOf(address user) external view returns (uint256) {
-        return balanceOf(user) - this.getFrozenTokens(user);
-    }
-
     /// @return the compliance contract address bound to the token.
     function complianceAddress() external view returns (address) {
         return address(this.compliance());

@@ -106,6 +106,28 @@ All notable changes to this project will be documented in this file.
   - `ERC7786GatewayMock`, a test asset: a same-chain loopback that queues on send and delivers on an
     explicit `relay`, so ordering, duplication and loss are controllable, presenting every delivery as
     coming from its configured origin chain.
+- **Balance model: free / frozen / bridged ledger.** A holder's position has three buckets. Free and
+  frozen are native and `balanceOf` keeps its exact ERC-20 meaning over them; bridged is the part
+  delegated to satellites, accounted per ERC-7930 wallet in a ledger of its own inside the token's
+  ERC-7201 namespace, the native mapping untouched.
+  - Accessors: `freeBalanceOf(wallet)`, `bridgedBalanceOf(envelope)` and `totalBridged()` on `IToken`.
+    `totalSupply()` counts the whole issuance, native supply plus `totalBridged`, so a delegation or a
+    recall never moves it; only a mint or a burn does.
+  - `WalletKeyLib`: canonical ERC-7930 parsing with the strict-length rule from the ONCHAINID M-08
+    finding, refusing as well a zero-led EVM chain reference (which decodes to the same chain id);
+    `canonicalKey` and `satelliteKey`, the latter refusing a wallet on this chain, which holds a native
+    balance and never a bridged one.
+  - Internal transitions, one per movement type, applied when the movement is final on the register:
+    `_delegateOut(holder, toWallet, amount)` burns natively (`Transfer(holder, 0x0)`) and credits the
+    satellite wallet; `_recall(fromWallet, holder, amount)` is its mirror; `_bridgedTransfer(from, to,
+    amount, validationId)` applies a settled satellite movement, same-chain or cross-chain, in one
+    atomic touch. They check buckets and envelopes only and fire no compliance hook: the calling flows
+    (delegation-out, recall on burn proof, settlement) own pause, freeze, eligibility, compliance and
+    the identity link, and arrive with the movement-type and settlement work.
+  - Events with the full envelopes: `DelegatedOut`, `Recalled`, `BridgedTransfer` (with the
+    `validationId`). Errors: `NotASatelliteWallet`, `InsufficientBridgedBalance`.
+  - Invariants `INV-7` (conservation across buckets) and `INV-8` (bridged total tracks the positions)
+    join the stateful suite, with `TokenLedgerHarness` exposing the transitions to tests.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
   and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
   single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
