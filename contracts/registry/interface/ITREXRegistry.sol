@@ -63,6 +63,7 @@
 pragma solidity ^0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
@@ -137,6 +138,35 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// @param identityType the ONCHAINID identity type the topic is no longer required for
     /// @param claimTopic the claim topic to remove for that identity type
     function removeClaimTopicForIdentityType(uint256 identityType, uint256 claimTopic) external;
+
+    /// @dev Returns the identity an ERC-7930 wallet is bound to, for attribution.
+    ///
+    /// A wallet on this chain reads its registry entry; every other wallet is resolved through the
+    /// IdentityFactory, revoked bindings included, so a position stays attributed once its wallet is
+    /// revoked. This is the lookup for who owns a position; use `isWalletVerified` to know whether the
+    /// wallet may receive new activity.
+    ///
+    /// Requirements:
+    /// - `wallet` must be a canonical ERC-7930 v1 envelope; otherwise reverts with
+    ///   `NonCanonicalInteroperableAddress`.
+    /// @param wallet the ERC-7930 envelope of the wallet to resolve
+    /// @return the bound identity, or the zero address when the wallet is unbound
+    function resolveIdentity(bytes calldata wallet) external view returns (IIdentity);
+
+    /// @dev Returns whether an ERC-7930 wallet is eligible for new activity, the way `isVerified`
+    /// answers for a wallet on this chain.
+    ///
+    /// A wallet on this chain reads its registry entry; every other wallet resolves its active binding
+    /// through the IdentityFactory, so a revoked satellite wallet is not eligible even though
+    /// `resolveIdentity` still attributes it. The identity then passes the same claim check as
+    /// `isVerified`, and `disableEligibilityChecks` short-circuits it the same way.
+    ///
+    /// Requirements:
+    /// - `wallet` must be a canonical ERC-7930 v1 envelope; otherwise reverts with
+    ///   `NonCanonicalInteroperableAddress`.
+    /// @param wallet the ERC-7930 envelope of the wallet to check
+    /// @return true when the wallet's active identity satisfies every required claim topic
+    function isWalletVerified(bytes calldata wallet) external view returns (bool);
 
     /// @dev Returns the override claim topics registered for an identity type.
     ///
