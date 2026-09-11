@@ -150,6 +150,33 @@ interface IModule {
         returns (bool);
 
     /**
+     *  @dev narrows the amount range of a compliance validation for a satellite movement
+     *  called only when the module declares `BOUNDS`, while the compliance issues a validation for a movement
+     *  between two ERC-7930 wallets that may live on any chain the asset reaches
+     *  the module receives the running range, already narrowed by the modules dispatched before it and capped
+     *  at `_from`'s balance, never the raw request; it must answer a range inside that input, and the
+     *  compliance intersects the answer with the running range anyway, so a wider answer is simply ignored
+     *  an additive rule (recipient cap, concentration, investor count) evaluates at `_currentMax` and a
+     *  retention rule at `_currentMin`, narrowing where the worst case fails; a module that can only certify
+     *  a single value narrows the range to a point; a module may revert to refuse the movement outright
+     *  This function can be called only on a compliance contract that is bound to the module
+     *  @param _from ERC-7930 interoperable address of the sender
+     *  @param _to ERC-7930 interoperable address of the recipient
+     *  @param _currentMin inclusive lower bound of the running range
+     *  @param _currentMax inclusive upper bound of the running range
+     *  @param _compliance address of the compliance contract issuing the validation
+     *  @return min the narrowed inclusive lower bound
+     *  @return max the narrowed inclusive upper bound
+     */
+    function validationBounds(
+        bytes calldata _from,
+        bytes calldata _to,
+        uint256 _currentMin,
+        uint256 _currentMax,
+        address _compliance
+    ) external view returns (uint256 min, uint256 max);
+
+    /**
      *  @dev getter for the dispatch points this module implements
      *  the returned value is a bitmask built from the flags of `ModuleCapabilitiesLib`
      *  the compliance reads it once, at binding time, and never calls a dispatch point whose flag is absent

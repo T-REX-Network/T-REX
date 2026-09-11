@@ -74,8 +74,8 @@ import { IModule } from "./IModule.sol";
 /**
  * @dev Base for every compliance module.
  *
- * The five dispatch points ship a default here, a no-op for the hooks and a pass for the checks, so a
- * module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
+ * The six dispatch points ship a default here, a no-op for the hooks, a pass for the checks and the
+ * untouched range for the bounds, so a module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
  * it is the one member a module MUST declare.
  *
  * An override without its flag is never called, so the rule silently stops applying.
@@ -189,6 +189,19 @@ abstract contract AbstractModuleUpgradeable is
      */
     function moduleCheckSpender(address, address, address, uint256, address) external view virtual returns (bool) {
         return true;
+    }
+
+    /**
+     *  @dev See {IModule-validationBounds}.
+     *  Default pass-through: a module overrides it only when it declares `BOUNDS`.
+     */
+    function validationBounds(bytes calldata, bytes calldata, uint256 _currentMin, uint256 _currentMax, address)
+        external
+        view
+        virtual
+        returns (uint256 min, uint256 max)
+    {
+        return (_currentMin, _currentMax);
     }
 
     /**
