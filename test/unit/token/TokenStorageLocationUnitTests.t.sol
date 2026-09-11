@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
+
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
 import { Utils } from "../helpers/Utils.sol";
@@ -32,6 +34,26 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         // onchainId is in bytes 1-20 (right-aligned, so we shift right by 8 bits to skip the decimals byte)
         address storedOnchainId = address(uint160(uint256(slotValue) >> 8));
         assertEq(storedOnchainId, token.onchainID(), "OnchainId read from storage should match token.onchainID()");
+    }
+
+    /// @dev The ledger fields are appended after `frozenStatus` (offset 5): bridgedBalance at 6, totalBridged
+    ///      at 7. The native balance mapping lives in OpenZeppelin's own namespace and is not touched.
+    function testTokenStorageLocationBridgedBalance() public {
+        bytes memory wallet = InteroperableAddress.formatEvmV1(8453, user1);
+        bytes32 bridgedSlot = bytes32(uint256(Utils.erc7201("token.storage.main")) + 6);
+        bytes32 entry = keccak256(abi.encode(keccak256(wallet), bridgedSlot));
+
+        vm.store(address(token), entry, bytes32(uint256(77)));
+        assertEq(token.bridgedBalanceOf(wallet), 77, "bridgedBalance is not at offset 6");
+    }
+
+    function testTokenStorageLocationTotalBridged() public {
+        bytes32 totalBridgedSlot = bytes32(uint256(Utils.erc7201("token.storage.main")) + 7);
+        assertEq(uint256(vm.load(address(token), totalBridgedSlot)), 0);
+
+        vm.store(address(token), totalBridgedSlot, bytes32(uint256(55)));
+        assertEq(token.totalBridged(), 55, "totalBridged is not at offset 7");
+        assertEq(token.totalSupply(), 55, "totalSupply does not count the bridged total");
     }
 
 }
