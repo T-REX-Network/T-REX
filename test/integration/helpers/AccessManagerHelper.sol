@@ -97,10 +97,16 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.AGENT_PAUSER, account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants the TOKEN_MANAGER and IDENTITY_MANAGER roles to `account`.
+    /// @notice Grants COMPLIANCE_MANAGER, which gates the validation policy setters on ModularCompliance.
+    function _grantComplianceManagerRole(address account) internal {
+        accessManager.grantRole(RolesLib.COMPLIANCE_MANAGER, account, NO_EXECUTION_DELAY);
+    }
+
+    /// @notice Grants the TOKEN_MANAGER, IDENTITY_MANAGER and COMPLIANCE_MANAGER roles to `account`.
     function _grantManagerRoles(address account) internal {
         accessManager.grantRole(RolesLib.TOKEN_MANAGER, account, NO_EXECUTION_DELAY);
         accessManager.grantRole(RolesLib.IDENTITY_MANAGER, account, NO_EXECUTION_DELAY);
+        _grantComplianceManagerRole(account);
     }
 
     /// @notice Returns true when `account` holds the AGENT role on the manager.

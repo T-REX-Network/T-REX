@@ -157,6 +157,15 @@ library EventsLib {
         bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
     );
 
+    // TransferValidation Events
+    event DefaultValidityWindowSet(uint64 duration);
+    event ReconciliationWindowSet(bytes32 indexed chainKey, uint64 duration);
+    event ValidationClampSet(uint256 maxAmount);
+    event ValidationIssuancePaused(bytes32 indexed chainKey);
+    event ValidationIssuanceUnpaused(bytes32 indexed chainKey);
+    /// @notice Warning: a reconciliation of `validationId` arrived from `chainKey` after its release deadline.
+    ///         The settlement is recorded regardless, and issuance for that chain is paused until unpaused.
+    event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

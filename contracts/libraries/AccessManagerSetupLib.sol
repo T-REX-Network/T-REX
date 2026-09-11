@@ -199,6 +199,16 @@ library AccessManagerSetupLib {
         functions[4] = RolesLib.BIND_UNBIND_TOKEN;
         functions[5] = ModularCompliance.refreshModuleCapabilities.selector;
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.OWNER);
+
+        // ------ COMPLIANCE_MANAGER role ------
+        // The issuer's validation policy: windows, clamp and the per-chain issuance pause.
+        functions = new bytes4[](5);
+        functions[0] = ModularCompliance.setDefaultValidityWindow.selector;
+        functions[1] = ModularCompliance.setReconciliationWindow.selector;
+        functions[2] = ModularCompliance.setValidationClamp.selector;
+        functions[3] = ModularCompliance.pauseValidationIssuance.selector;
+        functions[4] = ModularCompliance.unpauseValidationIssuance.selector;
+        accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.COMPLIANCE_MANAGER);
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
@@ -261,7 +271,7 @@ library AccessManagerSetupLib {
 
     /// @notice Wires the role-giver hierarchy. Call once, before any operational grant.
     ///         AGENT_ADMIN administers AGENT and every granular AGENT_* role; SUITE_ADMIN
-    ///         administers TOKEN_MANAGER and IDENTITY_MANAGER. OWNER is intentionally left
+    ///         administers TOKEN_MANAGER, IDENTITY_MANAGER and COMPLIANCE_MANAGER. OWNER is intentionally left
     ///         under ADMIN_ROLE (0) so only the governance multisig can grant it.
     function setupRoleAdmins(IAccessManager accessManager) internal {
         // ------ AGENT_ADMIN administers the AGENT family ------
@@ -277,6 +287,7 @@ library AccessManagerSetupLib {
         // ------ SUITE_ADMIN administers the token-config roles ------
         accessManager.setRoleAdmin(RolesLib.TOKEN_MANAGER, RolesLib.SUITE_ADMIN);
         accessManager.setRoleAdmin(RolesLib.IDENTITY_MANAGER, RolesLib.SUITE_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.COMPLIANCE_MANAGER, RolesLib.SUITE_ADMIN);
 
         // ------ AGENT_ADMIN administers the transient IRS_BINDER role ------
         accessManager.setRoleAdmin(RolesLib.IRS_BINDER, RolesLib.AGENT_ADMIN);
@@ -296,6 +307,7 @@ library AccessManagerSetupLib {
 
         accessManager.labelRole(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
         accessManager.labelRole(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
+        accessManager.labelRole(RolesLib.COMPLIANCE_MANAGER, "TREX-Suite Manager: Compliance");
         accessManager.labelRole(RolesLib.VERSION_MANAGER, "TREX-Suite Manager: Version");
 
         // Role-givers

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Test } from "@forge-std/Test.sol";
+import { Test, Vm } from "@forge-std/Test.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
@@ -22,6 +22,24 @@ contract AccessManagerSetupLibLabelsUnitTest is Test {
         vm.expectEmit(true, false, false, true, address(accessManager));
         emit IAccessManager.RoleLabel(RolesLib.OWNER, "TREX-Suite Owner");
         AccessManagerSetupLib.setupLabels(accessManager);
+    }
+
+    function test_setupLabels_LabelsTheComplianceManager() public {
+        AccessManager accessManager = new AccessManager(address(this));
+
+        vm.recordLogs();
+        AccessManagerSetupLib.setupLabels(accessManager);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] != IAccessManager.RoleLabel.selector) continue;
+            if (uint256(logs[i].topics[1]) == RolesLib.COMPLIANCE_MANAGER) {
+                assertEq(abi.decode(logs[i].data, (string)), "TREX-Suite Manager: Compliance");
+                found = true;
+            }
+        }
+        assertTrue(found, "COMPLIANCE_MANAGER is labelled");
     }
 
 }

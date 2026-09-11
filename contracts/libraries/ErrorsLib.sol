@@ -150,6 +150,13 @@ library ErrorsLib {
     // TREXRegistry Errors
     error Deprecated();
 
+    // TransferValidation Errors
+    /// @dev A validity or reconciliation window must be positive: a zero window would release a slot at expiry.
+    error ZeroDuration();
+    /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
+    error ValidationIssuancePaused(bytes32 chainKey);
+    /// @dev Unpausing a chain that is not paused.
+    error ValidationIssuanceNotPaused(bytes32 chainKey);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error ChainNotOpen(bytes32 chainKey);
