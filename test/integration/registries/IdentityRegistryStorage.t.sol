@@ -372,6 +372,52 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertNotEq(globalIdentity, address(0));
     }
 
+    // ============ addIdentityToStorage() override signal ============
+
+    /// @notice A local binding that shadows a different global identity is signalled by `IdentityOverridden`
+    ///         right after the standard `IdentityStored`, and the local binding wins.
+    function test_addIdentityToStorage_EmitsIdentityOverridden_WhenGlobalIdentityDiffers() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverridden(another, globalIdentity, charlieIdentity);
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(charlieIdentity));
+    }
+
+    /// @notice The signal reaches the agent path an issuer actually uses: registering through the registry.
+    function test_registerIdentity_EmitsIdentityOverridden_ThroughRegistry() public {
+        address globalOnly = makeAddr("globalOnly");
+        IIdentity globalIdentity = _deployIdentity(globalOnly, "globalOnly");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverridden(globalOnly, globalIdentity, charlieIdentity);
+        vm.expectEmit(address(registry));
+        emit ERC3643EventsLib.IdentityRegistered(globalOnly, charlieIdentity);
+        vm.prank(agent);
+        registry.registerIdentity(globalOnly, charlieIdentity, 0);
+    }
+
+    /// @notice With no registry bound there is no global registry to compare against: only `IdentityStored`.
+    function test_addIdentityToStorage_EmitsOnlyIdentityStored_WhenNoRegistryBound() public {
+        _deployIdentity(another, "another");
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
+
+        vm.recordLogs();
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
+    }
+
     // ============ supportsInterface() Tests ============
 
     /// @notice Should return false for unsupported interfaces
