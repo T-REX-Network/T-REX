@@ -143,5 +143,8 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// An empty array means identities of that type verify against the default `getClaimTopics()`.
     /// @param identityType the ONCHAINID identity type to query
     function getClaimTopicsForIdentityType(uint256 identityType) external view returns (uint256[] memory);
+    /// @notice Returns true when the wallet has an identity stored locally in this registry,
+    /// ignoring the global identity registry fallback.
+    function isLocallyRegistered(address userAddress) external view returns (bool);
 
 }

@@ -62,6 +62,8 @@
  */
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { Version } from "./VersionLib.sol";
 
@@ -97,6 +99,14 @@ library EventsLib {
     ///         `IdentityModified(oldIdentity, newIdentity)`, which omits the investor wallet. Pair the two logs of
     ///         the same transaction; the identities are not repeated here.
     event InvestorIdentityChanged(address indexed investor);
+    /// @notice Emitted by `IdentityRegistryStorage.addIdentityToStorage` right after the standard
+    ///         `IdentityStored(investor, localIdentity)` when the global ONCHAINID identity registry already binds
+    ///         the wallet to a different identity. The local binding takes precedence over the global one for every
+    ///         token wired to the storage; the registration is never blocked, this log is how the issuer's
+    ///         monitoring catches the divergence.
+    event IdentityOverridden(
+        address indexed investor, IIdentity indexed globalIdentity, IIdentity indexed localIdentity
+    );
 
     // Token Events
 

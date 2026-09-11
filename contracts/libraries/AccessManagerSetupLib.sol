@@ -135,15 +135,15 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.IRS_BINDER);
 
         // ------ OWNER role ------
+        functions = new bytes4[](1);
         functions[0] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        functions = new bytes4[](4);
+        functions = new bytes4[](3);
         functions[0] = IdentityRegistryStorage.addIdentityToStorage.selector;
         functions[1] = IdentityRegistryStorage.modifyStoredIdentity.selector;
-        functions[2] = IdentityRegistryStorage.modifyStoredInvestorCountry.selector;
-        functions[3] = IdentityRegistryStorage.removeIdentityFromStorage.selector;
+        functions[2] = IdentityRegistryStorage.removeIdentityFromStorage.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.AGENT);
     }
 
@@ -164,12 +164,11 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        functions = new bytes4[](5);
+        functions = new bytes4[](4);
         functions[0] = TREXRegistry.registerIdentity.selector;
         functions[1] = TREXRegistry.batchRegisterIdentity.selector;
         functions[2] = TREXRegistry.updateIdentity.selector;
-        functions[3] = TREXRegistry.updateCountry.selector;
-        functions[4] = TREXRegistry.deleteIdentity.selector;
+        functions[3] = TREXRegistry.deleteIdentity.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.AGENT);
     }
 

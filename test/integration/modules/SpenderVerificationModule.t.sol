@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
@@ -96,20 +97,23 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
 
     /// @notice Should stop refusing once the spender gets an identity
     function test_transferFrom_Success_AfterSpenderRegistered() public {
+        // `another` has no identity at all -- not locally, and not in the global IdFactory the
+        // registry falls back to -- so the spender check rejects them until one is registered.
+        // Deleting a registered spender's local entry would not do: the fallback still resolves it.
+        assertFalse(identityRegistry.isVerified(another));
+
         vm.prank(alice);
-        token.approve(charlie, 100);
+        token.approve(another, 100);
 
-        vm.prank(agent);
-        identityRegistry.deleteIdentity(charlie);
-
-        vm.prank(charlie);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, charlie, alice, bob, 100));
+        vm.prank(another);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, another, alice, bob, 100));
         token.transferFrom(alice, bob, 100);
 
+        IIdentity anotherIdentity = _deployIdentity(another, "another");
         vm.prank(agent);
-        identityRegistry.registerIdentity(charlie, charlieIdentity, Countries.SPAIN);
+        identityRegistry.registerIdentity(another, anotherIdentity, Countries.SPAIN);
 
-        vm.prank(charlie);
+        vm.prank(another);
         token.transferFrom(alice, bob, 100);
 
         assertEq(token.balanceOf(bob), 100);

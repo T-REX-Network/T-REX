@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -81,16 +82,16 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.addIdentityToStorage(bob, charlieIdentity, Countries.FRANCE);
     }
 
-    /// @notice Storing an identity also emits `CountryModified`, so the country is observable from logs.
-    function test_addIdentityToStorage_EmitsIdentityStoredAndCountryModified() public {
-        vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.CountryModified(another, Countries.FRANCE);
+    /// @notice The country argument is ignored: only `IdentityStored` is emitted and no country is recorded.
+    function test_addIdentityToStorage_IgnoresCountry() public {
+        vm.recordLogs();
         vm.prank(agent);
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, Countries.FRANCE);
 
-        assertEq(identityRegistryStorage.storedInvestorCountry(another), Countries.FRANCE);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
+        assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
     }
 
     // ============ modifyStoredIdentity() Tests ============
@@ -138,29 +139,19 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
     }
 
-    // ============ modifyStoredInvestorCountry() Tests ============
+    // ============ modifyStoredInvestorCountry() — deprecated ============
 
-    /// @notice Should revert when sender is not agent
-    function test_modifyStoredInvestorCountry_RevertWhen_NotAgent() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
+    /// @notice Deprecated: the storage keeps no country, so even an agent hits `Deprecated()`.
+    function test_modifyStoredInvestorCountry_RevertWhen_Deprecated_AsAgent() public {
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
     }
 
-    /// @notice Should revert when wallet is zero address
-    function test_modifyStoredInvestorCountry_RevertWhen_WalletZeroAddress() public {
-        vm.prank(agent);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        identityRegistryStorage.modifyStoredInvestorCountry(address(0), Countries.UNITED_STATES);
-    }
-
-    /// @notice Should revert when wallet is not registered
-    function test_modifyStoredInvestorCountry_RevertWhen_NotStored() public {
-        vm.prank(agent);
-        identityRegistryStorage.removeIdentityFromStorage(charlie);
-
-        vm.prank(agent);
-        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+    /// @notice Deprecation takes precedence — non-agents get `Deprecated()`, never the access-managed error.
+    function test_modifyStoredInvestorCountry_RevertWhen_Deprecated_AsOther() public {
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         identityRegistryStorage.modifyStoredInvestorCountry(charlie, Countries.UNITED_STATES);
     }
 
@@ -292,6 +283,139 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         emit ERC3643EventsLib.IdentityRegistryUnbound(identityRegistry);
         vm.prank(deployer);
         identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
+    }
+
+    /// @notice Should unbind a registry located past index 0 (exercises the loop increment)
+    function test_unbindIdentityRegistry_Success_WhenNotFirst() public {
+        address firstIR = address(token.identityRegistry());
+        address secondIR = makeAddr("secondIR");
+
+        // bindIdentityRegistry is gated by onlySharedAuthority: the bound address must report the
+        // storage's AccessManager as its authority.
+        vm.mockCall(
+            secondIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(secondIR);
+
+        // Unbind the second one — match is at index 1, so the loop increments past index 0
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(secondIR);
+
+        address[] memory linked = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(linked.length, 1);
+        assertEq(linked[0], firstIR);
+    }
+
+    // ============ linkedIdentityRegistries() Tests ============
+
+    /// @notice Should return the list of bound identity registries
+    function test_linkedIdentityRegistries_ReturnsBoundRegistries() public {
+        address existingIR = address(token.identityRegistry());
+
+        // Initially only the suite's IR is bound
+        address[] memory initial = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(initial.length, 1);
+        assertEq(initial[0], existingIR);
+
+        // Bind another registry and verify it appears. It must share the storage's authority to pass
+        // the onlySharedAuthority guard.
+        address extraIR = makeAddr("extraIR");
+        vm.mockCall(
+            extraIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(extraIR);
+
+        address[] memory updated = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(updated.length, 2);
+        assertEq(updated[0], existingIR);
+        assertEq(updated[1], extraIR);
+    }
+
+    // ============ storedIdentity() fallback / storedInvestorCountry() deprecated ============
+
+    /// @notice storedIdentity returns the local identity when present (no fallback to global)
+    function test_storedIdentity_UsesLocal_WhenPresent() public view {
+        assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(bobIdentity));
+    }
+
+    /// @notice storedIdentity falls back to the global identity registry when no local identity is stored
+    function test_storedIdentity_FallsBackToGlobal_WhenLocalMissing() public {
+        // `another` is a fresh wallet that has never been added to the local IRS.
+        // Create its identity directly in the global IdentityFactory and check the fallback.
+        address globalIdentity = address(_deployIdentity(another, "another"));
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), globalIdentity);
+    }
+
+    /// @notice storedIdentity returns address(0) when the wallet is unknown to both local and global
+    function test_storedIdentity_ReturnsZero_WhenUnknownEverywhere() public view {
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
+    }
+
+    /// @notice storedInvestorCountry returns 0 for every wallet, local or global-only
+    function test_storedInvestorCountry_ReturnsZero_ForAnyWallet() public {
+        _deployIdentity(another, "another");
+        assertEq(identityRegistryStorage.storedInvestorCountry(bob), 0);
+        assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
+    }
+
+    /// @notice With no registry bound there is no factory to fall back to: a global-only wallet
+    ///         resolves to the zero identity
+    function test_storedIdentity_ReturnsZero_WhenNoRegistryBound() public {
+        address globalIdentity = address(_deployIdentity(another, "another"));
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
+        assertNotEq(globalIdentity, address(0));
+    }
+
+    // ============ addIdentityToStorage() override signal ============
+
+    /// @notice A local binding that shadows a different global identity is signalled by `IdentityOverridden`
+    ///         right after the standard `IdentityStored`, and the local binding wins.
+    function test_addIdentityToStorage_EmitsIdentityOverridden_WhenGlobalIdentityDiffers() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverridden(another, globalIdentity, charlieIdentity);
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(charlieIdentity));
+    }
+
+    /// @notice The signal reaches the agent path an issuer actually uses: registering through the registry.
+    function test_registerIdentity_EmitsIdentityOverridden_ThroughRegistry() public {
+        address globalOnly = makeAddr("globalOnly");
+        IIdentity globalIdentity = _deployIdentity(globalOnly, "globalOnly");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverridden(globalOnly, globalIdentity, charlieIdentity);
+        vm.expectEmit(address(registry));
+        emit ERC3643EventsLib.IdentityRegistered(globalOnly, charlieIdentity);
+        vm.prank(agent);
+        registry.registerIdentity(globalOnly, charlieIdentity, 0);
+    }
+
+    /// @notice With no registry bound there is no global registry to compare against: only `IdentityStored`.
+    function test_addIdentityToStorage_EmitsOnlyIdentityStored_WhenNoRegistryBound() public {
+        _deployIdentity(another, "another");
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
+
+        vm.recordLogs();
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
     }
 
     // ============ supportsInterface() Tests ============

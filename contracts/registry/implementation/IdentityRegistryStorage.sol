@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
@@ -70,21 +71,23 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
+import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
+/// @title IdentityRegistryStorage
+/// @notice Wallet-to-identity bindings shared by the registries bound to it. This storage is a local override
+///  layer on top of the global ONCHAINID identity registry (the `IdentityFactory` of each bound registry): a
+///  wallet with no local binding resolves through the global registry, and a locally stored binding takes
+///  precedence over the global one for every token wired to this storage.
+/// @dev A local binding that shadows a different global identity is signalled by `IdentityOverridden` at
+///  registration time and never blocked.
 contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @dev struct containing the identity contract and the country of the user
-    struct Identity {
-        IIdentity identityContract;
-        uint16 investorCountry;
-    }
-
     /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistryStorage
     struct Storage {
         /// @dev mapping between a user address and the corresponding identity
-        mapping(address user => Identity) identities;
+        mapping(address user => IIdentity) identities;
 
         /// @dev set of Identity Registries linked to this storage
         EnumerableSet.AddressSet identityRegistries;
@@ -97,6 +100,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         _disableInitializers();
     }
 
+    /// @notice Initializes the contract
+    /// @param accessManagerAddress the address of the access manager
+    /// @param initialIRAddress the Identity Registry to bind at deploy time, or the zero address to bind none
     function init(address accessManagerAddress, address initialIRAddress) external initializer {
         require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
@@ -108,17 +114,26 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
+     *  @dev The binding stored here overrides, for every token wired to this storage, whatever the global
+     *  ONCHAINID identity registry returns for the wallet. When the global registry already binds the wallet
+     *  to another identity, `IdentityOverridden` is emitted and the registration proceeds.
+     *  @dev The country argument is ignored: this storage keeps wallet-to-identity bindings only. The
+     *  country is a compliance concern, read from the country module bound to the token's
+     *  `ModularCompliance`.
      */
-    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external restricted {
+    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
 
         Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) == address(0), ErrorsLib.AddressAlreadyStored());
-        s.identities[_userAddress].identityContract = _identity;
-        s.identities[_userAddress].investorCountry = _country;
+        require(address(s.identities[_userAddress]) == address(0), ErrorsLib.AddressAlreadyStored());
+        s.identities[_userAddress] = _identity;
+
         emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
-        // The standard store event omits the country; emit the same event `modifyStoredInvestorCountry` uses.
-        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
+
+        IIdentity globalIdentity = _globalIdentity(_userAddress);
+        if (address(globalIdentity) != address(0) && globalIdentity != _identity) {
+            emit EventsLib.IdentityOverridden(_userAddress, globalIdentity, _identity);
+        }
     }
 
     /**
@@ -127,22 +142,20 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     function modifyStoredIdentity(address _userAddress, IIdentity _identity) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        IIdentity oldIdentity = s.identities[_userAddress].identityContract;
-        s.identities[_userAddress].identityContract = _identity;
+        require(address(s.identities[_userAddress]) != address(0), ErrorsLib.AddressNotYetStored());
+        IIdentity oldIdentity = s.identities[_userAddress];
+        s.identities[_userAddress] = _identity;
         emit ERC3643EventsLib.IdentityModified(oldIdentity, _identity);
         emit EventsLib.InvestorIdentityChanged(_userAddress);
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
+     *  @dev DEPRECATED: this storage keeps no country; always reverts. The country is a compliance
+     *  concern, owned by the country module bound to the token's `ModularCompliance`.
      */
-    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external restricted {
-        require(_userAddress != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        s.identities[_userAddress].investorCountry = _country;
-        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
+    function modifyStoredInvestorCountry(address, uint16) external pure {
+        revert ErrorsLib.Deprecated();
     }
 
     /**
@@ -151,8 +164,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     function removeIdentityFromStorage(address _userAddress) external restricted {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
         Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        IIdentity oldIdentity = s.identities[_userAddress].identityContract;
+        require(address(s.identities[_userAddress]) != address(0), ErrorsLib.AddressNotYetStored());
+        IIdentity oldIdentity = s.identities[_userAddress];
         delete s.identities[_userAddress];
         emit ERC3643EventsLib.IdentityUnstored(_userAddress, oldIdentity);
     }
@@ -183,17 +196,32 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     }
 
     /**
+     *  @dev See {IIdentityRegistryStorage-isLocallyStored}.
+     */
+    function isLocallyStored(address _userAddress) external view override returns (bool) {
+        return address(_getStorage().identities[_userAddress]) != address(0);
+    }
+
+    /**
      *  @dev See {IIdentityRegistryStorage-storedIdentity}.
+     *  @dev The local binding takes precedence; without one, the wallet resolves through the global
+     *  identity registry (see `_globalIdentity`).
      */
     function storedIdentity(address _userAddress) external view returns (IIdentity) {
-        return _getStorage().identities[_userAddress].identityContract;
+        IIdentity identity = _getStorage().identities[_userAddress];
+        if (address(identity) != address(0)) {
+            return identity;
+        }
+        return _globalIdentity(_userAddress);
     }
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedInvestorCountry}.
+     *  @dev DEPRECATED: this storage keeps no country; always returns 0. Read the country from the
+     *  country module bound to the token's `ModularCompliance`.
      */
-    function storedInvestorCountry(address _userAddress) external view returns (uint16) {
-        return _getStorage().identities[_userAddress].investorCountry;
+    function storedInvestorCountry(address) external pure returns (uint16) {
+        return 0;
     }
 
     /**
@@ -212,6 +240,20 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
         s.identityRegistries.add(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
+    }
+
+    /**
+     *  @dev Asks the IdentityFactory of each bound registry in turn and returns the first identity found,
+     *  or the zero identity when none knows the wallet. The factory keys wallets by ERC-7930
+     *  interoperable address.
+     */
+    function _globalIdentity(address _userAddress) internal view returns (IIdentity identity) {
+        Storage storage s = _getStorage();
+        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, _userAddress);
+        uint256 count = s.identityRegistries.length();
+        for (uint256 i = 0; i < count && address(identity) == address(0); i++) {
+            identity = IIdentity(ITREXRegistry(s.identityRegistries.at(i)).identityFactory().getIdentity(account));
+        }
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
