@@ -73,6 +73,13 @@ import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnabl
 import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
+/// @title IdentityRegistryStorage
+/// @notice Wallet-to-identity bindings shared by the registries bound to it. This storage is a local override
+///  layer on top of the global ONCHAINID identity registry (the `IdentityFactory` of each bound registry): a
+///  wallet with no local binding resolves through the global registry, and a locally stored binding takes
+///  precedence over the global one for every token wired to this storage.
+/// @dev A local binding that shadows a different global identity is signalled by `IdentityOverridden` at
+///  registration time and never blocked.
 contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -107,6 +114,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
+     *  @dev The binding stored here overrides, for every token wired to this storage, whatever the global
+     *  ONCHAINID identity registry returns for the wallet. When the global registry already binds the wallet
+     *  to another identity, `IdentityOverridden` is emitted and the registration proceeds.
      *  @dev The country argument is ignored: this storage keeps wallet-to-identity bindings only. The
      *  country is a compliance concern, read from the country module bound to the token's
      *  `ModularCompliance`.
@@ -119,6 +129,11 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         s.identities[_userAddress] = _identity;
 
         emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
+
+        IIdentity globalIdentity = _globalIdentity(_userAddress);
+        if (address(globalIdentity) != address(0) && globalIdentity != _identity) {
+            emit EventsLib.IdentityOverridden(_userAddress, globalIdentity, _identity);
+        }
     }
 
     /**
@@ -189,22 +204,15 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-storedIdentity}.
-     *  @dev Without a local binding, asks the IdentityFactory of each bound registry in turn and
-     *  returns the first identity found. The factory keys wallets by ERC-7930 interoperable address.
+     *  @dev The local binding takes precedence; without one, the wallet resolves through the global
+     *  identity registry (see `_globalIdentity`).
      */
     function storedIdentity(address _userAddress) external view returns (IIdentity) {
-        Storage storage s = _getStorage();
-        IIdentity identity = s.identities[_userAddress];
+        IIdentity identity = _getStorage().identities[_userAddress];
         if (address(identity) != address(0)) {
             return identity;
         }
-
-        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, _userAddress);
-        uint256 count = s.identityRegistries.length();
-        for (uint256 i = 0; i < count && address(identity) == address(0); i++) {
-            identity = IIdentity(ITREXRegistry(s.identityRegistries.at(i)).identityFactory().getIdentity(account));
-        }
-        return identity;
+        return _globalIdentity(_userAddress);
     }
 
     /**
@@ -232,6 +240,20 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
         s.identityRegistries.add(_identityRegistry);
         emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
+    }
+
+    /**
+     *  @dev Asks the IdentityFactory of each bound registry in turn and returns the first identity found,
+     *  or the zero identity when none knows the wallet. The factory keys wallets by ERC-7930
+     *  interoperable address.
+     */
+    function _globalIdentity(address _userAddress) internal view returns (IIdentity identity) {
+        Storage storage s = _getStorage();
+        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, _userAddress);
+        uint256 count = s.identityRegistries.length();
+        for (uint256 i = 0; i < count && address(identity) == address(0); i++) {
+            identity = IIdentity(ITREXRegistry(s.identityRegistries.at(i)).identityFactory().getIdentity(account));
+        }
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
