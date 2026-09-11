@@ -20,30 +20,37 @@ import { SlotsOnlyModule } from "test/integration/mocks/SlotsModule.sol";
 contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     uint256 internal constant POLYGON = 137;
+    uint256 internal constant OPTIMISM = 10;
     uint64 internal constant VALIDITY_WINDOW = 1 hours;
     uint64 internal constant POLYGON_WINDOW = 30 minutes;
+    uint64 internal constant OPTIMISM_WINDOW = 45 minutes;
     uint256 internal constant ISSUED_AT = 1_700_000_000;
     uint256 internal constant BRIDGED_BALANCE = 100;
 
     bytes32 internal polygon = _evmChainKey(POLYGON);
+    bytes32 internal optimism = _evmChainKey(OPTIMISM);
     address internal aliceIdentity = makeAddr("AliceIdentity");
     address internal bobIdentity = makeAddr("BobIdentity");
     bytes internal fromSat;
     bytes internal toSat;
+    bytes internal toOptimism;
 
     function setUp() public override {
         super.setUp();
         fromSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("aliceOnPolygon"));
         toSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("bobOnPolygon"));
+        toOptimism = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("bobOnOptimism"));
 
         mc.setDefaultValidityWindow(VALIDITY_WINDOW);
         mc.setReconciliationWindow(polygon, POLYGON_WINDOW);
+        mc.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
+        _bind(toOptimism, bobIdentity);
 
         vm.warp(ISSUED_AT);
     }
@@ -82,8 +89,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_statusOf_Success_WhenBurnConfirmedNeverDerivesExpired() public {
-        uint256 id = _issue();
-        mc.exposed_setStatus(id, ITransferValidation.ValidationStatus.BurnConfirmed);
+        uint256 id = _issueCrossChainWithBurnLeg();
 
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
@@ -196,8 +202,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_discardExpiredValidations_RevertWhen_BurnConfirmedWhateverTheClock() public {
-        uint256 id = _issue();
-        mc.exposed_setStatus(id, ITransferValidation.ValidationStatus.BurnConfirmed);
+        uint256 id = _issueCrossChainWithBurnLeg();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
         vm.prank(keeperAccount);
@@ -232,6 +237,19 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     function _issue() private returns (uint256 id) {
         vm.prank(aliceIdentity);
         id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+    }
+
+    /// @dev A cross-chain validation whose burn leg landed: the real `BurnConfirmed`.
+    function _issueCrossChainWithBurnLeg() private returns (uint256 id) {
+        vm.prank(aliceIdentity);
+        id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        vm.prank(token);
+        mc.handleSettlement(
+            polygon,
+            MessageTypesLib.SettlementNotification({
+                validationId: id, token: token, from: fromSat, to: "", amount: 50
+            })
+        );
     }
 
     function _ids(uint256 id) private pure returns (uint256[] memory ids) {

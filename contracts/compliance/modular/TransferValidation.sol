@@ -285,16 +285,30 @@ abstract contract TransferValidation is ITransferValidation {
 
         bool consumed = leg == Leg.Mint ? state.toLegConsumed : state.fromLegConsumed;
         if (consumed) return _emergency(n.validationId, originChainKey);
+        require(
+            state.status == ValidationStatus.Pending || state.status == ValidationStatus.BurnConfirmed,
+            ErrorsLib.ValidationNotSettleable(n.validationId)
+        );
 
-        require(state.status == ValidationStatus.Pending, ErrorsLib.ValidationNotSettleable(n.validationId));
-        state.fromLegConsumed = true;
-        state.toLegConsumed = true;
-        _settle(state, n, originChainKey, ValidationStatus.Settled);
+        if (leg == Leg.Single) {
+            state.fromLegConsumed = true;
+            state.toLegConsumed = true;
+            _settle(state, n.from, n.to, n, originChainKey, ValidationStatus.Settled);
+        } else if (leg == Leg.Burn) {
+            state.fromLegConsumed = true;
+            if (state.toLegConsumed) _settleSecondLeg(state, n.from, state.legWallet, n, originChainKey);
+            else _confirmFirstLeg(state, n.from, n, originChainKey);
+        } else {
+            state.toLegConsumed = true;
+            if (state.fromLegConsumed) _settleSecondLeg(state, state.legWallet, n.to, n, originChainKey);
+            else _confirmFirstLeg(state, n.to, n, originChainKey);
+        }
     }
 
     /// @dev A leg is matched by the wallets it carries and the chain it comes from. A one-leg validation expects
     ///  both wallets, the issued ones, from either recorded chain (the satellite side; the reference chain has no
-    ///  peer). A two-leg validation is matched in the cross-chain lifecycle.
+    ///  peer). A two-leg validation expects the burn leg, `to` empty, from `from`'s chain, and the mint leg,
+    ///  `from` empty, from `to`'s chain; a leg carrying both wallets is neither.
     function _matchLeg(
         ValidationRecord storage record,
         bytes32 originChainKey,
@@ -302,17 +316,51 @@ abstract contract TransferValidation is ITransferValidation {
     ) private view returns (Leg) {
         bool fromMatches = n.from.length != 0 && keccak256(n.from) == record.fromKey;
         bool toMatches = n.to.length != 0 && keccak256(n.to) == record.toKey;
-        bool originMatches = originChainKey == record.fromChainKey || originChainKey == record.toChainKey;
+        if (!record.twoLegs) {
+            bool originMatches = originChainKey == record.fromChainKey || originChainKey == record.toChainKey;
+            require(fromMatches && toMatches && originMatches, ErrorsLib.SettlementLegMismatch(n.validationId));
+            return Leg.Single;
+        }
+        if (fromMatches && n.to.length == 0 && originChainKey == record.fromChainKey) return Leg.Burn;
+        if (toMatches && n.from.length == 0 && originChainKey == record.toChainKey) return Leg.Mint;
+        revert ErrorsLib.SettlementLegMismatch(n.validationId);
+    }
+
+    /// @dev The first of two legs, whichever it is: the amount and the wallet it carries are kept for the other
+    ///  one, and the validation is pinned. Nothing moves yet.
+    function _confirmFirstLeg(
+        ValidationState storage state,
+        bytes calldata wallet,
+        MessageTypesLib.SettlementNotification calldata n,
+        bytes32 originChainKey
+    ) private {
+        state.executedAmount = n.amount;
+        state.legWallet = wallet;
+        state.status = ValidationStatus.BurnConfirmed;
+
+        emit EventsLib.ValidationLegConfirmed(n.validationId, originChainKey, n.amount);
+    }
+
+    /// @dev The second of two legs must repeat the first one's amount; then the pair settles.
+    function _settleSecondLeg(
+        ValidationState storage state,
+        bytes memory from,
+        bytes memory to,
+        MessageTypesLib.SettlementNotification calldata n,
+        bytes32 originChainKey
+    ) private {
         require(
-            !record.twoLegs && fromMatches && toMatches && originMatches,
-            ErrorsLib.SettlementLegMismatch(n.validationId)
+            n.amount == state.executedAmount,
+            ErrorsLib.SettlementAmountMismatch(n.validationId, state.executedAmount, n.amount)
         );
-        return Leg.Single;
+        _settle(state, from, to, n, originChainKey, ValidationStatus.Settled);
     }
 
     /// @dev Every expected leg is in: commit the modules at the exact amount, move the ledger once, mark, announce.
     function _settle(
         ValidationState storage state,
+        bytes memory from,
+        bytes memory to,
         MessageTypesLib.SettlementNotification calldata n,
         bytes32 originChainKey,
         ValidationStatus status
@@ -320,7 +368,7 @@ abstract contract TransferValidation is ITransferValidation {
         state.executedAmount = n.amount;
         state.status = status;
         _commitSlots(n.validationId, n.amount);
-        _settleOnToken(n.from, n.to, n.amount, n.validationId);
+        _settleOnToken(from, to, n.amount, n.validationId);
 
         emit EventsLib.ValidationSettled(n.validationId, originChainKey, n.amount);
     }

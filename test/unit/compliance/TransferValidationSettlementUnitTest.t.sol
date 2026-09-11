@@ -246,6 +246,132 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertTrue(mc.handleSettlement(polygon, _leg(0, fromSat, toSat, 50)));
     }
 
+    // ==== two-leg Tests ====
+
+    function test_handleSettlement_Success_WhenTheBurnLegLandsFirst() public {
+        address slots = _bindSlotsModule();
+        uint256 id = _issueCrossChain();
+
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
+        vm.prank(token);
+        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        assertFalse(halt);
+        assertEq(SlotsOnlyModule(slots).commitCalls(), 0, "nothing committed on the first leg");
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        ITransferValidation.ValidationState memory state = mc.stateOf(id);
+        assertTrue(state.fromLegConsumed);
+        assertFalse(state.toLegConsumed);
+        assertEq(state.executedAmount, 50);
+        assertEq(state.legWallet, fromSat);
+
+        vm.expectCall(slots, abi.encodeCall(IModule.commitSlot, (id, 50)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toOptimism, 50, id)), 1);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationSettled(id, optimism, 50);
+        vm.prank(token);
+        halt = mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+
+        assertFalse(halt);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertTrue(mc.stateOf(id).toLegConsumed);
+    }
+
+    function test_handleSettlement_Success_WhenTheMintLegLandsFirst() public {
+        uint256 id = _issueCrossChain();
+
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationLegConfirmed(id, optimism, 60);
+        vm.prank(token);
+        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 60));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        ITransferValidation.ValidationState memory state = mc.stateOf(id);
+        assertFalse(state.fromLegConsumed);
+        assertTrue(state.toLegConsumed);
+        assertEq(state.legWallet, toOptimism);
+
+        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toOptimism, 60, id)), 1);
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 60));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(mc.stateOf(id).executedAmount, 60);
+    }
+
+    function test_handleSettlement_Success_WhenBurnConfirmedNeverDerivesExpired() public {
+        uint256 id = _issueCrossChain();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        vm.warp(ISSUED_AT + VALIDITY_WINDOW + OPTIMISM_WINDOW + 30 days);
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+    }
+
+    function test_handleSettlement_Success_WhenAConsumedLegOfTwoIsReplayed() public {
+        uint256 id = _issueCrossChain();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ReplayedSettlement(id, polygon);
+        vm.prank(token);
+        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        assertTrue(halt);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertFalse(mc.stateOf(id).toLegConsumed);
+    }
+
+    function test_handleSettlement_RevertWhen_TheSecondLegCarriesAnotherAmount() public {
+        uint256 id = _issueCrossChain();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        vm.prank(token);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementAmountMismatch.selector, id, 50, 51));
+        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 51));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertFalse(mc.stateOf(id).toLegConsumed);
+    }
+
+    function test_handleSettlement_RevertWhen_ATwoLegValidationGetsAMismatchedLeg() public {
+        uint256 id = _issueCrossChain();
+
+        vm.startPrank(token);
+        // both wallets filled
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
+        mc.handleSettlement(polygon, _leg(id, fromSat, toOptimism, 50));
+
+        // burn leg from the wrong chain
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
+        mc.handleSettlement(optimism, _leg(id, fromSat, "", 50));
+
+        // mint leg from the wrong chain
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
+        mc.handleSettlement(polygon, _leg(id, "", toOptimism, 50));
+
+        // a leg with no wallet at all
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
+        mc.handleSettlement(polygon, _leg(id, "", "", 50));
+
+        // the mint leg naming another recipient
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
+        mc.handleSettlement(optimism, _leg(id, "", carolSat, 50));
+        vm.stopPrank();
+
+        _assertUntouched(id);
+    }
+
+    function _issueCrossChain() private returns (uint256 id) {
+        vm.prank(aliceIdentity);
+        id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+    }
+
     function _issue() private returns (uint256 id) {
         vm.prank(aliceIdentity);
         id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");

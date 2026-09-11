@@ -77,9 +77,9 @@ interface ITransferValidation {
     enum ValidationStatus {
         /// Issued, slots reserved, waiting for the settlement notification(s).
         Pending,
-        /// Cross-chain only: one of the two legs was consumed, whichever it was. Never discardable: a consumed
-        /// leg proves irreversible satellite execution, and a mint stuck between two chains must not roll back
-        /// the reservation.
+        /// Cross-chain only: one of the two legs was consumed, whichever it was (`stateOf` says which). Never
+        /// discardable and never derived `Expired`: a consumed leg proves irreversible satellite execution, and a
+        /// mint stuck between two chains must not roll back the reservation.
         BurnConfirmed,
         /// Every expected leg received, slots committed, ledger updated.
         Settled,

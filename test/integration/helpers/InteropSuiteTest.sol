@@ -154,6 +154,24 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return _liteSends(gateway, _token, MessageTypesLib.encodeSettlement(notification));
     }
 
+    /// @dev The burn leg of a cross-chain validation: `to` is empty, by convention.
+    function _burnLeg(uint256 validationId, Token _token, bytes memory from, uint256 amount)
+        internal
+        pure
+        returns (MessageTypesLib.SettlementNotification memory)
+    {
+        return _settlement(validationId, _token, from, "", amount);
+    }
+
+    /// @dev The mint leg of a cross-chain validation: `from` is empty, by convention.
+    function _mintLeg(uint256 validationId, Token _token, bytes memory to, uint256 amount)
+        internal
+        pure
+        returns (MessageTypesLib.SettlementNotification memory)
+    {
+        return _settlement(validationId, _token, "", to, amount);
+    }
+
     function _burnProof(uint256 chainId, address burned, uint256 amount, address nativeWallet)
         internal
         pure
