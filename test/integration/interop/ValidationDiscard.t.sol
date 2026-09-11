@@ -11,11 +11,11 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
+import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 import { SlotsModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev The keeper against a real suite: the derived status over time, the discard releasing a counter module,
-///      the re-issuance it enables, and every refusal. The compliance is the harness so a `BurnConfirmed` state
-///      can be proved undiscardable before the two-leg settlement produces it for real.
+///      the re-issuance it enables, and every refusal, including a real `BurnConfirmed` validation.
 contract ValidationDiscardTest is InteropSuiteTest {
 
     uint256 internal constant CAP = 100;
@@ -150,21 +150,26 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
     /// @notice A consumed leg pins the validation: no clock makes it discardable.
     function test_discardExpiredValidations_RevertWhen_BurnConfirmed() public {
-        TransferValidationHarness(address(boundCompliance))
-            .exposed_setStatus(id, ITransferValidation.ValidationStatus.BurnConfirmed);
+        ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.routeFor(polygon));
+        _openEvmChain(token, OPTIMISM, address(_newTrustedGateway(OPTIMISM)));
+        bytes memory bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
+        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, CAP);
+        vm.prank(agent);
+        token.unpause();
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
         vm.warp(issuedAt + 100 * VALIDITY_WINDOW);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
         vm.prank(keeper);
         vm.expectRevert(
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotDiscardable.selector,
-                id,
+                crossChain,
                 uint8(ITransferValidation.ValidationStatus.BurnConfirmed)
             )
         );
-        boundCompliance.discardExpiredValidations(_ids(id));
-        assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
+        boundCompliance.discardExpiredValidations(_ids(crossChain));
+        assertEq(slots.heldOf(address(boundCompliance), bobOptimism), CAP);
     }
 
     function _ids(uint256 one) private pure returns (uint256[] memory ids) {
