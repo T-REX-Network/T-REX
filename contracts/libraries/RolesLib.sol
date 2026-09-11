@@ -97,6 +97,9 @@ library RolesLib {
     // windows, the global clamp and the per-chain issuance pause. Administered by SUITE_ADMIN like the other
     // manager roles.
     uint64 constant COMPLIANCE_MANAGER = ROLE_PREFIX + 18;
+    // Gates the discard of expired validations on ModularCompliance: the garbage collector that releases the
+    // compliance slots a satellite never consumed. An operator role, administered by AGENT_ADMIN like the agents.
+    uint64 constant VALIDATION_KEEPER = ROLE_PREFIX + 19;
 
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching

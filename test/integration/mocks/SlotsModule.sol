@@ -53,13 +53,14 @@ contract SlotsModule is AbstractModuleUpgradeable {
         return _reservations[compliance][validationId];
     }
 
-    function validationBounds(bytes calldata, bytes calldata to, uint256 currentMin, uint256 currentMax, address)
-        external
-        view
-        virtual
-        override
-        returns (uint256 min, uint256 max)
-    {
+    function validationBounds(
+        bytes calldata,
+        bytes calldata to,
+        bytes calldata,
+        uint256 currentMin,
+        uint256 currentMax,
+        address
+    ) external view virtual override returns (uint256 min, uint256 max) {
         min = currentMin;
         max = currentMax;
         uint256 cap = _cap[msg.sender];

@@ -9,6 +9,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
 import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 
@@ -345,6 +346,26 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
         assertEq(record.fromChainKey, referenceChain);
         assertEq(record.toChainKey, polygon);
+        assertEq(record.fromKey, WalletKeyLib.canonicalKey(nativeAlice));
+        assertEq(record.toKey, WalletKeyLib.canonicalKey(toSat));
+        assertFalse(record.twoLegs);
+    }
+
+    function test_requestTransferValidation_Success_WhenRecordingTheWalletKeysAndTheLegCount() public configured {
+        vm.startPrank(aliceIdentity);
+        uint256 sameChain = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        uint256 crossChain = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        vm.stopPrank();
+
+        ITransferValidation.ValidationRecord memory record = mc.validationOf(sameChain);
+        assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
+        assertEq(record.toKey, WalletKeyLib.canonicalKey(toSat));
+        assertFalse(record.twoLegs);
+
+        record = mc.validationOf(crossChain);
+        assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
+        assertEq(record.toKey, WalletKeyLib.canonicalKey(toOptimism));
+        assertTrue(record.twoLegs);
     }
 
     function test_requestTransferValidation_Success_WhenTheEventAndRecordMatchTheObject() public configured {

@@ -193,6 +193,8 @@ library EventsLib {
     ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
     ///         breaches a rule; otherwise this warning is the whole record.
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
+    /// @notice Emitted when the keeper discards an expired validation and its slots are released.
+    event ValidationDiscarded(uint256 indexed validationId);
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);
