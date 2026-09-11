@@ -34,6 +34,10 @@ contract MessageTypesHarness {
         return MessageTypesLib.decodeBurnProof(body);
     }
 
+    function decodeValidation(bytes calldata body) external pure returns (MessageTypesLib.ComplianceValidation memory) {
+        return MessageTypesLib.decodeValidation(body);
+    }
+
 }
 
 /// @dev Records what the gateway delivered, so ordering, duplication and loss are observable.
@@ -149,12 +153,102 @@ contract MessageTypesLibUnitTest is Test {
         assertEq(back.nativeWallet, p.nativeWallet);
     }
 
+    function testValidationRoundTrip() public view {
+        MessageTypesLib.ComplianceValidation memory v = _validation(hex"0001000001890114");
+        (uint8 messageType, bytes memory decodedBody) = harness.decode(MessageTypesLib.encodeValidation(v));
+        MessageTypesLib.ComplianceValidation memory back = harness.decodeValidation(decodedBody);
+
+        assertEq(messageType, MessageTypesLib.COMPLIANCE_VALIDATION);
+        assertEq(back.validationId, v.validationId);
+        assertEq(back.from, v.from);
+        assertEq(back.to, v.to);
+        assertEq(back.spender, v.spender);
+        assertEq(back.amountMin, v.amountMin);
+        assertEq(back.amountMax, v.amountMax);
+        assertEq(back.token, v.token);
+        assertEq(back.expiry, v.expiry);
+        assertEq(back.reconciliationWindow, v.reconciliationWindow);
+    }
+
+    function testValidationRoundTripPreservesAnEmptySpender() public view {
+        MessageTypesLib.ComplianceValidation memory v = _validation("");
+        (, bytes memory decodedBody) = harness.decode(MessageTypesLib.encodeValidation(v));
+        MessageTypesLib.ComplianceValidation memory back = harness.decodeValidation(decodedBody);
+
+        assertEq(back.spender.length, 0);
+        assertEq(back.from, v.from);
+    }
+
+    function testValidationTypehashMatchesItsTypeString() public pure {
+        assertEq(
+            MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
+            keccak256(
+                "ComplianceValidation(uint256 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,uint256 amountMax,address token,uint64 expiry,uint64 reconciliationWindow)"
+            )
+        );
+    }
+
+    /// @dev EIP-712 hashStruct: dynamic members hash to their keccak256, static members encode in place.
+    function testHashValidationIsTheEip712StructHash() public pure {
+        MessageTypesLib.ComplianceValidation memory v = _validation(hex"0001000001890114");
+        bytes32 expected = keccak256(
+            abi.encode(
+                MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
+                v.validationId,
+                keccak256(v.from),
+                keccak256(v.to),
+                keccak256(v.spender),
+                v.amountMin,
+                v.amountMax,
+                v.token,
+                v.expiry,
+                v.reconciliationWindow
+            )
+        );
+
+        assertEq(MessageTypesLib.hashValidation(v), expected);
+    }
+
+    function testHashValidationChangesWithEveryField() public pure {
+        MessageTypesLib.ComplianceValidation memory v = _validation("");
+        bytes32 base = MessageTypesLib.hashValidation(v);
+
+        v.amountMax += 1;
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+        v.amountMax -= 1;
+        v.spender = hex"0001000001890114";
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+    }
+
     function testTypedDecodeRevertsOnAForeignBody() public {
         vm.expectRevert();
         harness.decodeSettlement(hex"deadbeef");
 
         vm.expectRevert();
         harness.decodeBurnProof(abi.encode(uint256(1)));
+
+        vm.expectRevert();
+        harness.decodeValidation(abi.encode(_settlement()));
+    }
+
+    function _validation(bytes memory spender) private pure returns (MessageTypesLib.ComplianceValidation memory) {
+        return MessageTypesLib.ComplianceValidation({
+            validationId: 7,
+            from: hex"0001000001890114",
+            to: hex"00010000010a0114",
+            spender: spender,
+            amountMin: 9,
+            amountMax: 11,
+            token: address(0xBEEF),
+            expiry: 1_700_000_000,
+            reconciliationWindow: 3600
+        });
+    }
+
+    function _settlement() private pure returns (MessageTypesLib.SettlementNotification memory) {
+        return MessageTypesLib.SettlementNotification({
+            validationId: 7, token: address(0xBEEF), from: hex"0001000001890114", to: "", amount: 42
+        });
     }
 
     /* ----- chainKey ----- */

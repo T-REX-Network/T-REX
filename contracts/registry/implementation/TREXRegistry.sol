@@ -77,6 +77,7 @@ import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643Identity
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
@@ -259,52 +260,62 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         Storage storage s = _getStorage();
 
         if (s.checksDisabled) return true;
-        IIdentity userIdentity = identity(userAddress);
+        return _isVerified(s, identity(userAddress));
+    }
+
+    /// @inheritdoc ITREXRegistry
+    /// @dev Attribution lookup. A wallet on this chain is what the storage binds it to; every other wallet is known
+    ///  to the IdentityFactory only, and a revoked binding still answers so a position never loses its owner.
+    function resolveIdentity(bytes calldata wallet) external view override returns (IIdentity) {
+        (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
+        if (onReferenceChain) return identity(userAddress);
+        (address resolved,) = _IDENTITY_FACTORY.getIdentityIncludingRevoked(wallet);
+        return IIdentity(resolved);
+    }
+
+    /// @inheritdoc ITREXRegistry
+    /// @dev Admission lookup. Same claim check as {isVerified}, over the active binding only: a revoked satellite
+    ///  wallet keeps its position but is not eligible for new activity.
+    function isWalletVerified(bytes calldata wallet) external view override returns (bool) {
+        Storage storage s = _getStorage();
+
+        if (s.checksDisabled) return true;
+        (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
+        IIdentity userIdentity =
+            onReferenceChain ? identity(userAddress) : IIdentity(_IDENTITY_FACTORY.getIdentity(wallet));
+        return _isVerified(s, userIdentity);
+    }
+
+    /// @dev The claim check behind {isVerified} and {isWalletVerified}: every required topic of the identity's type
+    ///  must carry a claim a trusted issuer for that topic still holds valid. A zero identity never passes.
+    function _isVerified(Storage storage s, IIdentity userIdentity) internal view returns (bool) {
         if (address(userIdentity) == address(0)) return false;
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(s, userIdentity);
-        if (requiredClaimTopics.length == 0) {
-            return true;
-        }
-
-        uint256 foundClaimTopic;
-        uint256 scheme;
-        address issuer;
-        bytes memory sig;
-        Structs.ClaimData memory data;
-        uint256 claimTopic;
-        for (claimTopic = 0; claimTopic < requiredClaimTopics.length; claimTopic++) {
-            address[] memory trustedIssuersForTopic =
-                s.claimTopicsToTrustedIssuers[requiredClaimTopics[claimTopic]].values();
-
-            if (trustedIssuersForTopic.length == 0) return false;
-
-            for (uint256 j = 0; j < trustedIssuersForTopic.length; j++) {
-                address trustedIssuer = trustedIssuersForTopic[j];
-                bytes32 claimId = keccak256(abi.encode(trustedIssuer, requiredClaimTopics[claimTopic]));
-                (foundClaimTopic, scheme, issuer, sig, data,) = userIdentity.getClaim(claimId);
-
-                // The identity answers `getClaim`, so the issuer it returns is untrusted input:
-                // only a claim from `trustedIssuer` hashes to `claimId`. Validity is asked of the
-                // configured issuer, never of the address the identity supplied.
-                if (foundClaimTopic == requiredClaimTopics[claimTopic] && issuer == trustedIssuer) {
-                    (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
-                        trustedIssuer,
-                        abi.encodeCall(
-                            IClaimIssuer.isClaimValid, (userIdentity, requiredClaimTopics[claimTopic], sig, data)
-                        )
-                    );
-
-                    if (success && result != bytes32(0)) {
-                        break;
-                    } else if (j == (trustedIssuersForTopic.length - 1)) {
-                        return false;
-                    }
-                } else if (j == (trustedIssuersForTopic.length - 1)) {
-                    return false;
-                }
-            }
+        for (uint256 i = 0; i < requiredClaimTopics.length; i++) {
+            if (!_hasValidClaim(s, userIdentity, requiredClaimTopics[i])) return false;
         }
         return true;
+    }
+
+    /// @dev Whether one trusted issuer for `topic` holds a valid claim on `userIdentity`. No trusted issuer for
+    ///  the topic means nobody can satisfy it.
+    function _hasValidClaim(Storage storage s, IIdentity userIdentity, uint256 topic) private view returns (bool) {
+        address[] memory trustedIssuersForTopic = s.claimTopicsToTrustedIssuers[topic].values();
+        for (uint256 j = 0; j < trustedIssuersForTopic.length; j++) {
+            address trustedIssuer = trustedIssuersForTopic[j];
+            (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
+                userIdentity.getClaim(keccak256(abi.encode(trustedIssuer, topic)));
+
+            // The identity answers `getClaim`, so the issuer it returns is untrusted input:
+            // only a claim from `trustedIssuer` hashes to that claim id. Validity is asked of the
+            // configured issuer, never of the address the identity supplied.
+            if (foundClaimTopic != topic || issuer != trustedIssuer) continue;
+            (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
+                trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, topic, sig, data))
+            );
+            if (success && result != bytes32(0)) return true;
+        }
+        return false;
     }
 
     /// @inheritdoc IERC3643IdentityRegistry

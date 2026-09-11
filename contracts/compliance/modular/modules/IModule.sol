@@ -150,6 +150,29 @@ interface IModule {
         returns (bool);
 
     /**
+     *  @dev narrows the amount range of a compliance validation for a satellite movement
+     *  called only when the module declares `BOUNDS`; receives the running range, already capped at `_from`'s
+     *  balance and narrowed by the modules before it, and must answer a range inside it (the compliance intersects
+     *  the answer anyway). Additive rules evaluate at `_currentMax`, retention rules at `_currentMin`; a module may
+     *  narrow to a point or revert to refuse
+     *  This function can be called only on a compliance contract that is bound to the module
+     *  @param _from ERC-7930 interoperable address of the sender
+     *  @param _to ERC-7930 interoperable address of the recipient
+     *  @param _currentMin inclusive lower bound of the running range
+     *  @param _currentMax inclusive upper bound of the running range
+     *  @param _compliance address of the compliance contract issuing the validation
+     *  @return min the narrowed inclusive lower bound
+     *  @return max the narrowed inclusive upper bound
+     */
+    function validationBounds(
+        bytes calldata _from,
+        bytes calldata _to,
+        uint256 _currentMin,
+        uint256 _currentMax,
+        address _compliance
+    ) external view returns (uint256 min, uint256 max);
+
+    /**
      *  @dev getter for the dispatch points this module implements
      *  the returned value is a bitmask built from the flags of `ModuleCapabilitiesLib`
      *  the compliance reads it once, at binding time, and never calls a dispatch point whose flag is absent

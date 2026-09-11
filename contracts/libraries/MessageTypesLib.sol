@@ -68,8 +68,8 @@ import { ErrorsLib } from "./ErrorsLib.sol";
 
 /**
  * @title MessageTypesLib
- * @dev The protocol's ERC-7786 message surface: the four types that cross the interop boundary, and
- * the envelope that carries them.
+ * @dev The protocol's ERC-7786 message surface: the four types that cross the interop boundary, the
+ * bodies they carry, and the envelope that wraps them.
  */
 library MessageTypesLib {
 
@@ -90,6 +90,35 @@ library MessageTypesLib {
 
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
     bytes2 internal constant EVM_CHAIN_TYPE = 0x0000;
+
+    /// @dev EIP-712 type hash of `ComplianceValidation`:
+    ///  keccak256("ComplianceValidation(uint256 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,
+    ///  uint256 amountMax,address token,uint64 expiry,uint64 reconciliationWindow)")
+    bytes32 internal constant COMPLIANCE_VALIDATION_TYPEHASH =
+        0x0b9e295f943ccd7dad6f3ca3f907365ba5866f07431e165136759414e1e5f9f6;
+
+    /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, the only thing
+    /// a satellite executes a transfer against.
+    struct ComplianceValidation {
+        /// Unique per compliance contract, single-use: consumed on the satellite, keys the slot on T-REX.
+        uint256 validationId;
+        /// ERC-7930 sender. Its chain reference against `to`'s decides same-chain transfer or burn-and-mint.
+        bytes from;
+        /// ERC-7930 recipient.
+        bytes to;
+        /// ERC-7930 address allowed to execute through `transferFrom`; empty means `from` alone.
+        bytes spender;
+        /// Inclusive lower bound, caller-proposed and engine-narrowed.
+        uint256 amountMin;
+        /// Inclusive upper bound, caller-proposed, engine-narrowed, capped at `from`'s balance.
+        uint256 amountMax;
+        /// The asset's reference-chain address, its canonical identifier everywhere.
+        address token;
+        /// Absolute timestamp: the satellite executes strictly before it.
+        uint64 expiry;
+        /// Seconds T-REX keeps the slot reserved past `expiry` for the reconciliation.
+        uint64 reconciliationWindow;
+    }
 
     /// @dev Body of a `SETTLEMENT_NOTIFICATION`: a satellite reporting that one leg of a validation executed.
     struct SettlementNotification {
@@ -129,6 +158,34 @@ library MessageTypesLib {
 
         require(isKnownType(messageType), ErrorsLib.UnknownMessageType(messageType));
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
+    }
+
+    /// @dev EIP-712 `hashStruct` of a validation, without a domain: an identifier, not something to sign.
+    function hashValidation(ComplianceValidation memory validation) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                COMPLIANCE_VALIDATION_TYPEHASH,
+                validation.validationId,
+                keccak256(validation.from),
+                keccak256(validation.to),
+                keccak256(validation.spender),
+                validation.amountMin,
+                validation.amountMax,
+                validation.token,
+                validation.expiry,
+                validation.reconciliationWindow
+            )
+        );
+    }
+
+    /// @dev Wraps a compliance validation in the envelope, as the compliance does before dispatching a leg.
+    function encodeValidation(ComplianceValidation memory validation) internal pure returns (bytes memory) {
+        return abi.encode(COMPLIANCE_VALIDATION, VERSION, abi.encode(validation));
+    }
+
+    /// @dev Unwraps a `COMPLIANCE_VALIDATION` body. Reverts on a body that is not one.
+    function decodeValidation(bytes memory body) internal pure returns (ComplianceValidation memory) {
+        return abi.decode(body, (ComplianceValidation));
     }
 
     /// @dev Wraps a settlement notification in the envelope, as a satellite's Lite does before sending.

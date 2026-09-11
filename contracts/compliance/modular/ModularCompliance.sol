@@ -75,11 +75,21 @@ import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
+import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
+import { IToken } from "../../token/IToken.sol";
+import { Token } from "../../token/Token.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
+import { ITransferValidation } from "./ITransferValidation.sol";
+import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessManagedOwnableUpgradeable {
+contract ModularCompliance is
+    IModularCompliance,
+    ISettlementHandler,
+    TransferValidation,
+    AccessManagedOwnableUpgradeable
+{
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
@@ -234,6 +244,33 @@ contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessMana
         }
     }
 
+    /* ----- Validation settings ----- */
+
+    /// @inheritdoc ITransferValidation
+    function setDefaultValidityWindow(uint64 duration) external restricted {
+        _setDefaultValidityWindow(duration);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function setReconciliationWindow(bytes32 chainKey, uint64 duration) external restricted {
+        _setReconciliationWindow(chainKey, duration);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function setValidationClamp(uint256 maxAmount) external restricted {
+        _setValidationClamp(maxAmount);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function pauseValidationIssuance(bytes32 chainKey) external restricted {
+        _pauseIssuance(chainKey);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function unpauseValidationIssuance(bytes32 chainKey) external restricted {
+        _unpauseIssuance(chainKey);
+    }
+
     /**
      *  @dev See {IModularCompliance-addAndSetModule}.
      */
@@ -360,7 +397,53 @@ contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessMana
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
             || interfaceId == type(IERC3643Compliance).interfaceId
-            || interfaceId == type(ISettlementHandler).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(ISettlementHandler).interfaceId
+            || interfaceId == type(ITransferValidation).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    /* ----- What the validation layer needs ----- */
+
+    /// @inheritdoc TransferValidation
+    function _boundToken() internal view override returns (IToken) {
+        return IToken(_getStorage().tokenBound);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _boundRegistry() internal view override returns (ITREXRegistry) {
+        return ITREXRegistry(address(_boundToken().identityRegistry()));
+    }
+
+    /// @inheritdoc TransferValidation
+    function _canCallSelector(address caller, bytes4 selector) internal view override returns (bool) {
+        (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
+        return immediate;
+    }
+
+    /// @inheritdoc TransferValidation
+    /// @dev Each module receives the range as the ones before it left it; its answer is intersected, never trusted.
+    function _moduleBounds(bytes memory from, bytes memory to, uint256 currentMin, uint256 currentMax)
+        internal
+        view
+        override
+        returns (uint256 min, uint256 max)
+    {
+        min = currentMin;
+        max = currentMax;
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.BOUNDS == 0) continue;
+            (uint256 moduleMin, uint256 moduleMax) = IModule(module).validationBounds(from, to, min, max, address(this));
+            if (moduleMin > min) min = moduleMin;
+            if (moduleMax < max) max = moduleMax;
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
+    function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
+        Token(_getStorage().tokenBound).dispatchComplianceValidation(chainKey, validationId, body);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.

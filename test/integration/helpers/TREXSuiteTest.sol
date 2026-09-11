@@ -490,4 +490,95 @@ contract TREXSuiteTest is AccessManagerHelper {
         return abi.encode(abi.encodePacked(vm.addr(_signerPrivateKey)), abi.encodePacked(r, s, v));
     }
 
+    /// @dev ERC-7930 envelope of an EVM wallet on `chainId`; a satellite wallet when `chainId` is not this chain.
+    function _satelliteEnvelope(uint256 chainId, address wallet) internal pure returns (bytes memory) {
+        return InteroperableAddress.formatEvmV1(chainId, wallet);
+    }
+
+    /// @dev Address the factory trusts as the ERC-7786 gateway for satellite chains. A bare address: the factory only
+    ///      checks that `msg.sender` is trusted for the origin chain of the delivered message.
+    address internal constant SATELLITE_GATEWAY = address(uint160(uint256(keccak256("trex.test.satelliteGateway"))));
+
+    /// @dev Links `signer`'s wallet on `chainId` to `identity` in the global registry. A local wallet links through
+    ///      the signature path. The factory refuses a foreign-chain envelope there, so a satellite wallet goes through
+    ///      the cross-chain path: a trusted gateway delivers the proposal and the identity settles it.
+    function _linkSatelliteWallet(IIdentity identity, uint256 chainId, Account memory signer)
+        internal
+        returns (bytes memory envelope)
+    {
+        envelope = _satelliteEnvelope(chainId, signer.addr);
+        uint256 expiry = block.timestamp + 1 days;
+
+        if (chainId != block.chainid) {
+            _proposeCrossChainLink(identity, envelope, expiry);
+            vm.prank(address(identity));
+            idFactory.settlePendingCrossChainLink(envelope, true);
+            return envelope;
+        }
+
+        uint256 nonce = idFactory.nonceForAccount(envelope);
+
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256("LinkAccount(bytes account,address identity,uint256 nonce,uint256 expiry)"),
+                keccak256(envelope),
+                address(identity),
+                nonce,
+                expiry
+            )
+        );
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("IdentityFactory"),
+                keccak256("1"),
+                block.chainid,
+                address(idFactory)
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(signer.key, keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash)));
+
+        vm.prank(address(identity));
+        idFactory.linkAccount(envelope, abi.encodePacked(r, s, v), nonce, expiry);
+    }
+
+    /// @dev Delivers the ERC-7786 proposal linking `envelope` to `identity`, as a gateway trusted for the envelope's
+    ///      chain. The sender of the message must be the wallet itself: that is the factory's proof of control.
+    function _proposeCrossChainLink(IIdentity identity, bytes memory envelope, uint256 expiry) internal {
+        (, bytes memory chainReference,) = InteroperableAddress.parseV1(envelope);
+        idFactory.setTrustedGateway(SATELLITE_GATEWAY, 0x0000, chainReference, true);
+
+        bytes memory payload = abi.encode(envelope, address(identity), expiry);
+        vm.prank(SATELLITE_GATEWAY);
+        idFactory.receiveMessage(keccak256(payload), envelope, payload);
+    }
+
+    /// @dev Revokes `envelope` from `identity` in the global registry: the binding stays, its status flips.
+    function _revokeWallet(IIdentity identity, bytes memory envelope) internal {
+        vm.prank(address(identity));
+        idFactory.revokeAccount(envelope);
+    }
+
+    /// @dev A token requiring `CLAIM_TOPIC_1`, with alice, bob and charlie registered and attested: the shape
+    ///      for tests that need a holder to stop being verified without losing their identity.
+    function _deployTokenWithClaimedHolders(string memory salt, string memory name, string memory symbol)
+        internal
+        returns (Token claimed)
+    {
+        claimed = _deployTokenWithClaimTopic(salt, name, symbol);
+        _registerIdentities(claimed);
+
+        bytes memory claimData = "Some claim public data.";
+        _addClaim(aliceIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), alice);
+        _addClaim(bobIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), bob);
+        _addClaim(charlieIdentity, CLAIM_TOPIC_1, claimData, claimIssuerSigner.key, address(claimIssuer), charlie);
+    }
+
+    /// @notice Removes the claim `claimIssuer` issued on `_claimTopic`, as the identity's management key.
+    function _removeClaim(IIdentity _identity, uint256 _claimTopic, address _caller) internal {
+        vm.prank(_caller);
+        _identity.removeClaim(keccak256(abi.encode(address(claimIssuer), _claimTopic)));
+    }
+
 }
