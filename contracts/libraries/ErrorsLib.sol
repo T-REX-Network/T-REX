@@ -151,7 +151,7 @@ library ErrorsLib {
     error Deprecated();
 
     // TransferValidation Errors
-    /// @dev A validity or reconciliation window must be positive: a zero window would release a slot at expiry.
+    /// @dev A validity or reconciliation window must be positive.
     error ZeroDuration();
     /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
     error ValidationIssuancePaused(bytes32 chainKey);
@@ -165,7 +165,7 @@ library ErrorsLib {
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     /// @dev The balance cap, the modules or the clamp left no amount to authorize.
     error EmptyValidationRange(uint256 min, uint256 max);
-    /// @dev The caller is neither the wallet, its identity, nor authorised by the AccessManager.
+    /// @dev The caller is neither the native wallet, its identity, nor authorised by the AccessManager.
     error NotAuthorizedForWallet(address caller, bytes wallet);
     /// @dev `from` has no identity, or `to` is not eligible for new activity.
     error UnverifiedWallet(bytes wallet);

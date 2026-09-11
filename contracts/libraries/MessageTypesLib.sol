@@ -97,27 +97,26 @@ library MessageTypesLib {
     bytes32 internal constant COMPLIANCE_VALIDATION_TYPEHASH =
         0x0b9e295f943ccd7dad6f3ca3f907365ba5866f07431e165136759414e1e5f9f6;
 
-    /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, consumed by
-    /// T-REX Lite on the involved chain or chains. A satellite executes a transfer only against this object.
+    /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, the only thing
+    /// a satellite executes a transfer against.
     struct ComplianceValidation {
-        /// Unique per compliance contract, single-use: the satellite records it as consumed, T-REX keys the slot on it.
+        /// Unique per compliance contract, single-use: consumed on the satellite, keys the slot on T-REX.
         uint256 validationId;
-        /// ERC-7930 interoperable address of the sender, carrying its own chain reference.
+        /// ERC-7930 sender. Its chain reference against `to`'s decides same-chain transfer or burn-and-mint.
         bytes from;
-        /// ERC-7930 interoperable address of the recipient. Equal chain references with `from` mean a same-chain
-        /// transfer, different ones a burn on `from`'s chain and a mint on `to`'s.
+        /// ERC-7930 recipient.
         bytes to;
-        /// ERC-7930 interoperable address allowed to execute through `transferFrom`; empty means only `from` may execute.
+        /// ERC-7930 address allowed to execute through `transferFrom`; empty means `from` alone.
         bytes spender;
-        /// Inclusive lower bound of the executed amount: caller-proposed, engine-narrowed.
+        /// Inclusive lower bound, caller-proposed and engine-narrowed.
         uint256 amountMin;
-        /// Inclusive upper bound of the executed amount: caller-proposed, engine-narrowed, capped at `from`'s balance.
+        /// Inclusive upper bound, caller-proposed, engine-narrowed, capped at `from`'s balance.
         uint256 amountMax;
-        /// The asset's address on the T-REX reference chain, its canonical identifier on every chain.
+        /// The asset's reference-chain address, its canonical identifier everywhere.
         address token;
-        /// Absolute timestamp: the satellite executes strictly before it, never at or after.
+        /// Absolute timestamp: the satellite executes strictly before it.
         uint64 expiry;
-        /// Seconds T-REX keeps the compliance slot reserved past `expiry`, waiting for the reconciliation.
+        /// Seconds T-REX keeps the slot reserved past `expiry` for the reconciliation.
         uint64 reconciliationWindow;
     }
 
@@ -161,9 +160,7 @@ library MessageTypesLib {
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
     }
 
-    /// @dev EIP-712 `hashStruct` of a validation, without a domain: the satellite and the slot lifecycle use it as
-    /// the identifier of the object, not as something to sign. Dynamic `bytes` members hash to their `keccak256`,
-    /// static members encode in place.
+    /// @dev EIP-712 `hashStruct` of a validation, without a domain: an identifier, not something to sign.
     function hashValidation(ComplianceValidation memory validation) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(

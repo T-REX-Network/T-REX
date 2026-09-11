@@ -151,14 +151,10 @@ interface IModule {
 
     /**
      *  @dev narrows the amount range of a compliance validation for a satellite movement
-     *  called only when the module declares `BOUNDS`, while the compliance issues a validation for a movement
-     *  between two ERC-7930 wallets that may live on any chain the asset reaches
-     *  the module receives the running range, already narrowed by the modules dispatched before it and capped
-     *  at `_from`'s balance, never the raw request; it must answer a range inside that input, and the
-     *  compliance intersects the answer with the running range anyway, so a wider answer is simply ignored
-     *  an additive rule (recipient cap, concentration, investor count) evaluates at `_currentMax` and a
-     *  retention rule at `_currentMin`, narrowing where the worst case fails; a module that can only certify
-     *  a single value narrows the range to a point; a module may revert to refuse the movement outright
+     *  called only when the module declares `BOUNDS`; receives the running range, already capped at `_from`'s
+     *  balance and narrowed by the modules before it, and must answer a range inside it (the compliance intersects
+     *  the answer anyway). Additive rules evaluate at `_currentMax`, retention rules at `_currentMin`; a module may
+     *  narrow to a point or revert to refuse
      *  This function can be called only on a compliance contract that is bound to the module
      *  @param _from ERC-7930 interoperable address of the sender
      *  @param _to ERC-7930 interoperable address of the recipient

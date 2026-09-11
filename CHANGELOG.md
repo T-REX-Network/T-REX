@@ -128,57 +128,50 @@ All notable changes to this project will be documented in this file.
     `validationId`). Errors: `NotASatelliteWallet`, `InsufficientBridgedBalance`.
   - Invariants `INV-7` (conservation across buckets) and `INV-8` (bridged total tracks the positions)
     join the stateful suite, with `TokenLedgerHarness` exposing the transitions to tests.
-- **Compliance validation object and its issuance.** A satellite never decides compliance: it executes
-  a transfer only against a `ComplianceValidation` the reference chain issued for that exact transfer.
-  `ModularCompliance` now issues them.
-  - `MessageTypesLib.ComplianceValidation`: `validationId` (single-use), `from` and `to` (ERC-7930, each
-    carrying its chain, so equal chains mean a same-chain transfer and different chains a burn on
-    `from`'s and a mint on `to`'s), `spender` (empty means only `from` executes), `amountMin` /
-    `amountMax` (inclusive, caller-proposed, engine-narrowed, capped at `from`'s balance), `token`
-    (the reference-chain address as the canonical identifier), `expiry` (the satellite's hard
-    deadline) and `reconciliationWindow` (how long T-REX keeps the slot past `expiry`). With its
-    EIP-712 `COMPLIANCE_VALIDATION_TYPEHASH`, `hashValidation` (`hashStruct`, no domain), and the
-    `encodeValidation` / `decodeValidation` codec.
-  - `ITransferValidation.requestTransferValidation(from, to, requestedMin, requestedMax, spender)`
-    on the compliance. Authorization: `from` itself when it lives on this chain, the identity `from`
-    is linked to, or an `AGENT` (the selector is mapped to that role). Eligibility: `from` must
-    resolve to an identity, revoked included, and `to` must pass the registry's `isWalletVerified`.
-    Bounds: the request intersected with `[0, from's balance on its chain]` (bridged for a satellite
-    wallet, free for a native one), narrowed by intersection through every module declaring the new
-    `BOUNDS` capability, each receiving the running range, then by the manager's clamp; an empty range
-    reverts with `EmptyValidationRange` and nothing is written. Two wallets of one identity skip the
-    modules. The record (`validationOf`: hash, bounds, `expiry`, `releaseAt`, both chain keys) is
-    stored for the slot lifecycle, `TransferValidationIssued` carries the full envelopes, and one leg
-    per involved satellite chain leaves through `Token.dispatchComplianceValidation`, under the same
-    id. A movement with both wallets on the reference chain is refused (`NoSatelliteLeg`).
-  - `IModule.validationBounds(from, to, currentMin, currentMax, compliance)` and the
-    `ModuleCapabilitiesLib.BOUNDS` flag: a module narrows the running range, evaluating additive
-    rules at the max and retention rules at the min, or reverts to refuse. `AbstractModuleUpgradeable`
-    ships a pass-through default; existing modules are unaffected unless they declare the flag.
-  - `TREXRegistry.resolveIdentity(bytes)` and `isWalletVerified(bytes)`: the two ERC-7930 wallet
-    views, backed by the registry's IdentityFactory. The first attributes (revoked bindings included,
-    so a position never loses its owner), the second admits (active binding, then the same claim check
-    as `isVerified`). A native envelope answers what the address forms answer.
-  - `COMPLIANCE_MANAGER`, a new role administered by `SUITE_ADMIN`, over `setDefaultValidityWindow`,
+- **Compliance validation object and its issuance.** A satellite executes a transfer only against a
+  `ComplianceValidation` the reference chain issued for that exact transfer; `ModularCompliance` now
+  issues them.
+  - `MessageTypesLib.ComplianceValidation`: single-use `validationId`, ERC-7930 `from` / `to` (equal
+    chains mean a same-chain transfer, different chains a burn on `from`'s and a mint on `to`'s),
+    `spender` (empty means only `from` executes), inclusive `amountMin` / `amountMax`, the
+    reference-chain `token` address as canonical identifier, `expiry` (the satellite's hard deadline)
+    and `reconciliationWindow` (how long T-REX keeps the slot past `expiry`). With its EIP-712
+    `COMPLIANCE_VALIDATION_TYPEHASH`, `hashValidation` and the `encodeValidation` / `decodeValidation`
+    codec.
+  - `ITransferValidation.requestTransferValidation(from, to, requestedMin, requestedMax, spender)`.
+    Callable by `from` itself when native, by the identity `from` is linked to, or by an `AGENT`.
+    `from` must resolve to an identity (revoked included), `to` must pass `isWalletVerified`, every
+    envelope must be canonical. The range is capped at `from`'s balance on its chain (bridged for a
+    satellite wallet, free for a native one), narrowed by intersection through every module declaring
+    the new `BOUNDS` capability (skipped when both wallets belong to one identity), then by the
+    manager's clamp; an empty range reverts with `EmptyValidationRange`, a zero maximum with
+    `ZeroValue`, and nothing is written. The record (`validationOf`) is stored for the slot lifecycle,
+    `TransferValidationIssued` carries the full envelopes, and one leg per involved satellite chain
+    leaves through `Token.dispatchComplianceValidation` under the same id. Both wallets on the
+    reference chain is refused (`NoSatelliteLeg`).
+  - `IModule.validationBounds(from, to, currentMin, currentMax, compliance)` behind the
+    `ModuleCapabilitiesLib.BOUNDS` flag: a module narrows the running range or reverts to refuse.
+    `AbstractModuleUpgradeable` ships a pass-through default, so existing modules are unaffected.
+  - `TREXRegistry.resolveIdentity(bytes)` and `isWalletVerified(bytes)`, backed by the registry's
+    IdentityFactory: the first attributes (revoked bindings included), the second admits (active
+    binding, then the same claim check as `isVerified`).
+  - `COMPLIANCE_MANAGER`, administered by `SUITE_ADMIN`, over `setDefaultValidityWindow`,
     `setReconciliationWindow(chainKey, duration)`, `setValidationClamp` (zero clears),
     `pauseValidationIssuance(chainKey)` and `unpauseValidationIssuance(chainKey)`. Windows are
-    snapshot at issuance, so a later change never moves an outstanding deadline; a cross-chain
-    validation takes the larger of its two chains' windows. Issuance refuses to run without a
-    validity window (`ValidityWindowNotSet`) or toward a chain without a reconciliation window
-    (`ReconciliationWindowNotSet`).
+    snapshot at issuance; a cross-chain validation takes the larger of its two chains' windows;
+    issuance refuses to run without them (`ValidityWindowNotSet`, `ReconciliationWindowNotSet`).
   - Late-reconciliation surface: `LateReconciliation(validationId, chainKey)` and an automatic pause
-    of that chain's issuance, lifted by the manager only. The recording of the late settlement itself
-    belongs to the slot lifecycle, which will call the hook.
-  - Storage in `ERC3643.storage.TransferValidation`, a namespace of its own on the compliance, so the
-    module registry's layout is untouched. Events: `TransferValidationIssued`,
-    `DefaultValidityWindowSet`, `ReconciliationWindowSet`, `ValidationClampSet`,
-    `ValidationIssuancePaused`, `ValidationIssuanceUnpaused`, `LateReconciliation`. Errors:
-    `ZeroDuration`, `ValidationIssuancePaused`, `ValidationIssuanceNotPaused`, `ValidityWindowNotSet`,
-    `ReconciliationWindowNotSet`, `InvalidRequestedRange`, `EmptyValidationRange`,
-    `NotAuthorizedForWallet`, `UnverifiedWallet`, `NoSatelliteLeg`.
-  - Test assets: `BoundsModule` (configurable floor, ceiling and refusal), `TransferValidationHarness`
-    (exposes the late hook), `ModularComplianceBaseUnitTest`, and the satellite-wallet fixtures on
-    `TREXSuiteTest` (`_linkSatelliteWallet`, `_revokeWallet`, `_deployTokenWithClaimedHolders`).
+    of that chain, lifted by the manager only. Recording the late settlement belongs to the slot
+    lifecycle.
+  - Storage in `ERC3643.storage.TransferValidation`, a namespace of its own on the compliance. Events:
+    `TransferValidationIssued`, `DefaultValidityWindowSet`, `ReconciliationWindowSet`,
+    `ValidationClampSet`, `ValidationIssuancePaused`, `ValidationIssuanceUnpaused`,
+    `LateReconciliation`. Errors: `ZeroDuration`, `ValidationIssuancePaused`,
+    `ValidationIssuanceNotPaused`, `ValidityWindowNotSet`, `ReconciliationWindowNotSet`,
+    `InvalidRequestedRange`, `EmptyValidationRange`, `NotAuthorizedForWallet`, `UnverifiedWallet`,
+    `NoSatelliteLeg`.
+  - Test assets: `BoundsModule`, `TransferValidationHarness`, `ModularComplianceBaseUnitTest`, and
+    the satellite-wallet fixtures on `TREXSuiteTest`.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
   and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
   single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
