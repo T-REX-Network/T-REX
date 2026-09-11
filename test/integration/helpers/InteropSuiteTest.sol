@@ -29,9 +29,13 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
     /// @dev The suite token's compliance, with the validation windows an issuance needs already set.
     ModularCompliance boundCompliance;
 
+    /// @dev Holds VALIDATION_KEEPER and nothing else.
+    address public keeper = makeAddr("keeper");
+
     function setUp() public virtual override {
         super.setUp();
         boundCompliance = ModularCompliance(address(token.compliance()));
+        _grantValidationKeeperRole(keeper);
         vm.startPrank(deployer);
         boundCompliance.setDefaultValidityWindow(VALIDITY_WINDOW);
         boundCompliance.setReconciliationWindow(polygon, POLYGON_WINDOW);
@@ -139,6 +143,33 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
             InteroperableAddress.formatEvmV1(chainId, makeAddr("SatelliteTo")),
             amount
         );
+    }
+
+    /// @dev Queues a settlement authored by `_token`'s Lite on `gateway`'s chain, returning its index.
+    function _liteSettles(
+        ERC7786GatewayMock gateway,
+        Token _token,
+        MessageTypesLib.SettlementNotification memory notification
+    ) internal returns (uint256) {
+        return _liteSends(gateway, _token, MessageTypesLib.encodeSettlement(notification));
+    }
+
+    /// @dev The burn leg of a cross-chain validation: `to` is empty, by convention.
+    function _burnLeg(uint256 validationId, Token _token, bytes memory from, uint256 amount)
+        internal
+        pure
+        returns (MessageTypesLib.SettlementNotification memory)
+    {
+        return _settlement(validationId, _token, from, "", amount);
+    }
+
+    /// @dev The mint leg of a cross-chain validation: `from` is empty, by convention.
+    function _mintLeg(uint256 validationId, Token _token, bytes memory to, uint256 amount)
+        internal
+        pure
+        returns (MessageTypesLib.SettlementNotification memory)
+    {
+        return _settlement(validationId, _token, "", to, amount);
     }
 
     function _burnProof(uint256 chainId, address burned, uint256 amount, address nativeWallet)

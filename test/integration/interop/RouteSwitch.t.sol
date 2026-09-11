@@ -6,6 +6,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -13,6 +14,9 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 
 /// @dev Routes are snapshot at dispatch. An issuer switching a chain's gateway affects new validations
 ///      only; the legs of one already in flight are matched against the gateway that carried it out.
+///      The validations here are dispatched by the token alone, never issued by the compliance, so every leg
+///      that passes the transport raises the compliance's never-issued emergency and halts the token: the
+///      transport verdict is what these tests read, and the halt is asserted where a leg gets through.
 contract RouteSwitchTest is InteropSuiteTest {
 
     ERC7786GatewayMock oldGateway;
@@ -41,6 +45,9 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         // The switch: from here on the issuer's traffic goes through the new gateway.
         _openEvmChain(token, POLYGON, address(newGateway));
+
+        vm.prank(agent);
+        token.unpause();
     }
 
     function _dispatch(uint256 validationId) private {
@@ -62,6 +69,8 @@ contract RouteSwitchTest is InteropSuiteTest {
                 (satellite, _sameChainSettlement(validationId, token, POLYGON, amount))
             )
         );
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(validationId, satellite);
     }
 
     function _expectNotPinned(ERC7786GatewayMock gateway, uint256 validationId) private {
@@ -82,6 +91,8 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         _expectHandled(inFlight);
         oldGateway.relay(index);
+
+        assertTrue(token.paused(), "never issued by the compliance: the emergency halts the token");
     }
 
     function testOldLegIsRefusedFromTheNewRoute() public {

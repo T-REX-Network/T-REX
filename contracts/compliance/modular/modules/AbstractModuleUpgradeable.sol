@@ -205,6 +205,24 @@ abstract contract AbstractModuleUpgradeable is
     }
 
     /**
+     *  @dev See {IModule-reserveSlot}.
+     *  Default no-op: a module overrides it only when it declares `SLOTS`.
+     */
+    function reserveSlot(uint256, bytes calldata, bytes calldata, uint256) external virtual onlyComplianceCall { }
+
+    /**
+     *  @dev See {IModule-commitSlot}.
+     *  Default no-op: a module overrides it only when it declares `SLOTS`.
+     */
+    function commitSlot(uint256, uint256) external virtual onlyComplianceCall { }
+
+    /**
+     *  @dev See {IModule-releaseSlot}.
+     *  Default no-op: a module overrides it only when it declares `SLOTS`.
+     */
+    function releaseSlot(uint256) external virtual onlyComplianceCall { }
+
+    /**
      *  @dev See {IModule-isComplianceBound}.
      */
     function isComplianceBound(address _compliance) external view returns (bool) {

@@ -267,6 +267,23 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         return _sendMessage(chainKey, MessageTypesLib.MINT_INSTRUCTION, body);
     }
 
+    /// @inheritdoc IToken
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
+        require(_msgSender() == address(_tokenStorage().compliance), ErrorsLib.OnlyBoundCompliance());
+
+        (bool fromNative, address holder) = WalletKeyLib.isReferenceChain(from);
+        if (fromNative) {
+            _delegateOut(holder, to, amount);
+            return;
+        }
+        (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
+        if (toNative) {
+            _recall(from, recipient, amount);
+            return;
+        }
+        _bridgedTransfer(from, to, amount, validationId);
+    }
+
     /* ----- Ledger Views ----- */
 
     /// @inheritdoc IERC20
@@ -713,11 +730,18 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /// @dev The destination is structural: the bound compliance owns the slot lifecycle, so an attributed
     ///      settlement goes there and nowhere else. It is forwarded as decoded; classifying it against
     ///      the stored validation is the compliance's business, not the token's.
+    ///
+    ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
+    ///      incident under investigation settles nothing. When the compliance reports a replayed or a never-issued
+    ///      settlement, the token halts itself through its pause: the interop layer is misbehaving and every
+    ///      notification is suspect until an agent has investigated, resolved and called `unpause`.
     function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
         internal
         override
     {
-        ISettlementHandler(address(_tokenStorage().compliance)).handleSettlement(chainKey, notification);
+        _requireNotPaused();
+        bool halt = ISettlementHandler(address(_tokenStorage().compliance)).handleSettlement(chainKey, notification);
+        if (halt) _pause();
     }
 
     /// @inheritdoc TREXMessaging

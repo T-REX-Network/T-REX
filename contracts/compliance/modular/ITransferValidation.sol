@@ -64,12 +64,52 @@ pragma solidity 0.8.30;
 /**
  * @title ITransferValidation
  * @dev The compliance's issuance surface for satellite movements: the settings a COMPLIANCE_MANAGER tunes, the
- * per-chain issuance pause, and the views the slot lifecycle reads. A satellite executes a transfer only against
+ * per-chain issuance pause, the lifecycle of every issued validation, the keeper's discard, and the views the
+ * slot lifecycle reads. A satellite executes a transfer only against
  * a `ComplianceValidation` the reference chain issued for that exact transfer; this is where it comes from.
  */
 interface ITransferValidation {
 
+    /// @dev Where a validation stands. Stored transitions: `Pending -> BurnConfirmed -> Settled`,
+    /// `Pending -> Settled`, `Pending -> Discarded -> LateReconciled`. `Expired` is never written: `statusOf`
+    /// derives it for a `Pending` validation past `releaseAt` that the keeper has not discarded yet, since nothing
+    /// transitions storage at a timestamp without a transaction.
+    enum ValidationStatus {
+        /// Issued, slots reserved, waiting for the settlement notification(s).
+        Pending,
+        /// Cross-chain only: one of the two legs was consumed, whichever it was (`stateOf` says which). Never
+        /// discardable and never derived `Expired`: a consumed leg proves irreversible satellite execution, and a
+        /// mint stuck between two chains must not roll back the reservation.
+        BurnConfirmed,
+        /// Every expected leg received, slots committed, ledger updated.
+        Settled,
+        /// Derived: `Pending` and past `releaseAt`, not yet discarded.
+        Expired,
+        /// The keeper released the slots; issuance proceeds as if the validation never happened. A late first
+        /// leg of two keeps this status with its flag set in `ValidationState`.
+        Discarded,
+        /// Every leg arrived after the discard: applied anyway, the modules caught up with no live reservation,
+        /// `LateReconciliation` emitted per late leg and that leg's chain paused for issuance.
+        LateReconciled
+    }
+
+    /// @dev What settlement moves, keyed by the validation id. Kept forever, like the record.
+    struct ValidationState {
+        /// The stored status, `Expired` excluded.
+        ValidationStatus status;
+        /// The leg originating from `from`'s chain (the burn leg, or the single leg) was consumed.
+        bool fromLegConsumed;
+        /// The leg originating from `to`'s chain (the mint leg) was consumed. Set together with the other flag
+        /// on a single-leg settlement.
+        bool toLegConsumed;
+        /// Exact amount transferred, written by the first leg and repeated by the second.
+        uint256 executedAmount;
+        /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
+        bytes legWallet;
+    }
+
     /// @dev What the compliance keeps of an issued validation, keyed by its id, for the slot lifecycle.
+    /// Immutable once written; what settlement moves lives in `ValidationState`.
     struct ValidationRecord {
         /// EIP-712 struct hash of the issued `ComplianceValidation`, the identifier the satellite consumes.
         bytes32 hash;
@@ -85,6 +125,12 @@ interface ITransferValidation {
         bytes32 fromChainKey;
         /// Same for `to`'s chain.
         bytes32 toChainKey;
+        /// `keccak256` of the canonical `from` envelope, what a settlement leg's `from` is matched against.
+        bytes32 fromKey;
+        /// Same for `to`.
+        bytes32 toKey;
+        /// Both sides on distinct satellite chains: two legs are expected, the burn one and the mint one.
+        bool twoLegs;
     }
 
     /// @dev Issues a `ComplianceValidation` for a movement between two ERC-7930 wallets, at least one on a
@@ -191,5 +237,31 @@ interface ITransferValidation {
     /// @dev The record kept for `validationId`, all zeros when the id was never issued.
     /// @param validationId The validation to look up.
     function validationOf(uint256 validationId) external view returns (ValidationRecord memory);
+
+    /// @dev Discards expired validations in a batch: releases their slots on every module declaring `SLOTS`, so
+    /// the next issuance is computed as if the pre-approved transfers never happened. Rollback is never
+    /// automatic; this is the keeper's job. The batch is atomic: one refused id reverts the whole call.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
+    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. `BurnConfirmed` is
+    ///   refused whatever the clock says.
+    /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
+    ///
+    /// Emits `ValidationDiscarded` per id.
+    /// @param validationIds The validations to discard.
+    function discardExpiredValidations(uint256[] calldata validationIds) external;
+
+    /// @dev Where `validationId` stands: the stored status, or `Expired` for a stored `Pending` past `releaseAt`.
+    ///
+    /// Requirements:
+    /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
+    /// @param validationId The validation to look up.
+    function statusOf(uint256 validationId) external view returns (ValidationStatus);
+
+    /// @dev The raw settlement state kept for `validationId`, all zeros when the id was never issued.
+    /// @param validationId The validation to look up.
+    function stateOf(uint256 validationId) external view returns (ValidationState memory);
 
 }

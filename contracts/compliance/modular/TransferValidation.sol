@@ -74,8 +74,8 @@ import { ITransferValidation } from "./ITransferValidation.sol";
 /**
  * @title TransferValidation
  * @dev The compliance's issuance layer for satellite movements: settings, per-chain pause, the record of every
- * issued validation, the issuance itself, and the late-reconciliation surface. Own ERC-7201 namespace, so the
- * module registry's layout is untouched and the slot lifecycle can extend it.
+ * issued validation, the issuance itself, the slot reservation it triggers, and the late-reconciliation surface.
+ * Own ERC-7201 namespace, so the module registry's layout is untouched and the slot lifecycle can extend it.
  *
  * Issuance never widens what was asked: the request is capped at the sender's balance, narrowed by every `BOUNDS`
  * module, then clamped. The balance cap is a firewall: a validation can never authorize more than the register
@@ -98,6 +98,8 @@ abstract contract TransferValidation is ITransferValidation {
         uint256 nextValidationId;
         /// What the slot lifecycle keys on.
         mapping(uint256 validationId => ValidationRecord record) validations;
+        /// What settlement moves.
+        mapping(uint256 validationId => ValidationState state) states;
     }
 
     /// @dev Both sides of a movement, parsed once. Native means a non-zero EVM address on this chain.
@@ -169,6 +171,22 @@ abstract contract TransferValidation is ITransferValidation {
         return _validationStorage().validations[validationId];
     }
 
+    /// @inheritdoc ITransferValidation
+    function statusOf(uint256 validationId) public view returns (ValidationStatus) {
+        ValidationStorage storage s = _validationStorage();
+        require(_isIssued(s, validationId), ErrorsLib.UnknownValidation(validationId));
+        ValidationStatus status = s.states[validationId].status;
+        if (status == ValidationStatus.Pending && block.timestamp > s.validations[validationId].releaseAt) {
+            return ValidationStatus.Expired;
+        }
+        return status;
+    }
+
+    /// @inheritdoc ITransferValidation
+    function stateOf(uint256 validationId) public view returns (ValidationState memory) {
+        return _validationStorage().states[validationId];
+    }
+
     /* ----- What the compliance provides ----- */
 
     /// @dev The token this compliance is bound to.
@@ -187,13 +205,21 @@ abstract contract TransferValidation is ITransferValidation {
         virtual
         returns (uint256 min, uint256 max);
 
-    /// @dev Reserves the compliance slots of a validation being issued. Empty until the slot lifecycle fills it.
-    function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax)
-        internal
-        virtual { }
+    /// @dev Reserves the slot of a validation being issued on every module that declared `SLOTS`, at `amountMax`.
+    function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax) internal virtual;
+
+    /// @dev Reconciles every `SLOTS` module to the exact amount a validation executed. Called on settlement, timely
+    ///  or late; a late one commits with no live reservation.
+    function _commitSlots(uint256 validationId, uint256 executedAmount) internal virtual;
+
+    /// @dev Undoes the reservation of a validation on every `SLOTS` module. Called when the keeper discards it.
+    function _releaseSlots(uint256 validationId) internal virtual;
 
     /// @dev Sends one leg of a validation toward `chainKey`, through the token.
     function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal virtual;
+
+    /// @dev Applies a settled validation to the ledger, through the token, once.
+    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal virtual;
 
     /* ----- Settings ----- */
 
@@ -227,6 +253,163 @@ abstract contract TransferValidation is ITransferValidation {
         require(s.issuancePaused[chainKey], ErrorsLib.ValidationIssuanceNotPaused(chainKey));
         s.issuancePaused[chainKey] = false;
         emit EventsLib.ValidationIssuanceUnpaused(chainKey);
+    }
+
+    /* ----- Settlement ----- */
+
+    /// @dev Which leg of a validation a notification is: the single one of a one-leg validation, or the burn or
+    ///  mint leg of a two-leg one.
+    enum Leg {
+        Single,
+        Burn,
+        Mint
+    }
+
+    /// @dev Classifies an attributed settlement against the stored validation. Reverts on a leg that does not
+    ///  match; returns `true` on the two emergencies, which write nothing; reconciles a `Discarded` validation
+    ///  late, with the warning and the per-chain pause. See {ISettlementHandler}.
+    function _handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata n)
+        internal
+        returns (bool halt)
+    {
+        require(n.token == address(_boundToken()), ErrorsLib.SettlementTokenMismatch(n.token));
+        ValidationStorage storage s = _validationStorage();
+        if (!_isIssued(s, n.validationId)) return _emergency(n.validationId, originChainKey);
+
+        ValidationRecord storage record = s.validations[n.validationId];
+        ValidationState storage state = s.states[n.validationId];
+        Leg leg = _matchLeg(record, originChainKey, n);
+        require(
+            record.amountMin <= n.amount && n.amount <= record.amountMax,
+            ErrorsLib.SettlementOutOfBounds(n.validationId, n.amount)
+        );
+
+        bool consumed = leg == Leg.Mint ? state.toLegConsumed : state.fromLegConsumed;
+        if (consumed) return _emergency(n.validationId, originChainKey);
+
+        // What remains is Pending, BurnConfirmed, or Discarded: a settled one has every leg consumed.
+        bool late = state.status == ValidationStatus.Discarded;
+        if (leg == Leg.Single) {
+            state.fromLegConsumed = true;
+            state.toLegConsumed = true;
+            _settle(state, n.from, n.to, n, originChainKey, late);
+        } else if (leg == Leg.Burn) {
+            state.fromLegConsumed = true;
+            if (state.toLegConsumed) _settleSecondLeg(state, n.from, state.legWallet, n, originChainKey, late);
+            else _confirmFirstLeg(state, n.from, n, originChainKey, late);
+        } else {
+            state.toLegConsumed = true;
+            if (state.fromLegConsumed) _settleSecondLeg(state, state.legWallet, n.to, n, originChainKey, late);
+            else _confirmFirstLeg(state, n.to, n, originChainKey, late);
+        }
+        if (late) _onLateReconciliation(n.validationId, originChainKey);
+    }
+
+    /// @dev A leg is matched by the wallets it carries and the chain it comes from. A one-leg validation expects
+    ///  both wallets, the issued ones, from either recorded chain (the satellite side; the reference chain has no
+    ///  peer). A two-leg validation expects the burn leg, `to` empty, from `from`'s chain, and the mint leg,
+    ///  `from` empty, from `to`'s chain; a leg carrying both wallets is neither.
+    function _matchLeg(
+        ValidationRecord storage record,
+        bytes32 originChainKey,
+        MessageTypesLib.SettlementNotification calldata n
+    ) private view returns (Leg) {
+        bool fromMatches = n.from.length != 0 && keccak256(n.from) == record.fromKey;
+        bool toMatches = n.to.length != 0 && keccak256(n.to) == record.toKey;
+        if (!record.twoLegs) {
+            bool originMatches = originChainKey == record.fromChainKey || originChainKey == record.toChainKey;
+            require(fromMatches && toMatches && originMatches, ErrorsLib.SettlementLegMismatch(n.validationId));
+            return Leg.Single;
+        }
+        if (fromMatches && n.to.length == 0 && originChainKey == record.fromChainKey) return Leg.Burn;
+        if (toMatches && n.from.length == 0 && originChainKey == record.toChainKey) return Leg.Mint;
+        revert ErrorsLib.SettlementLegMismatch(n.validationId);
+    }
+
+    /// @dev The first of two legs, whichever it is: the amount and the wallet it carries are kept for the other
+    ///  one, and the validation is pinned. Nothing moves yet. A late first leg stays `Discarded`, its flag set.
+    function _confirmFirstLeg(
+        ValidationState storage state,
+        bytes calldata wallet,
+        MessageTypesLib.SettlementNotification calldata n,
+        bytes32 originChainKey,
+        bool late
+    ) private {
+        state.executedAmount = n.amount;
+        state.legWallet = wallet;
+        if (!late) state.status = ValidationStatus.BurnConfirmed;
+
+        emit EventsLib.ValidationLegConfirmed(n.validationId, originChainKey, n.amount);
+    }
+
+    /// @dev The second of two legs must repeat the first one's amount; then the pair settles.
+    function _settleSecondLeg(
+        ValidationState storage state,
+        bytes memory from,
+        bytes memory to,
+        MessageTypesLib.SettlementNotification calldata n,
+        bytes32 originChainKey,
+        bool late
+    ) private {
+        require(
+            n.amount == state.executedAmount,
+            ErrorsLib.SettlementAmountMismatch(n.validationId, state.executedAmount, n.amount)
+        );
+        _settle(state, from, to, n, originChainKey, late);
+    }
+
+    /// @dev Every expected leg is in: commit the modules at the exact amount, move the ledger once, mark, announce.
+    ///  A late settlement commits with no live reservation, the slots having been released at discard; the module
+    ///  applies the delta anyway, and a resulting breach stands as the flagged exception.
+    function _settle(
+        ValidationState storage state,
+        bytes memory from,
+        bytes memory to,
+        MessageTypesLib.SettlementNotification calldata n,
+        bytes32 originChainKey,
+        bool late
+    ) private {
+        state.executedAmount = n.amount;
+        state.status = late ? ValidationStatus.LateReconciled : ValidationStatus.Settled;
+        _commitSlots(n.validationId, n.amount);
+        _settleOnToken(from, to, n.amount, n.validationId);
+
+        emit EventsLib.ValidationSettled(n.validationId, originChainKey, n.amount);
+    }
+
+    /// @dev A replayed leg or a never-issued id: nothing applied, announced, and the token told to halt.
+    function _emergency(uint256 validationId, bytes32 originChainKey) private returns (bool) {
+        emit EventsLib.ReplayedSettlement(validationId, originChainKey);
+        return true;
+    }
+
+    /* ----- Discard ----- */
+
+    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a `BurnConfirmed` one is
+    ///  refused whatever the clock says. One refused id reverts the whole batch.
+    function _discardExpired(uint256[] calldata validationIds) internal {
+        ValidationStorage storage s = _validationStorage();
+        for (uint256 i = 0; i < validationIds.length; i++) {
+            uint256 validationId = validationIds[i];
+            require(_isIssued(s, validationId), ErrorsLib.UnknownValidation(validationId));
+            ValidationState storage state = s.states[validationId];
+            require(
+                state.status == ValidationStatus.Pending,
+                ErrorsLib.ValidationNotDiscardable(validationId, uint8(state.status))
+            );
+            uint64 releaseAt = s.validations[validationId].releaseAt;
+            require(block.timestamp > releaseAt, ErrorsLib.ValidationNotReleasable(validationId, releaseAt));
+
+            state.status = ValidationStatus.Discarded;
+            _releaseSlots(validationId);
+
+            emit EventsLib.ValidationDiscarded(validationId);
+        }
+    }
+
+    /// @dev Ids start at 1 and `nextValidationId` is the last one issued.
+    function _isIssued(ValidationStorage storage s, uint256 validationId) internal view returns (bool) {
+        return validationId != 0 && validationId <= s.nextValidationId;
     }
 
     /// @dev A settlement of `validationId` arrived from `chainKey` after `releaseAt`. The slot lifecycle records it
@@ -356,7 +539,10 @@ abstract contract TransferValidation is ITransferValidation {
             expiry: validation.expiry,
             releaseAt: validation.expiry + validation.reconciliationWindow,
             fromChainKey: legs.fromChainKey,
-            toChainKey: legs.toChainKey
+            toChainKey: legs.toChainKey,
+            fromKey: WalletKeyLib.canonicalKey(validation.from),
+            toKey: WalletKeyLib.canonicalKey(validation.to),
+            twoLegs: !legs.fromNative && !legs.toNative && legs.fromChainKey != legs.toChainKey
         });
     }
 
