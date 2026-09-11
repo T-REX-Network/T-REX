@@ -441,6 +441,45 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
+    function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax)
+        internal
+        override
+    {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
+                IModule(module).reserveSlot(validationId, from, to, amountMax);
+            }
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    function _commitSlots(uint256 validationId, uint256 executedAmount) internal override {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
+                IModule(module).commitSlot(validationId, executedAmount);
+            }
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    function _releaseSlots(uint256 validationId) internal override {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
+                IModule(module).releaseSlot(validationId);
+            }
+        }
+    }
+
+    /// @inheritdoc TransferValidation
     /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
     function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
         Token(_getStorage().tokenBound).dispatchComplianceValidation(chainKey, validationId, body);

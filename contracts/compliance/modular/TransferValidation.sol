@@ -74,8 +74,8 @@ import { ITransferValidation } from "./ITransferValidation.sol";
 /**
  * @title TransferValidation
  * @dev The compliance's issuance layer for satellite movements: settings, per-chain pause, the record of every
- * issued validation, the issuance itself, and the late-reconciliation surface. Own ERC-7201 namespace, so the
- * module registry's layout is untouched and the slot lifecycle can extend it.
+ * issued validation, the issuance itself, the slot reservation it triggers, and the late-reconciliation surface.
+ * Own ERC-7201 namespace, so the module registry's layout is untouched and the slot lifecycle can extend it.
  *
  * Issuance never widens what was asked: the request is capped at the sender's balance, narrowed by every `BOUNDS`
  * module, then clamped. The balance cap is a firewall: a validation can never authorize more than the register
@@ -187,10 +187,15 @@ abstract contract TransferValidation is ITransferValidation {
         virtual
         returns (uint256 min, uint256 max);
 
-    /// @dev Reserves the compliance slots of a validation being issued. Empty until the slot lifecycle fills it.
-    function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax)
-        internal
-        virtual { }
+    /// @dev Reserves the slot of a validation being issued on every module that declared `SLOTS`, at `amountMax`.
+    function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax) internal virtual;
+
+    /// @dev Reconciles every `SLOTS` module to the exact amount a validation executed. Called on settlement, timely
+    ///  or late; a late one commits with no live reservation.
+    function _commitSlots(uint256 validationId, uint256 executedAmount) internal virtual;
+
+    /// @dev Undoes the reservation of a validation on every `SLOTS` module. Called when the keeper discards it.
+    function _releaseSlots(uint256 validationId) internal virtual;
 
     /// @dev Sends one leg of a validation toward `chainKey`, through the token.
     function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal virtual;

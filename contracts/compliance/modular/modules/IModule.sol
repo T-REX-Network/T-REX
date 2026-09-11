@@ -173,6 +173,41 @@ interface IModule {
     ) external view returns (uint256 min, uint256 max);
 
     /**
+     *  @dev reserves the compliance slot of a validation being issued
+     *  called only when the module declares `SLOTS`, right after the validation is recorded; the module counts
+     *  the movement as executed at `_amountMax`, the worst case for any additive rule, so that a concurrent
+     *  validation is narrowed by `validationBounds` as if this one had already settled. A module that cannot
+     *  express its worst case at `_amountMax` pins the bounds in `validationBounds` so that min equals max
+     *  This function can be called ONLY by the compliance contract itself (_compliance)
+     *  @param _validationId id of the validation being issued
+     *  @param _from ERC-7930 interoperable address of the sender
+     *  @param _to ERC-7930 interoperable address of the recipient
+     *  @param _amountMax inclusive upper bound of the issued range
+     */
+    function reserveSlot(uint256 _validationId, bytes calldata _from, bytes calldata _to, uint256 _amountMax) external;
+
+    /**
+     *  @dev reconciles the module's counters to the exact amount a validation executed
+     *  called only when the module declares `SLOTS`, when the validation settles; the reservation taken at
+     *  `_amountMax`, if any, is replaced by `_executedAmount`. MUST tolerate an id it never reserved (a module
+     *  bound after issuance, or a late reconciliation after `releaseSlot`) by applying the delta anyway, so every
+     *  subsequent compliance decision sees the true state; a resulting breach stands, it is never hidden
+     *  This function can be called ONLY by the compliance contract itself (_compliance)
+     *  @param _validationId id of the settled validation
+     *  @param _executedAmount exact amount transferred, inside the issued range
+     */
+    function commitSlot(uint256 _validationId, uint256 _executedAmount) external;
+
+    /**
+     *  @dev undoes the reservation of a validation entirely
+     *  called only when the module declares `SLOTS`, when the keeper discards an expired validation. MUST
+     *  tolerate an id it never reserved
+     *  This function can be called ONLY by the compliance contract itself (_compliance)
+     *  @param _validationId id of the discarded validation
+     */
+    function releaseSlot(uint256 _validationId) external;
+
+    /**
      *  @dev getter for the dispatch points this module implements
      *  the returned value is a bitmask built from the flags of `ModuleCapabilitiesLib`
      *  the compliance reads it once, at binding time, and never calls a dispatch point whose flag is absent

@@ -91,7 +91,12 @@ library ModuleCapabilitiesLib {
     ///  validation issued for a satellite movement.
     uint256 internal constant BOUNDS = 1 << 5;
 
+    /// @dev The module implements {IModule-reserveSlot}, {IModule-commitSlot} and {IModule-releaseSlot}: it counts
+    ///  pending validations as executed, so concurrent validations cannot jointly breach a distribution rule.
+    uint256 internal constant SLOTS = 1 << 6;
+
     /// @dev Mask of every defined flag, used to reject undefined bits at binding time.
-    uint256 internal constant ALL = CHECK_TRANSFER | CHECK_SPENDER | HOOK_TRANSFER | HOOK_MINT | HOOK_BURN | BOUNDS;
+    uint256 internal constant ALL =
+        CHECK_TRANSFER | CHECK_SPENDER | HOOK_TRANSFER | HOOK_MINT | HOOK_BURN | BOUNDS | SLOTS;
 
 }
