@@ -60,8 +60,6 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
-
 pragma solidity 0.8.30;
 
 interface ITREXMessaging {
