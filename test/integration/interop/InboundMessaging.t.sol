@@ -120,7 +120,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ProtocolMessageReceived(
-            MessageTypesLib.SETTLEMENT_NOTIFICATION, originChain, routedGateway.receiveIdFor(index)
+            MessageTypesLib.Message.SETTLEMENT_NOTIFICATION, originChain, routedGateway.receiveIdFor(index)
         );
 
         routedGateway.relay(index);
@@ -165,18 +165,22 @@ contract InboundMessagingTest is InteropSuiteTest {
     function testOutboundOnlyTypesAreRefusedInbound() public {
         bytes memory body = abi.encode(uint256(1), "not for us");
 
-        uint256 validation =
-            _liteSends(routedGateway, token, MessageTypesLib.encode(MessageTypesLib.COMPLIANCE_VALIDATION, body));
+        uint256 validation = _liteSends(
+            routedGateway, token, MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, body)
+        );
 
         vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.COMPLIANCE_VALIDATION)
+            abi.encodeWithSelector(
+                ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.Message.COMPLIANCE_VALIDATION
+            )
         );
         routedGateway.relay(validation);
 
-        uint256 mint = _liteSends(routedGateway, token, MessageTypesLib.encode(MessageTypesLib.MINT_INSTRUCTION, body));
+        uint256 mint =
+            _liteSends(routedGateway, token, MessageTypesLib.encode(MessageTypesLib.Message.MINT_INSTRUCTION, body));
 
         vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.MINT_INSTRUCTION)
+            abi.encodeWithSelector(ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.Message.MINT_INSTRUCTION)
         );
         routedGateway.relay(mint);
     }
@@ -266,11 +270,13 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /* ----- Envelope refusals ----- */
 
-    function testUnknownMessageTypeReachesNoHandler() public {
-        uint8 undefinedType = 9;
+    /// @dev The refusal carries no data, so what is asserted is that it lands before any handler and
+    /// leaves the receipt unrecorded, letting a corrected message follow.
+    function testUndefinedMessageTypeReachesNoHandler() public {
+        uint8 undefinedType = uint8(type(MessageTypesLib.Message).max) + 1;
         uint256 index = _liteSends(routedGateway, token, abi.encode(undefinedType, MessageTypesLib.VERSION, "x"));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownMessageType.selector, undefinedType));
+        vm.expectRevert();
         routedGateway.relay(index);
 
         _assertNothingApplied(routedGateway, index);
@@ -278,8 +284,9 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     function testUnsupportedVersionReachesNoHandler() public {
         uint8 futureVersion = 2;
-        uint256 index =
-            _liteSends(routedGateway, token, abi.encode(MessageTypesLib.SETTLEMENT_NOTIFICATION, futureVersion, "x"));
+        uint256 index = _liteSends(
+            routedGateway, token, abi.encode(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION, futureVersion, "x")
+        );
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, futureVersion));
         routedGateway.relay(index);
@@ -290,7 +297,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     /// @dev A well-typed envelope around a body that is not a settlement never reaches the compliance.
     function testMalformedSettlementBodyIsRefused() public {
         uint256 index = _liteSends(
-            routedGateway, token, MessageTypesLib.encode(MessageTypesLib.SETTLEMENT_NOTIFICATION, hex"deadbeef")
+            routedGateway, token, MessageTypesLib.encode(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION, hex"deadbeef")
         );
 
         vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 0);

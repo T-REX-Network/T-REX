@@ -14,11 +14,11 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///      `vm.expectRevert` can see it.
 contract MessageTypesHarness {
 
-    function encode(uint8 messageType, bytes calldata body) external pure returns (bytes memory) {
+    function encode(MessageTypesLib.Message messageType, bytes calldata body) external pure returns (bytes memory) {
         return MessageTypesLib.encode(messageType, body);
     }
 
-    function decode(bytes calldata payload) external pure returns (uint8, bytes memory) {
+    function decode(bytes calldata payload) external pure returns (MessageTypesLib.Message, bytes memory) {
         return MessageTypesLib.decode(payload);
     }
 
@@ -77,41 +77,36 @@ contract MessageTypesLibUnitTest is Test {
     /* ----- Envelope codec ----- */
 
     function testRoundTripPreservesTypeAndBody() public view {
-        uint8[4] memory types = [
-            MessageTypesLib.COMPLIANCE_VALIDATION,
-            MessageTypesLib.MINT_INSTRUCTION,
-            MessageTypesLib.SETTLEMENT_NOTIFICATION,
-            MessageTypesLib.BURN_PROOF
+        MessageTypesLib.Message[4] memory types = [
+            MessageTypesLib.Message.COMPLIANCE_VALIDATION,
+            MessageTypesLib.Message.MINT_INSTRUCTION,
+            MessageTypesLib.Message.SETTLEMENT_NOTIFICATION,
+            MessageTypesLib.Message.BURN_PROOF
         ];
 
         for (uint256 i = 0; i < types.length; i++) {
-            (uint8 decodedType, bytes memory decodedBody) = harness.decode(harness.encode(types[i], body));
+            (MessageTypesLib.Message decodedType, bytes memory decodedBody) =
+                harness.decode(harness.encode(types[i], body));
 
-            assertEq(decodedType, types[i]);
+            assertEq(uint8(decodedType), uint8(types[i]));
             assertEq(decodedBody, body);
         }
     }
 
-    function testEncodeRevertsOnUnknownType(uint8 messageType) public {
-        vm.assume(!MessageTypesLib.isKnownType(messageType));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownMessageType.selector, messageType));
-        harness.encode(messageType, body);
-    }
-
-    function testDecodeRevertsOnUnknownType(uint8 messageType) public {
-        vm.assume(!MessageTypesLib.isKnownType(messageType));
+    /// @dev `encode` needs no such test: an undefined type is a compile error on its parameter.
+    function testDecodeRevertsOnUndefinedType(uint8 messageType) public {
+        vm.assume(messageType > uint8(type(MessageTypesLib.Message).max));
 
         bytes memory payload = abi.encode(messageType, MessageTypesLib.VERSION, body);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownMessageType.selector, messageType));
+        vm.expectRevert();
         harness.decode(payload);
     }
 
     function testDecodeRevertsOnUnsupportedVersion(uint8 messageVersion) public {
         vm.assume(messageVersion != MessageTypesLib.VERSION);
 
-        bytes memory payload = abi.encode(MessageTypesLib.SETTLEMENT_NOTIFICATION, messageVersion, body);
+        bytes memory payload = abi.encode(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION, messageVersion, body);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, messageVersion));
         harness.decode(payload);
@@ -124,10 +119,11 @@ contract MessageTypesLibUnitTest is Test {
             validationId: 7, token: address(0xBEEF), from: hex"0001000001890114", to: "", amount: 42
         });
 
-        (uint8 messageType, bytes memory decodedBody) = harness.decode(MessageTypesLib.encodeSettlement(n));
+        (MessageTypesLib.Message messageType, bytes memory decodedBody) =
+            harness.decode(MessageTypesLib.encodeSettlement(n));
         MessageTypesLib.SettlementNotification memory back = harness.decodeSettlement(decodedBody);
 
-        assertEq(messageType, MessageTypesLib.SETTLEMENT_NOTIFICATION);
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION));
         assertEq(back.validationId, n.validationId);
         assertEq(back.token, n.token);
         assertEq(back.from, n.from);
@@ -140,10 +136,11 @@ contract MessageTypesLibUnitTest is Test {
             burnedWallet: hex"0001000001890114", amount: 9, nativeWallet: address(0xCAFE)
         });
 
-        (uint8 messageType, bytes memory decodedBody) = harness.decode(MessageTypesLib.encodeBurnProof(p));
+        (MessageTypesLib.Message messageType, bytes memory decodedBody) =
+            harness.decode(MessageTypesLib.encodeBurnProof(p));
         MessageTypesLib.BurnProof memory back = harness.decodeBurnProof(decodedBody);
 
-        assertEq(messageType, MessageTypesLib.BURN_PROOF);
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BURN_PROOF));
         assertEq(back.burnedWallet, p.burnedWallet);
         assertEq(back.amount, p.amount);
         assertEq(back.nativeWallet, p.nativeWallet);
@@ -184,7 +181,7 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function testRelayDeliversTheExactPayloadOnce() public {
-        bytes memory payload = MessageTypesLib.encode(MessageTypesLib.COMPLIANCE_VALIDATION, body);
+        bytes memory payload = MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
         _sendRaw(payload);
 
         gateway.relay(0);
@@ -225,8 +222,8 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function testOutOfOrderRelayDeliversInTheRelayedOrder() public {
-        bytes memory first = MessageTypesLib.encode(MessageTypesLib.COMPLIANCE_VALIDATION, abi.encode("first"));
-        bytes memory second = MessageTypesLib.encode(MessageTypesLib.MINT_INSTRUCTION, abi.encode("second"));
+        bytes memory first = MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, abi.encode("first"));
+        bytes memory second = MessageTypesLib.encode(MessageTypesLib.Message.MINT_INSTRUCTION, abi.encode("second"));
         _sendRaw(first);
         _sendRaw(second);
 
@@ -238,7 +235,7 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function _send(bytes memory messageBody) private {
-        _sendRaw(MessageTypesLib.encode(MessageTypesLib.COMPLIANCE_VALIDATION, messageBody));
+        _sendRaw(MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, messageBody));
     }
 
     function _sendRaw(bytes memory payload) private {

@@ -63,14 +63,16 @@ contract OutboundMessagingTest is InteropSuiteTest {
         (uint8 messageType, uint8 version, bytes memory body) =
             abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
 
-        assertEq(messageType, MessageTypesLib.COMPLIANCE_VALIDATION);
+        assertEq(messageType, uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION));
         assertEq(version, MessageTypesLib.VERSION);
         assertEq(body, validationBody);
     }
 
     function testEverySendAnnouncesItsTypeChainAndSendId() public {
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ProtocolMessageSent(MessageTypesLib.COMPLIANCE_VALIDATION, satellite, gateway.receiveIdFor(0));
+        emit EventsLib.ProtocolMessageSent(
+            MessageTypesLib.Message.COMPLIANCE_VALIDATION, satellite, gateway.receiveIdFor(0)
+        );
 
         _dispatch(validationId, satellite);
     }
@@ -139,7 +141,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     function testAgentDispatchesAMintInstructionAndItIsAnnounced() public {
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ProtocolMessageSent(MessageTypesLib.MINT_INSTRUCTION, satellite, gateway.receiveIdFor(0));
+        emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.MINT_INSTRUCTION, satellite, gateway.receiveIdFor(0));
 
         vm.prank(agent);
         bytes32 sendId = token.dispatchMintInstruction(satellite, mintBody);
@@ -148,7 +150,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(sendId, gateway.receiveIdFor(0));
 
         (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
-        assertEq(messageType, MessageTypesLib.MINT_INSTRUCTION);
+        assertEq(messageType, uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
         assertEq(body, mintBody);
     }
 

@@ -202,16 +202,16 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
         require(keccak256(sender) == keccak256(peerFor(chainKey)), ErrorsLib.SenderNotPeer(chainKey, sender));
 
-        (uint8 messageType, bytes memory body) = MessageTypesLib.decode(payload);
+        (MessageTypesLib.Message messageType, bytes memory body) = MessageTypesLib.decode(payload);
 
         require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
         s.received[gateway][receiveId] = true;
 
-        if (messageType == MessageTypesLib.SETTLEMENT_NOTIFICATION) {
+        if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             MessageTypesLib.SettlementNotification memory notification = MessageTypesLib.decodeSettlement(body);
             _requireExpectedGateway(s, gateway, chainKey, notification.validationId);
             _handleSettlement(chainKey, notification);
-        } else if (messageType == MessageTypesLib.BURN_PROOF) {
+        } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
             _requireCurrentRoute(s, gateway, chainKey);
             _handleBurnProof(chainKey, MessageTypesLib.decodeBurnProof(body));
         } else {
@@ -318,23 +318,29 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
             require(pinned == gateway, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
         }
 
-        sendId = _send(gateway, peer, chainKey, MessageTypesLib.COMPLIANCE_VALIDATION, body);
+        sendId = _send(gateway, peer, chainKey, MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
     }
 
     /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current route.
     ///
     /// Fail-closed before anything leaves: a registry must be set, the chain must be routed, the routed
     /// gateway must still be trusted at this instant, and the peer must be addressable.
-    function _sendMessage(bytes32 chainKey, uint8 messageType, bytes memory body) internal returns (bytes32 sendId) {
+    function _sendMessage(bytes32 chainKey, MessageTypesLib.Message messageType, bytes memory body)
+        internal
+        returns (bytes32 sendId)
+    {
         (address gateway, bytes memory peer) = _openRoute(_messagingStorage(), chainKey);
 
         sendId = _send(gateway, peer, chainKey, messageType, body);
     }
 
-    function _send(address gateway, bytes memory peer, bytes32 chainKey, uint8 messageType, bytes memory body)
-        private
-        returns (bytes32 sendId)
-    {
+    function _send(
+        address gateway,
+        bytes memory peer,
+        bytes32 chainKey,
+        MessageTypesLib.Message messageType,
+        bytes memory body
+    ) private returns (bytes32 sendId) {
         sendId = IERC7786GatewaySource(gateway)
             .sendMessage(peer, MessageTypesLib.encode(messageType, body), new bytes[](0));
 

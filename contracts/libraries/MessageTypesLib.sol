@@ -73,17 +73,18 @@ import { ErrorsLib } from "./ErrorsLib.sol";
  */
 library MessageTypesLib {
 
-    /// @dev Outbound. A `ComplianceValidation` issued on the reference chain for a satellite to execute.
-    uint8 internal constant COMPLIANCE_VALIDATION = 1;
-
-    /// @dev Outbound. A delegation-out instruction to mint on a satellite. One-way, nothing reconciled.
-    uint8 internal constant MINT_INSTRUCTION = 2;
-
-    /// @dev Inbound. A satellite reporting that a validation's leg executed.
-    uint8 internal constant SETTLEMENT_NOTIFICATION = 3;
-
-    /// @dev Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.
-    uint8 internal constant BURN_PROOF = 4;
+    /// @dev The four types that cross the interop boundary, numbered from zero as their wire codes.
+    /// Appending a member is the only backward-compatible way to grow the surface.
+    enum Message {
+        /// Outbound. A `ComplianceValidation` issued on the reference chain for a satellite to execute.
+        COMPLIANCE_VALIDATION,
+        /// Outbound. A delegation-out instruction to mint on a satellite. One-way, nothing reconciled.
+        MINT_INSTRUCTION,
+        /// Inbound. A satellite reporting that a validation's leg executed.
+        SETTLEMENT_NOTIFICATION,
+        /// Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.
+        BURN_PROOF
+    }
 
     /// @dev The envelope version this library serves. A payload carrying any other version is refused.
     uint8 internal constant VERSION = 1;
@@ -113,27 +114,25 @@ library MessageTypesLib {
         address nativeWallet;
     }
 
-    /// @dev Wraps `body` in the envelope. Reverts on a type this library does not define.
-    function encode(uint8 messageType, bytes memory body) internal pure returns (bytes memory) {
-        require(isKnownType(messageType), ErrorsLib.UnknownMessageType(messageType));
+    /// @dev Wraps `body` in the envelope.
+    function encode(Message messageType, bytes memory body) internal pure returns (bytes memory) {
         return abi.encode(messageType, VERSION, body);
     }
 
     /// @dev Unwraps an envelope into its type and its untouched body.
     ///
-    /// Refuses an undefined type and an unserved version before the body is ever looked at, so an
-    /// unrecognised message can never reach a handler.
-    function decode(bytes memory payload) internal pure returns (uint8 messageType, bytes memory body) {
+    /// The ABI decoder validates the type against `Message` before the body is read, so an undefined
+    /// type reverts without data and never reaches a handler.
+    function decode(bytes memory payload) internal pure returns (Message messageType, bytes memory body) {
         uint8 messageVersion;
-        (messageType, messageVersion, body) = abi.decode(payload, (uint8, uint8, bytes));
+        (messageType, messageVersion, body) = abi.decode(payload, (Message, uint8, bytes));
 
-        require(isKnownType(messageType), ErrorsLib.UnknownMessageType(messageType));
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
     }
 
     /// @dev Wraps a settlement notification in the envelope, as a satellite's Lite does before sending.
     function encodeSettlement(SettlementNotification memory notification) internal pure returns (bytes memory) {
-        return abi.encode(SETTLEMENT_NOTIFICATION, VERSION, abi.encode(notification));
+        return abi.encode(Message.SETTLEMENT_NOTIFICATION, VERSION, abi.encode(notification));
     }
 
     /// @dev Unwraps a `SETTLEMENT_NOTIFICATION` body. Reverts on a body that is not one.
@@ -143,17 +142,12 @@ library MessageTypesLib {
 
     /// @dev Wraps a burn proof in the envelope, as a satellite's Lite does before sending.
     function encodeBurnProof(BurnProof memory proof) internal pure returns (bytes memory) {
-        return abi.encode(BURN_PROOF, VERSION, abi.encode(proof));
+        return abi.encode(Message.BURN_PROOF, VERSION, abi.encode(proof));
     }
 
     /// @dev Unwraps a `BURN_PROOF` body. Reverts on a body that is not one.
     function decodeBurnProof(bytes memory body) internal pure returns (BurnProof memory) {
         return abi.decode(body, (BurnProof));
-    }
-
-    /// @dev Whether `messageType` is one of the four this surface defines.
-    function isKnownType(uint8 messageType) internal pure returns (bool) {
-        return messageType >= COMPLIANCE_VALIDATION && messageType <= BURN_PROOF;
     }
 
     /// @dev The per-chain key every route, peer and per-chain setting is stored under.

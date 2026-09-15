@@ -63,6 +63,8 @@
 
 pragma solidity 0.8.30;
 
+import { MessageTypesLib } from "./MessageTypesLib.sol";
+
 library ErrorsLib {
 
     // Common Errors
@@ -154,11 +156,10 @@ library ErrorsLib {
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
-    error MessageTypeNotInbound(uint8 messageType);
+    error MessageTypeNotInbound(MessageTypesLib.Message messageType);
     error RegistryNotSet();
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error UnknownMessageType(uint8 messageType);
     error UnsupportedMessageVersion(uint8 messageVersion);
     error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
 

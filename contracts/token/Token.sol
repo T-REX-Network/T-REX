@@ -263,7 +263,7 @@ contract Token is
     /// One-way by design: delegation-out is atomic and final here, so no reconciliation is expected and
     /// none is tracked. Reverts when the chain was never opened.
     function dispatchMintInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
-        return _sendMessage(chainKey, MessageTypesLib.MINT_INSTRUCTION, body);
+        return _sendMessage(chainKey, MessageTypesLib.Message.MINT_INSTRUCTION, body);
     }
 
     /// @inheritdoc IERC20Metadata

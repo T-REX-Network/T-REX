@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
+import { MessageTypesLib } from "./MessageTypesLib.sol";
 import { Version } from "./VersionLib.sol";
 
 library EventsLib {
@@ -127,8 +128,10 @@ library EventsLib {
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     /// @notice Emitted when a validation's leg toward `chainKey` is pinned to the gateway that carried it.
     event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
-    event ProtocolMessageSent(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event ProtocolMessageReceived(uint8 indexed messageType, bytes32 indexed chainKey, bytes32 receiveId);
+    event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
+    event ProtocolMessageReceived(
+        MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 receiveId
+    );
     /// @notice Emitted by the token when an attributed burn proof reaches its recall path.
     event BurnProofReceived(
         bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
