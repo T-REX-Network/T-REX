@@ -99,13 +99,22 @@ library EventsLib {
     ///         `IdentityModified(oldIdentity, newIdentity)`, which omits the investor wallet. Pair the two logs of
     ///         the same transaction; the identities are not repeated here.
     event InvestorIdentityChanged(address indexed investor);
-    /// @notice Emitted by `IdentityRegistryStorage.addIdentityToStorage` right after the standard
-    ///         `IdentityStored(investor, localIdentity)` when the global ONCHAINID identity registry already binds
-    ///         the wallet to a different identity. The local binding takes precedence over the global one for every
-    ///         token wired to the storage; the registration is never blocked, this log is how the issuer's
-    ///         monitoring catches the divergence.
+    /// @notice Emitted by `IdentityRegistryStorage.addIdentityToStorage` and `modifyStoredIdentity`, right after
+    ///         the standard log of the write, when the binding just stored differs from the non-zero identity the
+    ///         global ONCHAINID identity registry holds for the wallet. The local binding takes precedence over the
+    ///         global one for every token wired to the storage; the write is never blocked, this log is how the
+    ///         issuer's monitoring catches the divergence.
     event IdentityOverridden(
         address indexed investor, IIdentity indexed globalIdentity, IIdentity indexed localIdentity
+    );
+    /// @notice Emitted when the wallet stops resolving to a local binding that shadowed the global ONCHAINID
+    ///         identity registry and follows `globalIdentity` again: by
+    ///         `IdentityRegistryStorage.removeIdentityFromStorage` when the removed binding differed from a non-zero
+    ///         global one, and by `modifyStoredIdentity` when the new binding realigns with it. Paired with
+    ///         `IdentityOverridden` it is how monitoring reconstructs a wallet's override state from the logs alone:
+    ///         at most one of the two fires per write.
+    event IdentityOverrideReleased(
+        address indexed investor, IIdentity indexed localIdentity, IIdentity indexed globalIdentity
     );
 
     // Token Events

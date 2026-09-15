@@ -78,8 +78,9 @@ import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 ///  layer on top of the global ONCHAINID identity registry (the `IdentityFactory` of each bound registry): a
 ///  wallet with no local binding resolves through the global registry, and a locally stored binding takes
 ///  precedence over the global one for every token wired to this storage.
-/// @dev A local binding that shadows a different global identity is signalled by `IdentityOverridden` at
-///  registration time and never blocked.
+/// @dev A local binding that shadows a different global identity is signalled by `IdentityOverridden`, and the
+///  end of that divergence by `IdentityOverrideReleased`. Every write that changes the identity a wallet resolves
+///  to carries the signal -- registration, modification and removal alike -- and none of them is ever blocked.
 contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnableUpgradeable {
 
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -138,6 +139,10 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredIdentity}.
+     *  @dev The binding stored here overrides, for every token wired to this storage, whatever the global
+     *  ONCHAINID identity registry returns for the wallet. When the new binding still differs from the global
+     *  one, `IdentityOverridden` is emitted; when it realigns with it, `IdentityOverrideReleased` is. The
+     *  modification is never blocked.
      */
     function modifyStoredIdentity(address _userAddress, IIdentity _identity) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
@@ -147,6 +152,13 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         s.identities[_userAddress] = _identity;
         emit ERC3643EventsLib.IdentityModified(oldIdentity, _identity);
         emit EventsLib.InvestorIdentityChanged(_userAddress);
+
+        IIdentity globalIdentity = _globalIdentity(_userAddress);
+        if (address(globalIdentity) != address(0) && globalIdentity != _identity) {
+            emit EventsLib.IdentityOverridden(_userAddress, globalIdentity, _identity);
+        } else if (globalIdentity == _identity && oldIdentity != _identity) {
+            emit EventsLib.IdentityOverrideReleased(_userAddress, oldIdentity, globalIdentity);
+        }
     }
 
     /**
@@ -160,6 +172,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-removeIdentityFromStorage}.
+     *  @dev Removing the local binding hands the wallet back to the global ONCHAINID identity registry, which
+     *  may hold a different identity for it. That silent change of the identity the wallet resolves to is
+     *  signalled by `IdentityOverrideReleased`; the removal is never blocked.
      */
     function removeIdentityFromStorage(address _userAddress) external restricted {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
@@ -168,6 +183,11 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         IIdentity oldIdentity = s.identities[_userAddress];
         delete s.identities[_userAddress];
         emit ERC3643EventsLib.IdentityUnstored(_userAddress, oldIdentity);
+
+        IIdentity globalIdentity = _globalIdentity(_userAddress);
+        if (address(globalIdentity) != address(0) && globalIdentity != oldIdentity) {
+            emit EventsLib.IdentityOverrideReleased(_userAddress, oldIdentity, globalIdentity);
+        }
     }
 
     /**
