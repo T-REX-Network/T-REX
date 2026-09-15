@@ -87,7 +87,7 @@ contract IdentityRegistryStorageAddIdentityUnitTest is Test {
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
 
         assertEq(address(irs.storedIdentity(wallet)), localIdentity);
-        assertTrue(irs.isLocallyStored(wallet));
+        assertTrue(irs.isLocallyRegistered(wallet));
     }
 
     function test_addIdentityToStorage_EmitsOnlyIdentityStored_WhenNoRegistryBound() public {

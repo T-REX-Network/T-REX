@@ -196,9 +196,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     }
 
     /**
-     *  @dev See {IIdentityRegistryStorage-isLocallyStored}.
+     *  @dev See {IIdentityRegistryStorage-isLocallyRegistered}.
      */
-    function isLocallyStored(address _userAddress) external view override returns (bool) {
+    function isLocallyRegistered(address _userAddress) external view override returns (bool) {
         return address(_getStorage().identities[_userAddress]) != address(0);
     }
 

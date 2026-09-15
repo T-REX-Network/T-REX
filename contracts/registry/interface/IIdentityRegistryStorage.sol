@@ -68,6 +68,6 @@ interface IIdentityRegistryStorage is IERC3643IdentityRegistryStorage {
 
     /// @notice Returns true when the wallet has an identity stored locally in this IRS,
     /// ignoring the global identity registry fallback.
-    function isLocallyStored(address userAddress) external view returns (bool);
+    function isLocallyRegistered(address userAddress) external view returns (bool);
 
 }

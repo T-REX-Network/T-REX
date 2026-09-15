@@ -316,7 +316,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
 
     /// @inheritdoc ITREXRegistry
     function isLocallyRegistered(address _userAddress) external view override returns (bool) {
-        return _getStorage().tokenIdentityStorage.isLocallyStored(_userAddress);
+        return _getStorage().tokenIdentityStorage.isLocallyRegistered(_userAddress);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
