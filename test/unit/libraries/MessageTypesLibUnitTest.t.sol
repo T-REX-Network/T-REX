@@ -103,6 +103,25 @@ contract MessageTypesLibUnitTest is Test {
         harness.decode(payload);
     }
 
+    /// @dev The wire codes are the member positions, so a reorder must not pass unnoticed.
+    function testMemberNumberingIsTheWireFormat() public pure {
+        assertEq(uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION), 0);
+        assertEq(uint8(MessageTypesLib.Message.MINT_INSTRUCTION), 1);
+        assertEq(uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION), 2);
+        assertEq(uint8(MessageTypesLib.Message.BURN_PROOF), 3);
+        assertEq(uint8(type(MessageTypesLib.Message).max), 3);
+    }
+
+    /// @dev The bound is inclusive on the valid side, so the refusal above it is not an off-by-one.
+    function testHighestMemberDecodesFromARawPayload() public view {
+        bytes memory payload = abi.encode(uint8(type(MessageTypesLib.Message).max), MessageTypesLib.VERSION, body);
+
+        (MessageTypesLib.Message messageType, bytes memory decodedBody) = harness.decode(payload);
+
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BURN_PROOF));
+        assertEq(decodedBody, body);
+    }
+
     function testDecodeRevertsOnUnsupportedVersion(uint8 messageVersion) public {
         vm.assume(messageVersion != MessageTypesLib.VERSION);
 

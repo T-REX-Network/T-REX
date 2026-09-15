@@ -276,6 +276,8 @@ contract InboundMessagingTest is InteropSuiteTest {
         uint8 undefinedType = uint8(type(MessageTypesLib.Message).max) + 1;
         uint256 index = _liteSends(routedGateway, token, abi.encode(undefinedType, MessageTypesLib.VERSION, "x"));
 
+        vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 0);
+
         vm.expectRevert();
         routedGateway.relay(index);
 

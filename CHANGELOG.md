@@ -93,10 +93,20 @@ All notable changes to this project will be documented in this file.
     `ValidationAlreadyRouted`. An id the token never dispatched, and every burn proof, follows the
     current route. Removing a pinned gateway from the registry orphans its legs, which the lifecycle
     will then expire and discard.
-  - `MessageTypesLib`: the four message types (`COMPLIANCE_VALIDATION`, `MINT_INSTRUCTION`,
-    `SETTLEMENT_NOTIFICATION`, `BURN_PROOF`) in a versioned `abi.encode(type, version, body)`
-    envelope, refusing an unknown type or version before any handler runs, plus the typed
-    `SettlementNotification` and `BurnProof` bodies with their codecs and the `chainKey` derivation.
+  - `MessageTypesLib`: the four message types as the enum `Message` (`COMPLIANCE_VALIDATION`,
+    `MINT_INSTRUCTION`, `SETTLEMENT_NOTIFICATION`, `BURN_PROOF`) in a versioned
+    `abi.encode(type, version, body)` envelope, plus the typed `SettlementNotification` and
+    `BurnProof` bodies with their codecs and the `chainKey` derivation.
+    - **The ABI decoder enforces the range.** `decode` reads the type slot as a `Message`, so a value
+      above the last member is refused before the body is looked at, and `encode` cannot be handed an
+      undefined type at all. There is no `isKnownType` helper and no `UnknownMessageType` error: an
+      undefined type now reverts without data, the range being the compiler's to state. A valid but
+      outbound-only type arriving inbound is a different matter and still reverts
+      `MessageTypeNotInbound`, which names it.
+    - **Wire codes are `0..3`**, the member positions, rather than the `1..4` of the constants they
+      replace. Appending a member is the only backward-compatible way to grow the surface: reordering
+      or inserting one reassigns a code. Event topics and the `MessageTypeNotInbound` selector are
+      unchanged, an enum canonicalising to `uint8` in the ABI.
   - Transport-level replay protection per `(gateway, receiveId)`, distinct from the semantic replay the
     slot lifecycle detects: a fresh id carrying consumed content is passed through untouched.
   - Events: `TrustedGatewaySet`, `TrustedGatewayRegistrySet`, `ChainRegistered`, `RouteSet`, `PeerSet`,

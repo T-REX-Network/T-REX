@@ -33,6 +33,8 @@ module.exports = {
         'header-max-length': [2, 'always', 100],
         'body-leading-blank': [2, 'always'],
         'footer-leading-blank': [2, 'always'],
+        'body-empty': [2, 'always'],
+        'footer-empty': [2, 'always'],
     },
     prompt: {
         messages: {
