@@ -418,6 +418,100 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
     }
 
+    // ============ modifyStoredIdentity() / removeIdentityFromStorage() override signal ============
+
+    /// @notice Rewriting a local binding that still differs from the global identity keeps signalling the
+    ///         divergence, after the two standard modification logs.
+    function test_modifyStoredIdentity_EmitsIdentityOverridden_WhenGlobalIdentityDiffers() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityModified(charlieIdentity, bobIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.InvestorIdentityChanged(another);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverridden(another, globalIdentity, bobIdentity);
+        vm.prank(agent);
+        identityRegistryStorage.modifyStoredIdentity(another, bobIdentity);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(bobIdentity));
+    }
+
+    /// @notice Rewriting the local binding to exactly the global identity ends the override.
+    function test_modifyStoredIdentity_EmitsIdentityOverrideReleased_WhenNewIdentityMatchesGlobal() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
+        vm.prank(agent);
+        identityRegistryStorage.modifyStoredIdentity(another, globalIdentity);
+    }
+
+    /// @notice The signal reaches the agent path an issuer actually uses: updating through the registry.
+    function test_updateIdentity_EmitsIdentityOverridden_ThroughRegistry() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        vm.prank(agent);
+        registry.registerIdentity(another, charlieIdentity, 0);
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverridden(another, globalIdentity, bobIdentity);
+        vm.expectEmit(address(registry));
+        emit ERC3643EventsLib.IdentityUpdated(charlieIdentity, bobIdentity);
+        vm.prank(agent);
+        registry.updateIdentity(another, bobIdentity);
+    }
+
+    /// @notice Removing the local binding hands the wallet to a different global identity: never silent.
+    function test_removeIdentityFromStorage_EmitsIdentityOverrideReleased_WhenGlobalIdentityDiffers() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit ERC3643EventsLib.IdentityUnstored(another, charlieIdentity);
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
+        vm.prank(agent);
+        identityRegistryStorage.removeIdentityFromStorage(another);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(globalIdentity));
+        assertFalse(identityRegistryStorage.isLocallyRegistered(another));
+    }
+
+    /// @notice The release signal reaches the registry path too.
+    function test_deleteIdentity_EmitsIdentityOverrideReleased_ThroughRegistry() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        vm.prank(agent);
+        registry.registerIdentity(another, charlieIdentity, 0);
+
+        vm.expectEmit(address(identityRegistryStorage));
+        emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
+        vm.expectEmit(address(registry));
+        emit ERC3643EventsLib.IdentityRemoved(another, charlieIdentity);
+        vm.prank(agent);
+        registry.deleteIdentity(another);
+    }
+
+    /// @notice A wallet the factory never minted has no global identity to fall back to: only `IdentityUnstored`.
+    function test_removeIdentityFromStorage_EmitsOnlyIdentityUnstored_WhenWalletIsUnknownGlobally() public {
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        vm.recordLogs();
+        vm.prank(agent);
+        identityRegistryStorage.removeIdentityFromStorage(another);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityUnstored.selector);
+    }
+
     // ============ supportsInterface() Tests ============
 
     /// @notice Should return false for unsupported interfaces

@@ -170,9 +170,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     // ============================================================
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev The countries argument is ignored. The country is a compliance concern: this registry
-    ///      stores none. Read the effective value from the country module bound to the token's
-    ///      `ModularCompliance`.
+    /// @dev countries are ignored; they are now managed with claims at identity level.
     function batchRegisterIdentity(address[] calldata userAddresses, IIdentity[] calldata identities, uint16[] calldata)
         external
         override
@@ -191,8 +189,7 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev DEPRECATED: this registry stores no country; always reverts. The country is a compliance
-    ///      concern, owned by the country module bound to the token's `ModularCompliance`.
+    /// @dev DEPRECATED: countries are now managed with claims at identity level.
     function updateCountry(address, uint16) external pure override {
         revert ErrorsLib.Deprecated();
     }

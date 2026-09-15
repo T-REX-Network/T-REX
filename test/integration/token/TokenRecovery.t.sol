@@ -7,6 +7,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -122,6 +123,28 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         assertFalse(identityRegistry.isLocallyRegistered(bob));
         assertTrue(identityRegistry.isLocallyRegistered(another));
+    }
+
+    /// @notice The lost wallet's local binding shadowed a different global identity: deleting it during
+    ///         recovery hands the wallet back to that global identity, which the agent must reconcile.
+    function test_recoveryAddress_EmitsIdentityOverrideReleased_WhenLostWalletShadowedAGlobalIdentity() public {
+        address identityStorage = address(identityRegistry.identityStorage());
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
+            ),
+            abi.encode(address(charlieIdentity))
+        );
+
+        vm.expectEmit(identityStorage);
+        emit EventsLib.IdentityOverrideReleased(bob, bobIdentity, charlieIdentity);
+        vm.prank(agent);
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertEq(address(identityRegistry.identity(bob)), address(charlieIdentity));
+        assertEq(token.balanceOf(another), 500);
     }
 
     /// @notice Should only remove the lost wallet from the registry when new wallet is already in it
