@@ -181,6 +181,29 @@ contract MessageTypesLibUnitTest is Test {
         assertEq(MessageTypesLib.chainKey(bytes2(0x0000), chainRef), MessageTypesLib.chainKey(bytes2(0x0000), chainRef));
     }
 
+    /// @dev Derived through the standard's EVM-specific helper, which builds the same identifier by
+    /// another path, so agreement is a cross-check rather than a restatement.
+    function testChainKeyIsTheCanonicalChainIdentifierHashed() public pure {
+        uint256 chainId = 137;
+
+        (bytes2 chainType, bytes memory chainReference,) =
+            InteroperableAddress.parseV1(InteroperableAddress.formatEvmV1(chainId));
+
+        assertEq(
+            MessageTypesLib.chainKey(chainType, chainReference), keccak256(InteroperableAddress.formatEvmV1(chainId))
+        );
+    }
+
+    /// @dev A chain identifier needs a reference, so the degenerate key has no value to collide with.
+    function testChainKeyRefusesAnEmptyReference() public {
+        vm.expectRevert();
+        this.callChainKey(MessageTypesLib.EVM_CHAIN_TYPE, "");
+    }
+
+    function callChainKey(bytes2 chainType, bytes calldata chainReference) external pure returns (bytes32) {
+        return MessageTypesLib.chainKey(chainType, chainReference);
+    }
+
     function testChainKeyDiffersAcrossChains() public pure {
         assertTrue(
             MessageTypesLib.chainKey(bytes2(0x0000), hex"01") != MessageTypesLib.chainKey(bytes2(0x0000), hex"89")

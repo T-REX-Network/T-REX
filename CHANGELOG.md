@@ -96,7 +96,9 @@ All notable changes to this project will be documented in this file.
   - `MessageTypesLib`: the four message types as the enum `Message` (`COMPLIANCE_VALIDATION`,
     `MINT_INSTRUCTION`, `SETTLEMENT_NOTIFICATION`, `BURN_PROOF`) in a versioned
     `abi.encode(type, version, body)` envelope, plus the typed `SettlementNotification` and
-    `BurnProof` bodies with their codecs and the `chainKey` derivation.
+    `BurnProof` bodies with their codecs and the `chainKey` derivation. A `chainKey` is
+    `keccak256` of ERC-7930's canonical chain identifier, the interoperable address of that chain
+    with a zero-length address, so a counterpart derives the same key from the standard alone.
     - **The ABI decoder enforces the range.** `decode` reads the type slot as a `Message`, so a value
       above the last member is refused before the body is looked at, and `encode` cannot be handed an
       undefined type at all. There is no `isKnownType` helper and no `UnknownMessageType` error: an

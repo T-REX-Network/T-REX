@@ -60,9 +60,9 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
-
 pragma solidity 0.8.30;
+
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ErrorsLib } from "./ErrorsLib.sol";
 
@@ -152,9 +152,10 @@ library MessageTypesLib {
 
     /// @dev The per-chain key every route, peer and per-chain setting is stored under.
     ///
-    /// Hashes the ERC-7930 chain prefix, so one key covers a chain whatever address it is paired with.
+    /// Hashes ERC-7930's canonical chain identifier, so one key covers a chain whatever address it
+    /// is paired with.
     function chainKey(bytes2 chainType, bytes memory chainReference) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(chainType, chainReference));
+        return keccak256(InteroperableAddress.formatV1(chainType, chainReference, ""));
     }
 
 }
