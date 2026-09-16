@@ -5,12 +5,12 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 
 contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
@@ -31,7 +31,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         IIdentity newIdentity = _deployIdentity(another, "another");
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityRegistered(another, newIdentity);
+        emit IERC3643IdentityRegistry.IdentityRegistered(another, newIdentity);
         registry.registerIdentity(another, newIdentity, 1);
 
         assertTrue(registry.contains(another));
@@ -52,7 +52,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityUpdated(old, charlieIdentity);
+        emit IERC3643IdentityRegistry.IdentityUpdated(old, charlieIdentity);
         registry.updateIdentity(bob, charlieIdentity);
 
         assertEq(address(registry.identity(bob)), address(charlieIdentity));
@@ -69,7 +69,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     function test_updateCountry_Success() public {
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.CountryUpdated(bob, 999);
+        emit IERC3643IdentityRegistry.CountryUpdated(bob, 999);
         registry.updateCountry(bob, 999);
 
         assertEq(registry.investorCountry(bob), 999);
@@ -88,7 +88,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityRemoved(bob, old);
+        emit IERC3643IdentityRegistry.IdentityRemoved(bob, old);
         registry.deleteIdentity(bob);
 
         assertFalse(registry.contains(bob));
@@ -158,7 +158,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityStorageSet(address(replacement));
+        emit IERC3643IdentityRegistry.IdentityStorageSet(address(replacement));
         registry.setIdentityRegistryStorage(address(replacement));
 
         assertEq(address(registry.identityStorage()), address(replacement));

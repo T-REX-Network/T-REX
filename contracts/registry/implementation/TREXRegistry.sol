@@ -165,7 +165,8 @@ contract TREXRegistry is
     // ============================================================
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts.
+    /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts. Reverted the same
+    ///  way before the split; see docs/erc3643-oz-swap.md for why this is the one sanctioned exception.
     function setClaimTopicsRegistry(address) external pure override(ERC3643IdentityRegistry, IERC3643IdentityRegistry) {
         revert ErrorsLib.Deprecated();
     }

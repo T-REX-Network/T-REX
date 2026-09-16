@@ -3,10 +3,10 @@ pragma solidity ^0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
+import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 
 contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
@@ -89,7 +89,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, true, address(registry));
-        emit ERC3643EventsLib.TrustedIssuerAdded(address(newIssuer), topics);
+        emit IERC3643TrustedIssuersRegistry.TrustedIssuerAdded(address(newIssuer), topics);
         registry.addTrustedIssuer(address(newIssuer), topics);
 
         assertTrue(registry.isTrustedIssuer(address(newIssuer)));
@@ -143,7 +143,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
-        emit ERC3643EventsLib.TrustedIssuerRemoved(address(anotherIssuer));
+        emit IERC3643TrustedIssuersRegistry.TrustedIssuerRemoved(address(anotherIssuer));
         registry.removeTrustedIssuer(address(anotherIssuer));
 
         assertFalse(registry.isTrustedIssuer(address(anotherIssuer)));
@@ -259,7 +259,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, true, address(registry));
-        emit ERC3643EventsLib.ClaimTopicsUpdated(address(claimIssuer), newTopics);
+        emit IERC3643TrustedIssuersRegistry.ClaimTopicsUpdated(address(claimIssuer), newTopics);
         registry.updateIssuerClaimTopics(address(claimIssuer), newTopics);
 
         assertTrue(registry.hasClaimTopic(address(claimIssuer), CLAIM_TOPIC_3));
@@ -289,7 +289,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, true, address(registry));
-        emit ERC3643EventsLib.ClaimTopicsUpdated(address(secondIssuer), newTopics);
+        emit IERC3643TrustedIssuersRegistry.ClaimTopicsUpdated(address(secondIssuer), newTopics);
         registry.updateIssuerClaimTopics(address(secondIssuer), newTopics);
 
         assertFalse(registry.hasClaimTopic(address(secondIssuer), CLAIM_TOPIC_1));

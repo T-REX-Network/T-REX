@@ -7,7 +7,6 @@ import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -15,6 +14,7 @@ import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol
 
 import { RecordingModule, SpenderCheckOnlyModule } from "../mocks/CapabilityModules.sol";
 import { TestModule } from "../mocks/TestModule.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenTransferTest is TREXSuiteTest {
@@ -585,7 +585,7 @@ contract TokenTransferTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, false, false, false, address(token));
-        emit ERC3643EventsLib.TokensUnfrozen(alice, 100);
+        emit IERC3643.TokensUnfrozen(alice, 100);
         token.unfreezePartialTokens(alice, 100);
     }
 

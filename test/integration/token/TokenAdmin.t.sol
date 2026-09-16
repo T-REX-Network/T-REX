@@ -13,7 +13,6 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -124,7 +123,7 @@ contract TokenAdminTest is TREXSuiteTest {
         address newIR = address(secondToken.identityRegistry());
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.IdentityRegistryAdded(newIR);
+        emit IERC3643.IdentityRegistryAdded(newIR);
 
         vm.prank(deployer);
         token.setIdentityRegistry(newIR);
@@ -154,7 +153,7 @@ contract TokenAdminTest is TREXSuiteTest {
         ModularCompliance complianceProxy = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.ComplianceAdded(address(complianceProxy));
+        emit IERC3643.ComplianceAdded(address(complianceProxy));
 
         vm.prank(deployer);
         token.setCompliance(address(complianceProxy));
@@ -277,7 +276,7 @@ contract TokenAdminTest is TREXSuiteTest {
     function test_setAddressFrozen_Success() public {
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.AddressFrozen(alice, true, agent);
+        emit IERC3643.AddressFrozen(alice, true, agent);
         token.setAddressFrozen(alice, true);
 
         assertTrue(token.isFrozen(alice));
@@ -290,7 +289,7 @@ contract TokenAdminTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.AddressFrozen(alice, false, agent);
+        emit IERC3643.AddressFrozen(alice, false, agent);
         token.setAddressFrozen(alice, false);
 
         assertFalse(token.isFrozen(alice));
@@ -351,9 +350,9 @@ contract TokenAdminTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.AddressFrozen(alice, true, agent);
+        emit IERC3643.AddressFrozen(alice, true, agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.AddressFrozen(bob, true, agent);
+        emit IERC3643.AddressFrozen(bob, true, agent);
         token.batchSetAddressFrozen(userAddresses, freeze);
 
         assertTrue(token.isFrozen(alice));

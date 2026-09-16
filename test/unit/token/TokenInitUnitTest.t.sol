@@ -4,11 +4,11 @@ pragma solidity 0.8.30;
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
 contract TokenInitUnitTest is TokenBaseUnitTest {
 
@@ -77,7 +77,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
 
     function testTokenInitNominal() public {
         vm.expectEmit(true, true, true, true);
-        emit ERC3643EventsLib.UpdatedTokenInformation(pName, pSymbol, pTokenDecimals, "5.0.0", address(pOnchainId));
+        emit IERC3643.UpdatedTokenInformation(pName, pSymbol, pTokenDecimals, "5.0.0", address(pOnchainId));
         Token newToken = initCall();
 
         assertEq(newToken.name(), pName);

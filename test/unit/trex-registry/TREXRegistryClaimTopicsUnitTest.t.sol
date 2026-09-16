@@ -3,10 +3,10 @@ pragma solidity ^0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
+import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 
 contract TREXRegistryClaimTopicsUnitTest is TREXRegistryBaseUnitTest {
 
@@ -21,7 +21,7 @@ contract TREXRegistryClaimTopicsUnitTest is TREXRegistryBaseUnitTest {
     function test_addClaimTopic_Success_EmitsEvent() public {
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
-        emit ERC3643EventsLib.ClaimTopicAdded(1);
+        emit IERC3643ClaimTopicsRegistry.ClaimTopicAdded(1);
         registry.addClaimTopic(1);
 
         uint256[] memory topics = registry.getClaimTopics();
@@ -72,7 +72,7 @@ contract TREXRegistryClaimTopicsUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
-        emit ERC3643EventsLib.ClaimTopicRemoved(2);
+        emit IERC3643ClaimTopicsRegistry.ClaimTopicRemoved(2);
         registry.removeClaimTopic(2);
 
         uint256[] memory topics = registry.getClaimTopics();

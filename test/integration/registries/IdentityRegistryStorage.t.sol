@@ -8,7 +8,6 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import {
     IERC3643IdentityRegistryStorage,
@@ -84,9 +83,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Storing an identity also emits `CountryModified`, so the country is observable from logs.
     function test_addIdentityToStorage_EmitsIdentityStoredAndCountryModified() public {
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
+        emit IERC3643IdentityRegistryStorage.IdentityStored(another, charlieIdentity);
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.CountryModified(another, Countries.FRANCE);
+        emit IERC3643IdentityRegistryStorage.CountryModified(another, Countries.FRANCE);
         vm.prank(agent);
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, Countries.FRANCE);
 
@@ -98,7 +97,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice `InvestorIdentityChanged` names the wallet the standard `IdentityModified` omits.
     function test_modifyStoredIdentity_EmitsInvestorIdentityChanged() public {
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityModified(bobIdentity, charlieIdentity);
+        emit IERC3643IdentityRegistryStorage.IdentityModified(bobIdentity, charlieIdentity);
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.InvestorIdentityChanged(bob);
         vm.prank(agent);
@@ -289,7 +288,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         address identityRegistry = address(token.identityRegistry());
 
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.IdentityRegistryUnbound(identityRegistry);
+        emit IERC3643IdentityRegistryStorage.IdentityRegistryUnbound(identityRegistry);
         vm.prank(deployer);
         identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
     }
