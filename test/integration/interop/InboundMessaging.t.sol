@@ -183,6 +183,14 @@ contract InboundMessagingTest is InteropSuiteTest {
             abi.encodeWithSelector(ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.Message.MINT_INSTRUCTION)
         );
         routedGateway.relay(mint);
+
+        uint256 recall =
+            _liteSends(routedGateway, token, MessageTypesLib.encode(MessageTypesLib.Message.RECALL_INSTRUCTION, body));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.Message.RECALL_INSTRUCTION)
+        );
+        routedGateway.relay(recall);
     }
 
     /* ----- The rejection matrix: three trust levels, three errors ----- */

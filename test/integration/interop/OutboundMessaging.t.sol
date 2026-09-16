@@ -27,6 +27,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
     uint256 validationId = 1;
     bytes validationBody = abi.encode(uint256(1), "validation");
     bytes mintBody = abi.encode(uint256(2), "mint");
+    bytes recallBody = abi.encode(uint256(3), "recall");
 
     /// @dev Mirrors TREXMessaging's ERC-7201 namespace, so a test can strip the registry back off.
     bytes32 internal constant MESSAGING_STORAGE_LOCATION =
@@ -169,6 +170,33 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(token.pinnedRouteFor(0, satellite), address(0));
     }
 
+    /* ----- Recall instruction: an order out, a proof back ----- */
+
+    function testAgentDispatchesARecallInstructionAndItIsAnnounced() public {
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.ProtocolMessageSent(
+            MessageTypesLib.Message.RECALL_INSTRUCTION, satellite, gateway.receiveIdFor(0)
+        );
+
+        vm.prank(agent);
+        bytes32 sendId = token.dispatchRecallInstruction(satellite, recallBody);
+
+        assertEq(gateway.queueLength(), 1);
+        assertEq(sendId, gateway.receiveIdFor(0));
+
+        (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
+        assertEq(messageType, uint8(MessageTypesLib.Message.RECALL_INSTRUCTION));
+        assertEq(body, recallBody);
+    }
+
+    /// @dev The order changes nothing here: the position only moves when the answering proof arrives.
+    function testARecallInstructionPinsNothing() public {
+        vm.prank(agent);
+        token.dispatchRecallInstruction(satellite, recallBody);
+
+        assertEq(token.pinnedRouteFor(0, satellite), address(0));
+    }
+
     /* ----- Fail closed ----- */
 
     function testDispatchRevertsOnAChainThatWasNeverOpened() public {
@@ -220,6 +248,10 @@ contract OutboundMessagingTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
         vm.prank(alice);
         token.dispatchMintInstruction(satellite, mintBody);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
+        vm.prank(alice);
+        token.dispatchRecallInstruction(satellite, recallBody);
 
         assertEq(gateway.queueLength(), 0);
     }

@@ -84,7 +84,7 @@ interface ISettlementHandler {
     ///
     /// The notification is decoded and passed on as is; nothing in it is verified.
     /// Must revert on failure. A silent failure leaves the message marked as received and unretryable.
-    /// @param originChainKey The key of the chain the notification came from, `keccak256(chainType, chainReference)`.
+    /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external;

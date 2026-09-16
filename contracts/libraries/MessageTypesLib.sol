@@ -68,18 +68,20 @@ import { ErrorsLib } from "./ErrorsLib.sol";
 
 /**
  * @title MessageTypesLib
- * @dev The protocol's ERC-7786 message surface: the four types that cross the interop boundary, and
+ * @dev The protocol's ERC-7786 message surface: the five types that cross the interop boundary, and
  * the envelope that carries them.
  */
 library MessageTypesLib {
 
-    /// @dev The four types that cross the interop boundary, numbered from zero as their wire codes.
+    /// @dev The five types that cross the interop boundary, numbered from zero as their wire codes.
     /// Appending a member is the only backward-compatible way to grow the surface.
     enum Message {
         /// Outbound. A `ComplianceValidation` issued on the reference chain for a satellite to execute.
         COMPLIANCE_VALIDATION,
         /// Outbound. A delegation-out instruction to mint on a satellite. One-way, nothing reconciled.
         MINT_INSTRUCTION,
+        /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF`.
+        RECALL_INSTRUCTION,
         /// Inbound. A satellite reporting that a validation's leg executed.
         SETTLEMENT_NOTIFICATION,
         /// Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.

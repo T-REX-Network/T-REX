@@ -77,9 +77,10 @@ contract MessageTypesLibUnitTest is Test {
     /* ----- Envelope codec ----- */
 
     function testRoundTripPreservesTypeAndBody() public view {
-        MessageTypesLib.Message[4] memory types = [
+        MessageTypesLib.Message[5] memory types = [
             MessageTypesLib.Message.COMPLIANCE_VALIDATION,
             MessageTypesLib.Message.MINT_INSTRUCTION,
+            MessageTypesLib.Message.RECALL_INSTRUCTION,
             MessageTypesLib.Message.SETTLEMENT_NOTIFICATION,
             MessageTypesLib.Message.BURN_PROOF
         ];
@@ -107,9 +108,10 @@ contract MessageTypesLibUnitTest is Test {
     function testMemberNumberingIsTheWireFormat() public pure {
         assertEq(uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION), 0);
         assertEq(uint8(MessageTypesLib.Message.MINT_INSTRUCTION), 1);
-        assertEq(uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION), 2);
-        assertEq(uint8(MessageTypesLib.Message.BURN_PROOF), 3);
-        assertEq(uint8(type(MessageTypesLib.Message).max), 3);
+        assertEq(uint8(MessageTypesLib.Message.RECALL_INSTRUCTION), 2);
+        assertEq(uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION), 3);
+        assertEq(uint8(MessageTypesLib.Message.BURN_PROOF), 4);
+        assertEq(uint8(type(MessageTypesLib.Message).max), 4);
     }
 
     /// @dev The bound is inclusive on the valid side, so the refusal above it is not an off-by-one.

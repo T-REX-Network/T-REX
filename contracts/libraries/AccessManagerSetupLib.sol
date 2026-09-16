@@ -102,9 +102,10 @@ library AccessManagerSetupLib {
         // ------ AGENT role ------
         // Outbound interop dispatch is an operation, not configuration: it sends, it does not rewire.
         // The bound compliance reaches dispatchComplianceValidation without a role; this is the human path.
-        functions = new bytes4[](2);
+        functions = new bytes4[](3);
         functions[0] = Token.dispatchComplianceValidation.selector;
         functions[1] = Token.dispatchMintInstruction.selector;
+        functions[2] = Token.dispatchRecallInstruction.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT);
 
         // ------ AGENT_MINTER role ------

@@ -266,6 +266,11 @@ contract Token is
         return _sendMessage(chainKey, MessageTypesLib.Message.MINT_INSTRUCTION, body);
     }
 
+    /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
+    function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
+        return _sendMessage(chainKey, MessageTypesLib.Message.RECALL_INSTRUCTION, body);
+    }
+
     /// @inheritdoc IERC20Metadata
     function name() public view override(ERC20Upgradeable, IERC20Metadata) returns (string memory) {
         return _tokenStorage().name;

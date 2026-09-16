@@ -101,7 +101,7 @@ interface ITREXMessaging {
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
     ///
     /// Emits `ChainRegistered` on first sight of the prefix, then `PeerSet`.
-    /// @param chainKey `keccak256(chainType, chainReference)` of the peer's chain.
+    /// @param chainKey The chain the peer is on.
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
 
