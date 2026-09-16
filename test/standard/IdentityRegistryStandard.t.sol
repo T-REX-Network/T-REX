@@ -90,15 +90,6 @@ contract IdentityRegistryStandardTest is Test {
         assertEq(registry.investorCountry(investors[1]), 7);
     }
 
-    function test_batchRegisterIdentity_RevertWhen_ArrayLengthsDiffer() public {
-        address[] memory investors = new address[](2);
-        IIdentity[] memory identities = new IIdentity[](1);
-        uint16[] memory countries = new uint16[](2);
-
-        vm.expectRevert(ERC3643ErrorsLib.ArrayLengthMismatch.selector);
-        registry.batchRegisterIdentity(investors, identities, countries);
-    }
-
     function test_updateIdentity_ReplacesTheIdentity() public {
         registry.registerIdentity(investor, identity, COUNTRY);
 

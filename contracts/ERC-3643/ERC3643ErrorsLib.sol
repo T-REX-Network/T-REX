@@ -99,10 +99,6 @@ library ERC3643ErrorsLib {
     error ClaimTopicsCannotBeEmpty();
     error TrustedIssuerAlreadyExists();
 
-    // IdentityRegistry
-    /// @dev Raised by `batchRegisterIdentity` when the three arrays have different lengths.
-    error ArrayLengthMismatch();
-
     // IdentityRegistryStorage
     error AddressAlreadyStored();
     error AddressNotYetStored();

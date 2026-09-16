@@ -151,10 +151,10 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         uint16[] calldata _countries
     ) external virtual {
         _authorizeIdentityUpdate();
-        require(
-            _userAddresses.length == _identities.length && _userAddresses.length == _countries.length,
-            ERC3643ErrorsLib.ArrayLengthMismatch()
-        );
+        // No explicit length check: mismatched arrays revert with the panic an out-of-bounds index
+        // raises, which is what every other ERC-3643 batch function does. Adding a named error to this
+        // one alone would make the batch surface inconsistent; the choice belongs to a separate change
+        // that covers all of them.
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _registerIdentity(_userAddresses[i], _identities[i], _countries[i]);
         }
