@@ -5,6 +5,13 @@ script = "scripts"
 test = "test"
 libs = ["dependencies"]
 
+# scripts/DeployUtilityChecker.s.sol reads and merges the network deployment manifest.
+fs_permissions = [
+    { access = "read-write", path = "./deployments" },
+    # scratch manifest for test/unit/scripts/DeployUtilityChecker.t.sol
+    { access = "read-write", path = "./cache" },
+]
+
 solc_version = "0.8.30"
 optimizer = true
 optimizer_runs = 200
