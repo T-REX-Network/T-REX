@@ -232,9 +232,23 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         vm.mockCall(
             extraRegistry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
         );
+        uint256 maxBound = identityRegistryStorage.MAX_BOUND_REGISTRIES();
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, 300));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, maxBound));
         identityRegistryStorage.bindIdentityRegistry(extraRegistry);
+    }
+
+    /// @notice Binding an already bound registry is a no-op: the set is unchanged and no event is emitted.
+    function test_bindIdentityRegistry_NoOp_WhenAlreadyBound() public {
+        address identityRegistry = address(token.identityRegistry());
+        uint256 boundBefore = identityRegistryStorage.linkedIdentityRegistries().length;
+
+        vm.recordLogs();
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(identityRegistry);
+
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertEq(identityRegistryStorage.linkedIdentityRegistries().length, boundBefore);
     }
 
     // ============ unbindIdentityRegistry() Tests ============

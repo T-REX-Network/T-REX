@@ -96,6 +96,12 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
     // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0x6d25db4721129739b3a7e96c2537b7170fb9cfd72348ce376c7a189a3ab3ba00;
 
+    /// @notice Upper bound on the registries bound to this storage. It caps the cost of the global fallback,
+    ///  which asks the IdentityFactory of every bound registry in turn (one external call each) whenever a
+    ///  wallet has no local binding. The value is inherited from T-REX v4 and was not derived from a
+    ///  measurement.
+    uint256 public constant MAX_BOUND_REGISTRIES = 300;
+
     constructor() {
         _disableInitializers();
     }
@@ -167,6 +173,12 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-removeIdentityFromStorage}.
+     *  @dev Deletes the local override only. The wallet does not disappear from the token's view: it falls
+     *  back to the global ONCHAINID identity registry, and when bound there it remains `contains` and
+     *  potentially `isVerified` for every token wired to this storage. When that fallback resolves to a
+     *  different identity than the deleted one, `IdentityOverrideReleased` is emitted.
+     *  Excluding a wallet from a token is a compliance concern (deny-list module, freeze, claim
+     *  revocation), not this function.
      */
     function removeIdentityFromStorage(address _userAddress) external restricted {
         require(_userAddress != address(0), ErrorsLib.ZeroAddress());
@@ -184,6 +196,10 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-bindIdentityRegistry}.
+     *  @dev Binding a registry makes its `identityFactory()` an identity source for every suite sharing this
+     *  storage: the global fallback asks each bound registry's factory in turn for any wallet with no local
+     *  binding. Bind only registries whose factory is trusted to resolve the identities of every token on
+     *  this storage. Binding an already bound registry is a no-op and emits nothing.
      */
     function bindIdentityRegistry(address identityRegistry) external restricted onlySharedAuthority(identityRegistry) {
         _bindIdentityRegistry(identityRegistry);
@@ -248,10 +264,11 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         // here -- init via its `if (initialIRAddress != address(0))` guard, and the public
         // bindIdentityRegistry via its `onlySharedAuthority` modifier -- so no zero-address check is needed.
         Storage storage s = _getStorage();
-        require(s.identityRegistries.length() < 300, ErrorsLib.MaxIRByIRSReached(300));
+        require(s.identityRegistries.length() < MAX_BOUND_REGISTRIES, ErrorsLib.MaxIRByIRSReached(MAX_BOUND_REGISTRIES));
 
-        s.identityRegistries.add(_identityRegistry);
-        emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
+        if (s.identityRegistries.add(_identityRegistry)) {
+            emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
+        }
     }
 
     /**
