@@ -140,11 +140,11 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         IIdentity[] calldata _identities,
         uint16[] calldata _countries
     ) external virtual {
+        _authorizeIdentityUpdate();
         require(
             _userAddresses.length == _identities.length && _userAddresses.length == _countries.length,
             ERC3643ErrorsLib.ArrayLengthMismatch()
         );
-        _authorizeIdentityUpdate();
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _registerIdentity(_userAddresses[i], _identities[i], _countries[i]);
         }

@@ -182,8 +182,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchMint(address[] calldata _toList, uint256[] calldata _amounts) external virtual {
-        require(_toList.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
+        require(_toList.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _toList.length; i++) {
             _mint(_toList[i], _amounts[i]);
         }
@@ -191,8 +191,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchBurn(address[] calldata _userAddresses, uint256[] calldata _amounts) external virtual {
-        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
+        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _burn(_userAddresses[i], _amounts[i]);
         }
@@ -220,8 +220,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external virtual {
-        require(_userAddresses.length == _freeze.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
+        require(_userAddresses.length == _freeze.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _setAddressFrozen(_userAddresses[i], _freeze[i]);
         }
@@ -229,8 +229,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchFreezePartialTokens(address[] calldata _userAddresses, uint256[] calldata _amounts) external virtual {
-        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
+        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _freezePartialTokens(_userAddresses[i], _amounts[i]);
         }
@@ -241,8 +241,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         external
         virtual
     {
-        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
+        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _unfreezePartialTokens(_userAddresses[i], _amounts[i]);
         }
@@ -271,11 +271,11 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         external
         virtual
     {
+        _checkTokenAdmin();
         require(
             _fromList.length == _toList.length && _fromList.length == _amounts.length,
             ERC3643ErrorsLib.ArrayLengthMismatch()
         );
-        _checkTokenAdmin();
         for (uint256 i = 0; i < _fromList.length; i++) {
             _forcedTransfer(_fromList[i], _toList[i], _amounts[i]);
         }
