@@ -62,8 +62,8 @@
 
 pragma solidity 0.8.30;
 
-import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
+import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 
 /// @title ERC3643Compliance
 /// @notice Standard-only base implementing the ERC-3643 Compliance surface.
@@ -88,13 +88,12 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
     bytes32 private constant COMPLIANCE_STORAGE_LOCATION =
         0x9a630f7fb5b68c9ca32ffeadfd0de30d50c23b603074e205ad3eb7046278f900;
 
-
-
-
-
     /// @dev Restricts a function to the token currently bound to this compliance.
     modifier onlyBoundToken() {
-        require(msg.sender == _erc3643ComplianceStorage().tokenBound, ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract());
+        require(
+            msg.sender == _erc3643ComplianceStorage().tokenBound,
+            ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract()
+        );
         _;
     }
 
@@ -106,7 +105,7 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @inheritdoc IERC3643Compliance
     function unbindToken(address _token) external virtual {
-        _authorizeTokenBinding(_token);
+        _authorizeTokenUnbinding(_token);
         _unbindToken(_token);
     }
 
@@ -146,10 +145,15 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
         return _getTokenBound();
     }
 
-    /// @dev Authorization hook for binding and unbinding. Receives the token address so derived
-    ///  contracts can apply the "the token may bind itself once, the owner may always bind" policy.
+    /// @dev Authorization hook for binding. Receives the token address so derived contracts can apply
+    ///  the "an unbound compliance accepts a bind from the token itself" policy.
     ///  Left abstract on purpose: the standard specifies no access model.
     function _authorizeTokenBinding(address token) internal virtual;
+
+    /// @dev Authorization hook for unbinding. Separate from `_authorizeTokenBinding` because the two
+    ///  are governed by different conditions: binding may be open to a claiming token while the
+    ///  compliance is unbound, whereas unbinding concerns a token that is already bound.
+    function _authorizeTokenUnbinding(address token) internal virtual;
 
     /// @dev Records the bound token. No caller check; `_authorizeTokenBinding` covers the public path.
     function _bindToken(address token) internal virtual {

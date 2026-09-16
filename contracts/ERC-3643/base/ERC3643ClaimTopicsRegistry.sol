@@ -64,8 +64,8 @@ pragma solidity 0.8.30;
 
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
 import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
+import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
 
 /// @title ERC3643ClaimTopicsRegistry
 /// @notice Standard-only base implementing the ERC-3643 Claim Topics Registry surface.
@@ -95,8 +95,6 @@ abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ClaimTopicsRegistry")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant CLAIM_TOPICS_REGISTRY_STORAGE_LOCATION =
         0xf733c3a0e1c477ac68147f80e659cc05e7e57f7c461b47d14f8d9811f4c72700;
-
-
 
     /// @inheritdoc IERC3643ClaimTopicsRegistry
     function addClaimTopic(uint256 _claimTopic) external virtual {

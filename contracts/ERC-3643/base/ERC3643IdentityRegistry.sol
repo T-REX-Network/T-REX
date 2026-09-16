@@ -67,11 +67,11 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
-import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643IdentityRegistry
 /// @notice Standard-only base implementing the ERC-3643 Identity Registry surface.
@@ -101,7 +101,6 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.IdentityRegistry")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant IDENTITY_REGISTRY_STORAGE_LOCATION =
         0x7677ac510b853691f250873636359d7d7673c26ecc94050f9c8f5810c4b61e00;
-
 
     /// @dev Thrown when the arrays of a batch call have mismatched lengths.
     error IdentityRegistryArrayLengthMismatch();

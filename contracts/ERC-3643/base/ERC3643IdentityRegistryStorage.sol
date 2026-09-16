@@ -65,8 +65,8 @@ pragma solidity 0.8.30;
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
+import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 
 /// @title ERC3643IdentityRegistryStorage
 /// @notice Standard-only base implementing the ERC-3643 Identity Registry Storage surface.
@@ -105,11 +105,6 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant IDENTITY_REGISTRY_STORAGE_STORAGE_LOCATION =
         0x8e8aa323647c3f2580137bf922482bdf62534082dec9617ddb5e7739bad03900;
-
-
-
-
-
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
     function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external virtual {
@@ -174,7 +169,9 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
         require(userAddress != address(0) && address(userIdentity) != address(0), ERC3643ErrorsLib.ZeroAddress());
 
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
-        require(address(s.identities[userAddress].identityContract) == address(0), ERC3643ErrorsLib.AddressAlreadyStored());
+        require(
+            address(s.identities[userAddress].identityContract) == address(0), ERC3643ErrorsLib.AddressAlreadyStored()
+        );
         s.identities[userAddress].identityContract = userIdentity;
         s.identities[userAddress].investorCountry = country;
         emit IdentityStored(userAddress, userIdentity);
@@ -196,7 +193,9 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     function _modifyStoredInvestorCountry(address userAddress, uint16 country) internal virtual {
         require(userAddress != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
-        require(address(s.identities[userAddress].identityContract) != address(0), ERC3643ErrorsLib.AddressNotYetStored());
+        require(
+            address(s.identities[userAddress].identityContract) != address(0), ERC3643ErrorsLib.AddressNotYetStored()
+        );
         s.identities[userAddress].investorCountry = country;
         emit CountryModified(userAddress, country);
     }

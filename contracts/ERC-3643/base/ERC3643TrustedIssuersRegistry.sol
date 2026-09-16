@@ -64,8 +64,8 @@ pragma solidity 0.8.30;
 
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
 import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
+import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
 
 /// @title ERC3643TrustedIssuersRegistry
 /// @notice Standard-only base implementing the ERC-3643 Trusted Issuers Registry surface.
@@ -106,12 +106,6 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TrustedIssuersRegistry")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant TRUSTED_ISSUERS_REGISTRY_STORAGE_LOCATION =
         0x58a7ad278b8ace1eb0e9c3892258e09577cfdd8d75b47f8418fdf561b2770b00;
-
-
-
-
-
-
 
     /// @inheritdoc IERC3643TrustedIssuersRegistry
     function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external virtual {
@@ -168,8 +162,14 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
         require(!s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.TrustedIssuerAlreadyExists());
         require(claimTopics.length > 0, ERC3643ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
-        require(claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS, ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS));
-        require(s.trustedIssuers.length() < MAX_TRUSTED_ISSUERS, ERC3643ErrorsLib.MaxTrustedIssuersReached(MAX_TRUSTED_ISSUERS));
+        require(
+            claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS,
+            ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS)
+        );
+        require(
+            s.trustedIssuers.length() < MAX_TRUSTED_ISSUERS,
+            ERC3643ErrorsLib.MaxTrustedIssuersReached(MAX_TRUSTED_ISSUERS)
+        );
 
         s.trustedIssuers.add(trustedIssuer);
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];
@@ -206,7 +206,10 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
         require(trustedIssuer != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
         require(s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.NotATrustedIssuer());
-        require(claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS, ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS));
+        require(
+            claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS,
+            ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS)
+        );
         require(claimTopics.length > 0, ERC3643ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];

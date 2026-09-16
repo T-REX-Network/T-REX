@@ -60,11 +60,10 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 pragma solidity 0.8.30;
 
-import { ERC3643IdentityRegistryStorage } from "../../ERC-3643/base/ERC3643IdentityRegistryStorage.sol";
 import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643IdentityRegistryStorage.sol";
+import { ERC3643IdentityRegistryStorage } from "../../ERC-3643/base/ERC3643IdentityRegistryStorage.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
@@ -106,7 +105,10 @@ contract IdentityRegistryStorage is
     /// @inheritdoc IERC3643IdentityRegistryStorage
     /// @dev Adds `EventsLib.InvestorIdentityChanged` to the standard behavior: T-REX operators watch it
     ///  to reconcile off-chain investor records when an identity contract is replaced.
-    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage) {
+    function modifyStoredIdentity(address _userAddress, IIdentity _identity)
+        external
+        override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
+    {
         _authorizeIdentityWrite();
         _modifyStoredIdentity(_userAddress, _identity);
         emit EventsLib.InvestorIdentityChanged(_userAddress);

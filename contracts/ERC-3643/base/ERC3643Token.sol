@@ -71,10 +71,10 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643 } from "../IERC3643.sol";
 import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
-import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643Token
 /// @notice Standard-only base implementing the ERC-3643 token surface.
@@ -119,10 +119,6 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ERC3643Token")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant ERC3643_TOKEN_STORAGE_LOCATION =
         0x1c6ea0581535d63a38daa138246885c0e308b5f6335af4548c056841c5c18f00;
-
-
-
-
 
     /* ----- Token information ----- */
 
