@@ -67,6 +67,7 @@ import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdenti
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
+import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
@@ -92,43 +93,43 @@ library AccessManagerSetupLib {
 
         // ------ IDENTITY_MANAGER role ------
         functions = new bytes4[](3);
-        functions[0] = Token.setOnchainID.selector;
-        functions[1] = Token.setIdentityRegistry.selector;
-        functions[2] = Token.setCompliance.selector;
+        functions[0] = IERC3643.setOnchainID.selector;
+        functions[1] = IERC3643.setIdentityRegistry.selector;
+        functions[2] = IERC3643.setCompliance.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
 
         // ------ AGENT_MINTER role ------
         functions = new bytes4[](1);
-        functions[0] = Token.mint.selector;
+        functions[0] = IERC3643.mint.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_MINTER);
 
         // ------ AGENT_BURNER role ------
-        functions[0] = Token.burn.selector;
+        functions[0] = IERC3643.burn.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_BURNER);
 
         // ------ AGENT_PARTIAL_FREEZER role ------
         functions = new bytes4[](2);
-        functions[0] = Token.freezePartialTokens.selector;
-        functions[1] = Token.unfreezePartialTokens.selector;
+        functions[0] = IERC3643.freezePartialTokens.selector;
+        functions[1] = IERC3643.unfreezePartialTokens.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PARTIAL_FREEZER);
 
         // ------ AGENT_ADDRESS_FREEZER role ------
         functions = new bytes4[](1);
-        functions[0] = Token.setAddressFrozen.selector;
+        functions[0] = IERC3643.setAddressFrozen.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_ADDRESS_FREEZER);
 
         // ------ AGENT_RECOVERY_ADDRESS role ------
-        functions[0] = Token.recoveryAddress.selector;
+        functions[0] = IERC3643.recoveryAddress.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_RECOVERY_ADDRESS);
 
         // ------ AGENT_FORCED_TRANSFER role ------
-        functions[0] = Token.forcedTransfer.selector;
+        functions[0] = IERC3643.forcedTransfer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_FORCED_TRANSFER);
 
         // ------ AGENT_PAUSER role ------
         functions = new bytes4[](2);
-        functions[0] = Token.pause.selector;
-        functions[1] = Token.unpause.selector;
+        functions[0] = IERC3643.pause.selector;
+        functions[1] = IERC3643.unpause.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);
     }
 

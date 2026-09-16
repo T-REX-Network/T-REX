@@ -311,6 +311,38 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     ///  T-REX uses an AccessManager where OpenZeppelin's base uses `Ownable` plus an agent role.
     function _checkTokenAdmin() internal virtual;
 
+    /// @dev Replaces the ERC-20 name.
+    ///
+    ///  Name and symbol are owned by the ERC-20 base (issue #54), not duplicated in the ERC-3643
+    ///  namespace. OpenZeppelin's `ERC20Upgradeable` keeps its storage accessor private and, in the
+    ///  released version, exposes no setter, so the slot is reached directly here. The location is the
+    ///  constant `ERC20Upgradeable` itself declares. `_setName` and `_setSymbol` are the names
+    ///  openzeppelin-contracts#5838 gives these hooks, so the swap renames nothing.
+    function _setName(string memory name_) internal virtual {
+        _erc20Storage().name = name_;
+    }
+
+    /// @dev Replaces the ERC-20 symbol. See the note on `_setName`.
+    function _setSymbol(string memory symbol_) internal virtual {
+        _erc20Storage().symbol = symbol_;
+    }
+
+    /// @dev Writes the identity registry, compliance and ONCHAINID pointers with no validation and no
+    ///  events, for use during initialization only.
+    ///
+    ///  `_setIdentityRegistry` and `_setCompliance` are the hooks a derived contract overrides to add
+    ///  validation and, in T-REX's case, the compliance bind/unbind handshake. None of that applies at
+    ///  construction time: there is no previous compliance to unbind, and the deployer binds the
+    ///  compliance itself as a separate step. Routing initialization through the overridable setters
+    ///  would perform that handshake twice.
+    function _initERC3643(address identityRegistry_, address compliance_, address onchainId_) internal virtual {
+        ERC3643TokenStorage storage s = _erc3643TokenStorage();
+        s.identityRegistry = IERC3643IdentityRegistry(identityRegistry_);
+        s.compliance = IERC3643Compliance(compliance_);
+        s.onchainId = onchainId_;
+        _emitUpdatedTokenInformation();
+    }
+
     /// @dev Sets the token's ONCHAINID. The zero address means no ONCHAINID is bound.
     function _setOnchainID(address onchainId_) internal virtual {
         _erc3643TokenStorage().onchainId = onchainId_;
@@ -326,8 +358,15 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @dev Points the token at a new compliance contract.
     function _setCompliance(address compliance_) internal virtual {
-        _erc3643TokenStorage().compliance = IERC3643Compliance(compliance_);
+        _writeCompliance(compliance_);
         emit ComplianceAdded(compliance_);
+    }
+
+    /// @dev Stores the compliance pointer without emitting. Separate from `_setCompliance` so a derived
+    ///  contract that performs a bind/unbind handshake can place `ComplianceAdded` after the handshake,
+    ///  where it reflects a binding that actually succeeded.
+    function _writeCompliance(address compliance_) internal {
+        _erc3643TokenStorage().compliance = IERC3643Compliance(compliance_);
     }
 
     /// @dev Freezes part of a wallet's balance. The frozen amount may never exceed the balance.
@@ -511,6 +550,27 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     /// @dev The compliance contract backing the transfer rules.
     function _getCompliance() internal view virtual returns (IERC3643Compliance) {
         return _erc3643TokenStorage().compliance;
+    }
+
+    /// @dev Mirror of `ERC20Upgradeable.ERC20Storage`, needed only to reach the name and symbol slots.
+    ///  The field order and the location constant must match `ERC20Upgradeable` exactly.
+    struct ERC20NameSymbolStorage {
+        mapping(address account => uint256) balances;
+        mapping(address account => mapping(address spender => uint256)) allowances;
+        uint256 totalSupply;
+        string name;
+        string symbol;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ERC20")) - 1)) & ~bytes32(uint256(0xff));
+    // Declared by ERC20Upgradeable, which keeps its own accessor private.
+    bytes32 private constant ERC20_STORAGE_LOCATION =
+        0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00;
+
+    function _erc20Storage() private pure returns (ERC20NameSymbolStorage storage s) {
+        assembly ("memory-safe") {
+            s.slot := ERC20_STORAGE_LOCATION
+        }
     }
 
     function _erc3643TokenStorage() internal pure returns (ERC3643TokenStorage storage s) {

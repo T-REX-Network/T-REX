@@ -63,6 +63,12 @@
 
 pragma solidity 0.8.30;
 
+/// @dev Errors of the ERC-3643 standard surface are declared canonically in
+///  {ERC3643ErrorsLib}, inside the standard layer, because the standard bases may not import from the
+///  T-REX layer (issue #65). The names below are re-declared here for the T-REX layer and for tests.
+///  Solidity identifies errors by selector, so a re-declaration with the same signature is the same
+///  error on the wire; `forge lint` reporting some of them as unused only means no T-REX-layer contract
+///  raises them any more, not that they are unreachable.
 library ErrorsLib {
 
     // Common Errors
