@@ -65,6 +65,7 @@ pragma solidity 0.8.30;
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643TrustedIssuersRegistry
 /// @notice Standard-only base implementing the ERC-3643 Trusted Issuers Registry surface.
@@ -106,23 +107,11 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
     bytes32 private constant TRUSTED_ISSUERS_REGISTRY_STORAGE_LOCATION =
         0x58a7ad278b8ace1eb0e9c3892258e09577cfdd8d75b47f8418fdf561b2770b00;
 
-    /// @dev Thrown when the issuer address is the zero address.
-    error TrustedIssuerZeroAddress();
 
-    /// @dev Thrown when registering an issuer that is already registered.
-    error TrustedIssuerAlreadyExists();
 
-    /// @dev Thrown when the address is not a registered trusted issuer.
-    error NotATrustedIssuer();
 
-    /// @dev Thrown when an issuer is registered or updated with no claim topics.
-    error TrustedClaimTopicsCannotBeEmpty();
 
-    /// @dev Thrown when the registry is already at `MAX_TRUSTED_ISSUERS`.
-    error MaxTrustedIssuersReached(uint256 max);
 
-    /// @dev Thrown when an issuer is given more than `MAX_ISSUER_CLAIM_TOPICS` topics.
-    error MaxIssuerClaimTopicsReached(uint256 max);
 
     /// @inheritdoc IERC3643TrustedIssuersRegistry
     function addTrustedIssuer(address _trustedIssuer, uint256[] calldata _claimTopics) external virtual {
@@ -174,13 +163,13 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
 
     /// @dev Registers a trusted issuer for a set of claim topics, maintaining the reverse index.
     function _addTrustedIssuer(address trustedIssuer, uint256[] memory claimTopics) internal virtual {
-        require(trustedIssuer != address(0), TrustedIssuerZeroAddress());
+        require(trustedIssuer != address(0), ERC3643ErrorsLib.ZeroAddress());
 
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
-        require(!s.trustedIssuers.contains(trustedIssuer), TrustedIssuerAlreadyExists());
-        require(claimTopics.length > 0, TrustedClaimTopicsCannotBeEmpty());
-        require(claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS, MaxIssuerClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS));
-        require(s.trustedIssuers.length() < MAX_TRUSTED_ISSUERS, MaxTrustedIssuersReached(MAX_TRUSTED_ISSUERS));
+        require(!s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.TrustedIssuerAlreadyExists());
+        require(claimTopics.length > 0, ERC3643ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
+        require(claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS, ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS));
+        require(s.trustedIssuers.length() < MAX_TRUSTED_ISSUERS, ERC3643ErrorsLib.MaxTrustedIssuersReached(MAX_TRUSTED_ISSUERS));
 
         s.trustedIssuers.add(trustedIssuer);
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];
@@ -197,9 +186,9 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
 
     /// @dev Removes a trusted issuer and every reverse-index entry pointing at it.
     function _removeTrustedIssuer(address trustedIssuer) internal virtual {
-        require(trustedIssuer != address(0), TrustedIssuerZeroAddress());
+        require(trustedIssuer != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
-        require(s.trustedIssuers.remove(trustedIssuer), NotATrustedIssuer());
+        require(s.trustedIssuers.remove(trustedIssuer), ERC3643ErrorsLib.NotATrustedIssuer());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];
         uint256[] memory claimTopics = issuerTopics.values();
@@ -214,11 +203,11 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
     /// @dev Replaces the topics an issuer is trusted for, rebuilding its reverse-index entries.
     ///  An empty `claimTopics` reverts; `_removeTrustedIssuer` is the way to strip an issuer of every topic.
     function _updateIssuerClaimTopics(address trustedIssuer, uint256[] memory claimTopics) internal virtual {
-        require(trustedIssuer != address(0), TrustedIssuerZeroAddress());
+        require(trustedIssuer != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
-        require(s.trustedIssuers.contains(trustedIssuer), NotATrustedIssuer());
-        require(claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS, MaxIssuerClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS));
-        require(claimTopics.length > 0, TrustedClaimTopicsCannotBeEmpty());
+        require(s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.NotATrustedIssuer());
+        require(claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS, ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS));
+        require(claimTopics.length > 0, ERC3643ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];
         uint256[] memory oldTopics = issuerTopics.values();

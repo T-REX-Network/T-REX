@@ -60,38 +60,35 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+
 pragma solidity 0.8.30;
 
-import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-
-import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
+import { ERC3643IdentityRegistryStorage } from "../../ERC-3643/base/ERC3643IdentityRegistryStorage.sol";
+import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
-import { IERC3643IdentityRegistryStorage, IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
+import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
-contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnableUpgradeable {
-
-    using EnumerableSet for EnumerableSet.AddressSet;
-
-    /// @dev struct containing the identity contract and the country of the user
-    struct Identity {
-        IIdentity identityContract;
-        uint16 investorCountry;
-    }
-
-    /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistryStorage
-    struct Storage {
-        /// @dev mapping between a user address and the corresponding identity
-        mapping(address user => Identity) identities;
-
-        /// @dev set of Identity Registries linked to this storage
-        EnumerableSet.AddressSet identityRegistries;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x6d25db4721129739b3a7e96c2537b7170fb9cfd72348ce376c7a189a3ab3ba00;
+/// @title IdentityRegistryStorage
+/// @notice T-REX identity registry storage: the standard ERC-3643 storage plus T-REX authorization and
+///  the extra notification T-REX operators rely on.
+/// @dev Layer 3 of the ERC-3643 / T-REX split (see issue #65). The standard surface and all standard
+///  state live in {ERC3643IdentityRegistryStorage}; this contract adds only what T-REX needs on top:
+///
+///  - AccessManager-based authorization, supplied through the two `_authorize*` hooks;
+///  - the `onlySharedAuthority` misconfiguration guard on registry binding;
+///  - `EventsLib.InvestorIdentityChanged`, a T-REX-only notification emitted alongside the standard
+///    `IdentityModified` event;
+///  - ERC-165 support.
+///
+///  Nothing here writes the base namespace directly; every write goes through a base internal function.
+contract IdentityRegistryStorage is
+    IIdentityRegistryStorage,
+    ERC3643IdentityRegistryStorage,
+    AccessManagedOwnableUpgradeable
+{
 
     constructor() {
         _disableInitializers();
@@ -106,118 +103,60 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         }
     }
 
-    /**
-     *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
-     */
-    function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external restricted {
-        require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
-
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) == address(0), ErrorsLib.AddressAlreadyStored());
-        s.identities[_userAddress].identityContract = _identity;
-        s.identities[_userAddress].investorCountry = _country;
-        emit ERC3643EventsLib.IdentityStored(_userAddress, _identity);
-        // The standard store event omits the country; emit the same event `modifyStoredInvestorCountry` uses.
-        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
-    }
-
-    /**
-     *  @dev See {IIdentityRegistryStorage-modifyStoredIdentity}.
-     */
-    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external restricted {
-        require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        IIdentity oldIdentity = s.identities[_userAddress].identityContract;
-        s.identities[_userAddress].identityContract = _identity;
-        emit ERC3643EventsLib.IdentityModified(oldIdentity, _identity);
+    /// @inheritdoc IERC3643IdentityRegistryStorage
+    /// @dev Adds `EventsLib.InvestorIdentityChanged` to the standard behavior: T-REX operators watch it
+    ///  to reconcile off-chain investor records when an identity contract is replaced.
+    function modifyStoredIdentity(address _userAddress, IIdentity _identity) external override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage) {
+        _authorizeIdentityWrite();
+        _modifyStoredIdentity(_userAddress, _identity);
         emit EventsLib.InvestorIdentityChanged(_userAddress);
     }
 
-    /**
-     *  @dev See {IIdentityRegistryStorage-modifyStoredInvestorCountry}.
-     */
-    function modifyStoredInvestorCountry(address _userAddress, uint16 _country) external restricted {
-        require(_userAddress != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        s.identities[_userAddress].investorCountry = _country;
-        emit ERC3643EventsLib.CountryModified(_userAddress, _country);
-    }
-
-    /**
-     *  @dev See {IIdentityRegistryStorage-removeIdentityFromStorage}.
-     */
-    function removeIdentityFromStorage(address _userAddress) external restricted {
-        require(_userAddress != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(address(s.identities[_userAddress].identityContract) != address(0), ErrorsLib.AddressNotYetStored());
-        IIdentity oldIdentity = s.identities[_userAddress].identityContract;
-        delete s.identities[_userAddress];
-        emit ERC3643EventsLib.IdentityUnstored(_userAddress, oldIdentity);
-    }
-
-    /**
-     *  @dev See {IIdentityRegistryStorage-bindIdentityRegistry}.
-     */
-    function bindIdentityRegistry(address identityRegistry) external restricted onlySharedAuthority(identityRegistry) {
+    /// @inheritdoc IERC3643IdentityRegistryStorage
+    /// @dev `onlySharedAuthority` is a misconfiguration guard only: `authority()` is spoofable.
+    function bindIdentityRegistry(address identityRegistry)
+        external
+        override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
+        restricted
+        onlySharedAuthority(identityRegistry)
+    {
         _bindIdentityRegistry(identityRegistry);
     }
 
-    /**
-     *  @dev See {IIdentityRegistryStorage-unbindIdentityRegistry}.
-     */
-    function unbindIdentityRegistry(address _identityRegistry) external restricted {
-        require(_identityRegistry != address(0), ErrorsLib.ZeroAddress());
-        Storage storage s = _getStorage();
-        require(s.identityRegistries.remove(_identityRegistry), ErrorsLib.IdentityRegistryNotStored());
-
-        emit ERC3643EventsLib.IdentityRegistryUnbound(_identityRegistry);
+    /// @inheritdoc IERC3643IdentityRegistryStorage
+    function unbindIdentityRegistry(address _identityRegistry)
+        external
+        override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
+        restricted
+    {
+        _unbindIdentityRegistry(_identityRegistry);
     }
 
-    /**
-     *  @dev See {IIdentityRegistryStorage-linkedIdentityRegistries}.
-     */
-    function linkedIdentityRegistries() external view returns (address[] memory) {
-        return _getStorage().identityRegistries.values();
+    /// @inheritdoc IERC3643IdentityRegistryStorage
+    function storedIdentity(address _userAddress)
+        external
+        view
+        override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
+        returns (IIdentity)
+    {
+        return _storedIdentity(_userAddress);
     }
 
-    /**
-     *  @dev See {IIdentityRegistryStorage-storedIdentity}.
-     */
-    function storedIdentity(address _userAddress) external view returns (IIdentity) {
-        return _getStorage().identities[_userAddress].identityContract;
-    }
-
-    /**
-     *  @dev See {IIdentityRegistryStorage-storedInvestorCountry}.
-     */
-    function storedInvestorCountry(address _userAddress) external view returns (uint16) {
-        return _getStorage().identities[_userAddress].investorCountry;
-    }
-
-    /**
-     *  @dev See {IERC165-supportsInterface}.
-     */
+    /// @dev See {IERC165-supportsInterface}.
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    function _bindIdentityRegistry(address _identityRegistry) internal {
-        // Note: callers (init and bindIdentityRegistry) already reject the zero address before reaching
-        // here -- init via its `if (initialIRAddress != address(0))` guard, and the public
-        // bindIdentityRegistry via its `onlySharedAuthority` modifier -- so no zero-address check is needed.
-        Storage storage s = _getStorage();
-        require(s.identityRegistries.length() < 300, ErrorsLib.MaxIRByIRSReached(300));
-
-        s.identityRegistries.add(_identityRegistry);
-        emit ERC3643EventsLib.IdentityRegistryBound(_identityRegistry);
+    /// @dev T-REX authorization for the identity-writing functions: the configured AccessManager role.
+    function _authorizeIdentityWrite() internal override {
+        _checkCanCall(_msgSender(), msg.data);
     }
 
-    function _getStorage() internal pure returns (Storage storage s) {
-        assembly ("memory-safe") {
-            s.slot := STORAGE_LOCATION
-        }
+    /// @dev Binding is authorized by the two dedicated external overrides above, which apply `restricted`
+    ///  and `onlySharedAuthority` directly. This hook is therefore never the sole gate on the public path;
+    ///  it exists so any future internal caller still passes through the role check.
+    function _authorizeRegistryBinding(address) internal override {
+        _checkCanCall(_msgSender(), msg.data);
     }
 
 }

@@ -70,6 +70,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
+import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { Token } from "../token/Token.sol";
@@ -140,10 +141,10 @@ library AccessManagerSetupLib {
 
         // ------ AGENT role ------
         functions = new bytes4[](4);
-        functions[0] = IdentityRegistryStorage.addIdentityToStorage.selector;
+        functions[0] = IERC3643IdentityRegistryStorage.addIdentityToStorage.selector;
         functions[1] = IdentityRegistryStorage.modifyStoredIdentity.selector;
-        functions[2] = IdentityRegistryStorage.modifyStoredInvestorCountry.selector;
-        functions[3] = IdentityRegistryStorage.removeIdentityFromStorage.selector;
+        functions[2] = IERC3643IdentityRegistryStorage.modifyStoredInvestorCountry.selector;
+        functions[3] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.AGENT);
     }
 

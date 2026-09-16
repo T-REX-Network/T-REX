@@ -66,6 +66,7 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643IdentityRegistryStorage
 /// @notice Standard-only base implementing the ERC-3643 Identity Registry Storage surface.
@@ -105,20 +106,10 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     bytes32 private constant IDENTITY_REGISTRY_STORAGE_STORAGE_LOCATION =
         0x8e8aa323647c3f2580137bf922482bdf62534082dec9617ddb5e7739bad03900;
 
-    /// @dev Thrown when a required address argument is the zero address.
-    error IdentityRegistryStorageZeroAddress();
 
-    /// @dev Thrown when storing an identity for a wallet that already has one.
-    error AddressAlreadyStored();
 
-    /// @dev Thrown when reading or modifying a wallet that has no stored identity.
-    error AddressNotYetStored();
 
-    /// @dev Thrown when unbinding a registry that is not bound.
-    error IdentityRegistryNotStored();
 
-    /// @dev Thrown when the bound-registry set is already at `MAX_IDENTITY_REGISTRIES`.
-    error MaxIdentityRegistriesReached(uint256 max);
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
     function addIdentityToStorage(address _userAddress, IIdentity _identity, uint16 _country) external virtual {
@@ -180,10 +171,10 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
 
     /// @dev Stores an identity and country for a wallet that has none yet.
     function _addIdentityToStorage(address userAddress, IIdentity userIdentity, uint16 country) internal virtual {
-        require(userAddress != address(0) && address(userIdentity) != address(0), IdentityRegistryStorageZeroAddress());
+        require(userAddress != address(0) && address(userIdentity) != address(0), ERC3643ErrorsLib.ZeroAddress());
 
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
-        require(address(s.identities[userAddress].identityContract) == address(0), AddressAlreadyStored());
+        require(address(s.identities[userAddress].identityContract) == address(0), ERC3643ErrorsLib.AddressAlreadyStored());
         s.identities[userAddress].identityContract = userIdentity;
         s.identities[userAddress].investorCountry = country;
         emit IdentityStored(userAddress, userIdentity);
@@ -193,29 +184,29 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
 
     /// @dev Replaces the identity contract of an already-stored wallet.
     function _modifyStoredIdentity(address userAddress, IIdentity userIdentity) internal virtual {
-        require(userAddress != address(0) && address(userIdentity) != address(0), IdentityRegistryStorageZeroAddress());
+        require(userAddress != address(0) && address(userIdentity) != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
         IIdentity oldIdentity = s.identities[userAddress].identityContract;
-        require(address(oldIdentity) != address(0), AddressNotYetStored());
+        require(address(oldIdentity) != address(0), ERC3643ErrorsLib.AddressNotYetStored());
         s.identities[userAddress].identityContract = userIdentity;
         emit IdentityModified(oldIdentity, userIdentity);
     }
 
     /// @dev Replaces the country of an already-stored wallet.
     function _modifyStoredInvestorCountry(address userAddress, uint16 country) internal virtual {
-        require(userAddress != address(0), IdentityRegistryStorageZeroAddress());
+        require(userAddress != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
-        require(address(s.identities[userAddress].identityContract) != address(0), AddressNotYetStored());
+        require(address(s.identities[userAddress].identityContract) != address(0), ERC3643ErrorsLib.AddressNotYetStored());
         s.identities[userAddress].investorCountry = country;
         emit CountryModified(userAddress, country);
     }
 
     /// @dev Deletes a wallet's stored identity record.
     function _removeIdentityFromStorage(address userAddress) internal virtual {
-        require(userAddress != address(0), IdentityRegistryStorageZeroAddress());
+        require(userAddress != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
         IIdentity oldIdentity = s.identities[userAddress].identityContract;
-        require(address(oldIdentity) != address(0), AddressNotYetStored());
+        require(address(oldIdentity) != address(0), ERC3643ErrorsLib.AddressNotYetStored());
         delete s.identities[userAddress];
         emit IdentityUnstored(userAddress, oldIdentity);
     }
@@ -225,7 +216,7 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
         require(
             s.identityRegistries.length() < MAX_IDENTITY_REGISTRIES,
-            MaxIdentityRegistriesReached(MAX_IDENTITY_REGISTRIES)
+            ERC3643ErrorsLib.MaxIRByIRSReached(MAX_IDENTITY_REGISTRIES)
         );
 
         s.identityRegistries.add(identityRegistry);
@@ -234,9 +225,9 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
 
     /// @dev Removes a registry from the bound set.
     function _unbindIdentityRegistry(address identityRegistry) internal virtual {
-        require(identityRegistry != address(0), IdentityRegistryStorageZeroAddress());
+        require(identityRegistry != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643IdentityRegistryStorageStorage storage s = _erc3643IdentityRegistryStorageStorage();
-        require(s.identityRegistries.remove(identityRegistry), IdentityRegistryNotStored());
+        require(s.identityRegistries.remove(identityRegistry), ERC3643ErrorsLib.IdentityRegistryNotStored());
 
         emit IdentityRegistryUnbound(identityRegistry);
     }

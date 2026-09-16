@@ -65,6 +65,7 @@ pragma solidity 0.8.30;
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643ClaimTopicsRegistry
 /// @notice Standard-only base implementing the ERC-3643 Claim Topics Registry surface.
@@ -95,11 +96,7 @@ abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
     bytes32 private constant CLAIM_TOPICS_REGISTRY_STORAGE_LOCATION =
         0xf733c3a0e1c477ac68147f80e659cc05e7e57f7c461b47d14f8d9811f4c72700;
 
-    /// @dev Thrown when adding a topic that is already required.
-    error ClaimTopicAlreadyExists();
 
-    /// @dev Thrown when the topic list is already at `MAX_CLAIM_TOPICS`.
-    error MaxClaimTopicsReached(uint256 max);
 
     /// @inheritdoc IERC3643ClaimTopicsRegistry
     function addClaimTopic(uint256 _claimTopic) external virtual {
@@ -125,8 +122,8 @@ abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
     /// @dev Adds a required claim topic. Reverts on duplicates and past the cap.
     function _addClaimTopic(uint256 claimTopic) internal virtual {
         EnumerableSet.UintSet storage topics = _erc3643ClaimTopicsRegistryStorage().claimTopics;
-        require(topics.length() < MAX_CLAIM_TOPICS, MaxClaimTopicsReached(MAX_CLAIM_TOPICS));
-        require(topics.add(claimTopic), ClaimTopicAlreadyExists());
+        require(topics.length() < MAX_CLAIM_TOPICS, ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_CLAIM_TOPICS));
+        require(topics.add(claimTopic), ERC3643ErrorsLib.ClaimTopicAlreadyExists());
         emit ClaimTopicAdded(claimTopic);
     }
 

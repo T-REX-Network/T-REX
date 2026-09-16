@@ -71,6 +71,7 @@ import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol"
 import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643IdentityRegistry
 /// @notice Standard-only base implementing the ERC-3643 Identity Registry surface.
@@ -101,8 +102,6 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     bytes32 private constant IDENTITY_REGISTRY_STORAGE_LOCATION =
         0x7677ac510b853691f250873636359d7d7673c26ecc94050f9c8f5810c4b61e00;
 
-    /// @dev Thrown when a required address argument is the zero address.
-    error IdentityRegistryZeroAddress();
 
     /// @dev Thrown when the arrays of a batch call have mismatched lengths.
     error IdentityRegistryArrayLengthMismatch();
@@ -210,21 +209,21 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
     /// @dev Points this registry at a new identity storage.
     function _setIdentityRegistryStorage(address identityRegistryStorage) internal virtual {
-        require(identityRegistryStorage != address(0), IdentityRegistryZeroAddress());
+        require(identityRegistryStorage != address(0), ERC3643ErrorsLib.ZeroAddress());
         _erc3643IdentityRegistryStorage().identityStorage = IERC3643IdentityRegistryStorage(identityRegistryStorage);
         emit IdentityStorageSet(identityRegistryStorage);
     }
 
     /// @dev Points this registry at a new claim topics registry.
     function _setClaimTopicsRegistry(address claimTopicsRegistry) internal virtual {
-        require(claimTopicsRegistry != address(0), IdentityRegistryZeroAddress());
+        require(claimTopicsRegistry != address(0), ERC3643ErrorsLib.ZeroAddress());
         _erc3643IdentityRegistryStorage().topicsRegistry = IERC3643ClaimTopicsRegistry(claimTopicsRegistry);
         emit ClaimTopicsRegistrySet(claimTopicsRegistry);
     }
 
     /// @dev Points this registry at a new trusted issuers registry.
     function _setTrustedIssuersRegistry(address trustedIssuersRegistry) internal virtual {
-        require(trustedIssuersRegistry != address(0), IdentityRegistryZeroAddress());
+        require(trustedIssuersRegistry != address(0), ERC3643ErrorsLib.ZeroAddress());
         _erc3643IdentityRegistryStorage().issuersRegistry = IERC3643TrustedIssuersRegistry(trustedIssuersRegistry);
         emit TrustedIssuersRegistrySet(trustedIssuersRegistry);
     }

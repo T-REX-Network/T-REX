@@ -74,6 +74,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/I
 import { IERC3643 } from "../IERC3643.sol";
 import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643Token
 /// @notice Standard-only base implementing the ERC-3643 token surface.
@@ -119,17 +120,9 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     bytes32 private constant ERC3643_TOKEN_STORAGE_LOCATION =
         0x1c6ea0581535d63a38daa138246885c0e308b5f6335af4548c056841c5c18f00;
 
-    /// @dev Thrown when a wallet's identity is not verified by the identity registry.
-    error UnverifiedIdentity();
 
-    /// @dev Thrown when the compliance rules reject a transfer.
-    error ComplianceNotFollowed();
 
-    /// @dev Thrown when a transfer involves a frozen wallet.
-    error FrozenWallet(address wallet);
 
-    /// @dev Thrown when unfreezing more tokens than are frozen.
-    error AmountAboveFrozenTokens(uint256 amount, uint256 frozenAmount);
 
     /* ----- Token information ----- */
 
@@ -357,7 +350,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     function _unfreezePartialTokens(address userAddress, uint256 amount) internal virtual {
         ERC3643TokenStorage storage s = _erc3643TokenStorage();
         uint256 frozenAmount = s.frozenTokens[userAddress];
-        require(frozenAmount >= amount, AmountAboveFrozenTokens(amount, frozenAmount));
+        require(frozenAmount >= amount, ERC3643ErrorsLib.AmountAboveFrozenTokens(amount, frozenAmount));
         s.frozenTokens[userAddress] = frozenAmount - amount;
         emit TokensUnfrozen(userAddress, amount);
     }
@@ -376,7 +369,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     /// @dev Moves tokens irrespective of freezes, unfreezing just enough to cover the amount, then tells
     ///  compliance the move happened. Recipient identity is still verified.
     function _forcedTransfer(address from, address to, uint256 amount) internal virtual returns (bool) {
-        require(_getIdentityRegistry().isVerified(to), UnverifiedIdentity());
+        require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         _getCompliance().transferred(from, to, amount);
         return true;
@@ -455,8 +448,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
         if (!isMint && !isBurn) {
             _requireNotPaused();
-            require(!s.frozen[from], FrozenWallet(from));
-            require(!s.frozen[to], FrozenWallet(to));
+            require(!s.frozen[from], ERC3643ErrorsLib.FrozenWallet(from));
+            require(!s.frozen[to], ERC3643ErrorsLib.FrozenWallet(to));
             uint256 freeBalance = balanceOf(from) - s.frozenTokens[from];
             require(value <= freeBalance, IERC20Errors.ERC20InsufficientBalance(from, freeBalance, value));
         } else if (isBurn) {
@@ -464,8 +457,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         }
 
         if (!isBurn) {
-            require(_getIdentityRegistry().isVerified(to), UnverifiedIdentity());
-            require(_getCompliance().canTransfer(from, to, value), ComplianceNotFollowed());
+            require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
+            require(_getCompliance().canTransfer(from, to, value), ERC3643ErrorsLib.ComplianceNotFollowed());
         }
 
         super._update(from, to, value);

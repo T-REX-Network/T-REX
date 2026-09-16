@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { IERC3643Compliance } from "../IERC3643Compliance.sol";
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 
 /// @title ERC3643Compliance
 /// @notice Standard-only base implementing the ERC-3643 Compliance surface.
@@ -87,21 +88,13 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
     bytes32 private constant COMPLIANCE_STORAGE_LOCATION =
         0x9a630f7fb5b68c9ca32ffeadfd0de30d50c23b603074e205ad3eb7046278f900;
 
-    /// @dev Thrown when a required address argument is the zero address.
-    error ComplianceZeroAddress();
 
-    /// @dev Thrown when a notification hook is called by anything other than the bound token.
-    error AddressNotATokenBoundToComplianceContract();
 
-    /// @dev Thrown when unbinding a token that is not the bound one.
-    error TokenNotBound();
 
-    /// @dev Thrown when a notification hook is called with a zero amount.
-    error ComplianceZeroValue();
 
     /// @dev Restricts a function to the token currently bound to this compliance.
     modifier onlyBoundToken() {
-        require(msg.sender == _erc3643ComplianceStorage().tokenBound, AddressNotATokenBoundToComplianceContract());
+        require(msg.sender == _erc3643ComplianceStorage().tokenBound, ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract());
         _;
     }
 
@@ -119,22 +112,22 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @inheritdoc IERC3643Compliance
     function transferred(address _from, address _to, uint256 _amount) external virtual onlyBoundToken {
-        require(_from != address(0) && _to != address(0), ComplianceZeroAddress());
-        require(_amount > 0, ComplianceZeroValue());
+        require(_from != address(0) && _to != address(0), ERC3643ErrorsLib.ZeroAddress());
+        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _transferred(_from, _to, _amount);
     }
 
     /// @inheritdoc IERC3643Compliance
     function created(address _to, uint256 _amount) external virtual onlyBoundToken {
-        require(_to != address(0), ComplianceZeroAddress());
-        require(_amount > 0, ComplianceZeroValue());
+        require(_to != address(0), ERC3643ErrorsLib.ZeroAddress());
+        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _created(_to, _amount);
     }
 
     /// @inheritdoc IERC3643Compliance
     function destroyed(address _from, uint256 _amount) external virtual onlyBoundToken {
-        require(_from != address(0), ComplianceZeroAddress());
-        require(_amount > 0, ComplianceZeroValue());
+        require(_from != address(0), ERC3643ErrorsLib.ZeroAddress());
+        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _destroyed(_from, _amount);
     }
 
@@ -160,16 +153,16 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @dev Records the bound token. No caller check; `_authorizeTokenBinding` covers the public path.
     function _bindToken(address token) internal virtual {
-        require(token != address(0), ComplianceZeroAddress());
+        require(token != address(0), ERC3643ErrorsLib.ZeroAddress());
         _erc3643ComplianceStorage().tokenBound = token;
         emit TokenBound(token);
     }
 
     /// @dev Clears the bound token.
     function _unbindToken(address token) internal virtual {
-        require(token != address(0), ComplianceZeroAddress());
+        require(token != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643ComplianceStorage storage s = _erc3643ComplianceStorage();
-        require(token == s.tokenBound, TokenNotBound());
+        require(token == s.tokenBound, ERC3643ErrorsLib.TokenNotBound());
         delete s.tokenBound;
         emit TokenUnbound(token);
     }
