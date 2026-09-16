@@ -9,7 +9,7 @@ import { Test } from "@forge-std/Test.sol";
 ///  struct starts with `checksDisabled` at byte 0. Reusing the namespace would leave the low byte of the
 ///  old storage address deciding whether eligibility checks run, and that byte is non-zero for almost
 ///  every address, which reads as "checks disabled" and verifies everyone.
-contract RegistryLayoutShiftTest is Test {
+contract RegistryStorageLayoutTest is Test {
 
     /// @dev Slot 0 as the old struct wrote it: address in bytes 0-19, `checksDisabled` false at byte 20.
     function _oldSlotZero(address identityStorage) internal pure returns (bytes32) {

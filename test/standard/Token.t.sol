@@ -8,7 +8,7 @@ import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
-import { ComplianceMock, TokenMock } from "./mocks/StandardMocks.sol";
+import { ComplianceMock, TokenMock } from "./mocks/Mocks.sol";
 
 /// @dev A registry that verifies whoever it is told to verify, so the token standard tests can state
 ///  "an unverified recipient is rejected" without dragging ONCHAINID claims into the picture.
@@ -65,7 +65,7 @@ contract StubIdentityRegistry {
 ///  OpenZeppelin's base replaces ours -- with the documented divergences of `ERC3643Token` re-decided at
 ///  swap time. The three that this suite pins deliberately are: mint and burn work while paused,
 ///  compliance hears `created` and `destroyed`, and a burn does not verify the zero address.
-contract TokenStandardTest is Test {
+contract TokenBaseTest is Test {
 
     TokenMock internal token;
     StubIdentityRegistry internal registry;

@@ -12,7 +12,7 @@ import {
     IdentityRegistryMock,
     IdentityRegistryStorageMock,
     TrustedIssuersRegistryMock
-} from "./mocks/StandardMocks.sol";
+} from "./mocks/Mocks.sol";
 
 /// @dev ERC-3643 standard: Identity Registry.
 ///
@@ -20,7 +20,7 @@ import {
 ///  four separate contracts, the registry pointing at the other three. T-REX consolidates them into one
 ///  address, which is an extension-layer choice; this file deliberately exercises the un-consolidated
 ///  shape, so it must pass unchanged when OpenZeppelin's bases replace ours.
-contract IdentityRegistryStandardTest is Test {
+contract IdentityRegistryBaseTest is Test {
 
     IdentityRegistryMock internal registry;
     IdentityRegistryStorageMock internal identityStorage;

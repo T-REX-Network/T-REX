@@ -11,7 +11,7 @@ import { Utils } from "../unit/helpers/Utils.sol";
 ///  that base's state. These assertions make such a change fail loudly instead, and give the swap
 ///  checklist in `docs/erc3643-oz-swap.md` something to verify against: when OpenZeppelin publishes its
 ///  namespace strings, the expected values here change in the same commit as the constants.
-contract NamespacesStandardTest is Test {
+contract NamespacesTest is Test {
 
     function test_tokenNamespace() public pure {
         assertEq(

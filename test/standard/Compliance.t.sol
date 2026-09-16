@@ -6,14 +6,14 @@ import { Test } from "@forge-std/Test.sol";
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 
-import { ComplianceMock } from "./mocks/StandardMocks.sol";
+import { ComplianceMock } from "./mocks/Mocks.sol";
 
 /// @dev ERC-3643 standard: Compliance.
 ///
 ///  Runs against the standard base alone (issue #65), so this file must pass unchanged when
 ///  OpenZeppelin's base replaces ours. A compliance with no rules is compliant, which is what the
 ///  `canTransfer` assertions below pin down.
-contract ComplianceStandardTest is Test {
+contract ComplianceBaseTest is Test {
 
     ComplianceMock internal compliance;
 

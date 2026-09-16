@@ -6,13 +6,13 @@ import { Test } from "@forge-std/Test.sol";
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 
-import { TrustedIssuersRegistryMock } from "./mocks/StandardMocks.sol";
+import { TrustedIssuersRegistryMock } from "./mocks/Mocks.sol";
 
 /// @dev ERC-3643 standard: Trusted Issuers Registry.
 ///
 ///  Runs against the standard base alone (issue #65). Every assertion states what the specification
 ///  requires, so this file must pass unchanged when OpenZeppelin's base replaces ours.
-contract TrustedIssuersRegistryStandardTest is Test {
+contract TrustedIssuersRegistryBaseTest is Test {
 
     TrustedIssuersRegistryMock internal registry;
 

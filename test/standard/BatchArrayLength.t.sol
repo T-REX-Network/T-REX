@@ -6,7 +6,7 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 
-import { StubIdentityRegistry } from "./TokenStandard.t.sol";
+import { StubIdentityRegistry } from "./Token.t.sol";
 import {
     ClaimTopicsRegistryMock,
     ComplianceMock,
@@ -14,7 +14,7 @@ import {
     IdentityRegistryStorageMock,
     TokenMock,
     TrustedIssuersRegistryMock
-} from "./mocks/StandardMocks.sol";
+} from "./mocks/Mocks.sol";
 
 /// @dev Every batch function rejects arrays of differing lengths.
 ///
@@ -24,7 +24,7 @@ import {
 ///  indicate it. The opposite direction merely panics on the out-of-bounds index.
 ///
 ///  Both directions are asserted for each function, because only the explicit check catches the first.
-contract BatchArrayLengthStandardTest is Test {
+contract BatchArrayLengthTest is Test {
 
     TokenMock internal token;
     StubIdentityRegistry internal registry;

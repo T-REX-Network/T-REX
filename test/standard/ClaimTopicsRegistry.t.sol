@@ -6,14 +6,14 @@ import { Test } from "@forge-std/Test.sol";
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 
-import { ClaimTopicsRegistryMock } from "./mocks/StandardMocks.sol";
+import { ClaimTopicsRegistryMock } from "./mocks/Mocks.sol";
 
 /// @dev ERC-3643 standard: Claim Topics Registry.
 ///
 ///  Runs against the standard base alone (issue #65). Every assertion here is a statement about what the
 ///  ERC-3643 specification requires, never about how T-REX chooses to extend it, so this file must pass
 ///  unchanged when OpenZeppelin's base replaces ours.
-contract ClaimTopicsRegistryStandardTest is Test {
+contract ClaimTopicsRegistryBaseTest is Test {
 
     ClaimTopicsRegistryMock internal registry;
 

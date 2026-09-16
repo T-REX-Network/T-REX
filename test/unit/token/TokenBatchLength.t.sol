@@ -8,7 +8,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 /// @dev The Token overrides the batch functions to attach per-selector roles, so it needs its own
 ///  length checks. Without them a first array shorter than the rest silently skips the extra entries
 ///  and the call still succeeds.
-contract TokenBatchLengthUnitTest is TokenBaseUnitTest {
+contract TokenBatchLengthTest is TokenBaseUnitTest {
 
     function test_batchMint_RevertWhen_FirstArrayShorter() public {
         address[] memory tos = new address[](1);

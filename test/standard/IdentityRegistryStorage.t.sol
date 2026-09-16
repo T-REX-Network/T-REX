@@ -7,13 +7,13 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 
-import { IdentityRegistryStorageMock } from "./mocks/StandardMocks.sol";
+import { IdentityRegistryStorageMock } from "./mocks/Mocks.sol";
 
 /// @dev ERC-3643 standard: Identity Registry Storage.
 ///
 ///  Runs against the standard base alone (issue #65), so this file must pass unchanged when
 ///  OpenZeppelin's base replaces ours.
-contract IdentityRegistryStorageStandardTest is Test {
+contract IdentityRegistryStorageBaseTest is Test {
 
     IdentityRegistryStorageMock internal storage_;
 
