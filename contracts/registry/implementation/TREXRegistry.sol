@@ -165,18 +165,13 @@ contract TREXRegistry is
     // ============================================================
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts. Rule 2 of the
-    ///  layering forbids changing a standard function's semantics in the extension layer, and this is
-    ///  the documented exception the consolidation forces: with the topics registry being this very
-    ///  contract, there is nothing for the setter to point at. Splitting the registries apart again
-    ///  would restore the base's implementation unchanged.
+    /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts.
     function setClaimTopicsRegistry(address) external pure override(ERC3643IdentityRegistry, IERC3643IdentityRegistry) {
         revert ErrorsLib.Deprecated();
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
-    /// @dev DEPRECATED: this registry is its own TrustedIssuersRegistry; always reverts. See the note
-    ///  on `setClaimTopicsRegistry`.
+    /// @dev DEPRECATED: this registry is its own TrustedIssuersRegistry; always reverts.
     function setTrustedIssuersRegistry(address)
         external
         pure

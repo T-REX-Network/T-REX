@@ -12,6 +12,11 @@ interface implementing exactly that interface over its own ERC-7201 namespace. T
 inherit those bases and add everything T-REX-specific through internal virtual hooks. No base refers to
 anything in the T-REX layer; no extension writes a base namespace directly.
 
+The one exception to "extensions never change a standard function's semantics": `TREXRegistry` reverts
+the inherited `setClaimTopicsRegistry` and `setTrustedIssuersRegistry` with `Deprecated`, because it is
+its own topics and issuers registry and there is nothing for either setter to point at. Both reverted
+before the split too. Splitting the registries apart would restore the base implementations unchanged.
+
 ## Procedure
 
 1. Replace the layer-2 import in the T-REX contract with OpenZeppelin's base.

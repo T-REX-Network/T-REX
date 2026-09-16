@@ -314,8 +314,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     /* ----- Extension hooks ----- */
 
     /// @dev Authorization hook for every privileged function of this base. Reverts when the caller may
-    ///  not administer the token. Left abstract on purpose: the standard specifies no access model, and
-    ///  T-REX uses an AccessManager where OpenZeppelin's base uses `Ownable` plus an agent role.
+    ///  not administer the token. Left abstract on purpose: the standard specifies no access model.
     function _checkTokenAdmin() internal virtual;
 
     /// @dev Replaces the ERC-20 name. Name and symbol belong to the ERC-20 base (issue #54), whose
