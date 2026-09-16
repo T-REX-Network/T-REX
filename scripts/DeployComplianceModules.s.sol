@@ -9,7 +9,9 @@ import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/Spe
 
 /// @dev Minimal surface for the token's `compliance()` getter, avoiding a full token import.
 interface ITokenCompliance {
+
     function compliance() external view returns (address);
+
 }
 
 /// @title DeployComplianceModules
@@ -44,8 +46,7 @@ contract DeployComplianceModules is Script {
         SpenderVerificationModule verification = SpenderVerificationModule(
             address(
                 new ModuleProxy(
-                    address(verificationImpl),
-                    abi.encodeCall(SpenderVerificationModule.initialize, (accessManager))
+                    address(verificationImpl), abi.encodeCall(SpenderVerificationModule.initialize, (accessManager))
                 )
             )
         );
@@ -54,8 +55,7 @@ contract DeployComplianceModules is Script {
         SpenderWhitelistModule whitelist = SpenderWhitelistModule(
             address(
                 new ModuleProxy(
-                    address(whitelistImpl),
-                    abi.encodeCall(SpenderWhitelistModule.initialize, (accessManager))
+                    address(whitelistImpl), abi.encodeCall(SpenderWhitelistModule.initialize, (accessManager))
                 )
             )
         );
@@ -75,4 +75,5 @@ contract DeployComplianceModules is Script {
         console.log("SpenderWhitelistModule impl:    ", address(whitelistImpl));
         console.log("SpenderWhitelistModule proxy:   ", address(whitelist));
     }
+
 }
