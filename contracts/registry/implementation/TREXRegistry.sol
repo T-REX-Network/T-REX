@@ -67,6 +67,7 @@ import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIss
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -209,7 +210,9 @@ contract TREXRegistry is ITREXRegistry, AccessManagedOwnableUpgradeable {
         onlySharedAuthority(_identityRegistryStorage)
     {
         require(
-            IERC165(_identityRegistryStorage).supportsInterface(type(IERC3643IdentityRegistryStorage).interfaceId),
+            ERC165Checker.supportsInterface(
+                _identityRegistryStorage, type(IERC3643IdentityRegistryStorage).interfaceId
+            ),
             ErrorsLib.InvalidIdentityRegistryStorage()
         );
 

@@ -111,6 +111,9 @@ interface IERC3643Compliance {
      *  This function will call moduleCheck() on every module bound to the compliance
      *  If each of the module checks return TRUE, this function will return TRUE as well
      *  returns FALSE otherwise
+     *  the token also calls this function on a mint, with `_from` set to the zero address, so that distribution
+     *  rules can be enforced at issuance, following the same convention as the `Transfer` event of `ERC-20`
+     *  a burn does not go through this function
      */
     function canTransfer(address _from, address _to, uint256 _amount) external view returns (bool);
 

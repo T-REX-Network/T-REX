@@ -106,6 +106,33 @@ contract ComplianceDispatchTest is TREXSuiteTest {
         assertEq(transferOnly.burnHookCalls(), 0);
     }
 
+    /// @notice A forced transfer reaches the transfer hook, like a normal transfer does.
+    function test_transferred_Success_WhenForcedTransfer() public {
+        vm.prank(agent);
+        token.forcedTransfer(alice, bob, 100);
+
+        assertEq(transferOnly.transferHookCalls(), 1);
+        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(burnOnly.totalHookCalls(), 0);
+    }
+
+    /// @notice A recovery reaches the transfer hook too. It moves the balance outside `_update`, so without an
+    ///         explicit notification modules would keep crediting the lost wallet, and the lost wallet is
+    ///         removed from the identity registry, so nothing could fix it afterwards.
+    function test_transferred_Success_WhenRecoveringAWallet() public {
+        uint256 aliceBalance = token.balanceOf(alice);
+
+        vm.expectCall(
+            address(transferOnly), abi.encodeCall(IModule.moduleTransferAction, (alice, another, aliceBalance))
+        );
+        vm.prank(agent);
+        token.recoveryAddress(alice, another, address(aliceIdentity));
+
+        assertEq(transferOnly.transferHookCalls(), 1);
+        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(burnOnly.totalHookCalls(), 0);
+    }
+
     /// @notice The declared hook is genuinely invoked, not merely counted.
     function test_created_Success_WhenExpectingTheCallOnTheDeclaringModule() public {
         vm.expectCall(address(mintOnly), abi.encodeCall(IModule.moduleMintAction, (bob, 100)));

@@ -128,6 +128,10 @@ interface IModule {
      *  @param _to address of the transfer receiver
      *  @param _value amount of tokens sent
      *  @param _compliance address of the compliance contract concerned by the transfer action
+     *  a `_from` equal to the zero address means the transaction is a mint, following the same convention as the
+     *  `Transfer` event of `ERC-20`, and the module is expected to apply its distribution rules to that case
+     *  the module is never consulted for a burn, so `_to` is never the zero address here
+     *  a module that ignores the mint case and evaluates `_from` as a regular holder rejects every mint
      *  the function returns TRUE if the module allows the transfer, FALSE otherwise
      */
     function moduleCheck(address _from, address _to, uint256 _value, address _compliance) external view returns (bool);
