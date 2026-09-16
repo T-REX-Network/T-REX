@@ -45,6 +45,38 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 
 interface IERC3643IdentityRegistry {
 
+    /// @dev Emitted when the ClaimTopicsRegistry has been set for the Identity Registry.
+    /// @param _claimTopicsRegistry The address of the Claim Topics Registry.
+    event ClaimTopicsRegistrySet(address indexed _claimTopicsRegistry);
+
+    /// @dev Emitted when the IdentityRegistryStorage has been set for the Identity Registry.
+    /// @param _identityStorage The address of the Identity Registry Storage.
+    event IdentityStorageSet(address indexed _identityStorage);
+
+    /// @dev Emitted when the TrustedIssuersRegistry has been set for the Identity Registry.
+    /// @param _trustedIssuersRegistry The address of the Trusted Issuers Registry.
+    event TrustedIssuersRegistrySet(address indexed _trustedIssuersRegistry);
+
+    /// @dev Emitted when an identity is registered into the Identity Registry.
+    /// @param _investorAddress The address of the investor's wallet.
+    /// @param _identity The address of the investor's ONCHAINID.
+    event IdentityRegistered(address indexed _investorAddress, IIdentity indexed _identity);
+
+    /// @dev Emitted when an identity is removed from the Identity Registry.
+    /// @param _investorAddress The address of the investor's wallet.
+    /// @param _identity The address of the investor's ONCHAINID.
+    event IdentityRemoved(address indexed _investorAddress, IIdentity indexed _identity);
+
+    /// @dev Emitted when an identity contract is replaced in the Identity Registry.
+    /// @param _oldIdentity The old ONCHAINID address.
+    /// @param _newIdentity The new ONCHAINID address.
+    event IdentityUpdated(IIdentity indexed _oldIdentity, IIdentity indexed _newIdentity);
+
+    /// @dev Emitted when an investor's country is updated in the Identity Registry.
+    /// @param _investorAddress The address of the investor's wallet.
+    /// @param _country The investor's new country code (ISO-3166).
+    event CountryUpdated(address indexed _investorAddress, uint16 indexed _country);
+
     /// Functions
     /// Identity Registry Setters
     /**
