@@ -244,16 +244,16 @@ contract Token is
     /// only ever has to trust a single reference address. A cross-chain validation is dispatched once
     /// per involved chain, under the same `validationId`, and each leg pins its own route.
     ///
-    /// Callable by the bound compliance without a role, or by a caller the AccessManager authorises for
-    /// this selector. Reverts when the chain was never opened, or when this validation already went out
-    /// toward `chainKey` through another gateway.
+    /// Callable by the bound compliance alone. No role opens this door: a validation body and the id it
+    /// travels under are the compliance's to author, and a human holding the selector could otherwise
+    /// forge either, or pin a route under an id the compliance has not reached yet. Reverts when the
+    /// chain was never opened, or when this validation already went out toward `chainKey` through
+    /// another gateway.
     function dispatchComplianceValidation(bytes32 chainKey, uint256 validationId, bytes calldata body)
         external
         returns (bytes32)
     {
-        if (_msgSender() != address(_tokenStorage().compliance)) {
-            _checkCanCall(_msgSender(), this.dispatchComplianceValidation.selector);
-        }
+        require(_msgSender() == address(_tokenStorage().compliance), ErrorsLib.SenderNotCompliance(_msgSender()));
 
         return _sendComplianceValidation(chainKey, validationId, body);
     }

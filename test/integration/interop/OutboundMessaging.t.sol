@@ -241,7 +241,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
     }
 
     function testDispatchRevertsForAnUnauthorizedCaller() public {
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, alice));
         vm.prank(alice);
         token.dispatchComplianceValidation(satellite, validationId, validationBody);
 
@@ -254,6 +254,20 @@ contract OutboundMessagingTest is InteropSuiteTest {
         token.dispatchRecallInstruction(satellite, recallBody);
 
         assertEq(gateway.queueLength(), 0);
+    }
+
+    /// @dev The agent issues instructions, never a validation: the body and the id it travels under are
+    ///      the compliance's to author, and no role reaches past that.
+    function testAgentCannotDispatchAValidationEvenThoughItDispatchesInstructions() public {
+        vm.prank(agent);
+        token.dispatchMintInstruction(satellite, mintBody);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, agent));
+        vm.prank(agent);
+        token.dispatchComplianceValidation(satellite, validationId, validationBody);
+
+        assertEq(gateway.queueLength(), 1);
+        assertEq(token.pinnedRouteFor(validationId, satellite), address(0));
     }
 
     /// @dev The emergency lever, proven end to end: removal stops traffic with no call on the token.

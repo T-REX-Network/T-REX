@@ -159,6 +159,7 @@ library ErrorsLib {
     error MessageTypeNotInbound(MessageTypesLib.Message messageType);
     error RegistryNotSet();
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
+    error SenderNotCompliance(address sender);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
     error UnsupportedMessageVersion(uint8 messageVersion);
     error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
