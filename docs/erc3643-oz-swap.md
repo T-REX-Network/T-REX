@@ -36,18 +36,34 @@ live state, removes the problem entirely.
 | `ERC3643ClaimTopicsRegistry` | `erc3643.storage.ClaimTopicsRegistry` | none published | Provisional. |
 | `ERC3643Compliance` | `erc3643.storage.Compliance` | none published | Provisional. |
 
-Extension namespaces are T-REX's own and are unaffected by the swap: `erc3643.storage.TREXToken`,
-`erc3643.storage.TREXRegistry`, `ERC3643.storage.ModularCompliance`.
+Extension namespaces are T-REX's own, so the OpenZeppelin swap will not move them. The split itself did
+move all of them, which is the migration below.
 
-### Migration already incurred by the split
+### Migration the split itself incurs
 
-Two namespaces moved when the layering landed. Any proxy deployed before it needs a one-time migration;
-nothing is deployed to mainnet yet, so this is recorded rather than scheduled.
+Every contract's layout changed, because state that used to sit at the head of a T-REX struct now lives
+in a standard base. **Every namespace string had to change with it.** Reusing a namespace over a changed
+struct does not fail loudly: it relocates every field after the one that moved, and the contract reads
+neighbouring data as if it were its own.
+
+Two of these were caught in review rather than by tests, because the test suite always deploys fresh and
+so never exercises an in-place upgrade. The `TREXRegistry` case was the dangerous one: `checksDisabled`
+would have been read from the low byte of the old identity-storage address, which is non-zero for 255 of
+every 256 addresses, silently disabling eligibility checks and verifying every address.
+`test/unit/registries/RegistryLayoutShift.t.sol` keeps that reasoning executable.
 
 | Contract | Before | After |
 |---|---|---|
-| Token | `token.storage.main` (name, symbol, decimals, onchainId, compliance, identityRegistry, packed frozen struct) | `erc3643.storage.ERC3643Token` for standard state, `erc3643.storage.TREXToken` for `decimals`; name and symbol move to the ERC-20 base's own storage |
+| Token | `token.storage.main` | `erc3643.storage.ERC3643Token` for standard state, `erc3643.storage.TREXToken` for `decimals`; name and symbol move to the ERC-20 base |
 | IdentityRegistryStorage | `ERC3643.storage.IdentityRegistryStorage` | `erc3643.storage.IdentityRegistryStorage` |
+| TREXRegistry | `erc3643.storage.TREXRegistry` | `erc3643.storage.TREXEligibility` |
+| ModularCompliance | `ERC3643.storage.ModularCompliance` | `erc3643.storage.TREXCompliance` |
+
+Nothing is deployed to mainnet, so this is recorded rather than scheduled. Any proxy deployed from an
+earlier commit must be redeployed, not upgraded in place.
+
+`test/standard/NamespacesStandard.t.sol` pins every namespace slot, so a future struct change that
+forgets to move its namespace fails a test instead of shipping.
 
 The Token's frozen state also changed shape, per issue #54: one mapping to a packed
 `{bool addressFrozen, uint256 amount}` struct became two separate mappings, matching OpenZeppelin's

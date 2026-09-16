@@ -69,17 +69,11 @@ import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistr
 
 /// @title ERC3643TrustedIssuersRegistry
 /// @notice Standard-only base implementing the ERC-3643 Trusted Issuers Registry surface.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). Implements exactly the functions
-///  `IERC3643TrustedIssuersRegistry` declares, over state held in its own ERC-7201 namespace. No T-REX
-///  vocabulary, no reference to the T-REX layer.
+/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
+///  else, over its own ERC-7201 namespace.
 ///
-///  The forward index `claimTopicsToTrustedIssuers` is maintained alongside the per-issuer topic set so
-///  that `isVerified` can resolve the issuers for a topic in one read rather than scanning every issuer.
-///  Both sides are written together in `_addTrustedIssuer`, `_removeTrustedIssuer` and
-///  `_updateIssuerClaimTopics`, so they cannot drift.
-///
-///  Extension happens through the internal hooks; authorization is left to `_authorizeIssuersUpdate`
-///  because the standard specifies no access-control model.
+///  `claimTopicsToTrustedIssuers` is a reverse index so verification can look up a topic's issuers in one
+///  read instead of scanning every issuer. Both sides are always written together, so they cannot drift.
 abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistry {
 
     using EnumerableSet for EnumerableSet.AddressSet;

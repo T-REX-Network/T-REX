@@ -75,20 +75,16 @@ import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistr
 
 /// @title ERC3643IdentityRegistry
 /// @notice Standard-only base implementing the ERC-3643 Identity Registry surface.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). Implements exactly the functions
-///  `IERC3643IdentityRegistry` declares, over state held in its own ERC-7201 namespace.
+/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
+///  else, over its own ERC-7201 namespace.
 ///
-///  The three collaborators (identity storage, trusted issuers, claim topics) are reached through the
-///  internal `_identityStorage`, `_issuersRegistry` and `_topicsRegistry` functions rather than by reading
-///  storage directly. A registry that holds the three as separate external contracts keeps the defaults,
-///  which read the stored addresses. A registry that *is* its own issuers and topics registry -- the
-///  consolidated `TREXRegistry` of issue #6 -- overrides `_issuersRegistry` and `_topicsRegistry` to point
-///  at itself, and overrides the corresponding setters. That is what makes rule 4 hold: consolidation is
-///  composition of three bases, not a fusion of their code, and each base stays independently replaceable.
+///  The three collaborators are reached through `_identityStorage`, `_issuersRegistry` and
+///  `_topicsRegistry` rather than by reading storage. A registry that is its own issuers and topics
+///  registry overrides those to return itself, which is how one address can serve all three surfaces
+///  while each base stays separately replaceable.
 ///
-///  `_isVerified` is the one piece of real logic here. It is written against the two resolution hooks
-///  `_requiredClaimTopics` and `_trustedIssuersForTopic`, so an extension can change *which* topics and
-///  issuers apply (per identity type, for instance) without reimplementing the claim-checking loop.
+///  `_isVerified` is written against `_requiredClaimTopics` and `_trustedIssuersForTopic`, so extensions
+///  can change which topics and issuers apply without rewriting the claim-checking loop.
 abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
     /// @custom:storage-location erc7201:erc3643.storage.IdentityRegistry
@@ -150,11 +146,11 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         IIdentity[] calldata _identities,
         uint16[] calldata _countries
     ) external virtual {
+        require(
+            _userAddresses.length == _identities.length && _userAddresses.length == _countries.length,
+            ERC3643ErrorsLib.ArrayLengthMismatch()
+        );
         _authorizeIdentityUpdate();
-        // No explicit length check: mismatched arrays revert with the panic an out-of-bounds index
-        // raises, which is what every other ERC-3643 batch function does. Adding a named error to this
-        // one alone would make the batch surface inconsistent; the choice belongs to a separate change
-        // that covers all of them.
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _registerIdentity(_userAddresses[i], _identities[i], _countries[i]);
         }

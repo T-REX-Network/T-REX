@@ -64,15 +64,19 @@ pragma solidity 0.8.30;
 
 /// @title ERC3643ErrorsLib
 /// @notice The errors raised by the ERC-3643 standard bases in `contracts/ERC-3643/base/`.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). The standard bases may not refer to
-///  anything in the T-REX layer, so the errors their surface raises live here rather than in
-///  `ErrorsLib`. `ErrorsLib` re-declares the same names for the T-REX layer; the two sets carry
-///  identical selectors, so which one a caller catches makes no difference on the wire.
+/// @dev The standard bases may not import from the T-REX layer, so their errors live here rather than in
+///  `ErrorsLib`, which re-declares the same names. Same signature means same selector, so a caller
+///  catching either gets the same result.
 library ERC3643ErrorsLib {
 
     // Common
     error ZeroAddress();
     error ZeroValue();
+
+    // Batch
+    /// @dev A batch call whose arrays differ in length. Unchecked, a short first array would silently
+    ///  skip the trailing entries and still succeed.
+    error ArrayLengthMismatch();
 
     // Token
     error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);

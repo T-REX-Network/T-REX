@@ -96,14 +96,17 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
-    /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
+    /// @custom:storage-location erc7201:erc3643.storage.TREXCompliance
+    /// @dev A new namespace, not the old `ERC3643.storage.ModularCompliance`: `tokenBound` moved to the
+    ///  standard base, so reusing the old one would shift `modules` up a slot. Migration in
+    ///  docs/erc3643-oz-swap.md.
     struct Storage {
         /// Bound modules, each mapped to the dispatch points it declares.
         EnumerableMap.AddressToUintMap modules;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x44b49c37d3109105ef492022bec834e94dca859d191a0d5323d3afbc4aa69400;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXCompliance")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0xbd2da5c5fcdced9ef28c358fe4e316978613e6ee5dda1f35de5eca5813787500;
 
     constructor() {
         _disableInitializers();

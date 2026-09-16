@@ -67,16 +67,14 @@ import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 
 /// @title ERC3643Compliance
 /// @notice Standard-only base implementing the ERC-3643 Compliance surface.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). Implements exactly the functions
-///  `IERC3643Compliance` declares, over state held in its own ERC-7201 namespace.
+/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
+///  else, over its own ERC-7201 namespace.
 ///
-///  The base owns the token binding and the four dispatch points, and nothing else. It has no notion of
-///  modules: `canTransfer` returns true and the three notification hooks do nothing, because a compliance
-///  with no rules is compliant. Extensions supply the rules by overriding the internal `_canTransfer`,
-///  `_transferred`, `_created` and `_destroyed` hooks, which is where T-REX plugs its module dispatch in.
+///  The base owns the token binding and the four dispatch points. It knows nothing about rules, so
+///  `canTransfer` returns true and the notification hooks do nothing. Extensions supply rules by
+///  overriding `_canTransfer`, `_transferred`, `_created` and `_destroyed`.
 ///
-///  `onlyBoundToken` guards the three notification entry points: they mutate rule state, so only the bound
-///  token may call them. `canTransfer` is a view and stays open.
+///  Only the bound token may call the three notification entry points, since they mutate rule state.
 abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @custom:storage-location erc7201:erc3643.storage.Compliance

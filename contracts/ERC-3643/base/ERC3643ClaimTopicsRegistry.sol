@@ -69,17 +69,10 @@ import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol"
 
 /// @title ERC3643ClaimTopicsRegistry
 /// @notice Standard-only base implementing the ERC-3643 Claim Topics Registry surface.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). This contract implements exactly the
-///  functions `IERC3643ClaimTopicsRegistry` declares and holds only the state the standard needs, in its
-///  own ERC-7201 namespace. It carries no T-REX vocabulary and refers to nothing in the T-REX layer.
-///
-///  Extension happens through the internal hooks, never by overriding the external functions:
-///  derived contracts add behavior around `_addClaimTopic` / `_removeClaimTopic`, and enforce their own
-///  authorization in `_authorizeClaimTopicsUpdate`. This is the seam that lets the whole base be replaced
-///  by OpenZeppelin's implementation when it ships, without touching the extension layer.
-///
-///  This base is authorization-agnostic: it declares `_authorizeClaimTopicsUpdate` and leaves the policy
-///  to the derived contract, because the standard does not specify an access-control model.
+/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
+///  else, over its own ERC-7201 namespace. Extend through the internal hooks, not by overriding the
+///  external functions. Authorization is left to `_authorizeClaimTopicsUpdate` because the standard
+///  specifies no access model.
 abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
 
     using EnumerableSet for EnumerableSet.UintSet;

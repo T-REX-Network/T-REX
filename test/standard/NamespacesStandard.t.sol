@@ -55,6 +55,30 @@ contract NamespacesStandardTest is Test {
         );
     }
 
+    /// @dev The T-REX namespaces. Each had to change when its struct did, because the standard bases
+    ///  took over fields that used to sit at the head of these structs. Reusing a namespace over a
+    ///  changed struct silently relocates every field after the one removed.
+    function test_trexTokenNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TREXToken"),
+            0x05378669fd58b6f9251e6d5461e60e18b8b3fdf11d70481ba6f9fc72a4bfc600
+        );
+    }
+
+    function test_trexRegistryNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TREXEligibility"),
+            0xe60ad881f2e5dd9ad5e5fabfb6687133de1b3b6f4c77607e9031b076e00b7500
+        );
+    }
+
+    function test_trexComplianceNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TREXCompliance"),
+            0xbd2da5c5fcdced9ef28c358fe4e316978613e6ee5dda1f35de5eca5813787500
+        );
+    }
+
     /// @dev The ERC-20 slot the token base reaches into for name and symbol. Declared by
     ///  `ERC20Upgradeable`, which keeps its own accessor private.
     function test_erc20NamespaceReachedByTokenBase() public pure {

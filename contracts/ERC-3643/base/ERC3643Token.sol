@@ -78,33 +78,19 @@ import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 
 /// @title ERC3643Token
 /// @notice Standard-only base implementing the ERC-3643 token surface.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). Implements exactly the functions `IERC3643`
-///  declares -- ERC-20, pause, address and partial freeze, forced transfer, recovery, mint and burn, the
-///  batch variants, and the registry / compliance / ONCHAINID setters -- over state held in its own
-///  ERC-7201 namespace.
+/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
+///  else, over its own ERC-7201 namespace. Hook names match openzeppelin-contracts#5838 so the swap
+///  renames nothing in the extension layer.
 ///
-///  Storage shape follows OpenZeppelin's proposed `ERC3643Storage`
-///  (openzeppelin-contracts#5838): two separate frozen mappings rather than one packed struct, and no
-///  name / symbol / decimals, which belong to the ERC-20 base. Issue #54 records the reasoning. The
-///  namespace string is provisional; see `docs/erc3643-oz-swap.md` for the migration step.
+///  Storage follows OZ's proposed shape (issue #54): two frozen mappings instead of one packed struct,
+///  and no name/symbol/decimals, which belong to the ERC-20 base.
 ///
-///  Extension happens through the internal hooks, never by overriding the external functions. The hook
-///  names deliberately match OpenZeppelin's (`_update`, `_forcedTransfer`, `_recoveryAddress`,
-///  `_freezePartialTokens`, `_unfreezePartialTokens`, `_setAddressFrozen`, `_setIdentityRegistry`,
-///  `_setCompliance`, `_setOnchainID`, `_emitUpdatedTokenInformation`) so that swapping this base for
-///  theirs does not rename anything in the extension layer.
-///
-///  Divergences from openzeppelin-contracts#5838 as it stands, each a deliberate T-REX behavior that the
-///  swap checklist must re-decide (see the swap document):
-///
-///  1. Mint and burn are permitted while paused; OZ's `whenNotPaused` on `_update` blocks them. T-REX
-///     pauses transfers, not issuance and redemption.
-///  2. Compliance is notified of mints through `created` and burns through `destroyed`; OZ calls only
-///     `transferred`, and only on transfers.
-///  3. A burn does not require `isVerified(address(0))`; OZ's `_update` would revert on every burn.
-///  4. A mint reaches `canTransfer` with `from` at the zero address, so distribution rules stay enforced
-///     at issuance. This is the convention modules read to tell a mint from a transfer.
-///  5. Authorization is delegated to `_checkTokenAdmin`, not OZ's `Ownable` plus agent role.
+///  Deliberate differences from OZ's PR, for the swap to re-decide (docs/erc3643-oz-swap.md):
+///  1. Mint and burn work while paused; OZ blocks both. T-REX pauses circulation, not issuance.
+///  2. Compliance hears `created` on a mint and `destroyed` on a burn; OZ calls only `transferred`.
+///  3. A burn does not verify the zero address; OZ's `_update` would revert on every burn.
+///  4. A mint reaches `canTransfer` with `from` at zero, which is how rules tell a mint from a transfer.
+///  5. Authorization goes through `_checkTokenAdmin`, not OZ's `Ownable` plus agent role.
 abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, IERC3643 {
 
     /// @custom:storage-location erc7201:erc3643.storage.ERC3643Token
@@ -207,6 +193,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchMint(address[] calldata _toList, uint256[] calldata _amounts) external virtual {
+        require(_toList.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
         for (uint256 i = 0; i < _toList.length; i++) {
             _mint(_toList[i], _amounts[i]);
@@ -215,6 +202,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchBurn(address[] calldata _userAddresses, uint256[] calldata _amounts) external virtual {
+        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _burn(_userAddresses[i], _amounts[i]);
@@ -243,6 +231,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external virtual {
+        require(_userAddresses.length == _freeze.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _setAddressFrozen(_userAddresses[i], _freeze[i]);
@@ -251,6 +240,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchFreezePartialTokens(address[] calldata _userAddresses, uint256[] calldata _amounts) external virtual {
+        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _freezePartialTokens(_userAddresses[i], _amounts[i]);
@@ -262,6 +252,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         external
         virtual
     {
+        require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         _checkTokenAdmin();
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _unfreezePartialTokens(_userAddresses[i], _amounts[i]);
@@ -291,6 +282,10 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         external
         virtual
     {
+        require(
+            _fromList.length == _toList.length && _fromList.length == _amounts.length,
+            ERC3643ErrorsLib.ArrayLengthMismatch()
+        );
         _checkTokenAdmin();
         for (uint256 i = 0; i < _fromList.length; i++) {
             _forcedTransfer(_fromList[i], _toList[i], _amounts[i]);
@@ -299,6 +294,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchTransfer(address[] calldata _toList, uint256[] calldata _amounts) external virtual {
+        require(_toList.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _toList.length; i++) {
             transfer(_toList[i], _amounts[i]);
         }
@@ -333,13 +329,9 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     ///  T-REX uses an AccessManager where OpenZeppelin's base uses `Ownable` plus an agent role.
     function _checkTokenAdmin() internal virtual;
 
-    /// @dev Replaces the ERC-20 name.
-    ///
-    ///  Name and symbol are owned by the ERC-20 base (issue #54), not duplicated in the ERC-3643
-    ///  namespace. OpenZeppelin's `ERC20Upgradeable` keeps its storage accessor private and, in the
-    ///  released version, exposes no setter, so the slot is reached directly here. The location is the
-    ///  constant `ERC20Upgradeable` itself declares. `_setName` and `_setSymbol` are the names
-    ///  openzeppelin-contracts#5838 gives these hooks, so the swap renames nothing.
+    /// @dev Replaces the ERC-20 name. Name and symbol belong to the ERC-20 base (issue #54), whose
+    ///  storage accessor is private and which ships no setter, so the slot is reached directly here.
+    ///  These two hook names match openzeppelin-contracts#5838, so the swap renames nothing.
     function _setName(string memory name_) internal virtual {
         _erc20Storage().name = name_;
     }
@@ -349,14 +341,9 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         _erc20Storage().symbol = symbol_;
     }
 
-    /// @dev Writes the identity registry, compliance and ONCHAINID pointers with no validation and no
-    ///  events, for use during initialization only.
-    ///
-    ///  `_setIdentityRegistry` and `_setCompliance` are the hooks a derived contract overrides to add
-    ///  validation and, in T-REX's case, the compliance bind/unbind handshake. None of that applies at
-    ///  construction time: there is no previous compliance to unbind, and the deployer binds the
-    ///  compliance itself as a separate step. Routing initialization through the overridable setters
-    ///  would perform that handshake twice.
+    /// @dev Writes the three pointers without validation, for initialization only. The overridable
+    ///  setters would run T-REX's bind/unbind handshake, which does not apply here: there is no previous
+    ///  compliance to unbind, and the deployer binds separately.
     function _initERC3643(address identityRegistry_, address compliance_, address onchainId_) internal virtual {
         ERC3643TokenStorage storage s = _erc3643TokenStorage();
         s.identityRegistry = IERC3643IdentityRegistry(identityRegistry_);
@@ -384,9 +371,8 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         emit ComplianceAdded(compliance_);
     }
 
-    /// @dev Stores the compliance pointer without emitting. Separate from `_setCompliance` so a derived
-    ///  contract that performs a bind/unbind handshake can place `ComplianceAdded` after the handshake,
-    ///  where it reflects a binding that actually succeeded.
+    /// @dev Stores the compliance pointer without emitting, so a derived contract doing a bind handshake
+    ///  can emit `ComplianceAdded` after it, once the binding has actually succeeded.
     function _writeCompliance(address compliance_) internal {
         _erc3643TokenStorage().compliance = IERC3643Compliance(compliance_);
     }
@@ -488,16 +474,10 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         }
     }
 
-    /// @dev The ERC-20 state transition, extended with the ERC-3643 rules.
-    ///
-    ///  Transfers are blocked while paused, from or to a frozen wallet, and beyond the free (unfrozen)
-    ///  balance. Mints and burns are deliberately permitted while paused: T-REX pauses circulation, not
-    ///  issuance and redemption. A burn auto-unfreezes just enough to cover the amount.
-    ///
-    ///  Identity and compliance are checked for mints and transfers but not burns, and compliance is then
-    ///  told which of the three happened. A mint reaches `canTransfer` with `from` at the zero address so
-    ///  that distribution rules stay enforced at issuance, which is the convention rules read to tell a
-    ///  mint from a transfer.
+    /// @dev The ERC-20 state transition plus the ERC-3643 rules. Transfers are blocked while paused,
+    ///  from or to a frozen wallet, and beyond the free balance. Mints and burns are allowed while
+    ///  paused, and a burn auto-unfreezes just enough to cover itself. Identity and compliance are
+    ///  checked for mints and transfers but not burns.
     function _update(address from, address to, uint256 value) internal virtual override {
         ERC3643TokenStorage storage s = _erc3643TokenStorage();
         bool isMint = from == address(0);

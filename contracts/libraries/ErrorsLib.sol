@@ -75,6 +75,7 @@ library ErrorsLib {
     error ZeroAddress();
     error ZeroValue();
     error ArraySizeLimited(uint256 maxSize);
+    error ArrayLengthMismatch();
     error InvalidImplementationAuthority();
 
     // Token Errors

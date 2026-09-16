@@ -70,15 +70,11 @@ import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStor
 
 /// @title ERC3643IdentityRegistryStorage
 /// @notice Standard-only base implementing the ERC-3643 Identity Registry Storage surface.
-/// @dev Layer 2 of the ERC-3643 / T-REX split (see issue #65). Implements exactly the functions
-///  `IERC3643IdentityRegistryStorage` declares, over state held in its own ERC-7201 namespace.
+/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
+///  else, over its own ERC-7201 namespace.
 ///
-///  Identity and country are stored together in one struct because every read of one is, in practice,
-///  accompanied by a read of the other, and both are written in the same call at registration.
-///
-///  Extension happens through the internal hooks. Authorization is left to the two `_authorize*` hooks
-///  because the standard specifies no access-control model, and binding is separated from identity
-///  writes because the two are governed by different roles in every deployment we know of.
+///  Identity and country share one struct because they are read and written together. Binding has its own
+///  authorization hook, separate from identity writes, because deployments govern the two differently.
 abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStorage {
 
     using EnumerableSet for EnumerableSet.AddressSet;

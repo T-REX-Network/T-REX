@@ -78,7 +78,6 @@ import { ERC3643TrustedIssuersRegistry } from "../../ERC-3643/base/ERC3643Truste
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
-import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
 /// @title TREXRegistry
@@ -110,7 +109,10 @@ contract TREXRegistry is
 
     using EnumerableSet for EnumerableSet.UintSet;
 
-    /// @custom:storage-location erc7201:erc3643.storage.TREXRegistry
+    /// @custom:storage-location erc7201:erc3643.storage.TREXEligibility
+    /// @dev A new namespace, not the old `erc3643.storage.TREXRegistry`: five fields moved to the
+    ///  standard bases, so reusing the old one would leave `checksDisabled` reading the low byte of the
+    ///  old storage address and silently verify everyone. Migration in docs/erc3643-oz-swap.md.
     struct Storage {
         /// @dev When true, `isVerified` short-circuits to true for every address.
         bool checksDisabled;
@@ -120,8 +122,8 @@ contract TREXRegistry is
         mapping(uint256 identityType => EnumerableSet.UintSet claimTopics) claimTopicsByIdentityType;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXRegistry")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x5fe6836edad2306552d236f378d4a0a2ef1c78da81818168b2b776323acb4300;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXEligibility")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0xe60ad881f2e5dd9ad5e5fabfb6687133de1b3b6f4c77607e9031b076e00b7500;
 
     /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The factory
     ///  records the type once at minting and never updates it, so it is a safer source than asking
@@ -327,11 +329,6 @@ contract TREXRegistry is
     /// @dev T-REX authorization for the claim-topic functions.
     function _authorizeClaimTopicsUpdate() internal override {
         _checkCanCall(_msgSender(), msg.data);
-    }
-
-    /// @dev The identity storage, narrowed to the T-REX interface for callers that need it.
-    function _identityStorageTyped() internal view returns (IIdentityRegistryStorage) {
-        return IIdentityRegistryStorage(address(_identityStorage()));
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

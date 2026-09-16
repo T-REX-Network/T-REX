@@ -194,6 +194,7 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
         override
         restrictedFor(this.mint.selector)
     {
+        require(tos.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < tos.length; i++) {
             _mint(tos[i], amounts[i]);
         }
@@ -206,6 +207,7 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
         override
         restrictedFor(this.burn.selector)
     {
+        require(froms.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < froms.length; i++) {
             _burn(froms[i], amounts[i]);
         }
@@ -218,6 +220,7 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
         override
         restrictedFor(this.freezePartialTokens.selector)
     {
+        require(users.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < users.length; i++) {
             _freezePartialTokens(users[i], amounts[i]);
         }
@@ -230,6 +233,7 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
         override
         restrictedFor(this.unfreezePartialTokens.selector)
     {
+        require(users.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < users.length; i++) {
             _unfreezePartialTokens(users[i], amounts[i]);
         }
@@ -242,6 +246,7 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
         override
         restrictedFor(this.setAddressFrozen.selector)
     {
+        require(users.length == freezes.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < users.length; i++) {
             _setAddressFrozen(users[i], freezes[i]);
         }
@@ -254,6 +259,7 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
         override
         restrictedFor(this.forcedTransfer.selector)
     {
+        require(froms.length == tos.length && froms.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < froms.length; i++) {
             _forcedTransfer(froms[i], tos[i], amounts[i]);
         }
