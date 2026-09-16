@@ -108,7 +108,7 @@ contract Token is
         uint256 amount;
     }
 
-    /// @custom:storage-location erc7201:token.storage.main
+    /// @custom:storage-location erc7201:erc3643.storage.Token
     struct TokenStorage {
         string name;
         string symbol;
@@ -119,9 +119,9 @@ contract Token is
         mapping(address user => FrozenStatus) frozenStatus;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("token.storage.main")) - 1)) & ~bytes32(uint256(0xff));
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.Token")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant TOKEN_STORAGE_LOCATION =
-        0x3eb201768b0b55c18fa93955aeb38c6bf0f381d8227d53e1b0e5b066883d4e00;
+        0xbeba28ad7ddedd460139c119663e50314606b6f256383098738bb1babd01fd00;
 
     modifier restrictedFor(bytes4 selector) {
         _checkCanCall(_msgSender(), selector);

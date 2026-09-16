@@ -30,7 +30,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     /// @dev Mirrors TREXMessaging's ERC-7201 namespace, so a test can strip the registry back off.
     bytes32 internal constant MESSAGING_STORAGE_LOCATION =
-        0x6781593751868cc4363b89c5315b7498ab1a563f1f060d4f48327b74abb92100;
+        0x2b7785d97e35cf618b41c256efdda42212baf2d424180e7d549907f2f911e900;
 
     function setUp() public override {
         super.setUp();

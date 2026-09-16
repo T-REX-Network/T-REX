@@ -100,7 +100,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         bytes chainReference;
     }
 
-    /// @custom:storage-location erc7201:ERC3643.storage.TREXMessaging
+    /// @custom:storage-location erc7201:erc3643.storage.TREXMessaging
     struct MessagingStorage {
         /// The network's vetted gateway set this token resolves trust against.
         ITrustedGatewayRegistry registry;
@@ -121,9 +121,9 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         mapping(uint256 validationId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant MESSAGING_STORAGE_LOCATION =
-        0x6781593751868cc4363b89c5315b7498ab1a563f1f060d4f48327b74abb92100;
+        0x2b7785d97e35cf618b41c256efdda42212baf2d424180e7d549907f2f911e900;
 
     /// @dev Bytes of an ERC-7930 v1 envelope that are not the chain reference or the account: the
     ///  version, the chain type, and the two length prefixes.

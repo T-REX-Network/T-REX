@@ -83,7 +83,7 @@ contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessMana
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
-    /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
+    /// @custom:storage-location erc7201:erc3643.storage.ModularCompliance
     struct Storage {
         /// token linked to the compliance contract
         address tokenBound;
@@ -91,8 +91,8 @@ contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessMana
         EnumerableMap.AddressToUintMap modules;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x44b49c37d3109105ef492022bec834e94dca859d191a0d5323d3afbc4aa69400;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0x972d3465c5929ffd473d79fb161cfbf94769d128c05bf176951400ec5dc1cb00;
 
     /**
      * @dev Throws if called by any address that is not a token bound to the compliance.
