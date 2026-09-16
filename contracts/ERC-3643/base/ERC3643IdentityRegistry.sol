@@ -102,9 +102,6 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     bytes32 private constant IDENTITY_REGISTRY_STORAGE_LOCATION =
         0x7677ac510b853691f250873636359d7d7673c26ecc94050f9c8f5810c4b61e00;
 
-    /// @dev Thrown when the arrays of a batch call have mismatched lengths.
-    error IdentityRegistryArrayLengthMismatch();
-
     /// @inheritdoc IERC3643IdentityRegistry
     function setIdentityRegistryStorage(address _identityRegistryStorage) external virtual {
         _authorizeRegistryUpdate(_identityRegistryStorage);
@@ -156,7 +153,7 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         _authorizeIdentityUpdate();
         require(
             _userAddresses.length == _identities.length && _userAddresses.length == _countries.length,
-            IdentityRegistryArrayLengthMismatch()
+            ERC3643ErrorsLib.ArrayLengthMismatch()
         );
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _registerIdentity(_userAddresses[i], _identities[i], _countries[i]);

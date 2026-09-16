@@ -123,6 +123,28 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     /* ----- Token information ----- */
 
     /// @inheritdoc IERC3643
+    /// @dev Changing the name rotates any EIP-712 domain separator derived from it, which invalidates
+    ///  outstanding ERC-2612 permit signatures. Derived contracts that bind permit to the name should
+    ///  say so on their own override.
+    function setName(string calldata _name) external virtual {
+        _checkTokenAdmin();
+        _setName(_name);
+        _emitUpdatedTokenInformation();
+    }
+
+    /// @inheritdoc IERC3643
+    function setSymbol(string calldata _symbol) external virtual {
+        _checkTokenAdmin();
+        _setSymbol(_symbol);
+        _emitUpdatedTokenInformation();
+    }
+
+    /// @inheritdoc IERC3643
+    function version() external view virtual returns (string memory) {
+        return _version();
+    }
+
+    /// @inheritdoc IERC3643
     function setOnchainID(address _onchainID) external virtual {
         _checkTokenAdmin();
         _setOnchainID(_onchainID);

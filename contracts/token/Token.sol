@@ -162,21 +162,21 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
     /// @inheritdoc IERC3643
     /// @dev The EIP-712 domain separator is derived from `name()` (see `_EIP712Name`), so changing the name
     ///      rotates the domain separator and invalidates any outstanding (unused) ERC-2612 permit signatures.
-    function setName(string calldata tokenName) external restricted {
+    function setName(string calldata tokenName) external override restricted {
         require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
         _setName(tokenName);
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function setSymbol(string calldata tokenSymbol) external restricted {
+    function setSymbol(string calldata tokenSymbol) external override restricted {
         require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         _setSymbol(tokenSymbol);
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
-    function version() external pure returns (string memory) {
+    function version() external pure override returns (string memory) {
         return VERSION;
     }
 
