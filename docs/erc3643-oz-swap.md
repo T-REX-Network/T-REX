@@ -50,7 +50,7 @@ Two of these were caught in review rather than by tests, because the test suite 
 so never exercises an in-place upgrade. The `TREXRegistry` case was the dangerous one: `checksDisabled`
 would have been read from the low byte of the old identity-storage address, which is non-zero for 255 of
 every 256 addresses, silently disabling eligibility checks and verifying every address.
-`test/unit/registries/RegistryLayoutShift.t.sol` keeps that reasoning executable.
+`test/unit/registries/RegistryStorageLayout.t.sol` keeps that reasoning executable.
 
 | Contract | Before | After |
 |---|---|---|
@@ -62,7 +62,7 @@ every 256 addresses, silently disabling eligibility checks and verifying every a
 Nothing is deployed to mainnet, so this is recorded rather than scheduled. Any proxy deployed from an
 earlier commit must be redeployed, not upgraded in place.
 
-`test/standard/NamespacesStandard.t.sol` pins every namespace slot, so a future struct change that
+`test/standard/Namespaces.t.sol` pins every namespace slot, so a future struct change that
 forgets to move its namespace fails a test instead of shipping.
 
 The Token's frozen state also changed shape, per issue #54: one mapping to a packed

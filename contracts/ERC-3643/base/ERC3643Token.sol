@@ -77,20 +77,9 @@ import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 
 /// @title ERC3643Token
-/// @notice Standard-only base implementing the ERC-3643 token surface.
-/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
-///  else, over its own ERC-7201 namespace. Hook names match openzeppelin-contracts#5838 so the swap
-///  renames nothing in the extension layer.
-///
-///  Storage follows OZ's proposed shape (issue #54): two frozen mappings instead of one packed struct,
-///  and no name/symbol/decimals, which belong to the ERC-20 base.
-///
-///  Deliberate differences from OZ's PR, for the swap to re-decide (docs/erc3643-oz-swap.md):
-///  1. Mint and burn work while paused; OZ blocks both. T-REX pauses circulation, not issuance.
-///  2. Compliance hears `created` on a mint and `destroyed` on a burn; OZ calls only `transferred`.
-///  3. A burn does not verify the zero address; OZ's `_update` would revert on every burn.
-///  4. A mint reaches `canTransfer` with `from` at zero, which is how rules tell a mint from a transfer.
-///  5. Authorization goes through `_checkTokenAdmin`, not OZ's `Ownable` plus agent role.
+/// @dev The ERC-3643 token surface and nothing else, over its own ERC-7201 namespace. Extend through
+/// the internal hooks; hook names match openzeppelin-contracts#5838 so a swap renames nothing.
+/// Storage shape and the deliberate divergences from that PR: see docs/erc3643-oz-swap.md.
 abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, IERC3643 {
 
     /// @custom:storage-location erc7201:erc3643.storage.ERC3643Token
@@ -534,22 +523,18 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     /// @dev The implementation version reported in `UpdatedTokenInformation`.
     function _version() internal view virtual returns (string memory);
 
-    /// @dev Whether a wallet is frozen.
     function _isFrozen(address userAddress) internal view virtual returns (bool) {
         return _erc3643TokenStorage().frozen[userAddress];
     }
 
-    /// @dev The frozen token amount of a wallet.
     function _getFrozenTokens(address userAddress) internal view virtual returns (uint256) {
         return _erc3643TokenStorage().frozenTokens[userAddress];
     }
 
-    /// @dev The identity registry backing verification.
     function _getIdentityRegistry() internal view virtual returns (IERC3643IdentityRegistry) {
         return _erc3643TokenStorage().identityRegistry;
     }
 
-    /// @dev The compliance contract backing the transfer rules.
     function _getCompliance() internal view virtual returns (IERC3643Compliance) {
         return _erc3643TokenStorage().compliance;
     }

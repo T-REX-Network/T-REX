@@ -74,17 +74,11 @@ import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStor
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
 
 /// @title ERC3643IdentityRegistry
-/// @notice Standard-only base implementing the ERC-3643 Identity Registry surface.
-/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
-///  else, over its own ERC-7201 namespace.
-///
-///  The three collaborators are reached through `_identityStorage`, `_issuersRegistry` and
-///  `_topicsRegistry` rather than by reading storage. A registry that is its own issuers and topics
-///  registry overrides those to return itself, which is how one address can serve all three surfaces
-///  while each base stays separately replaceable.
-///
-///  `_isVerified` is written against `_requiredClaimTopics` and `_trustedIssuersForTopic`, so extensions
-///  can change which topics and issuers apply without rewriting the claim-checking loop.
+/// @dev The ERC-3643 Identity Registry surface and nothing else, over its own ERC-7201 namespace.
+/// Collaborators are reached through `_identityStorage`, `_issuersRegistry` and `_topicsRegistry`, so a
+/// registry serving all three surfaces overrides them to return itself. `_isVerified` is written against
+/// `_requiredClaimTopics` and `_trustedIssuersForTopic`, so extensions can change which topics and
+/// issuers apply without rewriting the claim loop.
 abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
     /// @custom:storage-location erc7201:erc3643.storage.IdentityRegistry

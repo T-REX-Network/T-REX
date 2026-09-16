@@ -77,21 +77,9 @@ import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
-/// @notice T-REX compliance: the standard ERC-3643 compliance surface plus the module system that
-///  supplies the actual rules.
-/// @dev Layer 3 of the ERC-3643 / T-REX split (see issue #65). The standard surface -- token binding,
-///  `canTransfer` and the three notification hooks -- and the bound-token state live in
-///  {ERC3643Compliance}. This contract adds everything T-REX-specific, in its own ERC-7201 namespace:
-///
-///  - the bound module set with the dispatch points each module declares (#23);
-///  - rule evaluation, by implementing the base's `_canTransfer`, `_transferred`, `_created` and
-///    `_destroyed` hooks as capability-filtered dispatch over that set;
-///  - the spender check `canSpenderCall` (#4), a T-REX-only external function;
-///  - AccessManager-based authorization, including the "the token may bind itself once, the owner may
-///    always bind" policy expressed in `_authorizeTokenBinding`.
-///
-///  Nothing here writes the base namespace directly; the binding goes through the base's internal
-///  functions.
+/// @dev {ERC3643Compliance} plus the module system that supplies the rules: the bound module set, the
+/// capability-filtered dispatch implementing the base hooks, the `canSpenderCall` check and
+/// AccessManager authorization.
 contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManagedOwnableUpgradeable {
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;

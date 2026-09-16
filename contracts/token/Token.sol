@@ -64,11 +64,9 @@
 pragma solidity 0.8.30;
 
 import {
-    ERC20PermitUpgradeable,
     ERC20Upgradeable,
     IERC20Permit
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -90,21 +88,9 @@ import {
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
 
 /// @title Token
-/// @notice The T-REX security token: the standard ERC-3643 token plus the T-REX extensions.
-/// @dev Layer 3 of the ERC-3643 / T-REX split (see issue #65). The standard surface -- ERC-20, pause,
-///  freezes, forced transfer, recovery, mint and burn, the batch variants and the setters -- and all
-///  standard state live in {ERC3643Token}. This contract adds only what T-REX needs on top:
-///
-///  - AccessManager-based authorization, including per-selector role checks on the batch functions so
-///    that a batch carries the same role requirement as the single-call variant it repeats;
-///  - validation on the two collaborator setters (interface support, shared authority, and the check
-///    that a compliance is not already bound elsewhere);
-///  - the spender check on `transferFrom` (#4), delegated to the compliance modules;
-///  - the recovery preconditions T-REX enforces beyond the standard's;
-///  - ERC-2612 permit and the ERC-165 surface.
-///
-///  Nothing here writes the base namespace directly; every write goes through a base internal function.
-///  Name and symbol are stored by the ERC-20 base rather than duplicated, per issue #54.
+/// @dev The T-REX security token: {ERC3643Token} plus AccessManager authorization, validation on the
+/// collaborator setters, the spender check on `transferFrom`, the extra recovery preconditions,
+/// ERC-2612 permit and ERC-165.
 contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
 
     string internal constant VERSION = "5.0.0";

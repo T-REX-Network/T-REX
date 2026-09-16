@@ -66,15 +66,10 @@ import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643Compliance } from "../IERC3643Compliance.sol";
 
 /// @title ERC3643Compliance
-/// @notice Standard-only base implementing the ERC-3643 Compliance surface.
-/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
-///  else, over its own ERC-7201 namespace.
-///
-///  The base owns the token binding and the four dispatch points. It knows nothing about rules, so
-///  `canTransfer` returns true and the notification hooks do nothing. Extensions supply rules by
-///  overriding `_canTransfer`, `_transferred`, `_created` and `_destroyed`.
-///
-///  Only the bound token may call the three notification entry points, since they mutate rule state.
+/// @dev The ERC-3643 Compliance surface and nothing else, over its own ERC-7201 namespace. The base owns
+/// the token binding and the four dispatch points but knows no rules, so `canTransfer` returns true and
+/// the notification hooks do nothing. Extensions override `_canTransfer`, `_transferred`, `_created` and
+/// `_destroyed`. Only the bound token may call the notification entry points.
 abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @custom:storage-location erc7201:erc3643.storage.Compliance
@@ -160,7 +155,6 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
         emit TokenBound(token);
     }
 
-    /// @dev Clears the bound token.
     function _unbindToken(address token) internal virtual {
         require(token != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643ComplianceStorage storage s = _erc3643ComplianceStorage();
@@ -218,7 +212,6 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
         return true;
     }
 
-    /// @dev The token bound to this compliance, if any.
     function _getTokenBound() internal view virtual returns (address) {
         return _erc3643ComplianceStorage().tokenBound;
     }

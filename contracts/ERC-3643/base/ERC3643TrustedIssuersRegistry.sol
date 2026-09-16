@@ -68,19 +68,15 @@ import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
 
 /// @title ERC3643TrustedIssuersRegistry
-/// @notice Standard-only base implementing the ERC-3643 Trusted Issuers Registry surface.
-/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
-///  else, over its own ERC-7201 namespace.
-///
-///  `claimTopicsToTrustedIssuers` is a reverse index so verification can look up a topic's issuers in one
-///  read instead of scanning every issuer. Both sides are always written together, so they cannot drift.
+/// @dev The ERC-3643 Trusted Issuers Registry surface and nothing else, over its own ERC-7201 namespace.
+/// `claimTopicsToTrustedIssuers` is a reverse index so verification reads a topic's issuers directly
+/// instead of scanning every issuer. Both sides are always written together.
 abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistry {
 
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.UintSet;
 
-    /// @dev Caps borrowed from the reference implementation: they bound the work `isVerified` can be
-    ///  made to do, which the token performs on every transfer.
+    /// @dev Caps bound the work `isVerified` does on every transfer.
     uint256 internal constant MAX_TRUSTED_ISSUERS = 50;
 
     uint256 internal constant MAX_ISSUER_CLAIM_TOPICS = 15;

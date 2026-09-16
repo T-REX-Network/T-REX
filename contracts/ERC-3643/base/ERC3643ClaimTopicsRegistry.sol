@@ -68,11 +68,8 @@ import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
 
 /// @title ERC3643ClaimTopicsRegistry
-/// @notice Standard-only base implementing the ERC-3643 Claim Topics Registry surface.
-/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
-///  else, over its own ERC-7201 namespace. Extend through the internal hooks, not by overriding the
-///  external functions. Authorization is left to `_authorizeClaimTopicsUpdate` because the standard
-///  specifies no access model.
+/// @dev The ERC-3643 Claim Topics Registry surface and nothing else, over its own ERC-7201 namespace.
+/// Extend through the internal hooks. Authorization is left abstract: the standard specifies none.
 abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
 
     using EnumerableSet for EnumerableSet.UintSet;
@@ -125,15 +122,9 @@ abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
         }
     }
 
-    /// @dev Reads the required claim topics. Separate from the external getter so derived contracts can
-    ///  consult the standard set without re-entering their own overridden view.
+    /// @dev Required claim topics.
     function _getClaimTopics() internal view virtual returns (uint256[] memory) {
         return _erc3643ClaimTopicsRegistryStorage().claimTopics.values();
-    }
-
-    /// @dev Number of required claim topics, for derived contracts enforcing their own caps.
-    function _claimTopicsLength() internal view returns (uint256) {
-        return _erc3643ClaimTopicsRegistryStorage().claimTopics.length();
     }
 
     function _erc3643ClaimTopicsRegistryStorage() internal pure returns (ERC3643ClaimTopicsRegistryStorage storage s) {

@@ -12,18 +12,19 @@ import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
-import { PausableUpgradeable, Token } from "contracts/token/Token.sol";
+import { Token } from "contracts/token/Token.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
-contract TokenInformationTest is TREXSuiteTest {
+contract TokenAdminTest is TREXSuiteTest {
 
     TREXRegistry public identityRegistry;
 

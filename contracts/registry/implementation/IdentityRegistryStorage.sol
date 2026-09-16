@@ -71,18 +71,8 @@ import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
 /// @title IdentityRegistryStorage
-/// @notice T-REX identity registry storage: the standard ERC-3643 storage plus T-REX authorization and
-///  the extra notification T-REX operators rely on.
-/// @dev Layer 3 of the ERC-3643 / T-REX split (see issue #65). The standard surface and all standard
-///  state live in {ERC3643IdentityRegistryStorage}; this contract adds only what T-REX needs on top:
-///
-///  - AccessManager-based authorization, supplied through the two `_authorize*` hooks;
-///  - the `onlySharedAuthority` misconfiguration guard on registry binding;
-///  - `EventsLib.InvestorIdentityChanged`, a T-REX-only notification emitted alongside the standard
-///    `IdentityModified` event;
-///  - ERC-165 support.
-///
-///  Nothing here writes the base namespace directly; every write goes through a base internal function.
+/// @dev {ERC3643IdentityRegistryStorage} plus AccessManager authorization, the `onlySharedAuthority`
+/// guard on binding, the `InvestorIdentityChanged` notification and ERC-165.
 contract IdentityRegistryStorage is
     IIdentityRegistryStorage,
     ERC3643IdentityRegistryStorage,

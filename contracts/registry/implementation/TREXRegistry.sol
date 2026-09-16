@@ -81,24 +81,11 @@ import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnabl
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
 /// @title TREXRegistry
-/// @notice The three ERC-3643 eligibility registries in one contract, plus the T-REX extensions.
-/// @dev Layer 3 of the ERC-3643 / T-REX split (see issue #65), and the case rule 4 describes: this is a
-///  *composition* of three standard bases by multiple inheritance, not a fusion of their code. Each base
-///  keeps its own ERC-7201 namespace and its own logic, so any one of them can be swapped for
-///  OpenZeppelin's when it ships without disturbing the other two.
-///
-///  Consolidation is a deployment and interface convenience (#6): one address answers the Identity
-///  Registry, Trusted Issuers Registry and Claim Topics Registry surfaces. The seam that makes this work
-///  is `ERC3643IdentityRegistry`'s pair of resolution hooks. Overriding `_issuersRegistry` and
-///  `_topicsRegistry` to return `address(this)` is what turns three collaborating contracts into one,
-///  and is the only thing that would have to change to split them apart again.
-///
-///  T-REX additions, all in this layer and in the T-REX namespace:
-///
-///  - per-identity-type claim topics (#25), which override the default set inside `isVerified`;
-///  - the eligibility-check kill switch (`disableEligibilityChecks`);
-///  - the ONCHAINID IdentityFactory used to read an identity's type;
-///  - AccessManager-based authorization.
+/// @dev The identity, trusted-issuers and claim-topics registries at one address. Each base keeps its
+/// own namespace and stays separately replaceable; `_issuersRegistry` and `_topicsRegistry` are
+/// overridden to return `address(this)`, which is the only seam joining them.
+/// T-REX additions: per-identity-type claim topics, the eligibility kill switch, the ONCHAINID
+/// IdentityFactory, AccessManager authorization.
 contract TREXRegistry is
     ITREXRegistry,
     ERC3643IdentityRegistry,

@@ -69,21 +69,16 @@ import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 
 /// @title ERC3643IdentityRegistryStorage
-/// @notice Standard-only base implementing the ERC-3643 Identity Registry Storage surface.
-/// @dev Standard layer of the ERC-3643 / T-REX split (issue #65): the interface's functions and nothing
-///  else, over its own ERC-7201 namespace.
-///
-///  Identity and country share one struct because they are read and written together. Binding has its own
-///  authorization hook, separate from identity writes, because deployments govern the two differently.
+/// @dev The ERC-3643 Identity Registry Storage surface and nothing else, over its own ERC-7201
+/// namespace. Binding has its own authorization hook, separate from identity writes, because
+/// deployments govern the two differently.
 abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStorage {
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @dev Bound-registry cap. Each bound registry may write identities, so the set is kept small
-    ///  enough that enumerating it stays affordable.
+    /// @dev Cap so enumerating the bound set stays affordable.
     uint256 internal constant MAX_IDENTITY_REGISTRIES = 300;
 
-    /// @dev The identity contract and country of a stored investor.
     struct StoredIdentity {
         IIdentity identityContract;
         uint16 investorCountry;
@@ -91,10 +86,8 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
 
     /// @custom:storage-location erc7201:erc3643.storage.IdentityRegistryStorage
     struct ERC3643IdentityRegistryStorageStorage {
-        /// @dev Investor wallet to its stored identity record.
         mapping(address user => StoredIdentity) identities;
 
-        /// @dev Identity Registries allowed to write to this storage.
         EnumerableSet.AddressSet identityRegistries;
     }
 
@@ -236,11 +229,6 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     /// @dev Reads the stored country of a wallet.
     function _storedInvestorCountry(address userAddress) internal view virtual returns (uint16) {
         return _erc3643IdentityRegistryStorageStorage().identities[userAddress].investorCountry;
-    }
-
-    /// @dev Whether a registry is bound to this storage.
-    function _isIdentityRegistryBound(address identityRegistry) internal view returns (bool) {
-        return _erc3643IdentityRegistryStorageStorage().identityRegistries.contains(identityRegistry);
     }
 
     function _erc3643IdentityRegistryStorageStorage()
