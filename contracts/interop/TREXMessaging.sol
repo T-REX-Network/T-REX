@@ -267,6 +267,9 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
             bytes32 peerChainKey = _registerChain(s, chainType, chainReference);
             require(peerChainKey == chainKey, ErrorsLib.PeerChainMismatch(chainKey, peerChainKey));
+        } else {
+            // Nothing to restore on a chain the token has never seen, and the write would be a noop.
+            require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
         }
 
         s.peers[chainKey] = peer;

@@ -275,6 +275,13 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         assertEq(token.peerFor(evmChain), InteroperableAddress.formatEvmV1(0x89, address(token)));
     }
 
+    /// @dev Clearing a peer on a chain the token never saw would write nothing; it says so instead.
+    function testEmptyPeerRevertsOnAChainNeverSeen() public {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotRegistered.selector, evmChain));
+        vm.prank(identityManager);
+        token.setPeer(evmChain, "");
+    }
+
     function testIdentityManagerRegistersANonEvmPeer() public {
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.PeerSet(nonEvmChain, nonEvmPeer);

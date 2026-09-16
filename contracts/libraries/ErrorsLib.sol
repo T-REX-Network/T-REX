@@ -150,6 +150,7 @@ library ErrorsLib {
 
     // Interop Errors
     error ChainNotOpen(bytes32 chainKey);
+    error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
     error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
     error GatewayNotTrusted(address gateway);
