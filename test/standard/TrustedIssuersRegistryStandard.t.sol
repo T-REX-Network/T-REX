@@ -6,7 +6,7 @@ import { Test } from "@forge-std/Test.sol";
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 
-import { TrustedIssuersRegistryHarness } from "./harnesses/StandardHarnesses.sol";
+import { TrustedIssuersRegistryMock } from "./mocks/StandardMocks.sol";
 
 /// @dev ERC-3643 standard: Trusted Issuers Registry.
 ///
@@ -14,13 +14,13 @@ import { TrustedIssuersRegistryHarness } from "./harnesses/StandardHarnesses.sol
 ///  requires, so this file must pass unchanged when OpenZeppelin's base replaces ours.
 contract TrustedIssuersRegistryStandardTest is Test {
 
-    TrustedIssuersRegistryHarness internal registry;
+    TrustedIssuersRegistryMock internal registry;
 
     address internal issuer = makeAddr("issuer");
     address internal otherIssuer = makeAddr("otherIssuer");
 
     function setUp() public {
-        registry = new TrustedIssuersRegistryHarness();
+        registry = new TrustedIssuersRegistryMock();
     }
 
     function _topics(uint256 a) internal pure returns (uint256[] memory t) {

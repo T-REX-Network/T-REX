@@ -7,7 +7,7 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 
-import { IdentityRegistryStorageHarness } from "./harnesses/StandardHarnesses.sol";
+import { IdentityRegistryStorageMock } from "./mocks/StandardMocks.sol";
 
 /// @dev ERC-3643 standard: Identity Registry Storage.
 ///
@@ -15,7 +15,7 @@ import { IdentityRegistryStorageHarness } from "./harnesses/StandardHarnesses.so
 ///  OpenZeppelin's base replaces ours.
 contract IdentityRegistryStorageStandardTest is Test {
 
-    IdentityRegistryStorageHarness internal storage_;
+    IdentityRegistryStorageMock internal storage_;
 
     address internal investor = makeAddr("investor");
     IIdentity internal identity = IIdentity(makeAddr("identity"));
@@ -25,7 +25,7 @@ contract IdentityRegistryStorageStandardTest is Test {
     uint16 internal constant COUNTRY = 42;
 
     function setUp() public {
-        storage_ = new IdentityRegistryStorageHarness();
+        storage_ = new IdentityRegistryStorageMock();
     }
 
     function test_storedIdentity_IsZeroForUnknownInvestor() public view {

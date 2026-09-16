@@ -13,26 +13,26 @@ import { ERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/base/ERC3643Tr
 /// @dev Minimal concrete instantiations of the six ERC-3643 standard bases, used only by the
 ///  standard suite.
 ///
-///  Each harness supplies the one thing its base leaves abstract -- the authorization hook -- and
+///  Each mock supplies the one thing its base leaves abstract -- the authorization hook -- and
 ///  nothing else. Authorization is a permissive `owner`-or-anyone policy rather than T-REX's
 ///  AccessManager, precisely so the standard tests exercise the *standard* behavior and not T-REX's
-///  access model. No harness overrides any other hook.
+///  access model. No mock overrides any other hook.
 ///
 ///  This is what makes the suite the regression net the swap needs (issue #65): it runs against layer 2
 ///  alone, so it must pass unchanged against OpenZeppelin's bases once they replace ours.
-contract ClaimTopicsRegistryHarness is ERC3643ClaimTopicsRegistry {
+contract ClaimTopicsRegistryMock is ERC3643ClaimTopicsRegistry {
 
     function _authorizeClaimTopicsUpdate() internal override { }
 
 }
 
-contract TrustedIssuersRegistryHarness is ERC3643TrustedIssuersRegistry {
+contract TrustedIssuersRegistryMock is ERC3643TrustedIssuersRegistry {
 
     function _authorizeIssuersUpdate() internal override { }
 
 }
 
-contract IdentityRegistryStorageHarness is ERC3643IdentityRegistryStorage {
+contract IdentityRegistryStorageMock is ERC3643IdentityRegistryStorage {
 
     function _authorizeIdentityWrite() internal override { }
 
@@ -40,7 +40,7 @@ contract IdentityRegistryStorageHarness is ERC3643IdentityRegistryStorage {
 
 }
 
-contract IdentityRegistryHarness is ERC3643IdentityRegistry {
+contract IdentityRegistryMock is ERC3643IdentityRegistry {
 
     function init(address identityStorage_, address issuersRegistry_, address topicsRegistry_) external {
         _setIdentityRegistryStorage(identityStorage_);
@@ -54,7 +54,7 @@ contract IdentityRegistryHarness is ERC3643IdentityRegistry {
 
 }
 
-contract ComplianceHarness is ERC3643Compliance {
+contract ComplianceMock is ERC3643Compliance {
 
     function _authorizeTokenBinding(address) internal override { }
 
@@ -62,7 +62,7 @@ contract ComplianceHarness is ERC3643Compliance {
 
 }
 
-contract TokenHarness is ERC3643Token {
+contract TokenMock is ERC3643Token {
 
     function init(
         string memory name_,

@@ -6,7 +6,7 @@ import { Test } from "@forge-std/Test.sol";
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 
-import { ComplianceHarness } from "./harnesses/StandardHarnesses.sol";
+import { ComplianceMock } from "./mocks/StandardMocks.sol";
 
 /// @dev ERC-3643 standard: Compliance.
 ///
@@ -15,7 +15,7 @@ import { ComplianceHarness } from "./harnesses/StandardHarnesses.sol";
 ///  `canTransfer` assertions below pin down.
 contract ComplianceStandardTest is Test {
 
-    ComplianceHarness internal compliance;
+    ComplianceMock internal compliance;
 
     address internal token = makeAddr("token");
     address internal otherToken = makeAddr("otherToken");
@@ -23,7 +23,7 @@ contract ComplianceStandardTest is Test {
     address internal bob = makeAddr("bob");
 
     function setUp() public {
-        compliance = new ComplianceHarness();
+        compliance = new ComplianceMock();
     }
 
     function test_getTokenBound_IsZeroInitially() public view {

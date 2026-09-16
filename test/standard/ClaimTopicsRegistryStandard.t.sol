@@ -6,7 +6,7 @@ import { Test } from "@forge-std/Test.sol";
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 
-import { ClaimTopicsRegistryHarness } from "./harnesses/StandardHarnesses.sol";
+import { ClaimTopicsRegistryMock } from "./mocks/StandardMocks.sol";
 
 /// @dev ERC-3643 standard: Claim Topics Registry.
 ///
@@ -15,10 +15,10 @@ import { ClaimTopicsRegistryHarness } from "./harnesses/StandardHarnesses.sol";
 ///  unchanged when OpenZeppelin's base replaces ours.
 contract ClaimTopicsRegistryStandardTest is Test {
 
-    ClaimTopicsRegistryHarness internal registry;
+    ClaimTopicsRegistryMock internal registry;
 
     function setUp() public {
-        registry = new ClaimTopicsRegistryHarness();
+        registry = new ClaimTopicsRegistryMock();
     }
 
     function test_getClaimTopics_IsEmptyInitially() public view {

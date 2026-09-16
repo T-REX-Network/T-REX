@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity 0.8.30;
+
+import { Test } from "@forge-std/Test.sol";
+
+import { Utils } from "../unit/helpers/Utils.sol";
+
+/// @dev Pins the ERC-7201 slot of every namespace the ERC-3643 standard bases own.
+///
+///  A base's slot is derived from its namespace string, so a changed string silently relocates all of
+///  that base's state. These assertions make such a change fail loudly instead, and give the swap
+///  checklist in `docs/erc3643-oz-swap.md` something to verify against: when OpenZeppelin publishes its
+///  namespace strings, the expected values here change in the same commit as the constants.
+contract NamespacesStandardTest is Test {
+
+    function test_tokenNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.ERC3643Token"),
+            0x1c6ea0581535d63a38daa138246885c0e308b5f6335af4548c056841c5c18f00
+        );
+    }
+
+    function test_identityRegistryNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.IdentityRegistry"),
+            0x7677ac510b853691f250873636359d7d7673c26ecc94050f9c8f5810c4b61e00
+        );
+    }
+
+    function test_identityRegistryStorageNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.IdentityRegistryStorage"),
+            0x8e8aa323647c3f2580137bf922482bdf62534082dec9617ddb5e7739bad03900
+        );
+    }
+
+    function test_trustedIssuersRegistryNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TrustedIssuersRegistry"),
+            0x58a7ad278b8ace1eb0e9c3892258e09577cfdd8d75b47f8418fdf561b2770b00
+        );
+    }
+
+    function test_claimTopicsRegistryNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.ClaimTopicsRegistry"),
+            0xf733c3a0e1c477ac68147f80e659cc05e7e57f7c461b47d14f8d9811f4c72700
+        );
+    }
+
+    function test_complianceNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.Compliance"),
+            0x9a630f7fb5b68c9ca32ffeadfd0de30d50c23b603074e205ad3eb7046278f900
+        );
+    }
+
+    /// @dev The ERC-20 slot the token base reaches into for name and symbol. Declared by
+    ///  `ERC20Upgradeable`, which keeps its own accessor private.
+    function test_erc20NamespaceReachedByTokenBase() public pure {
+        assertEq(
+            Utils.erc7201("openzeppelin.storage.ERC20"),
+            0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00
+        );
+    }
+
+}

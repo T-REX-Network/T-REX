@@ -8,11 +8,11 @@ import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 
 import {
-    ClaimTopicsRegistryHarness,
-    IdentityRegistryHarness,
-    IdentityRegistryStorageHarness,
-    TrustedIssuersRegistryHarness
-} from "./harnesses/StandardHarnesses.sol";
+    ClaimTopicsRegistryMock,
+    IdentityRegistryMock,
+    IdentityRegistryStorageMock,
+    TrustedIssuersRegistryMock
+} from "./mocks/StandardMocks.sol";
 
 /// @dev ERC-3643 standard: Identity Registry.
 ///
@@ -22,10 +22,10 @@ import {
 ///  shape, so it must pass unchanged when OpenZeppelin's bases replace ours.
 contract IdentityRegistryStandardTest is Test {
 
-    IdentityRegistryHarness internal registry;
-    IdentityRegistryStorageHarness internal identityStorage;
-    TrustedIssuersRegistryHarness internal issuersRegistry;
-    ClaimTopicsRegistryHarness internal topicsRegistry;
+    IdentityRegistryMock internal registry;
+    IdentityRegistryStorageMock internal identityStorage;
+    TrustedIssuersRegistryMock internal issuersRegistry;
+    ClaimTopicsRegistryMock internal topicsRegistry;
 
     address internal investor = makeAddr("investor");
     IIdentity internal identity = IIdentity(makeAddr("identity"));
@@ -34,11 +34,11 @@ contract IdentityRegistryStandardTest is Test {
     uint16 internal constant COUNTRY = 42;
 
     function setUp() public {
-        identityStorage = new IdentityRegistryStorageHarness();
-        issuersRegistry = new TrustedIssuersRegistryHarness();
-        topicsRegistry = new ClaimTopicsRegistryHarness();
+        identityStorage = new IdentityRegistryStorageMock();
+        issuersRegistry = new TrustedIssuersRegistryMock();
+        topicsRegistry = new ClaimTopicsRegistryMock();
 
-        registry = new IdentityRegistryHarness();
+        registry = new IdentityRegistryMock();
         registry.init(address(identityStorage), address(issuersRegistry), address(topicsRegistry));
 
         identityStorage.bindIdentityRegistry(address(registry));
@@ -151,7 +151,7 @@ contract IdentityRegistryStandardTest is Test {
     }
 
     function test_setIdentityRegistryStorage_RepointsAndEmits() public {
-        IdentityRegistryStorageHarness replacement = new IdentityRegistryStorageHarness();
+        IdentityRegistryStorageMock replacement = new IdentityRegistryStorageMock();
 
         vm.expectEmit(true, false, false, true, address(registry));
         emit IERC3643IdentityRegistry.IdentityStorageSet(address(replacement));
@@ -162,7 +162,7 @@ contract IdentityRegistryStandardTest is Test {
     }
 
     function test_setClaimTopicsRegistry_RepointsAndEmits() public {
-        ClaimTopicsRegistryHarness replacement = new ClaimTopicsRegistryHarness();
+        ClaimTopicsRegistryMock replacement = new ClaimTopicsRegistryMock();
 
         vm.expectEmit(true, false, false, true, address(registry));
         emit IERC3643IdentityRegistry.ClaimTopicsRegistrySet(address(replacement));
@@ -173,7 +173,7 @@ contract IdentityRegistryStandardTest is Test {
     }
 
     function test_setTrustedIssuersRegistry_RepointsAndEmits() public {
-        TrustedIssuersRegistryHarness replacement = new TrustedIssuersRegistryHarness();
+        TrustedIssuersRegistryMock replacement = new TrustedIssuersRegistryMock();
 
         vm.expectEmit(true, false, false, true, address(registry));
         emit IERC3643IdentityRegistry.TrustedIssuersRegistrySet(address(replacement));

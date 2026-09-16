@@ -8,7 +8,7 @@ import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
-import { ComplianceHarness, TokenHarness } from "./harnesses/StandardHarnesses.sol";
+import { ComplianceMock, TokenMock } from "./mocks/StandardMocks.sol";
 
 /// @dev A registry that verifies whoever it is told to verify, so the token standard tests can state
 ///  "an unverified recipient is rejected" without dragging ONCHAINID claims into the picture.
@@ -67,9 +67,9 @@ contract StubIdentityRegistry {
 ///  compliance hears `created` and `destroyed`, and a burn does not verify the zero address.
 contract TokenStandardTest is Test {
 
-    TokenHarness internal token;
+    TokenMock internal token;
     StubIdentityRegistry internal registry;
-    ComplianceHarness internal compliance;
+    ComplianceMock internal compliance;
 
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
@@ -77,9 +77,9 @@ contract TokenStandardTest is Test {
 
     function setUp() public {
         registry = new StubIdentityRegistry();
-        compliance = new ComplianceHarness();
+        compliance = new ComplianceMock();
 
-        token = new TokenHarness();
+        token = new TokenMock();
         token.init("Standard Token", "STD", address(registry), address(compliance), onchainId);
 
         compliance.bindToken(address(token));
@@ -133,7 +133,7 @@ contract TokenStandardTest is Test {
     }
 
     function test_setCompliance_RepointsAndEmits() public {
-        ComplianceHarness replacement = new ComplianceHarness();
+        ComplianceMock replacement = new ComplianceMock();
 
         vm.expectEmit(true, false, false, true, address(token));
         emit IERC3643.ComplianceAdded(address(replacement));
