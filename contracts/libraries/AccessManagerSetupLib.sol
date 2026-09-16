@@ -67,7 +67,10 @@ import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdenti
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
+import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
+import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
+import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
@@ -152,25 +155,25 @@ library AccessManagerSetupLib {
     function setupTREXRegistryRoles(IAccessManager accessManager, address registry) internal {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](10);
-        functions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
+        functions[0] = IERC3643IdentityRegistry.setIdentityRegistryStorage.selector;
         functions[1] = TREXRegistry.disableEligibilityChecks.selector;
         functions[2] = TREXRegistry.enableEligibilityChecks.selector;
-        functions[3] = TREXRegistry.addTrustedIssuer.selector;
-        functions[4] = TREXRegistry.removeTrustedIssuer.selector;
-        functions[5] = TREXRegistry.updateIssuerClaimTopics.selector;
-        functions[6] = TREXRegistry.addClaimTopic.selector;
-        functions[7] = TREXRegistry.removeClaimTopic.selector;
+        functions[3] = IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector;
+        functions[4] = IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector;
+        functions[5] = IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector;
+        functions[6] = IERC3643ClaimTopicsRegistry.addClaimTopic.selector;
+        functions[7] = IERC3643ClaimTopicsRegistry.removeClaimTopic.selector;
         functions[8] = TREXRegistry.addClaimTopicForIdentityType.selector;
         functions[9] = TREXRegistry.removeClaimTopicForIdentityType.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
         functions = new bytes4[](5);
-        functions[0] = TREXRegistry.registerIdentity.selector;
-        functions[1] = TREXRegistry.batchRegisterIdentity.selector;
-        functions[2] = TREXRegistry.updateIdentity.selector;
-        functions[3] = TREXRegistry.updateCountry.selector;
-        functions[4] = TREXRegistry.deleteIdentity.selector;
+        functions[0] = IERC3643IdentityRegistry.registerIdentity.selector;
+        functions[1] = IERC3643IdentityRegistry.batchRegisterIdentity.selector;
+        functions[2] = IERC3643IdentityRegistry.updateIdentity.selector;
+        functions[3] = IERC3643IdentityRegistry.updateCountry.selector;
+        functions[4] = IERC3643IdentityRegistry.deleteIdentity.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.AGENT);
     }
 

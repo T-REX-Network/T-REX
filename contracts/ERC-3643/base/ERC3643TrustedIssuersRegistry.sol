@@ -210,7 +210,7 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
             claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS,
             ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS)
         );
-        require(claimTopics.length > 0, ERC3643ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
+        require(claimTopics.length > 0, ERC3643ErrorsLib.ClaimTopicsCannotBeEmpty());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];
         uint256[] memory oldTopics = issuerTopics.values();

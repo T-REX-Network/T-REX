@@ -91,7 +91,12 @@ library ERC3643ErrorsLib {
     // TrustedIssuersRegistry
     error MaxTrustedIssuersReached(uint256 max);
     error NotATrustedIssuer();
+    /// @dev Raised by `addTrustedIssuer` when the issuer is registered with no claim topics.
     error TrustedClaimTopicsCannotBeEmpty();
+
+    /// @dev Raised by `updateIssuerClaimTopics` when the new topic set is empty. Distinct from
+    ///  `TrustedClaimTopicsCannotBeEmpty` so callers can tell the two entry points apart.
+    error ClaimTopicsCannotBeEmpty();
     error TrustedIssuerAlreadyExists();
 
     // IdentityRegistryStorage
