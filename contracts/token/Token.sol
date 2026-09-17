@@ -64,11 +64,10 @@
 pragma solidity 0.8.30;
 
 import {
+    ERC20PermitUpgradeable,
     ERC20Upgradeable,
     IERC20Permit
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
@@ -91,7 +90,7 @@ import {
 /// @dev The T-REX security token: {ERC3643Token} plus AccessManager authorization, validation on the
 /// collaborator setters, the spender check on `transferFrom`, the extra recovery preconditions,
 /// ERC-2612 permit and ERC-165.
-contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
+contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgradeable {
 
     string internal constant VERSION = "5.0.0";
 
@@ -103,13 +102,6 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXToken")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant TOKEN_STORAGE_LOCATION =
         0x05378669fd58b6f9251e6d5461e60e18b8b3fdf11d70481ba6f9fc72a4bfc600;
-
-    /// @dev Applies the role check of `selector` rather than of the calling function. Used by the batch
-    ///  functions so that `batchMint` requires the same role as `mint`.
-    modifier restrictedFor(bytes4 selector) {
-        _checkCanCall(_msgSender(), selector);
-        _;
-    }
 
     constructor() {
         _disableInitializers();
@@ -145,110 +137,9 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
 
     /* ----- Main token properties ----- */
 
-    /// @inheritdoc IERC3643
-    /// @dev The EIP-712 domain separator is derived from `name()` (see `_EIP712Name`), so changing the name
-    ///      rotates the domain separator and invalidates any outstanding (unused) ERC-2612 permit signatures.
-    function setName(string calldata tokenName) external override restricted {
-        require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
-        _setName(tokenName);
-        _emitUpdatedTokenInformation();
-    }
-
-    /// @inheritdoc IERC3643
-    function setSymbol(string calldata tokenSymbol) external override restricted {
-        require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
-        _setSymbol(tokenSymbol);
-        _emitUpdatedTokenInformation();
-    }
-
-    /// @inheritdoc IERC3643
-    function version() external pure override returns (string memory) {
-        return VERSION;
-    }
-
     /// @inheritdoc IERC20Metadata
-    function decimals() public view override returns (uint8) {
+    function decimals() public view override(ERC3643Token, ERC20Upgradeable) returns (uint8) {
         return _tokenStorage().decimals;
-    }
-
-    /* ----- Batch functions ----- */
-
-    /// @inheritdoc IERC3643
-    /// @dev Carries the role requirement of `mint`, not a role of its own.
-    function batchMint(address[] calldata tos, uint256[] calldata amounts)
-        external
-        override
-        restrictedFor(this.mint.selector)
-    {
-        require(tos.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < tos.length; i++) {
-            _mint(tos[i], amounts[i]);
-        }
-    }
-
-    /// @inheritdoc IERC3643
-    /// @dev Carries the role requirement of `burn`.
-    function batchBurn(address[] calldata froms, uint256[] calldata amounts)
-        external
-        override
-        restrictedFor(this.burn.selector)
-    {
-        require(froms.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < froms.length; i++) {
-            _burn(froms[i], amounts[i]);
-        }
-    }
-
-    /// @inheritdoc IERC3643
-    /// @dev Carries the role requirement of `freezePartialTokens`.
-    function batchFreezePartialTokens(address[] calldata users, uint256[] calldata amounts)
-        external
-        override
-        restrictedFor(this.freezePartialTokens.selector)
-    {
-        require(users.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < users.length; i++) {
-            _freezePartialTokens(users[i], amounts[i]);
-        }
-    }
-
-    /// @inheritdoc IERC3643
-    /// @dev Carries the role requirement of `unfreezePartialTokens`.
-    function batchUnfreezePartialTokens(address[] calldata users, uint256[] calldata amounts)
-        external
-        override
-        restrictedFor(this.unfreezePartialTokens.selector)
-    {
-        require(users.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < users.length; i++) {
-            _unfreezePartialTokens(users[i], amounts[i]);
-        }
-    }
-
-    /// @inheritdoc IERC3643
-    /// @dev Carries the role requirement of `setAddressFrozen`.
-    function batchSetAddressFrozen(address[] calldata users, bool[] calldata freezes)
-        external
-        override
-        restrictedFor(this.setAddressFrozen.selector)
-    {
-        require(users.length == freezes.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < users.length; i++) {
-            _setAddressFrozen(users[i], freezes[i]);
-        }
-    }
-
-    /// @inheritdoc IERC3643
-    /// @dev Carries the role requirement of `forcedTransfer`.
-    function batchForcedTransfer(address[] calldata froms, address[] calldata tos, uint256[] calldata amounts)
-        external
-        override
-        restrictedFor(this.forcedTransfer.selector)
-    {
-        require(froms.length == tos.length && froms.length == amounts.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < froms.length; i++) {
-            _forcedTransfer(froms[i], tos[i], amounts[i]);
-        }
     }
 
     /* ----- Transfer Functions ----- */
@@ -284,10 +175,27 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
 
     /* ----- Layer-2 hook implementations ----- */
 
-    /// @dev T-REX authorization for every privileged function of the standard base: the role the
-    ///  configured AccessManager attaches to the selector being called.
-    function _checkTokenAdmin() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+    /// @dev Required disambiguation between `ERC3643Token` and `ERC20Upgradeable`; the ERC-3643 rules
+    ///  live in the former, so `super` resolves there first and nothing is added here.
+    function _update(address from, address to, uint256 value) internal override(ERC3643Token, ERC20Upgradeable) {
+        super._update(from, to, value);
+    }
+
+    function _checkTokenAdmin(bytes4 selector) internal override {
+        _checkCanCallSelector(selector);
+    }
+
+    /// @dev T-REX rejects an empty name. Changing it rotates the EIP-712 domain separator,
+    ///  invalidating outstanding ERC-2612 permit signatures.
+    function _setName(string memory tokenName) internal override {
+        require(bytes(tokenName).length > 0, ErrorsLib.EmptyString());
+        super._setName(tokenName);
+    }
+
+    /// @dev T-REX rejects an empty symbol.
+    function _setSymbol(string memory tokenSymbol) internal override {
+        require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
+        super._setSymbol(tokenSymbol);
     }
 
     /// @dev Adds T-REX validation to the standard setter. A wrong registry halts the token, since
@@ -369,11 +277,6 @@ contract Token is ERC3643Token, AccessManagedOwnableUpgradeable {
 
     function _EIP712Name() internal view override returns (string memory) {
         return name();
-    }
-
-    function _checkCanCall(address caller, bytes4 selector) internal virtual {
-        (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
-        require(immediate, IAccessManaged.AccessManagedUnauthorized(caller));
     }
 
     function _tokenStorage() private pure returns (TokenStorage storage $) {

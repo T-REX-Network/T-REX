@@ -77,7 +77,6 @@ import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
-import { Token } from "../token/Token.sol";
 import { RolesLib } from "./RolesLib.sol";
 
 /// @title AccessManagerSetupLib
@@ -87,8 +86,8 @@ library AccessManagerSetupLib {
     function setupTokenRoles(IAccessManager accessManager, address token) internal {
         // ------ TOKEN_MANAGER role ------
         bytes4[] memory functions = new bytes4[](2);
-        functions[0] = Token.setName.selector;
-        functions[1] = Token.setSymbol.selector;
+        functions[0] = IERC3643.setName.selector;
+        functions[1] = IERC3643.setSymbol.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
         // ------ IDENTITY_MANAGER role ------

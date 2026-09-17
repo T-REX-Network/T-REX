@@ -1,37 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Test } from "@forge-std/Test.sol";
+import { TREXRegistryBaseUnitTest } from "../trex-registry/helpers/TREXRegistryBaseUnitTest.t.sol";
 
-/// @dev Shows why TREXRegistry needed a new namespace when its struct changed.
-///
-///  The old struct began with an address and packed `checksDisabled` beside it at byte 20. The new
-///  struct starts with `checksDisabled` at byte 0. Reusing the namespace would leave the low byte of the
-///  old storage address deciding whether eligibility checks run, and that byte is non-zero for almost
-///  every address, which reads as "checks disabled" and verifies everyone.
-contract RegistryStorageLayoutTest is Test {
+import { Utils } from "../helpers/Utils.sol";
 
-    /// @dev Slot 0 as the old struct wrote it: address in bytes 0-19, `checksDisabled` false at byte 20.
-    function _oldSlotZero(address identityStorage) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(identityStorage)));
+/// @dev Reads TREXRegistry's real storage: `checksDisabled` must sit at byte 0 of the T-REX namespace,
+///  and the pre-split namespace must hold nothing. Reusing the old namespace would have left the low
+///  byte of the old storage address deciding whether checks run. Why it matters: docs/erc3643-oz-swap.md.
+contract RegistryStorageLayoutTest is TREXRegistryBaseUnitTest {
+
+    function test_storageLayout_ChecksDisabledAtByteZero() public {
+        bytes32 slot = Utils.erc7201("erc3643.storage.TREXEligibility");
+
+        assertEq(uint8(uint256(vm.load(address(registry), slot)) & 0xff), 0, "starts enabled");
+
+        vm.prank(deployer);
+        registry.disableEligibilityChecks();
+
+        assertEq(uint8(uint256(vm.load(address(registry), slot)) & 0xff), 1, "reads back as disabled");
+        assertTrue(registry.isVerified(makeAddr("anyone")), "disabled means everyone verifies");
     }
 
-    /// @dev Slot 0 as the new struct reads it: `checksDisabled` is byte 0.
-    function _newChecksDisabled(bytes32 slotZero) internal pure returns (bool) {
-        return uint8(uint256(slotZero) & 0xff) != 0;
-    }
+    function test_storageLayout_OldNamespaceUnused() public view {
+        bytes32 oldSlot = Utils.erc7201("erc3643.storage.TREXRegistry");
 
-    function test_reusingTheNamespaceWouldFlipChecksDisabled() public pure {
-        bytes32 slotZero = _oldSlotZero(0x1111111111111111111111111111111111111111);
-
-        assertTrue(_newChecksDisabled(slotZero), "checks enabled before would read as disabled after");
-    }
-
-    /// @dev True for any address whose lowest byte is set, which is 255 of every 256.
-    function testFuzz_flipHappensForAlmostEveryAddress(address identityStorage) public pure {
-        vm.assume(uint160(identityStorage) & 0xff != 0);
-
-        assertTrue(_newChecksDisabled(_oldSlotZero(identityStorage)));
+        assertEq(vm.load(address(registry), oldSlot), bytes32(0), "old namespace must stay empty");
     }
 
 }

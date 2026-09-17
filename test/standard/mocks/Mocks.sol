@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-
 import { ERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/base/ERC3643ClaimTopicsRegistry.sol";
 import { ERC3643Compliance } from "contracts/ERC-3643/base/ERC3643Compliance.sol";
 import { ERC3643IdentityRegistry } from "contracts/ERC-3643/base/ERC3643IdentityRegistry.sol";
@@ -48,7 +46,7 @@ contract IdentityRegistryMock is ERC3643IdentityRegistry {
         _setClaimTopicsRegistry(topicsRegistry_);
     }
 
-    function _authorizeIdentityUpdate() internal override { }
+    function _authorizeIdentityUpdate(bytes4) internal override { }
 
     function _authorizeRegistryUpdate(address) internal override { }
 
@@ -72,12 +70,11 @@ contract TokenMock is ERC3643Token {
         address onchainId_
     ) external initializer {
         __ERC20_init(name_, symbol_);
-        __ERC20Permit_init(name_);
         __Pausable_init();
         _initERC3643(identityRegistry_, compliance_, onchainId_);
     }
 
-    function _checkTokenAdmin() internal override { }
+    function _checkTokenAdmin(bytes4) internal override { }
 
     function _version() internal pure override returns (string memory) {
         return "standard";

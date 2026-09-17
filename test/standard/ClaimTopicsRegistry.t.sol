@@ -72,14 +72,14 @@ contract ClaimTopicsRegistryBaseTest is Test {
         assertEq(registry.getClaimTopics().length, 0);
     }
 
-    /// @dev The standard caps the topic list so `isVerified` cannot be driven out of gas.
-    function test_addClaimTopic_RevertWhen_CapReached() public {
-        for (uint256 i = 0; i < 15; i++) {
+    /// @dev The standard sets no cap; a deployment that wants one overrides `_maxClaimTopics`.
+    ///  T-REX's own cap is covered in test/unit/trex-registry.
+    function test_addClaimTopic_Success_PastFifteenTopics() public {
+        for (uint256 i = 0; i < 20; i++) {
             registry.addClaimTopic(i);
         }
 
-        vm.expectRevert(abi.encodeWithSelector(ERC3643ErrorsLib.MaxClaimTopicsReached.selector, 15));
-        registry.addClaimTopic(15);
+        assertEq(registry.getClaimTopics().length, 20);
     }
 
 }

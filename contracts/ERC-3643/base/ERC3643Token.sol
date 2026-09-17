@@ -63,10 +63,7 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import {
-    ERC20PermitUpgradeable,
-    ERC20Upgradeable
-} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -80,7 +77,7 @@ import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 /// @dev The ERC-3643 token surface and nothing else, over its own ERC-7201 namespace. Extend through
 /// the internal hooks; hook names match openzeppelin-contracts#5838 so a swap renames nothing.
 /// Storage shape and the deliberate divergences from that PR: see docs/erc3643-oz-swap.md.
-abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, IERC3643 {
+abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC3643 {
 
     /// @custom:storage-location erc7201:erc3643.storage.ERC3643Token
     struct ERC3643TokenStorage {
@@ -102,14 +99,14 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
     ///  outstanding ERC-2612 permit signatures. Derived contracts that bind permit to the name should
     ///  say so on their own override.
     function setName(string calldata _name) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setName.selector);
         _setName(_name);
         _emitUpdatedTokenInformation();
     }
 
     /// @inheritdoc IERC3643
     function setSymbol(string calldata _symbol) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setSymbol.selector);
         _setSymbol(_symbol);
         _emitUpdatedTokenInformation();
     }
@@ -121,19 +118,19 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function setOnchainID(address _onchainID) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setOnchainID.selector);
         _setOnchainID(_onchainID);
     }
 
     /// @inheritdoc IERC3643
     function setIdentityRegistry(address _identityRegistry) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setIdentityRegistry.selector);
         _setIdentityRegistry(_identityRegistry);
     }
 
     /// @inheritdoc IERC3643
     function setCompliance(address _compliance) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setCompliance.selector);
         _setCompliance(_compliance);
     }
 
@@ -156,13 +153,13 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function pause() external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.pause.selector);
         _pause();
     }
 
     /// @inheritdoc IERC3643
     function unpause() external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.unpause.selector);
         _unpause();
     }
 
@@ -170,19 +167,19 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function mint(address _to, uint256 _amount) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.mint.selector);
         _mint(_to, _amount);
     }
 
     /// @inheritdoc IERC3643
     function burn(address _userAddress, uint256 _amount) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.burn.selector);
         _burn(_userAddress, _amount);
     }
 
     /// @inheritdoc IERC3643
     function batchMint(address[] calldata _toList, uint256[] calldata _amounts) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.mint.selector);
         require(_toList.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _toList.length; i++) {
             _mint(_toList[i], _amounts[i]);
@@ -191,7 +188,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchBurn(address[] calldata _userAddresses, uint256[] calldata _amounts) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.burn.selector);
         require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _burn(_userAddresses[i], _amounts[i]);
@@ -202,25 +199,25 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function setAddressFrozen(address _userAddress, bool _freeze) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setAddressFrozen.selector);
         _setAddressFrozen(_userAddress, _freeze);
     }
 
     /// @inheritdoc IERC3643
     function freezePartialTokens(address _userAddress, uint256 _amount) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.freezePartialTokens.selector);
         _freezePartialTokens(_userAddress, _amount);
     }
 
     /// @inheritdoc IERC3643
     function unfreezePartialTokens(address _userAddress, uint256 _amount) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.unfreezePartialTokens.selector);
         _unfreezePartialTokens(_userAddress, _amount);
     }
 
     /// @inheritdoc IERC3643
     function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.setAddressFrozen.selector);
         require(_userAddresses.length == _freeze.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _setAddressFrozen(_userAddresses[i], _freeze[i]);
@@ -229,7 +226,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function batchFreezePartialTokens(address[] calldata _userAddresses, uint256[] calldata _amounts) external virtual {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.freezePartialTokens.selector);
         require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _freezePartialTokens(_userAddresses[i], _amounts[i]);
@@ -241,7 +238,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         external
         virtual
     {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.unfreezePartialTokens.selector);
         require(_userAddresses.length == _amounts.length, ERC3643ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _unfreezePartialTokens(_userAddresses[i], _amounts[i]);
@@ -262,7 +259,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /// @inheritdoc IERC3643
     function forcedTransfer(address _from, address _to, uint256 _amount) external virtual returns (bool) {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.forcedTransfer.selector);
         return _forcedTransfer(_from, _to, _amount);
     }
 
@@ -271,7 +268,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         external
         virtual
     {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.forcedTransfer.selector);
         require(
             _fromList.length == _toList.length && _fromList.length == _amounts.length,
             ERC3643ErrorsLib.ArrayLengthMismatch()
@@ -295,7 +292,7 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
         virtual
         returns (bool)
     {
-        _checkTokenAdmin();
+        _checkTokenAdmin(this.recoveryAddress.selector);
         return _recoveryAddress(_lostWallet, _newWallet, _investorOnchainID);
     }
 
@@ -313,9 +310,10 @@ abstract contract ERC3643Token is ERC20PermitUpgradeable, PausableUpgradeable, I
 
     /* ----- Extension hooks ----- */
 
-    /// @dev Authorization hook for every privileged function of this base. Reverts when the caller may
-    ///  not administer the token. Left abstract on purpose: the standard specifies no access model.
-    function _checkTokenAdmin() internal virtual;
+    /// @dev Reverts unless `_msgSender()` may call `selector`. Batches pass their single-item
+    ///  counterpart, so `batchMint` needs whatever `mint` needs. Left abstract: the standard defines no
+    ///  access model. Named for openzeppelin-contracts#5838, unlike the `_authorize*` hooks elsewhere.
+    function _checkTokenAdmin(bytes4 selector) internal virtual;
 
     /// @dev Replaces the ERC-20 name. Name and symbol belong to the ERC-20 base (issue #54), whose
     ///  storage accessor is private and which ships no setter, so the slot is reached directly here.

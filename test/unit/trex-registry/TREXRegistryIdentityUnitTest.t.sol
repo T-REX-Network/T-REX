@@ -96,10 +96,9 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
     // ============ batchRegisterIdentity() ============
 
-    /// @notice `batchRegisterIdentity` is not `restricted`, it just iterates `registerIdentity`.
-    ///         When only `registerIdentity.selector` is granted to AGENT, the inner `restricted`
-    ///         check reads `batchRegisterIdentity.selector` from calldata and reverts.
-    function test_batchRegisterIdentity_RevertWhen_SelectorNotGrantedToAgent() public {
+    /// @notice A batch needs whatever the single call needs: granting `registerIdentity` to AGENT is
+    ///         enough, because `batchRegisterIdentity` authorizes against `registerIdentity.selector`.
+    function test_batchRegisterIdentity_Success_WhenSingleSelectorGrantedToAgent() public {
         IIdentity i1 = _deployIdentity(another, "another");
 
         address[] memory addrs = new address[](1);
@@ -110,13 +109,13 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         countries[0] = 1;
 
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
         registry.batchRegisterIdentity(addrs, ids, countries);
+
+        assertTrue(registry.contains(another));
     }
 
-    /// @notice With the production wiring from `AccessManagerSetupLib`, which binds
-    ///         `batchRegisterIdentity.selector` to AGENT precisely because the inner `restricted`
-    ///         check reads the outer selector, an agent can batch-register.
+    /// @notice The production wiring from `AccessManagerSetupLib` grants AGENT only the single-item
+    ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry));

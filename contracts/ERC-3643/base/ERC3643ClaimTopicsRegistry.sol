@@ -74,9 +74,6 @@ abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
 
     using EnumerableSet for EnumerableSet.UintSet;
 
-    /// @dev The standard caps the topic list so that `isVerified` cannot be made to run out of gas.
-    uint256 internal constant MAX_CLAIM_TOPICS = 15;
-
     /// @custom:storage-location erc7201:erc3643.storage.ClaimTopicsRegistry
     struct ERC3643ClaimTopicsRegistryStorage {
         EnumerableSet.UintSet claimTopics;
@@ -103,14 +100,20 @@ abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
         return _getClaimTopics();
     }
 
-    /// @dev Authorization hook for every state-changing function of this base. Reverts when the caller
-    ///  may not update the claim topics. Left abstract on purpose: the standard specifies no access model.
+    /// @dev Authorization hook for every state-changing function of this base.
+    ///  Left abstract: the standard defines no access model.
     function _authorizeClaimTopicsUpdate() internal virtual;
+
+    /// @dev Cap on required claim topics. The standard sets none; override to bound `isVerified`.
+    function _maxClaimTopics() internal view virtual returns (uint256) {
+        return type(uint256).max;
+    }
 
     /// @dev Adds a required claim topic. Reverts on duplicates and past the cap.
     function _addClaimTopic(uint256 claimTopic) internal virtual {
         EnumerableSet.UintSet storage topics = _erc3643ClaimTopicsRegistryStorage().claimTopics;
-        require(topics.length() < MAX_CLAIM_TOPICS, ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_CLAIM_TOPICS));
+        uint256 max = _maxClaimTopics();
+        require(topics.length() < max, ERC3643ErrorsLib.MaxClaimTopicsReached(max));
         require(topics.add(claimTopic), ERC3643ErrorsLib.ClaimTopicAlreadyExists());
         emit ClaimTopicAdded(claimTopic);
     }

@@ -2,8 +2,7 @@
 
 This is the procedure for replacing the local standard bases in `contracts/ERC-3643/base/` with
 OpenZeppelin's implementation once it ships, and the record of what that swap will cost. It is part of
-the deliverable of issue #65, not an afterthought: the whole point of the layering is that this document
-stays short.
+the deliverable of issue #65.
 
 ## The layering in one paragraph
 
@@ -55,7 +54,8 @@ Two of these were caught in review rather than by tests, because the test suite 
 so never exercises an in-place upgrade. The `TREXRegistry` case was the dangerous one: `checksDisabled`
 would have been read from the low byte of the old identity-storage address, which is non-zero for 255 of
 every 256 addresses, silently disabling eligibility checks and verifying every address.
-`test/unit/registries/RegistryStorageLayout.t.sol` keeps that reasoning executable.
+`test/unit/registries/RegistryStorageLayout.t.sol` reads the deployed registry's storage to keep that
+reasoning executable for the new layout.
 
 | Contract | Before | After |
 |---|---|---|
@@ -67,13 +67,43 @@ every 256 addresses, silently disabling eligibility checks and verifying every a
 Nothing is deployed to mainnet, so this is recorded rather than scheduled. Any proxy deployed from an
 earlier commit must be redeployed, not upgraded in place.
 
-`test/standard/Namespaces.t.sol` pins every namespace slot, so a future struct change that
-forgets to move its namespace fails a test instead of shipping.
+`test/standard/Namespaces.t.sol` records the expected slot for every namespace, and
+`test/unit/token/TokenStorageLocationUnitTests.t.sol`, `test/unit/registries/RegistryStorageLayout.t.sol`
+and a layout test in `test/unit/compliance/ModularComplianceInitUnitTest.t.sol` read real storage with
+`vm.load` to confirm each field sits where
+the new namespace says it does. None of this catches a struct that changes without its namespace moving:
+no fresh-deploy test can, since the suite never upgrades a proxy in place. Committing
+`forge inspect <Contract> storage-layout` and diffing it in CI would close that gap.
 
 The Token's frozen state also changed shape, per issue #54: one mapping to a packed
 `{bool addressFrozen, uint256 amount}` struct became two separate mappings, matching OpenZeppelin's
 `ERC3643Storage`. This costs one extra SSTORE when both fields are set together and removes the need to
 virtualize every internal frozen access on the upstream base.
+
+### Mutable name and symbol (open question for upstream)
+
+`ERC3643Token._setName` / `_setSymbol` write into `ERC20Upgradeable`'s **private** storage through a copy
+of OpenZeppelin's struct at a hardcoded slot, because the ERC-20 base ships no setter. This depends on
+OpenZeppelin never reordering that private struct's fields: the namespace test checks the slot, not the
+order, so a reordering upstream would be silent.
+
+**Ask @ernestognw / @Amxx how openzeppelin-contracts#5838 stores mutable name and symbol before adopting
+its base** -- issue #54 said "use the ERC-20's own storage", but it has no setter, so upstream must keep
+them somewhere of its own, and that decides where `name`, `symbol` and `decimals` land after the swap.
+
+### Typed getters (#54) are not provided
+
+Issue #54 asks for `compliance()` / `identityRegistry()` getters returning the T-REX types "if callers
+still depend on them". None do: the only casts are internal (`Token.transferFrom` and `UtilityChecker`),
+and the integration tests that cast to `ModularCompliance` / `TREXRegistry` would keep casting either
+way. Returning the standard interface keeps `Token` swappable, so the getters are deliberately skipped.
+
+### Caps are T-REX's, not the standard's
+
+`MAX_CLAIM_TOPICS`, `MAX_TRUSTED_ISSUERS` and `MAX_ISSUER_CLAIM_TOPICS` come from T-REX v4, not from
+ERC-3643. The bases expose `_maxClaimTopics`, `_maxTrustedIssuers` and `_maxIssuerClaimTopics`,
+defaulting to unlimited; `TREXRegistry` overrides them with the v4 values, which is what keeps them
+after the swap.
 
 ## Divergences to re-decide at swap time
 
@@ -87,12 +117,14 @@ listed on the contract itself; the ones with teeth:
    calls only `transferred`, and only on transfers. Modules that track balances need all three.
 3. **Burn and recipient verification.** OpenZeppelin's `_update` checks `isVerified(to)` unconditionally,
    so a burn would ask the registry to verify the zero address and revert.
-4. **Authorization.** T-REX authorizes through an AccessManager via `_checkTokenAdmin`; OpenZeppelin uses
-   `Ownable` plus an abstract `isAgent`. The hook makes this a one-line override, but every test asserting
-   a revert selector changes.
+4. **Authorization.** T-REX authorizes through an AccessManager via `_checkTokenAdmin(bytes4)`;
+   OpenZeppelin uses `Ownable` plus an abstract `isAgent`. The hook makes this a one-line override, but
+   every test asserting a revert selector changes.
+5. **Freeze semantics.** The #5838 thread shows `_freezePartialTokens` / `_unfreezePartialTokens` that
+   clamp with `Math.min` and return the amount; ours revert and return nothing. The names match, so only
+   the standard suite would catch this. **Re-verify against the current upstream branch before adopting.**
 
-Items 1 to 3 should be raised on the upstream PR before adopting its base. As written, inheriting it
-would lose all three.
+Items other than 4 should be raised on the upstream PR before adopting its base.
 
 ## Upstream status
 

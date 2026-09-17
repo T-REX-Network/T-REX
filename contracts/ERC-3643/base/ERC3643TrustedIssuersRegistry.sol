@@ -76,11 +76,6 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.UintSet;
 
-    /// @dev Caps bound the work `isVerified` does on every transfer.
-    uint256 internal constant MAX_TRUSTED_ISSUERS = 50;
-
-    uint256 internal constant MAX_ISSUER_CLAIM_TOPICS = 15;
-
     /// @custom:storage-location erc7201:erc3643.storage.TrustedIssuersRegistry
     struct ERC3643TrustedIssuersRegistryStorage {
         /// @dev All registered trusted issuer addresses.
@@ -141,8 +136,18 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
         return _erc3643TrustedIssuersRegistryStorage().trustedIssuerClaimTopics[_issuer].contains(_claimTopic);
     }
 
-    /// @dev Authorization hook for every state-changing function of this base. Left abstract on purpose:
-    ///  the standard specifies no access model.
+    /// @dev Cap on registered trusted issuers. The standard sets none; override to bound `isVerified`.
+    function _maxTrustedIssuers() internal view virtual returns (uint256) {
+        return type(uint256).max;
+    }
+
+    /// @dev Cap on claim topics per issuer. The standard sets none; override to bound `isVerified`.
+    function _maxIssuerClaimTopics() internal view virtual returns (uint256) {
+        return type(uint256).max;
+    }
+
+    /// @dev Authorization hook for every state-changing function of this base.
+    ///  Left abstract: the standard defines no access model.
     function _authorizeIssuersUpdate() internal virtual;
 
     /// @dev Registers a trusted issuer for a set of claim topics, maintaining the reverse index.
@@ -152,14 +157,10 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
         require(!s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.TrustedIssuerAlreadyExists());
         require(claimTopics.length > 0, ERC3643ErrorsLib.TrustedClaimTopicsCannotBeEmpty());
-        require(
-            claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS,
-            ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS)
-        );
-        require(
-            s.trustedIssuers.length() < MAX_TRUSTED_ISSUERS,
-            ERC3643ErrorsLib.MaxTrustedIssuersReached(MAX_TRUSTED_ISSUERS)
-        );
+        uint256 maxTopics = _maxIssuerClaimTopics();
+        require(claimTopics.length <= maxTopics, ERC3643ErrorsLib.MaxClaimTopicsReached(maxTopics));
+        uint256 maxIssuers = _maxTrustedIssuers();
+        require(s.trustedIssuers.length() < maxIssuers, ERC3643ErrorsLib.MaxTrustedIssuersReached(maxIssuers));
 
         s.trustedIssuers.add(trustedIssuer);
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];
@@ -196,10 +197,8 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
         require(trustedIssuer != address(0), ERC3643ErrorsLib.ZeroAddress());
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
         require(s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.NotATrustedIssuer());
-        require(
-            claimTopics.length <= MAX_ISSUER_CLAIM_TOPICS,
-            ERC3643ErrorsLib.MaxClaimTopicsReached(MAX_ISSUER_CLAIM_TOPICS)
-        );
+        uint256 maxTopics = _maxIssuerClaimTopics();
+        require(claimTopics.length <= maxTopics, ERC3643ErrorsLib.MaxClaimTopicsReached(maxTopics));
         require(claimTopics.length > 0, ERC3643ErrorsLib.ClaimTopicsCannotBeEmpty());
 
         EnumerableSet.UintSet storage issuerTopics = s.trustedIssuerClaimTopics[trustedIssuer];

@@ -146,7 +146,8 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
         return _storedInvestorCountry(_userAddress);
     }
 
-    /// @dev Authorization hook for the identity-writing functions. Left abstract on purpose.
+    /// @dev Authorization hook for the identity-writing functions.
+    ///  Left abstract: the standard defines no access model.
     function _authorizeIdentityWrite() internal virtual;
 
     /// @dev Authorization hook for binding and unbinding registries. Receives the registry address so

@@ -5,12 +5,10 @@ import { Test } from "@forge-std/Test.sol";
 
 import { Utils } from "../unit/helpers/Utils.sol";
 
-/// @dev Pins the ERC-7201 slot of every namespace the ERC-3643 standard bases own.
-///
-///  A base's slot is derived from its namespace string, so a changed string silently relocates all of
-///  that base's state. These assertions make such a change fail loudly instead, and give the swap
-///  checklist in `docs/erc3643-oz-swap.md` something to verify against: when OpenZeppelin publishes its
-///  namespace strings, the expected values here change in the same commit as the constants.
+/// @dev Pins the expected ERC-7201 slot of every namespace this repo uses. It hashes a string written
+///  here against a constant written here, so it fixes the intended values for review and for the swap
+///  checklist in `docs/erc3643-oz-swap.md`; it does not read the contracts. Real storage layout is
+///  checked by the storage-layout tests named there.
 contract NamespacesTest is Test {
 
     function test_tokenNamespace() public pure {

@@ -112,6 +112,11 @@ contract TREXRegistry is
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXEligibility")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0xe60ad881f2e5dd9ad5e5fabfb6687133de1b3b6f4c77607e9031b076e00b7500;
 
+    /// @dev T-REX caps inherited from v4; they bound the work `isVerified` does on every transfer.
+    ///  Both topic caps are 15, as in v4.
+    uint256 private constant MAX_CLAIM_TOPICS = 15;
+    uint256 private constant MAX_TRUSTED_ISSUERS = 50;
+
     /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The factory
     ///  records the type once at minting and never updates it, so it is a safer source than asking
     ///  the identity contract itself. Baked into the implementation so it cannot be repointed at
@@ -286,9 +291,20 @@ contract TREXRegistry is
         return super._isVerified(userAddress);
     }
 
-    /// @dev T-REX authorization for the identity-writing functions.
-    function _authorizeIdentityUpdate() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+    function _maxClaimTopics() internal pure override returns (uint256) {
+        return MAX_CLAIM_TOPICS;
+    }
+
+    function _maxTrustedIssuers() internal pure override returns (uint256) {
+        return MAX_TRUSTED_ISSUERS;
+    }
+
+    function _maxIssuerClaimTopics() internal pure override returns (uint256) {
+        return MAX_CLAIM_TOPICS;
+    }
+
+    function _authorizeIdentityUpdate(bytes4 selector) internal override {
+        _checkCanCallSelector(selector);
     }
 
     /// @dev T-REX authorization for `setIdentityRegistryStorage`. A storage that cannot answer identity

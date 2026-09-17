@@ -112,25 +112,25 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
     /// @inheritdoc IERC3643IdentityRegistry
     function registerIdentity(address _userAddress, IIdentity _identity, uint16 _country) external virtual {
-        _authorizeIdentityUpdate();
+        _authorizeIdentityUpdate(this.registerIdentity.selector);
         _registerIdentity(_userAddress, _identity, _country);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
     function deleteIdentity(address _userAddress) external virtual {
-        _authorizeIdentityUpdate();
+        _authorizeIdentityUpdate(this.deleteIdentity.selector);
         _deleteIdentity(_userAddress);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
     function updateCountry(address _userAddress, uint16 _country) external virtual {
-        _authorizeIdentityUpdate();
+        _authorizeIdentityUpdate(this.updateCountry.selector);
         _updateCountry(_userAddress, _country);
     }
 
     /// @inheritdoc IERC3643IdentityRegistry
     function updateIdentity(address _userAddress, IIdentity _identity) external virtual {
-        _authorizeIdentityUpdate();
+        _authorizeIdentityUpdate(this.updateIdentity.selector);
         _updateIdentity(_userAddress, _identity);
     }
 
@@ -140,7 +140,7 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         IIdentity[] calldata _identities,
         uint16[] calldata _countries
     ) external virtual {
-        _authorizeIdentityUpdate();
+        _authorizeIdentityUpdate(this.registerIdentity.selector);
         require(
             _userAddresses.length == _identities.length && _userAddresses.length == _countries.length,
             ERC3643ErrorsLib.ArrayLengthMismatch()
@@ -185,9 +185,9 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         return _topicsRegistry();
     }
 
-    /// @dev Authorization hook for the identity-writing functions. Left abstract on purpose: the
-    ///  standard specifies no access model.
-    function _authorizeIdentityUpdate() internal virtual;
+    /// @dev Reverts unless `_msgSender()` may call `selector`. `batchRegisterIdentity` passes
+    ///  `registerIdentity`. Left abstract: the standard defines no access model.
+    function _authorizeIdentityUpdate(bytes4 selector) internal virtual;
 
     /// @dev Authorization hook for the three collaborator setters. Receives the new address so derived
     ///  contracts can apply per-target checks (interface support, a shared authority).

@@ -140,7 +140,7 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @dev Authorization hook for binding. Receives the token address so derived contracts can apply
     ///  the "an unbound compliance accepts a bind from the token itself" policy.
-    ///  Left abstract on purpose: the standard specifies no access model.
+    ///  Left abstract: the standard defines no access model.
     function _authorizeTokenBinding(address token) internal virtual;
 
     /// @dev Authorization hook for unbinding. Separate from `_authorizeTokenBinding` because the two
