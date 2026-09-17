@@ -139,15 +139,15 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.IRS_BINDER);
 
         // ------ OWNER role ------
+        functions = new bytes4[](1);
         functions[0] = IdentityRegistryStorage.unbindIdentityRegistry.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        functions = new bytes4[](4);
+        functions = new bytes4[](3);
         functions[0] = IERC3643IdentityRegistryStorage.addIdentityToStorage.selector;
         functions[1] = IdentityRegistryStorage.modifyStoredIdentity.selector;
-        functions[2] = IERC3643IdentityRegistryStorage.modifyStoredInvestorCountry.selector;
-        functions[3] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
+        functions[2] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.AGENT);
     }
 
@@ -168,12 +168,11 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        functions = new bytes4[](5);
+        functions = new bytes4[](4);
         functions[0] = IERC3643IdentityRegistry.registerIdentity.selector;
         functions[1] = IERC3643IdentityRegistry.batchRegisterIdentity.selector;
         functions[2] = IERC3643IdentityRegistry.updateIdentity.selector;
-        functions[3] = IERC3643IdentityRegistry.updateCountry.selector;
-        functions[4] = IERC3643IdentityRegistry.deleteIdentity.selector;
+        functions[3] = IERC3643IdentityRegistry.deleteIdentity.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.AGENT);
     }
 

@@ -81,6 +81,7 @@ import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -268,6 +269,20 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         emit EventsLib.ForcedTransfer(_msgSender());
         _getCompliance().transferred(from, to, amount);
         return true;
+    }
+
+    /// @dev The new wallet is registered only when it resolves nowhere, so a wallet the global registry
+    ///  already binds keeps following that binding rather than a local copy. Only local entries can be
+    ///  deleted. Country is not stored, so 0.
+    function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainID) internal override {
+        IERC3643IdentityRegistry registry = _getIdentityRegistry();
+
+        if (!registry.contains(newWallet)) {
+            registry.registerIdentity(newWallet, IIdentity(investorOnchainID), 0);
+        }
+        if (ITREXRegistry(address(registry)).isLocallyRegistered(lostWallet)) {
+            registry.deleteIdentity(lostWallet);
+        }
     }
 
     /// @inheritdoc ERC3643Token

@@ -78,6 +78,7 @@ import { ERC3643TrustedIssuersRegistry } from "../../ERC-3643/base/ERC3643Truste
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
+import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
 /// @title TREXRegistry
@@ -184,6 +185,29 @@ contract TREXRegistry is
         override(ERC3643IdentityRegistry, IERC3643IdentityRegistry)
     {
         revert ErrorsLib.Deprecated();
+    }
+
+    /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev DEPRECATED: countries are now managed with claims at identity level.
+    function updateCountry(address, uint16) external pure override(ERC3643IdentityRegistry, IERC3643IdentityRegistry) {
+        revert ErrorsLib.Deprecated();
+    }
+
+    /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev DEPRECATED: this registry stores no country; always returns 0. Read the effective value
+    ///  from the country module bound to the token's `ModularCompliance`.
+    function investorCountry(address)
+        external
+        pure
+        override(ERC3643IdentityRegistry, IERC3643IdentityRegistry)
+        returns (uint16)
+    {
+        return 0;
+    }
+
+    /// @inheritdoc ITREXRegistry
+    function isLocallyRegistered(address userAddress) external view override returns (bool) {
+        return IIdentityRegistryStorage(address(_identityStorage())).isLocallyRegistered(userAddress);
     }
 
     /// @inheritdoc ITREXRegistry

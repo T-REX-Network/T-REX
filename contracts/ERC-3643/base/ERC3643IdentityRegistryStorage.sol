@@ -133,7 +133,7 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
     function linkedIdentityRegistries() external view virtual returns (address[] memory) {
-        return _erc3643IdentityRegistryStorageStorage().identityRegistries.values();
+        return _linkedIdentityRegistries();
     }
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
@@ -163,9 +163,16 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
             address(s.identities[userAddress].identityContract) == address(0), ERC3643ErrorsLib.AddressAlreadyStored()
         );
         s.identities[userAddress].identityContract = userIdentity;
-        s.identities[userAddress].investorCountry = country;
         emit IdentityStored(userAddress, userIdentity);
-        // The standard store event omits the country; emit the same event `modifyStoredInvestorCountry` uses.
+        // The standard store event omits the country, so the country is recorded through the same path
+        // `modifyStoredInvestorCountry` uses and reported with the same event.
+        _setStoredInvestorCountry(userAddress, country);
+    }
+
+    /// @dev Records a wallet's country and reports it. Separate from the write paths that call it so a
+    ///  deployment that keeps no country can drop both the write and the event in one override.
+    function _setStoredInvestorCountry(address userAddress, uint16 country) internal virtual {
+        _erc3643IdentityRegistryStorageStorage().identities[userAddress].investorCountry = country;
         emit CountryModified(userAddress, country);
     }
 
@@ -186,8 +193,7 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
         require(
             address(s.identities[userAddress].identityContract) != address(0), ERC3643ErrorsLib.AddressNotYetStored()
         );
-        s.identities[userAddress].investorCountry = country;
-        emit CountryModified(userAddress, country);
+        _setStoredInvestorCountry(userAddress, country);
     }
 
     /// @dev Deletes a wallet's stored identity record.
@@ -208,8 +214,10 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
             ERC3643ErrorsLib.MaxIRByIRSReached(MAX_IDENTITY_REGISTRIES)
         );
 
-        s.identityRegistries.add(identityRegistry);
-        emit IdentityRegistryBound(identityRegistry);
+        // Rebinding an already-bound registry changes nothing, so it stays silent.
+        if (s.identityRegistries.add(identityRegistry)) {
+            emit IdentityRegistryBound(identityRegistry);
+        }
     }
 
     /// @dev Removes a registry from the bound set.
@@ -219,6 +227,12 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
         require(s.identityRegistries.remove(identityRegistry), ERC3643ErrorsLib.IdentityRegistryNotStored());
 
         emit IdentityRegistryUnbound(identityRegistry);
+    }
+
+    /// @dev Reads the bound registries, separate from the external getter so derived contracts can
+    ///  consult them without an external call.
+    function _linkedIdentityRegistries() internal view virtual returns (address[] memory) {
+        return _erc3643IdentityRegistryStorageStorage().identityRegistries.values();
     }
 
     /// @dev Reads the stored identity of a wallet, separate from the external getter so derived

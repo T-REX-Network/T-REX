@@ -115,7 +115,7 @@ interface IERC3643IdentityRegistryStorage {
      *  @notice Adds an identity registry to the list of identityRegistries linked to the storage contract.
      *  Gated by the IRS_BINDER role (see AccessManagerSetupLib): a transient role the TREXFactory
      *  self-grants for the bind window when attaching an IR onto a reused IRS, and revokes immediately.
-     *  cannot bind more than 300 IR to 1 IRS.
+     *  The number of bound registries is capped (see `MAX_BOUND_REGISTRIES` on the implementation).
      *
      *  @dev The bound set (`linkedIdentityRegistries`) is enumeration only, NOT authorization. Write
      *  access to the IRS (addIdentityToStorage / modify* / remove*) is gated solely by the AGENT role

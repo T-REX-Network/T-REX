@@ -223,11 +223,10 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         IAccessManager(accessManager).setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.OWNER);
 
         // ------ AGENT role ------
-        bytes4[] memory agentFunctions = new bytes4[](4);
+        bytes4[] memory agentFunctions = new bytes4[](3);
         agentFunctions[0] = IERC3643IdentityRegistry.updateIdentity.selector;
-        agentFunctions[1] = IERC3643IdentityRegistry.updateCountry.selector;
-        agentFunctions[2] = IERC3643IdentityRegistry.deleteIdentity.selector;
-        agentFunctions[3] = IERC3643IdentityRegistry.registerIdentity.selector;
+        agentFunctions[1] = IERC3643IdentityRegistry.deleteIdentity.selector;
+        agentFunctions[2] = IERC3643IdentityRegistry.registerIdentity.selector;
         IAccessManager(accessManager).setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.AGENT);
     }
 
