@@ -97,8 +97,6 @@ library MessageTypesLib {
     /// @dev Body of a `SETTLEMENT_NOTIFICATION`: a satellite reporting that one leg of a validation executed.
     struct SettlementNotification {
         uint256 validationId;
-        /// Canonical reference-chain asset address, must match the validation.
-        address token;
         /// ERC-7930; empty on the mint leg.
         bytes from;
         /// ERC-7930; empty on the burn leg.

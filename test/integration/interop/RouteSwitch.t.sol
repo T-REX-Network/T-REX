@@ -50,7 +50,7 @@ contract RouteSwitchTest is InteropSuiteTest {
 
     function _settlementFrom(ERC7786GatewayMock gateway, uint256 validationId) private returns (uint256) {
         return _liteSends(
-            gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, token, POLYGON, amount))
+            gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount))
         );
     }
 
@@ -58,8 +58,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         vm.expectCall(
             compliance,
             abi.encodeCall(
-                ISettlementHandler.handleSettlement,
-                (satellite, _sameChainSettlement(validationId, token, POLYGON, amount))
+                ISettlementHandler.handleSettlement, (satellite, _sameChainSettlement(validationId, POLYGON, amount))
             )
         );
     }
@@ -99,7 +98,7 @@ contract RouteSwitchTest is InteropSuiteTest {
             oldGateway,
             token,
             MessageTypesLib.encodeSettlement(
-                _settlement(inFlight, token, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From")), "", amount)
+                _settlement(inFlight, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From")), "", amount)
             )
         );
         uint256 replayOnNewRoute = _settlementFrom(newGateway, inFlight);

@@ -137,7 +137,7 @@ contract MessageTypesLibUnitTest is Test {
 
     function testSettlementRoundTrip() public view {
         MessageTypesLib.SettlementNotification memory n = MessageTypesLib.SettlementNotification({
-            validationId: 7, token: address(0xBEEF), from: hex"0001000001890114", to: "", amount: 42
+            validationId: 7, from: hex"0001000001890114", to: "", amount: 42
         });
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
@@ -146,7 +146,6 @@ contract MessageTypesLibUnitTest is Test {
 
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION));
         assertEq(back.validationId, n.validationId);
-        assertEq(back.token, n.token);
         assertEq(back.from, n.from);
         assertEq(back.to, n.to);
         assertEq(back.amount, n.amount);

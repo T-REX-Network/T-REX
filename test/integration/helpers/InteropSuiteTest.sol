@@ -59,23 +59,21 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return _queue(gateway, address(_token), _token, payload);
     }
 
-    function _settlement(uint256 validationId, Token _token, bytes memory from, bytes memory to, uint256 amount)
+    function _settlement(uint256 validationId, bytes memory from, bytes memory to, uint256 amount)
         internal
         pure
         returns (MessageTypesLib.SettlementNotification memory)
     {
-        return MessageTypesLib.SettlementNotification({
-            validationId: validationId, token: address(_token), from: from, to: to, amount: amount
-        });
+        return
+            MessageTypesLib.SettlementNotification({ validationId: validationId, from: from, to: to, amount: amount });
     }
 
-    function _sameChainSettlement(uint256 validationId, Token _token, uint256 chainId, uint256 amount)
+    function _sameChainSettlement(uint256 validationId, uint256 chainId, uint256 amount)
         internal
         returns (MessageTypesLib.SettlementNotification memory)
     {
         return _settlement(
             validationId,
-            _token,
             InteroperableAddress.formatEvmV1(chainId, makeAddr("SatelliteFrom")),
             InteroperableAddress.formatEvmV1(chainId, makeAddr("SatelliteTo")),
             amount

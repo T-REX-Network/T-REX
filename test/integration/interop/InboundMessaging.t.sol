@@ -41,7 +41,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     }
 
     function _settlementPayload() private returns (bytes memory) {
-        return MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, token, POLYGON, amount));
+        return MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount));
     }
 
     function _peerSendsSettlement() private returns (uint256) {
@@ -62,7 +62,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /// @dev Same-chain transfer: one notification with real `from` and `to`, forwarded as decoded.
     function testOneLegSettlementReachesTheBoundComplianceIntact() public {
-        MessageTypesLib.SettlementNotification memory n = _sameChainSettlement(validationId, token, POLYGON, amount);
+        MessageTypesLib.SettlementNotification memory n = _sameChainSettlement(validationId, POLYGON, amount);
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(n));
 
         vm.expectCall(compliance, abi.encodeCall(ISettlementHandler.handleSettlement, (originChain, n)));
@@ -82,8 +82,8 @@ contract InboundMessagingTest is InteropSuiteTest {
         bytes memory from = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From"));
         bytes memory to = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("To"));
 
-        MessageTypesLib.SettlementNotification memory burnLeg = _settlement(validationId, token, from, "", amount);
-        MessageTypesLib.SettlementNotification memory mintLeg = _settlement(validationId, token, "", to, amount);
+        MessageTypesLib.SettlementNotification memory burnLeg = _settlement(validationId, from, "", amount);
+        MessageTypesLib.SettlementNotification memory mintLeg = _settlement(validationId, "", to, amount);
 
         uint256 burnIndex = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(burnLeg));
         uint256 mintIndex = _liteSends(optimismGateway, token, MessageTypesLib.encodeSettlement(mintLeg));
@@ -104,7 +104,6 @@ contract InboundMessagingTest is InteropSuiteTest {
     function testSingleLegSettlementWhenOneSideIsTheReferenceChain() public {
         MessageTypesLib.SettlementNotification memory leg = _settlement(
             validationId,
-            token,
             InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From")),
             InteroperableAddress.formatEvmV1(block.chainid, makeAddr("NativeTo")),
             amount
@@ -128,7 +127,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /// @dev The compliance's entry point belongs to the token alone.
     function testOnlyTheBoundTokenMayHandASettlementToTheCompliance() public {
-        MessageTypesLib.SettlementNotification memory n = _sameChainSettlement(validationId, token, POLYGON, amount);
+        MessageTypesLib.SettlementNotification memory n = _sameChainSettlement(validationId, POLYGON, amount);
 
         vm.expectRevert(ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
         vm.prank(impostor);
