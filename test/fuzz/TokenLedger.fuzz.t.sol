@@ -44,13 +44,15 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
     }
 
     /// @dev One movement per step: 0 mint, 1 burn, 2 transfer, 3 forced transfer, 4 freeze, 5 delegate out,
-    ///      6 recall, 7 bridged transfer. Every call is bounded to the available position, and a revert is
-    ///      tolerated: the property is about the state after whatever did apply.
+    ///      6 recall, 7 bridged transfer, 8 settle from native, 9 settle to native. The two settlements draw
+    ///      their native side and their satellite side from independent seeds, so they cross identities. Every
+    ///      call is bounded to the available position, and a revert is tolerated: the property is about the
+    ///      state after whatever did apply.
     function _apply(uint8 op, uint8 a, uint8 b, uint128 rawAmount) internal {
         uint256 from = a % actors.length;
         uint256 to = b % actors.length;
         uint256 amount = rawAmount;
-        uint8 kind = op % 8;
+        uint8 kind = op % 10;
         if (kind == 2) {
             vm.prank(actors[from]);
             try token.transfer(actors[to], amount % (token.freeBalanceOf(actors[from]) + 1)) { } catch { }
@@ -75,9 +77,19 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
                 satellites[from], actors[from], amount % (token.bridgedBalanceOf(satellites[from]) + 1)
             ) { }
                 catch { }
-        } else {
+        } else if (kind == 7) {
             try ledger.bridgedTransfer(
                 satellites[from], satellites[to], amount % (token.bridgedBalanceOf(satellites[from]) + 1), op
+            ) { }
+                catch { }
+        } else if (kind == 8) {
+            try ledger.settleFromNative(
+                actors[from], satellites[to], amount % (token.freeBalanceOf(actors[from]) + 1), op
+            ) { }
+                catch { }
+        } else {
+            try ledger.settleToNative(
+                satellites[from], actors[to], amount % (token.bridgedBalanceOf(satellites[from]) + 1), op
             ) { }
                 catch { }
         }
@@ -159,6 +171,33 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         assertEq(token.totalSupply(), mintAmount);
     }
 
+    /// @dev A settlement out and a settlement back for the same amount is the identity on every bucket, whichever
+    ///      identities the two legs name: only the wallet the position sits on changed in between.
+    function testFuzz_settleOutAndBackIsTheIdentity(uint128 mintAmount, uint128 settled, uint128 frozen) public {
+        mintAmount = uint128(bound(mintAmount, 1, 1e30));
+        frozen = uint128(bound(frozen, 0, mintAmount));
+        settled = uint128(bound(settled, 0, mintAmount - frozen));
+
+        vm.startPrank(agent);
+        token.mint(alice, mintAmount);
+        token.freezePartialTokens(alice, frozen);
+        // the counterparty wallet is bob's, so the leg crosses identities in both directions
+        ledger.settleFromNative(alice, satellites[1], settled, 1);
+
+        assertEq(token.balanceOf(alice), mintAmount - settled, "balance after settling out");
+        assertEq(token.bridgedBalanceOf(satellites[1]), settled, "bridged after settling out");
+        assertEq(token.totalSupply(), mintAmount, "supply after settling out");
+
+        ledger.settleToNative(satellites[1], alice, settled, 2);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(alice), mintAmount, "balance after settling back");
+        assertEq(token.getFrozenTokens(alice), frozen, "frozen after settling back");
+        assertEq(token.bridgedBalanceOf(satellites[1]), 0, "bridged after settling back");
+        assertEq(token.totalBridged(), 0, "bridged total after settling back");
+        assertEq(token.totalSupply(), mintAmount, "supply after settling back");
+    }
+
     function testFuzz_paddedEnvelopeReachesNoTransition(bytes memory suffix, uint128 amount) public {
         vm.assume(suffix.length > 0);
         bytes memory padded = abi.encodePacked(satellites[0], suffix);
@@ -176,6 +215,10 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         ledger.bridgedTransfer(padded, satellites[1], amount % 500, 1);
         vm.expectRevert(expected);
         ledger.bridgedTransfer(satellites[0], padded, amount % 500, 1);
+        vm.expectRevert(expected);
+        ledger.settleFromNative(alice, padded, amount % 500, 1);
+        vm.expectRevert(expected);
+        ledger.settleToNative(padded, alice, amount % 500, 1);
         vm.stopPrank();
 
         assertEq(token.bridgedBalanceOf(satellites[0]), 500);

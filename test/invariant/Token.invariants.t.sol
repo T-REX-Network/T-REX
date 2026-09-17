@@ -25,7 +25,8 @@ import { TokenHandler } from "./handlers/TokenHandler.sol";
 ///   INV-5  no transfer ever succeeded while paused                    (pause gate holds)
 ///   INV-6  no successful transfer landed on an unverified recipient   (eligibility gate holds)
 ///   INV-7  totalSupply() == Σ free + Σ frozen + Σ bridged             (conservation across buckets)
-///   INV-8  totalBridged() == ghostBridgedTotal == Σ bridgedBalanceOf  (bridged total tracks the positions)
+///   INV-8  totalBridged() == ghostBridgedTotal == Σ bridgedBalanceOf  (bridged total tracks the positions,
+///          across every transition that crosses the native boundary: delegation, recall and both settlements)
 contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
     uint256 internal constant SATELLITE_CHAIN_A = 8453;
@@ -63,7 +64,7 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
         // Only fuzz the handler's transitions.
         targetContract(address(handler));
-        bytes4[] memory selectors = new bytes4[](11);
+        bytes4[] memory selectors = new bytes4[](13);
         selectors[0] = TokenHandler.mint.selector;
         selectors[1] = TokenHandler.burn.selector;
         selectors[2] = TokenHandler.transfer.selector;
@@ -75,6 +76,8 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         selectors[8] = TokenHandler.delegateOut.selector;
         selectors[9] = TokenHandler.recall.selector;
         selectors[10] = TokenHandler.bridgedTransfer.selector;
+        selectors[11] = TokenHandler.settleFromNative.selector;
+        selectors[12] = TokenHandler.settleToNative.selector;
         targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
 
         // The handler pranks `agent` for restricted calls; exclude the named privileged addresses as senders
@@ -153,7 +156,8 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         assertEq(token.balanceOf(address(token)), 0, "INV-7 the token holds no escrow");
     }
 
-    /// INV-8: the bridged total is the sum of the bridged positions and matches the external model.
+    /// INV-8: the bridged total is the sum of the bridged positions and matches the external model, whichever
+    /// transition moved it: a delegation-out, a recall, or either native-side settlement.
     function invariant_bridgedTotalMatchesPositions() public view {
         (,, uint256 bridgedSum) = _bucketSums();
         assertEq(token.totalBridged(), handler.ghostBridgedTotal(), "INV-8 bridged total drifted from the model");
@@ -172,6 +176,8 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         console.log("delegateOut    ", handler.callsDelegateOut());
         console.log("recall         ", handler.callsRecall());
         console.log("bridgedTransfer", handler.callsBridgedTransfer());
+        console.log("settleFromNative", handler.callsSettleFromNative());
+        console.log("settleToNative ", handler.callsSettleToNative());
     }
 
 }

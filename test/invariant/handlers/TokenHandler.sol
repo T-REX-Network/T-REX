@@ -24,7 +24,7 @@ contract TokenHandler is Test {
     // ----- ghost state -----
     uint256 public ghostMinted; // total ever minted via this handler
     uint256 public ghostBurned; // total ever burned via this handler
-    uint256 public ghostBridgedTotal; // delegated minus recalled
+    uint256 public ghostBridgedTotal; // every transition that moves a position across the native boundary
     bool public pausedTransferLeak; // set true if a transfer ever succeeded while paused (must stay false)
     bool public unverifiedRecipientLeak; // set true if a successful transfer landed on an unverified recipient
 
@@ -39,6 +39,8 @@ contract TokenHandler is Test {
     uint256 public callsDelegateOut;
     uint256 public callsRecall;
     uint256 public callsBridgedTransfer;
+    uint256 public callsSettleFromNative;
+    uint256 public callsSettleToNative;
 
     constructor(TokenLedgerHarness token_, address agent_, address[] memory actors_, bytes[][] memory satellites_) {
         token = token_;
@@ -182,6 +184,32 @@ contract TokenHandler is Test {
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
         vm.prank(agent);
         try token.bridgedTransfer(from, to, amount, validationId) { } catch { }
+    }
+
+    /// @dev The native side and the satellite side come from independent seeds, so the leg crosses identities.
+    function settleFromNative(uint256 nativeSeed, uint256 walletActorSeed, uint256 walletSeed, uint256 amount)
+        external
+    {
+        callsSettleFromNative++;
+        address from = actors[_actor(nativeSeed)];
+        bytes memory to = _satellite(_actor(walletActorSeed), walletSeed);
+        amount = bound(amount, 0, token.freeBalanceOf(from));
+        vm.prank(agent);
+        try token.settleFromNative(from, to, amount, nativeSeed) {
+            ghostBridgedTotal += amount;
+        } catch { }
+    }
+
+    /// @dev The mirror: a satellite position lands on another identity's native wallet.
+    function settleToNative(uint256 walletActorSeed, uint256 walletSeed, uint256 nativeSeed, uint256 amount) external {
+        callsSettleToNative++;
+        bytes memory from = _satellite(_actor(walletActorSeed), walletSeed);
+        address to = actors[_actor(nativeSeed)];
+        amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        vm.prank(agent);
+        try token.settleToNative(from, to, amount, nativeSeed) {
+            ghostBridgedTotal -= amount;
+        } catch { }
     }
 
     // ------------------------------------------------------------------
