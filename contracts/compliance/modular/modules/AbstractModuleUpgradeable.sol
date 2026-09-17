@@ -216,7 +216,9 @@ abstract contract AbstractModuleUpgradeable is
      *  @dev See {IModule-commitSlot}.
      *  Default no-op: a module overrides it only when it declares `SLOTS`.
      */
-    function commitSlot(uint256, uint256) external virtual onlyComplianceCall { }
+    function commitSlot(uint256, uint256) external virtual onlyComplianceCall returns (bool) {
+        return false;
+    }
 
     /**
      *  @dev See {IModule-releaseSlot}.

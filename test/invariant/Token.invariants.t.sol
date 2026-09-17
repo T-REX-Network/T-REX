@@ -25,8 +25,9 @@ import { TokenHandler } from "./handlers/TokenHandler.sol";
 ///   INV-5  no transfer ever succeeded while paused                    (pause gate holds)
 ///   INV-6  no successful transfer landed on an unverified recipient   (eligibility gate holds)
 ///   INV-7  totalSupply() == Σ free + Σ frozen + Σ bridged             (conservation across buckets)
-///   INV-8  totalBridged() == ghostBridgedTotal == Σ bridgedBalanceOf  (bridged total tracks the positions,
-///          across every transition that crosses the native boundary: delegation, recall and both settlements)
+///   INV-8  totalBridged() == ghostBridgedTotal == Σ bridgedBalanceOf + totalInTransit  (bridged total tracks
+///          the positions plus the holds, across every transition that crosses the native boundary:
+///          delegation, recall, both settlements and an in-transit hold)
 contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
     uint256 internal constant SATELLITE_CHAIN_A = 8453;
@@ -64,7 +65,7 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
         // Only fuzz the handler's transitions.
         targetContract(address(handler));
-        bytes4[] memory selectors = new bytes4[](13);
+        bytes4[] memory selectors = new bytes4[](15);
         selectors[0] = TokenHandler.mint.selector;
         selectors[1] = TokenHandler.burn.selector;
         selectors[2] = TokenHandler.transfer.selector;
@@ -78,6 +79,8 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         selectors[10] = TokenHandler.bridgedTransfer.selector;
         selectors[11] = TokenHandler.settleFromNative.selector;
         selectors[12] = TokenHandler.settleToNative.selector;
+        selectors[13] = TokenHandler.holdInTransit.selector;
+        selectors[14] = TokenHandler.settleHeld.selector;
         targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
 
         // The handler pranks `agent` for restricted calls; exclude the named privileged addresses as senders
@@ -149,19 +152,24 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         assertEq(handler.unverifiedRecipientLeak(), false, "INV-6 unverified recipient received tokens");
     }
 
-    /// INV-7: the supply is conserved across the free, frozen and bridged buckets.
+    /// INV-7: the supply is conserved across the free, frozen, bridged and in-transit buckets.
     function invariant_supplyIsConservedAcrossBuckets() public view {
         (uint256 freeSum, uint256 frozenSum, uint256 bridgedSum) = _bucketSums();
-        assertEq(freeSum + frozenSum + bridgedSum, token.totalSupply(), "INV-7 buckets do not sum to the supply");
+        assertEq(
+            freeSum + frozenSum + bridgedSum + token.totalInTransit(),
+            token.totalSupply(),
+            "INV-7 buckets do not sum to the supply"
+        );
         assertEq(token.balanceOf(address(token)), 0, "INV-7 the token holds no escrow");
     }
 
-    /// INV-8: the bridged total is the sum of the bridged positions and matches the external model, whichever
-    /// transition moved it: a delegation-out, a recall, or either native-side settlement.
+    /// INV-8: the bridged total is the bridged positions plus the in-transit holds, and matches the external
+    /// model, whichever transition moved it: a delegation-out, a recall, either native-side settlement, or a hold.
     function invariant_bridgedTotalMatchesPositions() public view {
         (,, uint256 bridgedSum) = _bucketSums();
         assertEq(token.totalBridged(), handler.ghostBridgedTotal(), "INV-8 bridged total drifted from the model");
-        assertEq(token.totalBridged(), bridgedSum, "INV-8 bridged total != bridged sum");
+        assertEq(token.totalInTransit(), handler.ghostInTransit(), "INV-8 in-transit total drifted from the model");
+        assertEq(token.totalBridged(), bridgedSum + token.totalInTransit(), "INV-8 bridged total != positions + holds");
     }
 
     /// @notice Prints how often each transition fired (visible with `forge test -vv`).
@@ -178,6 +186,8 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         console.log("bridgedTransfer", handler.callsBridgedTransfer());
         console.log("settleFromNative", handler.callsSettleFromNative());
         console.log("settleToNative ", handler.callsSettleToNative());
+        console.log("holdInTransit  ", handler.callsHoldInTransit());
+        console.log("settleHeld     ", handler.callsSettleHeld());
     }
 
 }

@@ -120,6 +120,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         mapping(bytes32 walletKey => uint256) bridgedBalance;
         /// @dev Sum of every bridged position, kept so `totalSupply` counts it in O(1).
         uint256 totalBridged;
+        /// @dev Amounts a satellite burned for a cross-chain validation whose mint leg has not landed, keyed by
+        ///  the validation. Debited from the sender's position, still counted in `totalBridged`, still owned by
+        ///  the sender the validation names.
+        mapping(uint256 validationId => uint256) inTransit;
+        /// @dev Sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
+        uint256 totalInTransit;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.Token")) - 1)) & ~bytes32(uint256(0xff));
@@ -302,6 +308,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         _bridgedTransfer(from, to, amount, validationId);
     }
 
+    /// @inheritdoc IToken
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external {
+        require(_msgSender() == address(_tokenStorage().compliance), ErrorsLib.OnlyBoundCompliance());
+        _holdInTransit(from, amount, validationId);
+    }
+
     /* ----- Ledger Views ----- */
 
     /// @inheritdoc IERC20
@@ -335,6 +347,16 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /// @inheritdoc IToken
     function totalBridged() external view returns (uint256) {
         return _tokenStorage().totalBridged;
+    }
+
+    /// @inheritdoc IToken
+    function inTransitOf(uint256 validationId) external view returns (uint256) {
+        return _tokenStorage().inTransit[validationId];
+    }
+
+    /// @inheritdoc IToken
+    function totalInTransit() external view returns (uint256) {
+        return _tokenStorage().totalInTransit;
     }
 
     /// @inheritdoc IERC20Metadata
@@ -699,14 +721,39 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
     }
 
+    /// @dev Takes `amount` out of `fromWallet`'s bridged position and holds it against `validationId`: the burn
+    ///  leg of a cross-chain validation landed, the mint leg has not. The amount stays bridged and stays the
+    ///  sender's; only the wallet no longer holds it, so nothing can be issued or recalled against tokens the
+    ///  satellite already burned. One hold per validation.
+    function _holdInTransit(bytes memory fromWallet, uint256 amount, uint256 validationId) internal {
+        bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
+
+        TokenStorage storage s = _tokenStorage();
+        require(s.inTransit[validationId] == 0, ErrorsLib.TransitAlreadyHeld(validationId));
+        _debitBridged(s, fromWallet, fromKey, amount);
+        s.inTransit[validationId] = amount;
+        s.totalInTransit += amount;
+
+        emit EventsLib.HeldInTransit(fromKey, validationId, fromWallet, amount);
+    }
+
     /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
     ///  touch: `from` down, `to` up, nothing native. `validationId` is the validation the settlement consumed.
+    ///  When its burn leg already moved the amount in transit, the hold is what `to` is credited from, and it
+    ///  must be the settled amount exactly.
     function _bridgedTransfer(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal {
         bytes32 fromKey = WalletKeyLib.satelliteKey(from);
         bytes32 toKey = WalletKeyLib.satelliteKey(to);
 
         TokenStorage storage s = _tokenStorage();
-        _debitBridged(s, from, fromKey, amount);
+        uint256 held = s.inTransit[validationId];
+        if (held != 0) {
+            require(held == amount, ErrorsLib.TransitAmountMismatch(validationId, held, amount));
+            delete s.inTransit[validationId];
+            s.totalInTransit -= amount;
+        } else {
+            _debitBridged(s, from, fromKey, amount);
+        }
         s.bridgedBalance[toKey] += amount;
 
         emit EventsLib.BridgedTransfer(fromKey, toKey, validationId, from, to, amount);

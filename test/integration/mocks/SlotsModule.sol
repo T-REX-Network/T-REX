@@ -22,6 +22,8 @@ contract SlotsModule is AbstractModuleUpgradeable {
     /// Zero means no cap.
     mapping(address compliance => uint256) internal _cap;
     mapping(address compliance => mapping(bytes32 toKey => uint256)) internal _held;
+    /// @dev What the module holds in total, so a commit can say whether the state it leaves behind fits the cap.
+    mapping(address compliance => uint256) internal _totalHeld;
     mapping(address compliance => mapping(uint256 validationId => Reservation)) internal _reservations;
 
     uint256 public reserveCalls;
@@ -83,32 +85,48 @@ contract SlotsModule is AbstractModuleUpgradeable {
     {
         bytes32 toKey = WalletKeyLib.canonicalKey(to);
         _held[msg.sender][toKey] += amountMax;
+        _totalHeld[msg.sender] += amountMax;
         _reservations[msg.sender][validationId] = Reservation({ toKey: toKey, amount: amountMax });
         reserveCalls++;
         lastReservedId = validationId;
         lastReservedAmount = amountMax;
     }
 
-    function commitSlot(uint256 validationId, uint256 executedAmount) external virtual override onlyComplianceCall {
+    function commitSlot(uint256 validationId, uint256 executedAmount)
+        external
+        virtual
+        override
+        onlyComplianceCall
+        returns (bool breachesRule)
+    {
         Reservation memory reservation = _reservations[msg.sender][validationId];
+        bytes32 key = reservation.toKey;
         if (reservation.amount != 0) {
-            _held[msg.sender][reservation.toKey] =
-                _held[msg.sender][reservation.toKey] - reservation.amount + executedAmount;
+            _held[msg.sender][key] = _held[msg.sender][key] - reservation.amount + executedAmount;
+            _totalHeld[msg.sender] = _totalHeld[msg.sender] - reservation.amount + executedAmount;
             delete _reservations[msg.sender][validationId];
         } else {
             // No live reservation: a module bound after issuance, or a late reconciliation. The delta applies
             // anyway; the recipient is unknown here, so it lands on the committed-without-reservation key.
-            _held[msg.sender][bytes32(0)] += executedAmount;
+            key = bytes32(0);
+            _held[msg.sender][key] += executedAmount;
+            _totalHeld[msg.sender] += executedAmount;
         }
         commitCalls++;
         lastCommittedId = validationId;
         lastCommittedAmount = executedAmount;
+
+        // What the module can answer for: the commit landed, and the cap no longer fits what it now holds. A
+        // late commit that stacks on a live reservation is exactly the case the caller has to hear about.
+        uint256 cap = _cap[msg.sender];
+        breachesRule = cap != 0 && _totalHeld[msg.sender] > cap;
     }
 
     function releaseSlot(uint256 validationId) external virtual override onlyComplianceCall {
         Reservation memory reservation = _reservations[msg.sender][validationId];
         if (reservation.amount != 0) {
             _held[msg.sender][reservation.toKey] -= reservation.amount;
+            _totalHeld[msg.sender] -= reservation.amount;
             delete _reservations[msg.sender][validationId];
         }
         releaseCalls++;
@@ -146,6 +164,7 @@ contract SlotsOnlyModule is AbstractModuleUpgradeable {
     bytes public lastTo;
     uint256 public lastAmountMax;
     uint256 public lastExecutedAmount;
+    bool public breachOnCommit;
 
     function initialize() external initializer {
         __AbstractModule_init();
@@ -163,10 +182,21 @@ contract SlotsOnlyModule is AbstractModuleUpgradeable {
         lastAmountMax = amountMax;
     }
 
-    function commitSlot(uint256 validationId, uint256 executedAmount) external override onlyComplianceCall {
+    function commitSlot(uint256 validationId, uint256 executedAmount)
+        external
+        override
+        onlyComplianceCall
+        returns (bool)
+    {
         commitCalls++;
         lastValidationId = validationId;
         lastExecutedAmount = executedAmount;
+        return breachOnCommit;
+    }
+
+    /// @dev Lets a test drive the breach the compliance reads back from a commit.
+    function setBreachOnCommit(bool value) external {
+        breachOnCommit = value;
     }
 
     function releaseSlot(uint256 validationId) external override onlyComplianceCall {

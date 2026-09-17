@@ -11,6 +11,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { IToken } from "contracts/token/IToken.sol";
 import { Token } from "contracts/token/Token.sol";
 import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import { SlotsOnlyModule } from "test/integration/mocks/SlotsModule.sol";
@@ -48,6 +49,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
+        vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
@@ -88,12 +90,12 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.stateOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
     }
 
-    function test_statusOf_Success_WhenBurnConfirmedNeverDerivesExpired() public {
+    function test_statusOf_Success_WhenLegConfirmedNeverDerivesExpired() public {
         uint256 id = _issueCrossChainWithBurnLeg();
 
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
     }
 
     function test_statusOf_RevertWhen_IdWasNeverIssued() public {
@@ -201,7 +203,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         mc.discardExpiredValidations(_ids(id));
     }
 
-    function test_discardExpiredValidations_RevertWhen_BurnConfirmedWhateverTheClock() public {
+    function test_discardExpiredValidations_RevertWhen_LegConfirmedWhateverTheClock() public {
         uint256 id = _issueCrossChainWithBurnLeg();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
@@ -210,7 +212,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotDiscardable.selector,
                 id,
-                uint8(ITransferValidation.ValidationStatus.BurnConfirmed)
+                uint8(ITransferValidation.ValidationStatus.LegConfirmed)
             )
         );
         mc.discardExpiredValidations(_ids(id));
@@ -239,16 +241,13 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
     }
 
-    /// @dev A cross-chain validation whose burn leg landed: the real `BurnConfirmed`.
+    /// @dev A cross-chain validation whose burn leg landed: the real `LegConfirmed`.
     function _issueCrossChainWithBurnLeg() private returns (uint256 id) {
         vm.prank(aliceIdentity);
         id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
         vm.prank(token);
         mc.handleSettlement(
-            polygon,
-            MessageTypesLib.SettlementNotification({
-                validationId: id, token: token, from: fromSat, to: "", amount: 50
-            })
+            polygon, MessageTypesLib.SettlementNotification({ validationId: id, from: fromSat, to: "", amount: 50 })
         );
     }
 

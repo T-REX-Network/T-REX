@@ -158,7 +158,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         pure
         returns (MessageTypesLib.SettlementNotification memory)
     {
-        return _settlement(validationId, _token, from, "", amount);
+        return _settlement(validationId, from, "", amount);
     }
 
     /// @dev The mint leg of a cross-chain validation: `from` is empty, by convention.
@@ -167,7 +167,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         pure
         returns (MessageTypesLib.SettlementNotification memory)
     {
-        return _settlement(validationId, _token, "", to, amount);
+        return _settlement(validationId, "", to, amount);
     }
 
     function _burnProof(uint256 chainId, address burned, uint256 amount, address nativeWallet)

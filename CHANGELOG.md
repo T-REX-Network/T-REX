@@ -203,7 +203,7 @@ All notable changes to this project will be documented in this file.
     amount and MUST tolerate an id the module never reserved (bound after issuance, or a late
     reconciliation) by applying the delta anyway; a release undoes it entirely. `ModularCompliance`
     dispatches to declaring modules only, right after the record is written.
-  - `ITransferValidation.ValidationStatus` (`Pending`, `BurnConfirmed`, `Settled`, `Expired`,
+  - `ITransferValidation.ValidationStatus` (`Pending`, `LegConfirmed`, `Settled`, `Expired`,
     `Discarded`, `LateReconciled`) and `ValidationState` (status, the two per-leg consumption flags,
     the executed amount, the wallet the first of two legs carried), read through `statusOf` and
     `stateOf`. `Expired` is derived, never written: a stored `Pending` past `releaseAt`. Records and
@@ -215,18 +215,30 @@ All notable changes to this project will be documented in this file.
     `SettlementOutOfBounds`) and leaves the message deliverable. A same-chain movement, or one with a
     native side, settles on one leg carrying both wallets. A cross-chain movement takes two legs under
     one id, the burn leg with `to` empty from the sender's chain and the mint leg with `from` empty from
-    the recipient's chain: the first to arrive, whichever it is, pins the validation as `BurnConfirmed`
+    the recipient's chain: the first to arrive, whichever it is, pins the validation as `LegConfirmed`
     (`ValidationLegConfirmed`), the second must repeat its amount (`SettlementAmountMismatch`) and
-    settles the pair. A leg for a `Pending` validation settles whatever the clock says.
+    settles the pair. A first burn leg also takes the burned amount out of the sender's position into
+    transit on the token (`IToken.holdInTransit`, `HeldInTransit`), timely or late, so nothing can be
+    issued or recalled against tokens the satellite already burned; a first mint leg moves nothing and
+    the pair is applied atomically when the burn leg lands. A leg for a `Pending` validation settles
+    whatever the clock says.
   - `IToken.settleValidation(from, to, amount, validationId)`: the ledger entry, callable by the bound
     compliance only (`OnlyBoundCompliance`), routing by wallet shape to a delegation-out (native
-    sender), a recall (native recipient) or a bridged transfer. The ledger moves once per settled
-    validation; the burn leg alone moves nothing. Nothing locks a native sender at issuance: a native
-    leg whose free balance no longer covers the amount reverts and stays deliverable.
+    sender), a recall (native recipient) or a bridged transfer. A bridged transfer under an id that
+    holds an amount in transit credits the recipient from the hold, which must be the settled amount
+    exactly (`TransitAmountMismatch`), instead of debiting the sender again. Nothing locks a native
+    sender at issuance: a native leg whose free balance no longer covers the amount reverts and stays
+    deliverable.
+  - `IToken.holdInTransit(from, amount, validationId)`, `inTransitOf(validationId)` and
+    `totalInTransit()`: the in-transit bucket inside the bridged one. A hold debits the sender's
+    position, leaves `totalBridged` and `totalSupply` untouched, and is taken once per validation
+    (`TransitAlreadyHeld`). The sender named by the validation still owns the amount.
   - `VALIDATION_KEEPER`, administered by `AGENT_ADMIN`, over
     `discardExpiredValidations(uint256[])`: each id must be stored `Pending` and past `releaseAt`
     (`UnknownValidation`, `ValidationNotDiscardable`, `ValidationNotReleasable`); the batch is atomic.
-    A discard releases the slots and emits `ValidationDiscarded`; `BurnConfirmed` is never discardable.
+    A discard releases the slots and emits `ValidationDiscarded`; `LegConfirmed` is never discardable.
+    The role is restricted by design: `RolesLib` names the discard front-running vector a permissionless
+    keeper would open, against the liveness dependency a restricted one carries.
   - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the modules catch up
     through `commitSlot` with no live reservation, the status becomes `LateReconciled`,
     `LateReconciliation` fires and the leg's chain is paused for issuance until the manager unpauses
@@ -235,10 +247,10 @@ All notable changes to this project will be documented in this file.
     `ReplayedSettlement` and halts the whole token through its pause (`handleSettlement` returns
     `haltToken`); only `AGENT_PAUSER` lifts it through `unpause`. While the token is paused every
     settlement delivery reverts with `EnforcedPause` and stays deliverable.
-  - Events: `ValidationLegConfirmed`, `ValidationSettled`, `ValidationDiscarded`, `ReplayedSettlement`.
-    Errors: `OnlyBoundCompliance`, `UnknownValidation`, `ValidationNotDiscardable`,
+  - Events: `ValidationLegConfirmed`, `ValidationSettled`, `ValidationDiscarded`, `ReplayedSettlement`,
+    `HeldInTransit`. Errors: `OnlyBoundCompliance`, `UnknownValidation`, `ValidationNotDiscardable`,
     `ValidationNotReleasable`, `SettlementTokenMismatch`, `SettlementLegMismatch`,
-    `SettlementOutOfBounds`, `SettlementAmountMismatch`.
+    `SettlementOutOfBounds`, `SettlementAmountMismatch`, `TransitAlreadyHeld`, `TransitAmountMismatch`.
   - Test assets: `SlotsModule` (a max-balance-per-recipient counter over reservations),
     `SlotsOnlyModule`, and the settlement-leg builders on `InteropSuiteTest`.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
@@ -329,7 +341,8 @@ All notable changes to this project will be documented in this file.
   the three slot hooks), `type(IModularCompliance).interfaceId`, `type(ITREXRegistry).interfaceId`
   (the two wallet views), `type(ITransferValidation).interfaceId` (the lifecycle views and the keeper's
   discard), `type(ISettlementHandler).interfaceId` (`handleSettlement` now returns `haltToken`) and
-  `type(IToken).interfaceId` (`settleValidation`) all change. `ValidationRecord` gained three fields.
+  `type(IToken).interfaceId` (`settleValidation`, `holdInTransit` and the in-transit views) all change.
+  `ValidationRecord` gained three fields.
 - `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
   (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
   routing decision. Ordering is not preserved across a removal or a refresh.

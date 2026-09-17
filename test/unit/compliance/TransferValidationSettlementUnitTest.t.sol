@@ -57,6 +57,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
         vm.mockCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), "");
+        vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
         _bind(fromSat, aliceIdentity);
         _bind(nativeAlice, aliceIdentity);
         _bind(toSat, bobIdentity);
@@ -123,8 +124,10 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     // ==== late reconciliation Tests ====
 
-    function test_handleSettlement_Success_WhenADiscardedValidationReconcilesLate() public {
+    /// @notice A late settlement whose commit leaves the module in breach: recorded, warned, and the chain paused.
+    function test_handleSettlement_Success_WhenALateReconciliationBreachesARule() public {
         address slots = _bindSlotsModule();
+        SlotsOnlyModule(slots).setBreachOnCommit(true);
         uint256 id = _issue();
         _discard(id);
         assertEq(SlotsOnlyModule(slots).releaseCalls(), 1);
@@ -144,6 +147,23 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
         assertEq(mc.stateOf(id).executedAmount, 50);
         assertTrue(mc.isIssuancePaused(polygon));
+        assertEq(SlotsOnlyModule(slots).commitCalls(), 1);
+    }
+
+    /// @notice The same journey with nothing in breach: the warning is the whole record, issuance stays open.
+    function test_handleSettlement_Success_WhenADiscardedValidationReconcilesLate() public {
+        address slots = _bindSlotsModule();
+        uint256 id = _issue();
+        _discard(id);
+
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.LateReconciliation(id, polygon);
+        vm.prank(token);
+        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        assertFalse(halt);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertFalse(mc.isIssuancePaused(polygon), "a late delivery is cheap to force; pausing on it would be a DoS");
         assertEq(SlotsOnlyModule(slots).commitCalls(), 1);
     }
 
@@ -183,6 +203,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         uint256 id = _issueCrossChain();
         _discard(id);
 
+        vm.expectCall(token, abi.encodeCall(IToken.holdInTransit, (fromSat, 50, id)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
         vm.expectEmit(true, true, false, true, address(mc));
@@ -195,7 +216,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertTrue(state.fromLegConsumed);
         assertFalse(state.toLegConsumed);
         assertEq(state.executedAmount, 50);
-        assertTrue(mc.isIssuancePaused(polygon));
+        assertFalse(mc.isIssuancePaused(polygon), "a first leg commits nothing, so it breaches nothing");
         assertFalse(mc.isIssuancePaused(optimism));
         assertEq(SlotsOnlyModule(slots).commitCalls(), 0);
 
@@ -209,7 +230,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
-        assertTrue(mc.isIssuancePaused(optimism));
+        assertFalse(mc.isIssuancePaused(optimism), "the pair breached nothing on the way in");
     }
 
     function test_discardExpiredValidations_RevertWhen_ALateFirstLegLanded() public {
@@ -337,6 +358,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         address slots = _bindSlotsModule();
         uint256 id = _issueCrossChain();
 
+        vm.expectCall(token, abi.encodeCall(IToken.holdInTransit, (fromSat, 50, id)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
         vm.prank(token);
@@ -344,7 +366,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         assertFalse(halt);
         assertEq(SlotsOnlyModule(slots).commitCalls(), 0, "nothing committed on the first leg");
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
         ITransferValidation.ValidationState memory state = mc.stateOf(id);
         assertTrue(state.fromLegConsumed);
         assertFalse(state.toLegConsumed);
@@ -366,12 +388,13 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     function test_handleSettlement_Success_WhenTheMintLegLandsFirst() public {
         uint256 id = _issueCrossChain();
 
+        vm.expectCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, optimism, 60);
         vm.prank(token);
         mc.handleSettlement(optimism, _leg(id, "", toOptimism, 60));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
         ITransferValidation.ValidationState memory state = mc.stateOf(id);
         assertFalse(state.fromLegConsumed);
         assertTrue(state.toLegConsumed);
@@ -385,14 +408,14 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.stateOf(id).executedAmount, 60);
     }
 
-    function test_handleSettlement_Success_WhenBurnConfirmedNeverDerivesExpired() public {
+    function test_handleSettlement_Success_WhenLegConfirmedNeverDerivesExpired() public {
         uint256 id = _issueCrossChain();
         vm.prank(token);
         mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
 
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + OPTIMISM_WINDOW + 30 days);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
     }
 
     function test_handleSettlement_Success_WhenAConsumedLegOfTwoIsReplayed() public {
@@ -407,7 +430,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
 
         assertTrue(halt);
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
         assertFalse(mc.stateOf(id).toLegConsumed);
     }
 
@@ -420,7 +443,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementAmountMismatch.selector, id, 50, 51));
         mc.handleSettlement(optimism, _leg(id, "", toOptimism, 51));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.BurnConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
         assertFalse(mc.stateOf(id).toLegConsumed);
     }
 

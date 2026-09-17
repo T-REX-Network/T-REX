@@ -217,8 +217,9 @@ abstract contract TransferValidation is ITransferValidation {
     function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax) internal virtual;
 
     /// @dev Reconciles every `SLOTS` module to the exact amount a validation executed. Called on settlement, timely
-    ///  or late; a late one commits with no live reservation.
-    function _commitSlots(uint256 validationId, uint256 executedAmount) internal virtual;
+    ///  or late; a late one commits with no live reservation. Returns whether any module reports the state it now
+    ///  holds as breaching its rule, which is what makes a late reconciliation pause the chain.
+    function _commitSlots(uint256 validationId, uint256 executedAmount) internal virtual returns (bool breachesRule);
 
     /// @dev Undoes the reservation of a validation on every `SLOTS` module. Called when the keeper discards it.
     function _releaseSlots(uint256 validationId) internal virtual;
@@ -228,6 +229,10 @@ abstract contract TransferValidation is ITransferValidation {
 
     /// @dev Applies a settled validation to the ledger, through the token, once.
     function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal virtual;
+
+    /// @dev Takes the burned amount out of `from`'s position and holds it in transit, through the token, when
+    ///  the burn leg of a two-leg validation lands before the mint leg.
+    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal virtual;
 
     /* ----- Settings ----- */
 
@@ -294,22 +299,30 @@ abstract contract TransferValidation is ITransferValidation {
         bool consumed = leg == Leg.Mint ? state.toLegConsumed : state.fromLegConsumed;
         if (consumed) return _emergency(n.validationId, originChainKey);
 
-        // What remains is Pending, BurnConfirmed, or Discarded: a settled one has every leg consumed.
+        // What remains is Pending, LegConfirmed, or Discarded: a settled one has every leg consumed.
         bool late = state.status == ValidationStatus.Discarded;
+        // Only a settling leg commits the modules, so only one can report a breach; a first leg pins and holds.
+        bool breachesRule;
         if (leg == Leg.Single) {
             state.fromLegConsumed = true;
             state.toLegConsumed = true;
-            _settle(state, n.from, n.to, n, originChainKey, late);
+            breachesRule = _settle(state, n.from, n.to, n, originChainKey, late);
         } else if (leg == Leg.Burn) {
             state.fromLegConsumed = true;
-            if (state.toLegConsumed) _settleSecondLeg(state, n.from, state.legWallet, n, originChainKey, late);
-            else _confirmFirstLeg(state, n.from, n, originChainKey, late);
+            if (state.toLegConsumed) {
+                breachesRule = _settleSecondLeg(state, n.from, state.legWallet, n, originChainKey, late);
+            } else {
+                _confirmFirstLeg(state, n.from, true, n, originChainKey, late);
+            }
         } else {
             state.toLegConsumed = true;
-            if (state.fromLegConsumed) _settleSecondLeg(state, state.legWallet, n.to, n, originChainKey, late);
-            else _confirmFirstLeg(state, n.to, n, originChainKey, late);
+            if (state.fromLegConsumed) {
+                breachesRule = _settleSecondLeg(state, state.legWallet, n.to, n, originChainKey, late);
+            } else {
+                _confirmFirstLeg(state, n.to, false, n, originChainKey, late);
+            }
         }
-        if (late) _onLateReconciliation(n.validationId, originChainKey);
+        if (late) _onLateReconciliation(n.validationId, originChainKey, breachesRule);
     }
 
     /// @dev A leg is matched by the wallets it carries and the chain it comes from. A one-leg validation expects
@@ -334,17 +347,22 @@ abstract contract TransferValidation is ITransferValidation {
     }
 
     /// @dev The first of two legs, whichever it is: the amount and the wallet it carries are kept for the other
-    ///  one, and the validation is pinned. Nothing moves yet. A late first leg stays `Discarded`, its flag set.
+    ///  one, and the validation is pinned. A first burn leg is proof the sender's satellite position is gone, so
+    ///  the amount leaves that position and waits in transit on the ledger; a first mint leg moves nothing until
+    ///  the burn leg lands, and the pair is then applied atomically. A late first leg stays `Discarded`, its
+    ///  flag set, and holds all the same: the burn is final either way.
     function _confirmFirstLeg(
         ValidationState storage state,
         bytes calldata wallet,
+        bool burn,
         MessageTypesLib.SettlementNotification calldata n,
         bytes32 originChainKey,
         bool late
     ) private {
         state.executedAmount = n.amount;
         state.legWallet = wallet;
-        if (!late) state.status = ValidationStatus.BurnConfirmed;
+        if (!late) state.status = ValidationStatus.LegConfirmed;
+        if (burn) _holdOnToken(wallet, n.amount, n.validationId);
 
         emit EventsLib.ValidationLegConfirmed(n.validationId, originChainKey, n.amount);
     }
@@ -357,17 +375,18 @@ abstract contract TransferValidation is ITransferValidation {
         MessageTypesLib.SettlementNotification calldata n,
         bytes32 originChainKey,
         bool late
-    ) private {
+    ) private returns (bool breachesRule) {
         require(
             n.amount == state.executedAmount,
             ErrorsLib.SettlementAmountMismatch(n.validationId, state.executedAmount, n.amount)
         );
-        _settle(state, from, to, n, originChainKey, late);
+        breachesRule = _settle(state, from, to, n, originChainKey, late);
     }
 
     /// @dev Every expected leg is in: commit the modules at the exact amount, move the ledger once, mark, announce.
     ///  A late settlement commits with no live reservation, the slots having been released at discard; the module
-    ///  applies the delta anyway, and a resulting breach stands as the flagged exception.
+    ///  applies the delta anyway and says whether the state it now holds breaches its rule, which the caller needs
+    ///  to decide what a late reconciliation does about it.
     function _settle(
         ValidationState storage state,
         bytes memory from,
@@ -375,10 +394,10 @@ abstract contract TransferValidation is ITransferValidation {
         MessageTypesLib.SettlementNotification calldata n,
         bytes32 originChainKey,
         bool late
-    ) private {
+    ) private returns (bool breachesRule) {
         state.executedAmount = n.amount;
         state.status = late ? ValidationStatus.LateReconciled : ValidationStatus.Settled;
-        _commitSlots(n.validationId, n.amount);
+        breachesRule = _commitSlots(n.validationId, n.amount);
         _settleOnToken(from, to, n.amount, n.validationId);
 
         emit EventsLib.ValidationSettled(n.validationId, originChainKey, n.amount);
@@ -392,7 +411,7 @@ abstract contract TransferValidation is ITransferValidation {
 
     /* ----- Discard ----- */
 
-    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a `BurnConfirmed` one is
+    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a `LegConfirmed` one is
     ///  refused whatever the clock says. One refused id reverts the whole batch.
     function _discardExpired(uint256[] calldata validationIds) internal {
         ValidationStorage storage s = _validationStorage();

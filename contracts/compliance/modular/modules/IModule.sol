@@ -199,12 +199,15 @@ interface IModule {
      *  called only when the module declares `SLOTS`, when the validation settles; the reservation taken at
      *  `_amountMax`, if any, is replaced by `_executedAmount`. MUST tolerate an id it never reserved (a module
      *  bound after issuance, or a late reconciliation after `releaseSlot`) by applying the delta anyway, so every
-     *  subsequent compliance decision sees the true state; a resulting breach stands, it is never hidden
+     *  subsequent compliance decision sees the true state; a resulting breach stands, it is never hidden. It is
+     *  reported instead: the module returns whether the state it now holds fails its rule, which is how a late
+     *  reconciliation tells a harmless delay from one that broke a cap
      *  This function can be called ONLY by the compliance contract itself (_compliance)
      *  @param _validationId id of the settled validation
      *  @param _executedAmount exact amount transferred, inside the issued range
+     *  @return breachesRule whether the state the module holds after the commit fails its rule
      */
-    function commitSlot(uint256 _validationId, uint256 _executedAmount) external;
+    function commitSlot(uint256 _validationId, uint256 _executedAmount) external returns (bool breachesRule);
 
     /**
      *  @dev undoes the reservation of a validation entirely

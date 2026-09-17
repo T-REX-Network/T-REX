@@ -94,6 +94,10 @@ library ErrorsLib {
     error OnlyBoundCompliance();
     /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
+    /// @dev The validation already holds an amount in transit; a burn leg moves it once.
+    error TransitAlreadyHeld(uint256 validationId);
+    /// @dev The amount settled under the validation is not the one its burn leg put in transit.
+    error TransitAmountMismatch(uint256 validationId, uint256 held, uint256 amount);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();

@@ -70,7 +70,7 @@ pragma solidity 0.8.30;
  */
 interface ITransferValidation {
 
-    /// @dev Where a validation stands. Stored transitions: `Pending -> BurnConfirmed -> Settled`,
+    /// @dev Where a validation stands. Stored transitions: `Pending -> LegConfirmed -> Settled`,
     /// `Pending -> Settled`, `Pending -> Discarded -> LateReconciled`. `Expired` is never written: `statusOf`
     /// derives it for a `Pending` validation past `releaseAt` that the keeper has not discarded yet, since nothing
     /// transitions storage at a timestamp without a transaction.
@@ -79,8 +79,9 @@ interface ITransferValidation {
         Pending,
         /// Cross-chain only: one of the two legs was consumed, whichever it was (`stateOf` says which). Never
         /// discardable and never derived `Expired`: a consumed leg proves irreversible satellite execution, and a
-        /// mint stuck between two chains must not roll back the reservation.
-        BurnConfirmed,
+        /// mint stuck between two chains must not roll back the reservation. When the consumed leg is the burn
+        /// one, the amount already left the sender's position and waits in transit on the token.
+        LegConfirmed,
         /// Every expected leg received, slots committed, ledger updated.
         Settled,
         /// Derived: `Pending` and past `releaseAt`, not yet discarded.
@@ -242,12 +243,13 @@ interface ITransferValidation {
 
     /// @dev Discards expired validations in a batch: releases their slots on every module declaring `SLOTS`, so
     /// the next issuance is computed as if the pre-approved transfers never happened. Rollback is never
-    /// automatic; this is the keeper's job. The batch is atomic: one refused id reverts the whole call.
+    /// automatic; this is the keeper's job, a restricted role by design: see `RolesLib.VALIDATION_KEEPER` for
+    /// why it is not permissionless. The batch is atomic: one refused id reverts the whole call.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
-    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. `BurnConfirmed` is
+    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. `LegConfirmed` is
     ///   refused whatever the clock says.
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     ///

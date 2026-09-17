@@ -69,7 +69,8 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 /// @notice The T-REX token surface beyond ERC-3643: the ledger views the standard does not define.
 ///  A position has three buckets. Free and frozen are native and `balanceOf` is their sum, plain ERC-20.
 ///  Bridged is the part delegated to satellites, per ERC-7930 wallet, outside `balanceOf`; `totalSupply` counts
-///  all three.
+///  all three. Inside the bridged bucket, an amount a satellite burned for a cross-chain validation whose mint
+///  leg has not landed is held in transit against that validation: no wallet holds it, its sender still owns it.
 interface IToken is IERC3643 {
 
     /// @notice Returns the part of a wallet's balance that is movable on this chain: `balanceOf` minus frozen.
@@ -81,9 +82,18 @@ interface IToken is IERC3643 {
     /// @param wallet the ERC-7930 envelope of the satellite wallet
     function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256);
 
-    /// @notice Returns the sum of every bridged position: the part of `totalSupply` active on satellites. The
-    ///  native float, what the ERC-20 balances on this chain add up to, is `totalSupply() - totalBridged()`.
+    /// @notice Returns the sum of every bridged position, the in-transit holds included: the part of
+    ///  `totalSupply` active on satellites. The native float, what the ERC-20 balances on this chain add up to,
+    ///  is `totalSupply() - totalBridged()`.
     function totalBridged() external view returns (uint256);
+
+    /// @notice Returns the amount held in transit against a cross-chain validation: its burn leg landed, its mint
+    ///  leg has not. Zero once settled, or for a validation that never held anything.
+    /// @param validationId the validation the burn leg consumed
+    function inTransitOf(uint256 validationId) external view returns (uint256);
+
+    /// @notice Returns the sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
+    function totalInTransit() external view returns (uint256);
 
     /// @notice Applies a settled validation to the ledger, once, by the shape of its wallets: a native `from` is a
     ///  delegation-out of the holder's free balance to `to`, a native `to` is a recall of `from` onto the holder,
@@ -97,5 +107,18 @@ interface IToken is IERC3643 {
     /// @param amount the exact amount the satellite executed
     /// @param validationId the validation the settlement consumed
     function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external;
+
+    /// @notice Debits `amount` from `from`'s bridged position and holds it in transit against `validationId`:
+    ///  the burn leg of a cross-chain validation landed and proves the satellite burned it, so the wallet must
+    ///  not be issued or recalled against it while the mint leg is in flight. `totalBridged` and `totalSupply`
+    ///  do not move; the amount is still bridged and still the sender's. `settleValidation` for the same id
+    ///  later credits the recipient from the hold instead of debiting `from` again.
+    /// @dev Callable by the bound compliance only; reverts with `OnlyBoundCompliance` otherwise. Reverts with
+    ///  `TransitAlreadyHeld` when the validation already holds an amount, and with `InsufficientBridgedBalance`
+    ///  when `from`'s position no longer covers `amount`, which leaves the burn leg deliverable again.
+    /// @param from the ERC-7930 envelope of the sender, a satellite wallet
+    /// @param amount the exact amount the satellite burned
+    /// @param validationId the validation the burn leg consumed
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external;
 
 }

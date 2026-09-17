@@ -465,13 +465,14 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    function _commitSlots(uint256 validationId, uint256 executedAmount) internal override {
+    function _commitSlots(uint256 validationId, uint256 executedAmount) internal override returns (bool breachesRule) {
         Storage storage s = _getStorage();
         uint256 length = s.modules.length();
         for (uint256 i = 0; i < length; i++) {
             (address module, uint256 capabilities) = s.modules.pos(i);
             if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
-                IModule(module).commitSlot(validationId, executedAmount);
+                // Every declaring module is committed; one breach is enough, but none of them may be skipped.
+                if (IModule(module).commitSlot(validationId, executedAmount)) breachesRule = true;
             }
         }
     }
@@ -500,6 +501,11 @@ contract ModularCompliance is
         override
     {
         _boundToken().settleValidation(from, to, amount, validationId);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal override {
+        _boundToken().holdInTransit(from, amount, validationId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.

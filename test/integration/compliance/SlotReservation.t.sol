@@ -171,7 +171,7 @@ contract SlotReservationTest is InteropSuiteTest {
         uint256 fresh = _issue(10, CAP);
         assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
 
-        gateway.relay(_liteSettles(gateway, token, _settlement(late, token, aliceSat, bobSat, CAP)));
+        gateway.relay(_liteSettles(gateway, token, _settlement(late, aliceSat, bobSat, CAP)));
 
         assertEq(slots.heldByKey(address(boundCompliance), bytes32(0)), CAP, "committed with no reservation");
         assertEq(slots.reservationOf(address(boundCompliance), fresh).amount, CAP, "the fresh one still holds");

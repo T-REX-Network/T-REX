@@ -80,6 +80,9 @@ library EventsLib {
     event DelegatedOut(address indexed holder, bytes32 indexed toKey, bytes toWallet, uint256 amount);
     /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
     event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
+    /// @notice Emitted when the burn leg of a cross-chain validation takes the amount out of the sender's
+    ///         position and holds it in transit until the mint leg lands.
+    event HeldInTransit(bytes32 indexed fromKey, uint256 indexed validationId, bytes fromWallet, uint256 amount);
     /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
     event BridgedTransfer(
         bytes32 indexed fromKey,

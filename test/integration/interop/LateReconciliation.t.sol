@@ -55,7 +55,7 @@ contract LateReconciliationTest is InteropSuiteTest {
         _discard(late);
         uint256 fresh = _issue(aliceSat, bobSat, 10, CAP);
         assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP, "the fresh one holds the whole cap");
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(late, token, aliceSat, bobSat, CAP));
+        uint256 index = _liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP));
 
         vm.expectCall(address(slots), abi.encodeCall(IModule.commitSlot, (late, CAP)), 1);
         vm.expectEmit(true, true, true, true, address(token));
@@ -87,6 +87,7 @@ contract LateReconciliationTest is InteropSuiteTest {
     }
 
     /// @notice A late burn leg records itself and warns; the late mint leg completes the pair and warns again.
+    ///         Neither pauses: a first leg commits no module, and the pair leaves the cap intact.
     function test_handleSettlement_Success_WhenACrossChainSettlementLandsAfterTheDiscard() public {
         uint256 late = _issue(aliceSat, bobOptimism, 90, 100);
         _discard(late);
@@ -101,9 +102,11 @@ contract LateReconciliationTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.Discarded));
         assertTrue(boundCompliance.stateOf(late).fromLegConsumed);
-        assertTrue(boundCompliance.isIssuancePaused(polygon));
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "a first leg commits nothing, so it breaches nothing");
         assertFalse(boundCompliance.isIssuancePaused(optimism));
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0, "nothing moves on the first leg");
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "a late burn leg holds all the same");
+        assertEq(token.inTransitOf(late), 95);
+        assertEq(token.bridgedBalanceOf(bobOptimism), 0, "nothing credited on the first leg");
         assertEq(slots.commitCalls(), 0);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
@@ -114,17 +117,18 @@ contract LateReconciliationTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95);
+        assertEq(token.inTransitOf(late), 0);
         assertEq(token.bridgedBalanceOf(bobOptimism), 95);
         assertEq(slots.commitCalls(), 1);
-        assertTrue(boundCompliance.isIssuancePaused(optimism));
+        assertFalse(boundCompliance.isIssuancePaused(optimism), "95 against a cap of 100 breaches nothing");
     }
 
     /// @notice A late leg delivered twice is a replay like any other: the token halts.
     function test_handleSettlement_Success_WhenALateLegIsReplayed() public {
         uint256 late = _issue(aliceSat, bobSat, 10, CAP);
         _discard(late);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(late, token, aliceSat, bobSat, CAP)));
-        uint256 replay = _liteSettles(polygonGateway, token, _settlement(late, token, aliceSat, bobSat, CAP));
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP)));
+        uint256 replay = _liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReplayedSettlement(late, polygon);
@@ -141,7 +145,7 @@ contract LateReconciliationTest is InteropSuiteTest {
         _discard(late);
         vm.prank(deployer);
         boundCompliance.pauseValidationIssuance(polygon);
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(late, token, aliceSat, bobSat, CAP));
+        uint256 index = _liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.LateReconciliation(late, polygon);
