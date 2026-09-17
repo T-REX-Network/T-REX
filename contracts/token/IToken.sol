@@ -81,7 +81,8 @@ interface IToken is IERC3643 {
     /// @param wallet the ERC-7930 envelope of the satellite wallet
     function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256);
 
-    /// @notice Returns the sum of every bridged position: the part of `totalSupply` active on satellites.
+    /// @notice Returns the sum of every bridged position: the part of `totalSupply` active on satellites. The
+    ///  native float, what the ERC-20 balances on this chain add up to, is `totalSupply() - totalBridged()`.
     function totalBridged() external view returns (uint256);
 
 }

@@ -125,6 +125,14 @@ All notable changes to this project will be documented in this file.
   - Accessors: `freeBalanceOf(wallet)`, `bridgedBalanceOf(envelope)` and `totalBridged()` on `IToken`.
     `totalSupply()` counts the whole issuance, native supply plus `totalBridged`, so a delegation or a
     recall never moves it; only a mint or a burn does.
+  - **`totalSupply` reports the issuance, not the native float.** A delegation-out, a recall or a
+    native-side settlement leg leaves it unmoved while emitting a native `Transfer` to or from `0x0`, which
+    is what makes `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price: a
+    consumer deriving supply by summing `Transfer` events under-reports by `totalBridged`, and reconciles on
+    `DelegatedOut`, `Recalled`, `SettledFromNative` and `SettledToNative`. The native figure is
+    `totalSupply() - totalBridged()`. An escrow address holding the delegated float would have kept
+    Transfer-summing whole and was rejected: it would show the token holding its own supply. `INV-7` asserts
+    the balance at the token's own address is always zero, and sums the three buckets to `totalSupply()`.
   - `WalletKeyLib`: canonical ERC-7930 parsing with the strict-length rule from the ONCHAINID M-08
     finding, refusing as well a zero-led EVM chain reference (which decodes to the same chain id);
     `canonicalKey` and `satelliteKey`, the latter refusing a wallet on this chain, which holds a native

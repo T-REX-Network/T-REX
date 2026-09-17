@@ -288,8 +288,19 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /* ----- Ledger Views ----- */
 
     /// @inheritdoc IERC20
-    /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite. A delegation-out or
-    ///  a recall moves between the two terms and never changes the sum; only a mint or a burn does.
+    /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite. A delegation-out, a
+    ///  recall or either native-side settlement leg moves between the two terms and never changes the sum; only a
+    ///  mint or a burn does.
+    ///
+    ///  The register reports the issuance, not the native float, and the events say so at the cost of one
+    ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
+    ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
+    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled`,
+    ///  `SettledFromNative` and `SettledToNative` are the reconciliation for anyone deriving it that way, and
+    ///  `totalSupply() - totalBridged()` is the native float. An escrow address holding the delegated float
+    ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
+    ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
+    ///  `totalBridged` to the positions, whichever of the four transitions moved it.
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         return super.totalSupply() + _tokenStorage().totalBridged;
     }
