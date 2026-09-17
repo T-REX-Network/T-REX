@@ -39,7 +39,8 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        registry = new TrustedGatewayRegistry(address(accessManager));
+        // The network's registry the token was deployed against; the token exposes no way to move it.
+        registry = trustedGatewayRegistry;
         AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(registry));
 
         _grantManagerRoles(identityManager);
@@ -49,49 +50,27 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         registry.setTrustedGateway(trustedGateway, true);
     }
 
-    function _pointAtRegistry() private {
-        vm.prank(identityManager);
-        token.setTrustedGatewayRegistry(address(registry));
-    }
-
     /* ----- Registry ----- */
 
-    function testTokenStartsWithNoRegistry() public view {
-        assertEq(token.trustedGatewayRegistry(), address(0));
-    }
-
-    function testIdentityManagerSetsTheRegistry() public {
-        vm.expectEmit(false, false, false, true, address(token));
-        emit EventsLib.TrustedGatewayRegistrySet(address(registry));
-
-        _pointAtRegistry();
-
+    function testTokenIsDeployedAgainstTheNetworkRegistry() public view {
         assertEq(token.trustedGatewayRegistry(), address(registry));
     }
 
-    function testSetTrustedGatewayRegistryRevertsOnZero() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        vm.prank(identityManager);
-        token.setTrustedGatewayRegistry(address(0));
-    }
+    /// @dev The registry is not a lever any suite role holds: the old setter selector resolves to
+    ///      nothing on the token, so the network's gateway removals cannot be escaped per token.
+    function testNoRoleCanMoveTheRegistry() public {
+        bytes4 legacySelector = bytes4(keccak256("setTrustedGatewayRegistry(address)"));
 
-    function testSetTrustedGatewayRegistryRevertsWhenNotIdentityManager() public {
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
-        vm.prank(agent);
-        token.setTrustedGatewayRegistry(address(registry));
+        vm.prank(identityManager);
+        (bool ok,) = address(token).call(abi.encodeWithSelector(legacySelector, makeAddr("OwnRegistry")));
+
+        assertFalse(ok);
+        assertEq(token.trustedGatewayRegistry(), address(registry));
     }
 
     /* ----- Routes ----- */
 
-    function testSetRouteRevertsWhenRegistryNotSet() public {
-        vm.expectRevert(ErrorsLib.RegistryNotSet.selector);
-        vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
-    }
-
     function testIdentityManagerOpensAChain() public {
-        _pointAtRegistry();
-
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.ChainRegistered(evmChain, evmType, evmRef);
         vm.expectEmit(true, true, false, false, address(token));
@@ -109,8 +88,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     }
 
     function testChainIsRegisteredOnce() public {
-        _pointAtRegistry();
-
         vm.startPrank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);
 
@@ -125,8 +102,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     }
 
     function testSetRouteRevertsOnAnEmptyChainReference() public {
-        _pointAtRegistry();
-
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidChainReference.selector, evmType, bytes("")));
         vm.prank(identityManager);
         token.setRoute(evmType, "", trustedGateway);
@@ -134,8 +109,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     /// @dev A gateway derives the chain from a minimal big-endian id; a padded one would never match it.
     function testSetRouteRevertsOnAPaddedEvmChainReference() public {
-        _pointAtRegistry();
-
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidChainReference.selector, evmType, hex"0089"));
         vm.prank(identityManager);
         token.setRoute(evmType, hex"0089", trustedGateway);
@@ -143,8 +116,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     /// @dev Only EVM references are minimal by construction; another chain type may start with a zero.
     function testNonEvmChainReferenceMayStartWithZero() public {
-        _pointAtRegistry();
-
         vm.prank(identityManager);
         token.setRoute(nonEvmType, hex"0001", trustedGateway);
 
@@ -152,16 +123,12 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     }
 
     function testSetRouteRevertsOnUntrustedGateway() public {
-        _pointAtRegistry();
-
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotTrusted.selector, untrustedGateway));
         vm.prank(identityManager);
         token.setRoute(evmType, evmRef, untrustedGateway);
     }
 
     function testZeroGatewayClosesTheChain() public {
-        _pointAtRegistry();
-
         vm.startPrank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);
         token.setRoute(evmType, evmRef, address(0));
@@ -172,8 +139,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     }
 
     function testSetRouteRevertsWhenNotIdentityManager() public {
-        _pointAtRegistry();
-
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
         vm.prank(agent);
         token.setRoute(evmType, evmRef, trustedGateway);
@@ -181,8 +146,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     /// @dev The emergency lever: removal severs the route with no call on the token.
     function testRemovingTheGatewayClosesEveryRouteThroughIt() public {
-        _pointAtRegistry();
-
         vm.prank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);
         assertTrue(token.isChainOpen(evmChain));
@@ -198,7 +161,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     /// @dev On the satellite, not on the reference chain: the Lite lives at the token's address over there.
     function testPeerDefaultsToTheTokensOwnAddressOnThatChain() public {
-        _pointAtRegistry();
         vm.prank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);
 
@@ -215,7 +177,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     }
 
     function testNonEvmChainHasNoDefaultPeer() public {
-        _pointAtRegistry();
         vm.prank(identityManager);
         token.setRoute(nonEvmType, nonEvmRef, trustedGateway);
 
@@ -261,7 +222,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     }
 
     function testEmptyPeerRestoresTheDefault() public {
-        _pointAtRegistry();
         vm.startPrank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);
 
@@ -309,7 +269,6 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         uint256 balanceBefore = token.balanceOf(user1);
         uint256 supplyBefore = token.totalSupply();
 
-        _pointAtRegistry();
         vm.startPrank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);
         token.setPeer(nonEvmChain, nonEvmPeer);

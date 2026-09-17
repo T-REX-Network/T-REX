@@ -64,21 +64,10 @@ pragma solidity 0.8.30;
 
 interface ITREXMessaging {
 
-    /// @dev Points this token at the network's vetted gateway set.
-    ///
-    /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `registry` must not be the zero address; otherwise reverts with `ZeroAddress`.
-    ///
-    /// Emits `TrustedGatewayRegistrySet`.
-    /// @param registry The `TrustedGatewayRegistry` to resolve gateway trust against.
-    function setTrustedGatewayRegistry(address registry) external;
-
     /// @dev Routes this token's traffic to and from a chain through `gateway`.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - A registry must be set; otherwise reverts with `RegistryNotSet`.
     /// - `gateway` must be registry-trusted or zero; otherwise reverts with `GatewayNotTrusted`.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
@@ -105,8 +94,10 @@ interface ITREXMessaging {
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
 
-    /// @dev The gateway registry this token resolves trust against.
-    /// @return The registry address, or zero when unset.
+    /// @dev The gateway registry this token resolves trust against. It is the network's, wired at
+    /// deployment, and no role on the token can move it: removing a gateway from the registry severs
+    /// every route through it, for every token.
+    /// @return The registry address.
     function trustedGatewayRegistry() external view returns (address);
 
     /// @dev The stored route for `chainKey`, not re-validated: the gateway may have been untrusted

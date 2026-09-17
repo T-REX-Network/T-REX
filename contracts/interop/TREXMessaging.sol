@@ -172,8 +172,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         MessagingStorage storage s = _messagingStorage();
         address gateway = s.routes[chainKey];
 
-        return gateway != address(0) && address(s.registry) != address(0) && s.registry.isTrusted(gateway)
-            && peerFor(chainKey).length > 0;
+        return gateway != address(0) && s.registry.isTrusted(gateway) && peerFor(chainKey).length > 0;
     }
 
     /// @dev Whether `gateway` has already delivered `receiveId` to this token.
@@ -183,9 +182,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @inheritdoc ERC7786Recipient
     function _isAuthorizedGateway(address gateway, bytes calldata) internal view override returns (bool) {
-        ITrustedGatewayRegistry registry = _messagingStorage().registry;
-
-        return address(registry) != address(0) && registry.isTrusted(gateway);
+        return _messagingStorage().registry.isTrusted(gateway);
     }
 
     /// @inheritdoc ERC7786Recipient
@@ -230,7 +227,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     /// @dev Acts on a burn proof attributed to this token's peer on `chainKey`. The token's recall path.
     function _handleBurnProof(bytes32 chainKey, MessageTypesLib.BurnProof memory proof) internal virtual;
 
-    /// @dev Shared by `setTrustedGatewayRegistry` and any deployment-time wiring.
+    /// @dev Called once, from the token's initializer. The registry is the network's and the token
+    /// exposes no setter for it, so a token can never resolve trust against a registry of its own.
     function _setTrustedGatewayRegistry(address registry) internal {
         require(registry != address(0), ErrorsLib.ZeroAddress());
 
@@ -241,7 +239,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     function _setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
         MessagingStorage storage s = _messagingStorage();
-        require(address(s.registry) != address(0), ErrorsLib.RegistryNotSet());
 
         // The zero gateway is how an issuer closes a chain, so it is the one value not vetted.
         require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.GatewayNotTrusted(gateway));
@@ -354,8 +351,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         view
         returns (address gateway, bytes memory peer)
     {
-        require(address(s.registry) != address(0), ErrorsLib.RegistryNotSet());
-
         gateway = s.routes[chainKey];
         require(gateway != address(0) && s.registry.isTrusted(gateway), ErrorsLib.ChainNotOpen(chainKey));
 

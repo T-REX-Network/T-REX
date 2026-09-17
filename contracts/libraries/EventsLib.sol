@@ -121,6 +121,7 @@ library EventsLib {
 
     // TREXMessaging Events
 
+    /// @notice Emitted by the factory when its registry pointer moves, and by a token once, at deployment.
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);

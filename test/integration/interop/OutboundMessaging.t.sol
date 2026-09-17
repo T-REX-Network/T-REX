@@ -29,10 +29,6 @@ contract OutboundMessagingTest is InteropSuiteTest {
     bytes mintBody = abi.encode(uint256(2), "mint");
     bytes recallBody = abi.encode(uint256(3), "recall");
 
-    /// @dev Mirrors TREXMessaging's ERC-7201 namespace, so a test can strip the registry back off.
-    bytes32 internal constant MESSAGING_STORAGE_LOCATION =
-        0x2b7785d97e35cf618b41c256efdda42212baf2d424180e7d549907f2f911e900;
-
     function setUp() public override {
         super.setUp();
 
@@ -222,22 +218,6 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
         _dispatch(validationId, solana);
         assertEq(gateway.queuedMessage(0).recipient, hex"0001000201010401020304");
-    }
-
-    function testDispatchRevertsWhenTheTokenHasNoRegistry() public {
-        Token fresh = _deployToken("fresh", "Fresh", "FRS");
-        address freshCompliance = address(fresh.compliance());
-
-        // Undo the helper's wiring: a token that was never pointed at a registry sends nothing.
-        // `registry` is the first field of the messaging namespace, so it sits on the location itself.
-        vm.store(address(fresh), MESSAGING_STORAGE_LOCATION, 0);
-        assertEq(fresh.trustedGatewayRegistry(), address(0));
-
-        vm.expectRevert(ErrorsLib.RegistryNotSet.selector);
-        vm.prank(freshCompliance);
-        fresh.dispatchComplianceValidation(satellite, validationId, validationBody);
-
-        assertEq(gateway.queueLength(), 0);
     }
 
     function testDispatchRevertsForAnUnauthorizedCaller() public {

@@ -139,6 +139,7 @@ contract Token is
         uint8 tokenDecimals,
         address identityRegistryAddress,
         address complianceAddress,
+        address trustedGatewayRegistryAddress,
         address onchainIdAddress,
         address accessManagerAddress
     ) external initializer {
@@ -164,6 +165,9 @@ contract Token is
         s.identityRegistry = IERC3643IdentityRegistry(identityRegistryAddress);
         s.compliance = IModularCompliance(complianceAddress);
         _emitUpdatedTokenInformation();
+
+        // The network's registry, fixed for the token's lifetime: no role can move it afterwards.
+        _setTrustedGatewayRegistry(trustedGatewayRegistryAddress);
 
         _pause();
     }
@@ -232,11 +236,6 @@ contract Token is
     }
 
     /* ----- Interop Configuration ----- */
-
-    /// @inheritdoc ITREXMessaging
-    function setTrustedGatewayRegistry(address registry) external restricted {
-        _setTrustedGatewayRegistry(registry);
-    }
 
     /// @inheritdoc ITREXMessaging
     function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {

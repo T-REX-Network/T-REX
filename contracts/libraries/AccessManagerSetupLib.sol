@@ -88,15 +88,13 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
         // ------ IDENTITY_MANAGER role ------
-        // Also owns the interop wiring: which registry the token resolves gateway trust against, and
-        // which gateway and peer each chain uses. Same concern as the registry and compliance it points at.
-        functions = new bytes4[](6);
+        // Also owns the issuer's side of the interop wiring: which gateway and peer each chain uses.
+        functions = new bytes4[](5);
         functions[0] = Token.setOnchainID.selector;
         functions[1] = Token.setIdentityRegistry.selector;
         functions[2] = Token.setCompliance.selector;
-        functions[3] = Token.setTrustedGatewayRegistry.selector;
-        functions[4] = Token.setRoute.selector;
-        functions[5] = Token.setPeer.selector;
+        functions[3] = Token.setRoute.selector;
+        functions[4] = Token.setPeer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
 
         // ------ AGENT role ------
@@ -204,11 +202,12 @@ library AccessManagerSetupLib {
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](4);
+        bytes4[] memory functions = new bytes4[](5);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
-        functions[2] = TREXFactory.deployTREXSuite.selector;
-        functions[3] = TREXFactory.deployTREXSuiteIsolated.selector;
+        functions[2] = TREXFactory.setTrustedGatewayRegistry.selector;
+        functions[3] = TREXFactory.deployTREXSuite.selector;
+        functions[4] = TREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
     }
 

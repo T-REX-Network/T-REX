@@ -160,7 +160,6 @@ library ErrorsLib {
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
     error MessageTypeNotInbound(MessageTypesLib.Message messageType);
-    error RegistryNotSet();
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
     error SenderNotCompliance(address sender);
     error SenderNotPeer(bytes32 chainKey, bytes sender);

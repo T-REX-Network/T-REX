@@ -135,15 +135,17 @@ contract TREXSuiteTest is AccessManagerHelper {
         claimIssuer = _deployClaimIssuer();
     }
 
-    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory. The ASSET module bundle is
-    ///      registered on the IdentityFactory per type (`setIdentityTypeModules`), so the TREX factory
-    ///      carries no module configuration of its own.
+    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory and gateway registry. The ASSET
+    ///      module bundle is registered on the IdentityFactory per type (`setIdentityTypeModules`), so
+    ///      the TREX factory carries no module configuration of its own.
     function _newTREXFactory(address implementationAuthority, address accessManagerAddress)
         internal
         returns (TREXFactory factory)
     {
         vm.startPrank(deployer);
-        factory = new TREXFactory(implementationAuthority, address(idFactory), accessManagerAddress);
+        factory = new TREXFactory(
+            implementationAuthority, address(idFactory), address(trustedGatewayRegistry), accessManagerAddress
+        );
         vm.stopPrank();
     }
 
@@ -258,7 +260,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     function _deployFactories() internal {
         trexImplementationAuthority = _deployTREXImplementationAuthority();
 
-        // Network-level, shared by every suite. Deployed here so the interop phases have one to route through.
+        // Network-level, shared by every suite. Deployed before the factory, which wires it into every token.
         trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
         AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(trustedGatewayRegistry));
         _grantInteropManagerRole(address(this));
@@ -391,11 +393,6 @@ contract TREXSuiteTest is AccessManagerHelper {
         // registry wiring covers all three sub-surfaces.
         IERC3643IdentityRegistry ir = _token.identityRegistry();
         _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
-
-        // A token opens no chain by default. Pointing it at the registry is the first of the issuer's
-        // interop levers, and every later route or peer call needs it in place.
-        vm.prank(deployer);
-        _token.setTrustedGatewayRegistry(address(trustedGatewayRegistry));
     }
 
     /// @notice Deploys a fresh ModularCompliance proxy with no token bound, managed by the test AccessManager
