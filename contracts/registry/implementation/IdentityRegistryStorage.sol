@@ -122,7 +122,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
      *  @dev See {IIdentityRegistryStorage-addIdentityToStorage}.
      *  @dev The binding stored here overrides, for every token wired to this storage, whatever the global
      *  ONCHAINID identity registry returns for the wallet. When the global registry already binds the wallet
-     *  to another identity, `IdentityOverridden` is emitted and the registration proceeds.
+     *  to another identity, the registration proceeds and `IdentityOverridden` is emitted *after*
+     *  `IdentityStored`: an override registration logs both events, in that order, so an indexer tracking
+     *  the override state must read the pair rather than stop at `IdentityStored`.
      *  @dev The country argument is ignored: this storage keeps wallet-to-identity bindings only. The
      *  country is a compliance concern, read from the country module bound to the token's
      *  `ModularCompliance`.
@@ -144,6 +146,10 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     /**
      *  @dev See {IIdentityRegistryStorage-modifyStoredIdentity}.
+     *  @dev `IdentityModified` and `InvestorIdentityChanged` are always emitted first, then at most one
+     *  override signal: `IdentityOverridden` when the new binding diverges from a non-zero global identity,
+     *  `IdentityOverrideReleased` when it realigns with it. An indexer tracking the override state must read
+     *  that trailing event, not only the modification pair.
      */
     function modifyStoredIdentity(address _userAddress, IIdentity _identity) external restricted {
         require(_userAddress != address(0) && address(_identity) != address(0), ErrorsLib.ZeroAddress());
@@ -176,7 +182,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
      *  @dev Deletes the local override only. The wallet does not disappear from the token's view: it falls
      *  back to the global ONCHAINID identity registry, and when bound there it remains `contains` and
      *  potentially `isVerified` for every token wired to this storage. When that fallback resolves to a
-     *  different identity than the deleted one, `IdentityOverrideReleased` is emitted.
+     *  different identity than the deleted one, `IdentityOverrideReleased` is emitted *after*
+     *  `IdentityUnstored`: ending an override logs both events, in that order.
      *  Excluding a wallet from a token is a compliance concern (deny-list module, freeze, claim
      *  revocation), not this function.
      */
