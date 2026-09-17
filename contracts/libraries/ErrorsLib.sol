@@ -81,7 +81,9 @@ library ErrorsLib {
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
+    error NotLinkedIdentity(address from, address caller);
     error RecoveryNotPossible();
+    error RevokedWallet(address wallet);
     error SameWalletRecovery();
     error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
