@@ -93,19 +93,20 @@ contract TokenIdentityTransferTest is TREXSuiteTest {
         assertEq(token.balanceOf(bob), 100);
     }
 
-    /// @dev The real revocation path, through ONCHAINID. The local registration keeps resolving the wallet, so
-    ///      only the factory's link status can tell that the identity no longer commands it.
-    function test_identityTransfer_RevertWhen_SourceWalletIsRevokedInOnchainId() public {
+    /// @dev Revoking in ONCHAINID does not stop this path, and is not meant to: the local registration keeps
+    ///      resolving the wallet, and the same wallet can still {transfer} out on its own. Revoked wallets are a
+    ///      token-wide policy question; pinned here so a future revocation gate is a deliberate change.
+    function test_identityTransfer_Success_WhenSourceWalletIsRevokedInOnchainId() public {
         bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, alice);
         vm.prank(address(aliceIdentity));
         idFactory.revokeAccount(account);
 
-        // The registry still resolves alice: revocation does not touch the local binding.
         assertEq(address(identityRegistry.identity(alice)), address(aliceIdentity));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RevokedWallet.selector, alice));
         vm.prank(address(aliceIdentity));
         token.identityTransfer(alice, bob, 100);
+
+        assertEq(token.balanceOf(bob), 100);
     }
 
     function test_identityTransfer_RevertWhen_DestinationIsNotRegistered() public {

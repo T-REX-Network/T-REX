@@ -2,20 +2,15 @@
 pragma solidity 0.8.30;
 
 import { Vm } from "@forge-std/Vm.sol";
-import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
-
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
-
-import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
@@ -24,7 +19,6 @@ contract TokenIdentityTransferUnitTest is TokenBaseUnitTest {
     address from = makeAddr("From");
     address to = makeAddr("To");
     address identity = makeAddr("Identity");
-    address idFactory = makeAddr("IdentityFactoryMock");
     address keyHolder = makeAddr("KeyHolder");
 
     uint256 mintAmount = 1000;
@@ -35,9 +29,6 @@ contract TokenIdentityTransferUnitTest is TokenBaseUnitTest {
 
         // `from` resolves to `identity`; every other wallet resolves to nothing unless a test says otherwise.
         _mockIdentityOf(from, identity);
-
-        vm.mockCall(identityRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));
-        _mockAccountStatus(from, IIdentityFactory.AccountStatus.Active);
 
         vm.startPrank(agent);
         token.unpause();
@@ -58,18 +49,6 @@ contract TokenIdentityTransferUnitTest is TokenBaseUnitTest {
     function _mockVerified(address wallet, bool verified) internal {
         vm.mockCall(
             identityRegistry, abi.encodeCall(IERC3643IdentityRegistry.isVerified, (wallet)), abi.encode(verified)
-        );
-    }
-
-    /// @dev Revocation is a link status held by the ONCHAINID factory, which the token reaches through the
-    ///      registry. Mocked per wallet so a test can revoke one wallet without touching the others.
-    function _mockAccountStatus(address wallet, IIdentityFactory.AccountStatus status) internal {
-        vm.mockCall(
-            idFactory,
-            abi.encodeCall(
-                IIdentityFactory.getAccountStatus, (InteroperableAddress.formatEvmV1(block.chainid, wallet))
-            ),
-            abi.encode(status)
         );
     }
 
@@ -128,27 +107,8 @@ contract TokenIdentityTransferUnitTest is TokenBaseUnitTest {
         token.identityTransfer(unlinked, to, transferAmount);
     }
 
-    /// @dev A revoked wallet's exit is {recoveryAddress}, not a self-service move. The status is read from the
-    ///      factory, not inferred from `isVerified`, which answers a question about claims instead.
-    function testTokenIdentityTransferRevertsWhenSourceWalletIsRevoked() public {
-        _mockAccountStatus(from, IIdentityFactory.AccountStatus.Revoked);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RevokedWallet.selector, from));
-        vm.prank(identity);
-        token.identityTransfer(from, to, transferAmount);
-    }
-
-    /// @dev `None` is "never linked", distinct from `Revoked`; neither may move tokens.
-    function testTokenIdentityTransferRevertsWhenSourceWalletWasNeverLinked() public {
-        _mockAccountStatus(from, IIdentityFactory.AccountStatus.None);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RevokedWallet.selector, from));
-        vm.prank(identity);
-        token.identityTransfer(from, to, transferAmount);
-    }
-
-    /// @dev Expired claims are not this function's gate: `_update` checks the destination, matching {transfer},
-    ///      which never checks the sender either.
+    /// @dev The sender's own claims are not this function's gate: `_update` checks the destination, matching
+    ///      {transfer}, which never checks the sender either.
     function testTokenIdentityTransferAllowsSourceWithoutValidClaims() public {
         _mockVerified(from, false);
 

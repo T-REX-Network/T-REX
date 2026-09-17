@@ -63,7 +63,6 @@
 
 pragma solidity 0.8.30;
 
-import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import {
     ERC20PermitUpgradeable,
@@ -77,7 +76,6 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import { ERC3643EventsLib } from "../ERC-3643/ERC3643EventsLib.sol";
@@ -510,9 +508,10 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     ///      account's own authentication. A key holder calling the token directly is just another caller.
     /// @dev No allowance is read or written, and the spender gate never runs: it vets third-party spenders, and
     ///      the owner's own identity is not one. `approve`, `transferFrom` and `permit` stay plain ERC-20.
-    /// @dev A wallet revoked in ONCHAINID is rejected: revocation is a link status held by the factory, and a
-    ///      local registration keeps resolving the wallet long after it, so the status is read at the source.
-    ///      The exit for a revoked wallet stays {recoveryAddress}.
+    /// @dev Carries no revocation gate of its own. A wallet revoked in ONCHAINID still resolves here whenever it
+    ///      holds a local registration, and it can still {transfer} out, so gating this path alone would be
+    ///      bypassable rather than protective. Revoked wallets are a token-wide policy question, not this
+    ///      function's.
     /// @param from wallet the tokens are taken from, linked to the calling identity
     /// @param to address the tokens are sent to
     /// @param amount number of tokens moved
@@ -528,11 +527,6 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             address(identity) != address(0) && _msgSender() == address(identity),
             ErrorsLib.NotLinkedIdentity(from, _msgSender())
         );
-        IIdentityFactory.AccountStatus status = ITREXRegistry(address(s.identityRegistry))
-            .identityFactory()
-            .getAccountStatus(InteroperableAddress.formatEvmV1(block.chainid, from));
-        require(status == IIdentityFactory.AccountStatus.Active, ErrorsLib.RevokedWallet(from));
-
         _transfer(from, to, amount);
         // Emitted after the move so the operator event follows `Transfer`, the ordering {_forcedTransfer} keeps.
         emit EventsLib.IdentityTransfer(address(identity), from, to, amount);
