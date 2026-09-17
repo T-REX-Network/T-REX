@@ -85,6 +85,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -454,8 +455,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         }
     }
 
-    /// @dev Moves the on-chain identity from the lost wallet to the new wallet (registering the new wallet only
-    ///      when it is not already known to the identity registry).
+    /// @dev Moves the on-chain identity from the lost wallet to the new wallet. The new wallet is registered
+    ///  only when it resolves nowhere, so a wallet the global registry already binds keeps following that
+    ///  binding rather than a local copy. Only local entries can be deleted. Country is not stored, so 0.
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
         TokenStorage storage s = _tokenStorage();
 
@@ -465,13 +467,10 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
             ErrorsLib.RecoveryNotPossible()
         );
 
-        if (s.identityRegistry.contains(lostWallet)) {
-            if (!s.identityRegistry.contains(newWallet)) {
-                s.identityRegistry
-                    .registerIdentity(
-                        newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
-                    );
-            }
+        if (!s.identityRegistry.contains(newWallet)) {
+            s.identityRegistry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
+        }
+        if (ITREXRegistry(address(s.identityRegistry)).isLocallyRegistered(lostWallet)) {
             s.identityRegistry.deleteIdentity(lostWallet);
         }
     }
