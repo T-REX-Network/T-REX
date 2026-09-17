@@ -275,6 +275,9 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
      *  @dev Asks the IdentityFactory of each bound registry in turn and returns the first identity found,
      *  or the zero identity when none knows the wallet. The factory keys wallets by ERC-7930
      *  interoperable address.
+     *  The lookup key is built with `formatEvmV1(block.chainid, wallet)`, so it resolves EVM wallets on
+     *  this chain only. Wallets of another chain type, or the same wallet on another chain, are out of
+     *  scope for this fallback and resolve to the zero identity; bind them locally instead.
      */
     function _globalIdentity(address _userAddress) internal view returns (IIdentity identity) {
         Storage storage s = _getStorage();
