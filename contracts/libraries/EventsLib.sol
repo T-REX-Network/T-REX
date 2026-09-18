@@ -74,6 +74,32 @@ library EventsLib {
 
     event ImplementationAuthoritySet(address implementationAuthority);
 
+    // Token Events
+
+    /// @notice Emitted on a delegation-out. Carries the full envelope so indexers need no reverse key table.
+    event DelegatedOut(address indexed holder, bytes32 indexed toKey, bytes toWallet, uint256 amount);
+    /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
+    event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
+    /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
+    event BridgedTransfer(
+        bytes32 indexed fromKey,
+        bytes32 indexed toKey,
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        uint256 amount
+    );
+    /// @notice Emitted on a settled movement leaving a native wallet for a satellite one, under the validation it
+    ///  consumed. Ownership moves between identities, unlike {DelegatedOut}.
+    event SettledFromNative(
+        address indexed from, bytes32 indexed toKey, uint256 indexed validationId, bytes toWallet, uint256 amount
+    );
+    /// @notice Emitted on a settled movement leaving a satellite wallet for a native one, under the validation it
+    ///  consumed. Ownership moves between identities, unlike {Recalled}.
+    event SettledToNative(
+        bytes32 indexed fromKey, address indexed to, uint256 indexed validationId, bytes fromWallet, uint256 amount
+    );
+
     // ModularCompliance Events
 
     event ModuleInteraction(address indexed target, bytes data);
@@ -146,6 +172,27 @@ library EventsLib {
         bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
     );
 
+    // TransferValidation Events
+    event DefaultValidityWindowSet(uint64 duration);
+    event ReconciliationWindowSet(bytes32 indexed chainKey, uint64 duration);
+    event ValidationClampSet(uint256 maxAmount);
+    event ValidationIssuancePaused(bytes32 indexed chainKey);
+    event ValidationIssuanceUnpaused(bytes32 indexed chainKey);
+    /// @notice Emitted on issuance with the full envelopes and the final bounds, so indexers need no reverse table.
+    event TransferValidationIssued(
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        bytes spender,
+        uint256 amountMin,
+        uint256 amountMax,
+        uint64 expiry,
+        uint64 reconciliationWindow
+    );
+    /// @notice Warning: a reconciliation of `validationId` arrived from `chainKey` after its release deadline.
+    ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
+    ///         breaches a rule; otherwise this warning is the whole record.
+    event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

@@ -61,67 +61,28 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-library RolesLib {
+import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
+/// @title IToken
+/// @notice The T-REX token surface beyond ERC-3643: the ledger views the standard does not define.
+///  A position has three buckets. Free and frozen are native and `balanceOf` is their sum, plain ERC-20.
+///  Bridged is the part delegated to satellites, per ERC-7930 wallet, outside `balanceOf`; `totalSupply` counts
+///  all three.
+interface IToken is IERC3643 {
 
-    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
+    /// @notice Returns the part of a wallet's balance that is movable on this chain: `balanceOf` minus frozen.
+    /// @param wallet the wallet to read
+    function freeBalanceOf(address wallet) external view returns (uint256);
 
-    // ---- Operational roles (gate contract functions: "what you can do") ----
+    /// @notice Returns the position delegated to a satellite wallet.
+    /// @dev A non-canonical envelope reverts rather than reading a key no transition ever wrote.
+    /// @param wallet the ERC-7930 envelope of the satellite wallet
+    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256);
 
-    uint64 constant OWNER = ROLE_PREFIX + 1;
-
-    uint64 constant AGENT = ROLE_PREFIX + 2;
-    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
-    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
-    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
-    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
-    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
-    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
-    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
-
-    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
-    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
-
-    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
-    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
-    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
-
-    // Gates the network-level set of vetted ERC-7786 gateways on TrustedGatewayRegistry. Held by network
-    // governance, not by an issuer: a gateway in that set attests the authorship of every message a token
-    // routed through it acts on, so adding one is deliberate and removing one is an emergency lever.
-    uint64 constant INTEROP_MANAGER = ROLE_PREFIX + 17;
-    // Gates the issuer's validation policy on ModularCompliance: the validity window, the per-chain reconciliation
-    // windows, the global clamp and the per-chain issuance pause. Administered by SUITE_ADMIN like the other
-    // manager roles.
-    uint64 constant COMPLIANCE_MANAGER = ROLE_PREFIX + 18;
-
-    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
-    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
-    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
-    // handing out the AccessManager ADMIN_ROLE (0).
-
-    // Admin of AGENT and every granular AGENT_* role.
-    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
-
-    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
-    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
-
-    // ---- Deploy-time transient roles (self-granted for a single call, revoked before returning) ----
-
-    // Gates IdentityRegistryStorage.bindIdentityRegistry so the factory can bind a new IR onto a reused
-    // IRS during deployTREXSuite without standing OWNER. Unassigned at rest, self-granted for the bind call
-    // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
-    uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
-
-    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
-
-    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
-    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
-    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
-    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
+    /// @notice Returns the sum of every bridged position: the part of `totalSupply` active on satellites. The
+    ///  native float, what the ERC-20 balances on this chain add up to, is `totalSupply() - totalBridged()`.
+    function totalBridged() external view returns (uint256);
 
 }

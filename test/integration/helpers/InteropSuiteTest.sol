@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
 /// @dev A deployed suite plus the vocabulary the interop tests share: satellite chains, their keys,
@@ -18,6 +21,62 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
 
     bytes32 polygon = _evmChainKey(POLYGON);
     bytes32 optimism = _evmChainKey(OPTIMISM);
+
+    uint64 constant VALIDITY_WINDOW = 1 hours;
+    uint64 constant POLYGON_WINDOW = 30 minutes;
+    uint64 constant OPTIMISM_WINDOW = 45 minutes;
+
+    /// @dev The suite token's compliance, with the validation windows an issuance needs already set.
+    ModularCompliance boundCompliance;
+
+    function setUp() public virtual override {
+        super.setUp();
+        boundCompliance = ModularCompliance(address(token.compliance()));
+        vm.startPrank(deployer);
+        boundCompliance.setDefaultValidityWindow(VALIDITY_WINDOW);
+        boundCompliance.setReconciliationWindow(polygon, POLYGON_WINDOW);
+        boundCompliance.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
+        vm.stopPrank();
+    }
+
+    /// @dev The token is the ledger harness, so a test can fund a satellite wallet before any flow does.
+    function _deployImplementations() internal virtual override {
+        super._deployImplementations();
+        tokenImplementation = Token(address(new TokenLedgerHarness()));
+    }
+
+    /// @dev Links `signer`'s wallet on `chainId` to `identity` and moves `amount` of `holder`'s tokens onto it.
+    function _fundSatelliteWallet(
+        IIdentity identity,
+        address holder,
+        uint256 chainId,
+        Account memory signer,
+        uint256 amount
+    ) internal returns (bytes memory envelope) {
+        envelope = _linkSatelliteWallet(identity, chainId, signer);
+        vm.startPrank(agent);
+        token.mint(holder, amount);
+        TokenLedgerHarness(address(token)).delegateOut(holder, envelope, amount);
+        vm.stopPrank();
+    }
+
+    function _requestValidation(address caller, bytes memory from, bytes memory to, uint256 min, uint256 max)
+        internal
+        returns (uint256)
+    {
+        vm.prank(caller);
+        return boundCompliance.requestTransferValidation(from, to, min, max, "");
+    }
+
+    /// @dev The validation a queued message carries, as the Lite would decode it.
+    function _decodeQueuedValidation(ERC7786GatewayMock gateway, uint256 index)
+        internal
+        view
+        returns (MessageTypesLib.ComplianceValidation memory)
+    {
+        (, bytes memory body) = MessageTypesLib.decode(gateway.queuedMessage(index).payload);
+        return MessageTypesLib.decodeValidation(body);
+    }
 
     /// @dev The ERC-7930 prefix of an EVM chain, as a gateway derives it from a canonical sender.
     function _evmChain(uint256 chainId) internal pure returns (bytes2 chainType, bytes memory chainReference) {

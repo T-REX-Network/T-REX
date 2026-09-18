@@ -61,67 +61,73 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-library RolesLib {
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
+import { ErrorsLib } from "./ErrorsLib.sol";
 
-    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
+/// @title WalletKeyLib
+/// @notice Canonical ERC-7930 handling for the wallet keys of the bridged ledger.
+library WalletKeyLib {
 
-    // ---- Operational roles (gate contract functions: "what you can do") ----
+    /// @dev version (2) + chainType (2) + chainReference length (1) + address length (1)
+    uint256 private constant HEADER_LENGTH = 6;
 
-    uint64 constant OWNER = ROLE_PREFIX + 1;
+    /// @dev The ERC-7930 chain type of EVM chains, whose chain reference is the minimal big-endian chain id.
+    bytes2 private constant EVM_CHAIN_TYPE = 0x0000;
 
-    uint64 constant AGENT = ROLE_PREFIX + 2;
-    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
-    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
-    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
-    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
-    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
-    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
-    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
+    /// @notice Parses a version 1 ERC-7930 envelope, requiring it to be canonical.
+    /// @dev One encoding per wallet, so one ledger key per wallet. Refused: bytes beyond the parsed envelope
+    ///  (ONCHAINID M-08) and a zero-led EVM chain reference, which decodes to the same id. A lone zero byte
+    ///  is accepted: it is how OpenZeppelin formats chain id 0.
+    /// @param envelope the interoperable address
+    /// @return chainType the CAIP-350 chain type
+    /// @return chainReference the chain reference bytes
+    /// @return addr the address bytes
+    function parse(bytes memory envelope)
+        internal
+        pure
+        returns (bytes2 chainType, bytes memory chainReference, bytes memory addr)
+    {
+        bool success;
+        (success, chainType, chainReference, addr) = InteroperableAddress.tryParseV1(envelope);
+        require(
+            success && HEADER_LENGTH + chainReference.length + addr.length == envelope.length
+                && (chainType != EVM_CHAIN_TYPE || chainReference.length < 2 || chainReference[0] != 0x00),
+            ErrorsLib.NonCanonicalInteroperableAddress(envelope)
+        );
+    }
 
-    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
-    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
+    /// @notice Returns the ledger key of a wallet: `keccak256` over its canonical envelope.
+    /// @param envelope the interoperable address
+    function canonicalKey(bytes memory envelope) internal pure returns (bytes32 key) {
+        parse(envelope);
+        assembly ("memory-safe") {
+            key := keccak256(add(envelope, 0x20), mload(envelope))
+        }
+    }
 
-    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
-    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
-    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
+    /// @notice Returns the ledger key of a satellite wallet: a canonical envelope on any chain but this one.
+    /// @param envelope the interoperable address
+    function satelliteKey(bytes memory envelope) internal view returns (bytes32 key) {
+        parse(envelope);
+        (bool isEvm, uint256 chainId,) = InteroperableAddress.tryParseEvmV1(envelope);
+        require(!isEvm || chainId != block.chainid, ErrorsLib.NotASatelliteWallet(envelope));
+        assembly ("memory-safe") {
+            key := keccak256(add(envelope, 0x20), mload(envelope))
+        }
+    }
 
-    // Gates the network-level set of vetted ERC-7786 gateways on TrustedGatewayRegistry. Held by network
-    // governance, not by an issuer: a gateway in that set attests the authorship of every message a token
-    // routed through it acts on, so adding one is deliberate and removing one is an emergency lever.
-    uint64 constant INTEROP_MANAGER = ROLE_PREFIX + 17;
-    // Gates the issuer's validation policy on ModularCompliance: the validity window, the per-chain reconciliation
-    // windows, the global clamp and the per-chain issuance pause. Administered by SUITE_ADMIN like the other
-    // manager roles.
-    uint64 constant COMPLIANCE_MANAGER = ROLE_PREFIX + 18;
-
-    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
-    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
-    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
-    // handing out the AccessManager ADMIN_ROLE (0).
-
-    // Admin of AGENT and every granular AGENT_* role.
-    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
-
-    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
-    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
-
-    // ---- Deploy-time transient roles (self-granted for a single call, revoked before returning) ----
-
-    // Gates IdentityRegistryStorage.bindIdentityRegistry so the factory can bind a new IR onto a reused
-    // IRS during deployTREXSuite without standing OWNER. Unassigned at rest, self-granted for the bind call
-    // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
-    uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
-
-    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
-
-    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
-    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
-    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
-    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
+    /// @notice Tells whether an envelope designates an EVM wallet on this chain.
+    /// @param envelope the interoperable address
+    /// @return onReferenceChain true when the envelope is a non-zero EVM address on `block.chainid`
+    /// @return wallet the unwrapped address, or zero when the envelope is not on this chain
+    function isReferenceChain(bytes memory envelope) internal view returns (bool onReferenceChain, address wallet) {
+        parse(envelope);
+        (bool isEvm, uint256 chainId, address addr) = InteroperableAddress.tryParseEvmV1(envelope);
+        onReferenceChain = isEvm && chainId == block.chainid && addr != address(0);
+        if (onReferenceChain) wallet = addr;
+    }
 
 }

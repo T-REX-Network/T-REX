@@ -88,6 +88,10 @@ library ErrorsLib {
     error SameWalletRecovery();
     error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
+    /// @dev Only a wallet on another chain can hold a bridged position; this envelope designates this chain.
+    error NotASatelliteWallet(bytes wallet);
+    /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
+    error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
@@ -151,7 +155,29 @@ library ErrorsLib {
     // TREXRegistry Errors
     error Deprecated();
 
+    // TransferValidation Errors
+    /// @dev A validity or reconciliation window must be positive.
+    error ZeroDuration();
+    /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
+    error ValidationIssuancePaused(bytes32 chainKey);
+    /// @dev Unpausing a chain that is not paused.
+    error ValidationIssuanceNotPaused(bytes32 chainKey);
+    /// @dev Issuance needs a validity window; none was configured.
+    error ValidityWindowNotSet();
+    /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
+    error ReconciliationWindowNotSet(bytes32 chainKey);
+    /// @dev The requested range is inverted.
+    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
+    /// @dev The balance cap, the modules or the clamp left no amount to authorize.
+    error EmptyValidationRange(uint256 min, uint256 max);
+    /// @dev The caller is neither the native wallet, its identity, nor authorised by the AccessManager.
+    error NotAuthorizedForWallet(address caller, bytes wallet);
+    /// @dev `from` has no identity, or `to` is not eligible for new activity.
+    error UnverifiedWallet(bytes wallet);
+    /// @dev Both wallets live on the reference chain: nothing for a satellite to execute.
+    error NoSatelliteLeg();
     // Interop Errors
+    error NonCanonicalInteroperableAddress(bytes envelope);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);

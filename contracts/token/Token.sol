@@ -89,19 +89,15 @@ import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
+import { IToken } from "./IToken.sol";
 
-contract Token is
-    ERC20PermitUpgradeable,
-    PausableUpgradeable,
-    AccessManagedOwnableUpgradeable,
-    TREXMessaging,
-    IERC3643
-{
+contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwnableUpgradeable, TREXMessaging, IToken {
 
     string internal constant VERSION = "5.0.0";
 
@@ -119,6 +115,11 @@ contract Token is
         IModularCompliance compliance;
         IERC3643IdentityRegistry identityRegistry;
         mapping(address user => FrozenStatus) frozenStatus;
+        /// @dev Positions delegated to satellites, keyed by the canonical ERC-7930 wallet key. Separate from the
+        ///  native mapping, which stays OpenZeppelin's.
+        mapping(bytes32 walletKey => uint256) bridgedBalance;
+        /// @dev Sum of every bridged position, kept so `totalSupply` counts it in O(1).
+        uint256 totalBridged;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.Token")) - 1)) & ~bytes32(uint256(0xff));
@@ -282,6 +283,41 @@ contract Token is
     /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
     function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
         return _sendMessage(chainKey, MessageTypesLib.Message.RECALL_INSTRUCTION, body);
+    }
+
+    /* ----- Ledger Views ----- */
+
+    /// @inheritdoc IERC20
+    /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite. A delegation-out, a
+    ///  recall or either native-side settlement leg moves between the two terms and never changes the sum; only a
+    ///  mint or a burn does.
+    ///
+    ///  The register reports the issuance, not the native float, and the events say so at the cost of one
+    ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
+    ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
+    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled`,
+    ///  `SettledFromNative` and `SettledToNative` are the reconciliation for anyone deriving it that way, and
+    ///  `totalSupply() - totalBridged()` is the native float. An escrow address holding the delegated float
+    ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
+    ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
+    ///  `totalBridged` to the positions, whichever of the four transitions moved it.
+    function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
+        return super.totalSupply() + _tokenStorage().totalBridged;
+    }
+
+    /// @inheritdoc IToken
+    function freeBalanceOf(address wallet) public view returns (uint256) {
+        return balanceOf(wallet) - _tokenStorage().frozenStatus[wallet].amount;
+    }
+
+    /// @inheritdoc IToken
+    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256) {
+        return _tokenStorage().bridgedBalance[WalletKeyLib.canonicalKey(wallet)];
+    }
+
+    /// @inheritdoc IToken
+    function totalBridged() external view returns (uint256) {
+        return _tokenStorage().totalBridged;
     }
 
     /// @inheritdoc IERC20Metadata
@@ -623,6 +659,100 @@ contract Token is
         return true;
     }
 
+    /* ----- Ledger Transitions ----- */
+
+    /// @dev Moves `amount` of `holder`'s free balance out to `toWallet`, a wallet on a satellite chain: a native
+    ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
+    ///  Relocation of one identity's own position, so ownership does not move: the calling flow checks pause,
+    ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
+    ///  the buckets and the envelope only. A settlement leg that crosses identities is {_settleFromNative}.
+    function _delegateOut(address holder, bytes memory toWallet, uint256 amount) internal {
+        bytes32 toKey = _moveNativeToBridged(holder, toWallet, amount);
+
+        emit EventsLib.DelegatedOut(holder, toKey, toWallet, amount);
+    }
+
+    /// @dev Brings `amount` back from `fromWallet`, a wallet on a satellite chain, onto `holder`'s free balance:
+    ///  a bridged debit and a native mint (`Transfer(0x0, holder)`). The mirror of {_delegateOut}, applied on a
+    ///  consumed burn proof; the flow checks that `holder` belongs to the burned wallet's identity, so ownership
+    ///  does not move here either. A settlement leg that crosses identities is {_settleToNative}.
+    function _recall(bytes memory fromWallet, address holder, uint256 amount) internal {
+        bytes32 fromKey = _moveBridgedToNative(fromWallet, holder, amount);
+
+        emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
+    }
+
+    /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
+    ///  touch: `from` down, `to` up, nothing native. `validationId` is the validation the settlement consumed.
+    function _bridgedTransfer(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal {
+        bytes32 fromKey = WalletKeyLib.satelliteKey(from);
+        bytes32 toKey = WalletKeyLib.satelliteKey(to);
+
+        TokenStorage storage s = _tokenStorage();
+        _debitBridged(s, from, fromKey, amount);
+        s.bridgedBalance[toKey] += amount;
+
+        emit EventsLib.BridgedTransfer(fromKey, toKey, validationId, from, to, amount);
+    }
+
+    /// @dev Applies the settled leg of a validation whose sender is on the reference chain and whose receiver is
+    ///  on a satellite: `from`'s free balance down, the satellite position up. Same bucket arithmetic as
+    ///  {_delegateOut} and a distinct event, because ownership moves between identities here. `validationId` is
+    ///  the validation the settlement consumed. The calling flow owns the lifecycle; the ledger checks the
+    ///  buckets and the envelope only.
+    function _settleFromNative(address from, bytes memory toWallet, uint256 amount, uint256 validationId) internal {
+        bytes32 toKey = _moveNativeToBridged(from, toWallet, amount);
+
+        emit EventsLib.SettledFromNative(from, toKey, validationId, toWallet, amount);
+    }
+
+    /// @dev Applies the settled leg of a validation whose sender is on a satellite and whose receiver is on the
+    ///  reference chain: the satellite position down, `to`'s free balance up. The mirror of {_settleFromNative},
+    ///  and the cross-identity counterpart of {_recall}.
+    function _settleToNative(bytes memory fromWallet, address to, uint256 amount, uint256 validationId) internal {
+        bytes32 fromKey = _moveBridgedToNative(fromWallet, to, amount);
+
+        emit EventsLib.SettledToNative(fromKey, to, validationId, fromWallet, amount);
+    }
+
+    /// @dev The bucket arithmetic every native-to-bridged transition shares: a native burn and a bridged credit,
+    ///  `totalSupply` unmoved. Emits nothing; the caller names the movement.
+    function _moveNativeToBridged(address holder, bytes memory toWallet, uint256 amount)
+        private
+        returns (bytes32 toKey)
+    {
+        require(holder != address(0), ErrorsLib.ZeroAddress());
+        toKey = WalletKeyLib.satelliteKey(toWallet);
+        uint256 freeBalance = freeBalanceOf(holder);
+        require(amount <= freeBalance, IERC20Errors.ERC20InsufficientBalance(holder, freeBalance, amount));
+
+        TokenStorage storage s = _tokenStorage();
+        super._update(holder, address(0), amount);
+        s.bridgedBalance[toKey] += amount;
+        s.totalBridged += amount;
+    }
+
+    /// @dev The bucket arithmetic every bridged-to-native transition shares: a bridged debit and a native mint.
+    ///  Emits nothing; the caller names the movement.
+    function _moveBridgedToNative(bytes memory fromWallet, address holder, uint256 amount)
+        private
+        returns (bytes32 fromKey)
+    {
+        require(holder != address(0), ErrorsLib.ZeroAddress());
+        fromKey = WalletKeyLib.satelliteKey(fromWallet);
+
+        TokenStorage storage s = _tokenStorage();
+        _debitBridged(s, fromWallet, fromKey, amount);
+        s.totalBridged -= amount;
+        super._update(address(0), holder, amount);
+    }
+
+    function _debitBridged(TokenStorage storage s, bytes memory wallet, bytes32 key, uint256 amount) private {
+        uint256 balance = s.bridgedBalance[key];
+        require(amount <= balance, ErrorsLib.InsufficientBridgedBalance(wallet, balance, amount));
+        s.bridgedBalance[key] = balance - amount;
+    }
+
     /* ----- Utility Functions ----- */
 
     /// @inheritdoc AccessManagedOwnableBase
@@ -646,7 +776,7 @@ contract Token is
             _requireNotPaused();
             require(!s.frozenStatus[from].addressFrozen, ErrorsLib.FrozenWallet(from));
             require(!s.frozenStatus[to].addressFrozen, ErrorsLib.FrozenWallet(to));
-            uint256 freeBalance = balanceOf(from) - s.frozenStatus[from].amount;
+            uint256 freeBalance = freeBalanceOf(from);
             require(value <= freeBalance, IERC20Errors.ERC20InsufficientBalance(from, freeBalance, value));
         } else if (isBurn) {
             _autoUnfreezeFor(from, value);
@@ -675,7 +805,7 @@ contract Token is
         TokenStorage storage s = _tokenStorage();
         uint256 balance = balanceOf(from);
         require(value <= balance, IERC20Errors.ERC20InsufficientBalance(from, balance, value));
-        uint256 freeBalance = balance - s.frozenStatus[from].amount;
+        uint256 freeBalance = freeBalanceOf(from);
         if (value > freeBalance) {
             uint256 toUnfreeze = value - freeBalance;
             s.frozenStatus[from].amount -= toUnfreeze;
@@ -702,10 +832,10 @@ contract Token is
     /// @dev The recall path: credits the holder's native wallet against a satellite's burn proof.
     ///
     /// The path must check that the destination wallet is linked to the same identity as the burned one,
-    /// because a recall moves location and never ownership, then consume the proof through the bridged
-    /// ledger. Both the identity link and the balance transition arrive with the balance model and the
-    /// movement types; until then the proof is attributed, checked for a destination, and announced with
-    /// its fields intact, without touching the ledger.
+    /// because a recall moves location and never ownership, then consume the proof through {_recall}.
+    /// The identity link and the call into the ledger arrive with the movement types; until then the
+    /// proof is attributed, checked for a destination, and announced with its fields intact, without
+    /// touching the ledger.
     function _handleBurnProof(bytes32 chainKey, MessageTypesLib.BurnProof memory proof) internal virtual override {
         require(proof.nativeWallet != address(0), ErrorsLib.ZeroAddress());
 
