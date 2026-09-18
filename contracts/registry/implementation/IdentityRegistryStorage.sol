@@ -84,7 +84,7 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @custom:storage-location erc7201:ERC3643.storage.IdentityRegistryStorage
+    /// @custom:storage-location erc7201:erc3643.storage.IdentityRegistryStorage
     struct Storage {
         /// @dev mapping between a user address and the corresponding identity
         mapping(address user => IIdentity) identities;
@@ -93,8 +93,8 @@ contract IdentityRegistryStorage is IIdentityRegistryStorage, AccessManagedOwnab
         EnumerableSet.AddressSet identityRegistries;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x6d25db4721129739b3a7e96c2537b7170fb9cfd72348ce376c7a189a3ab3ba00;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.IdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0x8e8aa323647c3f2580137bf922482bdf62534082dec9617ddb5e7739bad03900;
 
     /// @notice Upper bound on the registries bound to this storage. It caps the cost of the global fallback,
     ///  which asks the IdentityFactory of every bound registry in turn (one external call each) whenever a

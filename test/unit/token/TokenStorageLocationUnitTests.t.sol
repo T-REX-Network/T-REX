@@ -8,15 +8,15 @@ import { Utils } from "../helpers/Utils.sol";
 contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
 
     function testTokenStorageLocationComputation() public pure {
-        bytes32 expectedLocation = Utils.erc7201("token.storage.main");
-        bytes32 actualLocation = 0x3eb201768b0b55c18fa93955aeb38c6bf0f381d8227d53e1b0e5b066883d4e00;
+        bytes32 expectedLocation = Utils.erc7201("erc3643.storage.Token");
+        bytes32 actualLocation = 0xbeba28ad7ddedd460139c119663e50314606b6f256383098738bb1babd01fd00;
 
         assertEq(expectedLocation, actualLocation, "TOKEN_STORAGE_LOCATION does not match computed value");
     }
 
     function testTokenStorageLocationDecimals() public view {
         // decimals + onchainId are packed at slot offset 2 (after `name` and `symbol`)
-        bytes32 storageSlot = bytes32(uint256(Utils.erc7201("token.storage.main")) + 2);
+        bytes32 storageSlot = bytes32(uint256(Utils.erc7201("erc3643.storage.Token")) + 2);
 
         bytes32 slotValue = vm.load(address(token), storageSlot);
         // decimals is in the rightmost byte (byte 0)
@@ -26,7 +26,7 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
 
     function testTokenStorageLocationOnchainId() public view {
         // decimals + onchainId are packed at slot offset 2 (after `name` and `symbol`)
-        bytes32 storageSlot = bytes32(uint256(Utils.erc7201("token.storage.main")) + 2);
+        bytes32 storageSlot = bytes32(uint256(Utils.erc7201("erc3643.storage.Token")) + 2);
 
         bytes32 slotValue = vm.load(address(token), storageSlot);
         // onchainId is in bytes 1-20 (right-aligned, so we shift right by 8 bits to skip the decimals byte)

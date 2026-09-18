@@ -69,6 +69,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
+import { TrustedGatewayRegistry } from "../interop/TrustedGatewayRegistry.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
@@ -87,11 +88,23 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
         // ------ IDENTITY_MANAGER role ------
-        functions = new bytes4[](3);
+        // Also owns the issuer's side of the interop wiring: which gateway and peer each chain uses.
+        functions = new bytes4[](5);
         functions[0] = Token.setOnchainID.selector;
         functions[1] = Token.setIdentityRegistry.selector;
         functions[2] = Token.setCompliance.selector;
+        functions[3] = Token.setRoute.selector;
+        functions[4] = Token.setPeer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
+
+        // ------ AGENT role ------
+        // Outbound interop dispatch is an operation, not configuration: it sends, it does not rewire.
+        // Only the two instructions an operator genuinely issues; a compliance validation is dispatched
+        // by the bound compliance itself and is deliberately unreachable from any role.
+        functions = new bytes4[](2);
+        functions[0] = Token.dispatchMintInstruction.selector;
+        functions[1] = Token.dispatchRecallInstruction.selector;
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT);
 
         // ------ AGENT_MINTER role ------
         functions = new bytes4[](1);
@@ -188,11 +201,12 @@ library AccessManagerSetupLib {
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](4);
+        bytes4[] memory functions = new bytes4[](5);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
-        functions[2] = TREXFactory.deployTREXSuite.selector;
-        functions[3] = TREXFactory.deployTREXSuiteIsolated.selector;
+        functions[2] = TREXFactory.setTrustedGatewayRegistry.selector;
+        functions[3] = TREXFactory.deployTREXSuite.selector;
+        functions[4] = TREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
     }
 
@@ -224,6 +238,13 @@ library AccessManagerSetupLib {
         // ASSET is single-binding: a token OID binds to exactly one token and cannot be re-linked.
         identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true);
         accessManager.grantRole(RolesLib.ASSET_DEPLOYER, trexFactory, 0);
+    }
+
+    function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {
+        // ------ INTEROP_MANAGER role ------
+        bytes4[] memory functions = new bytes4[](1);
+        functions[0] = TrustedGatewayRegistry.setTrustedGateway.selector;
+        accessManager.setTargetFunctionRole(trustedGatewayRegistry, functions, RolesLib.INTEROP_MANAGER);
     }
 
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)

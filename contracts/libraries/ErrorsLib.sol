@@ -63,6 +63,8 @@
 
 pragma solidity 0.8.30;
 
+import { MessageTypesLib } from "./MessageTypesLib.sol";
+
 library ErrorsLib {
 
     // Common Errors
@@ -148,5 +150,21 @@ library ErrorsLib {
 
     // TREXRegistry Errors
     error Deprecated();
+
+    // Interop Errors
+    error ChainNotOpen(bytes32 chainKey);
+    error ChainNotRegistered(bytes32 chainKey);
+    error GatewayNotRouted(address gateway, bytes32 chainKey);
+    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
+    error GatewayNotTrusted(address gateway);
+    error InvalidChainReference(bytes2 chainType, bytes chainReference);
+    error InvalidPeer(bytes peer);
+    error MessageAlreadyReceived(address gateway, bytes32 receiveId);
+    error MessageTypeNotInbound(MessageTypesLib.Message messageType);
+    error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
+    error SenderNotCompliance(address sender);
+    error SenderNotPeer(bytes32 chainKey, bytes sender);
+    error UnsupportedMessageVersion(uint8 messageVersion);
+    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
 
 }

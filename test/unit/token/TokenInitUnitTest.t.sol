@@ -6,6 +6,7 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
@@ -17,6 +18,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     uint8 pTokenDecimals;
     address pIdentityRegistry;
     address pCompliance;
+    address pTrustedGatewayRegistry;
     address pOnchainId;
     address pOwner;
 
@@ -26,6 +28,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
         pOnchainId = onchainId;
         pIdentityRegistry = identityRegistry;
         pCompliance = compliance;
+        pTrustedGatewayRegistry = address(trustedGatewayRegistry);
         pTokenDecimals = 18;
         pName = "Token";
         pSymbol = "TKN";
@@ -60,6 +63,20 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
         pCompliance = address(0);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         initCall();
+    }
+
+    function testTokenInitRevertsIfTrustedGatewayRegistryIsZeroAddress() public {
+        pTrustedGatewayRegistry = address(0);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        initCall();
+    }
+
+    function testTokenInitWiresTheTrustedGatewayRegistry() public {
+        vm.expectEmit(false, false, false, true);
+        emit EventsLib.TrustedGatewayRegistrySet(pTrustedGatewayRegistry);
+        Token newToken = initCall();
+
+        assertEq(newToken.trustedGatewayRegistry(), pTrustedGatewayRegistry);
     }
 
     function testTokenInitRevertsIfOwnerIsZeroAddress() public {
@@ -99,7 +116,17 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
                 new ERC1967Proxy(
                     address(tokenImplementation),
                     abi.encodeCall(
-                        Token.init, (pName, pSymbol, pTokenDecimals, pIdentityRegistry, pCompliance, pOnchainId, pOwner)
+                        Token.init,
+                        (
+                            pName,
+                            pSymbol,
+                            pTokenDecimals,
+                            pIdentityRegistry,
+                            pCompliance,
+                            pTrustedGatewayRegistry,
+                            pOnchainId,
+                            pOwner
+                        )
                     )
                 )
             )

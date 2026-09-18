@@ -65,6 +65,7 @@ pragma solidity 0.8.30;
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
+import { MessageTypesLib } from "./MessageTypesLib.sol";
 import { Version } from "./VersionLib.sol";
 
 library EventsLib {
@@ -114,6 +115,36 @@ library EventsLib {
 
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
     event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
+
+    // TrustedGatewayRegistry Events
+
+    event TrustedGatewaySet(address indexed gateway, bool trusted);
+
+    // TREXMessaging Events
+
+    /// @notice Emitted by the factory when its registry pointer moves, and by a token once, at deployment.
+    event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
+    /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
+    event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
+    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event PeerSet(bytes32 indexed chainKey, bytes peer);
+    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to the gateway that carried it.
+    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
+    event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
+    event ProtocolMessageReceived(
+        MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 receiveId
+    );
+    /// @notice Emitted by the token when an attributed burn proof reaches its recall path.
+    event BurnProofReceived(
+        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
+    );
+
+    // ModularCompliance Interop Events
+
+    /// @notice Emitted by the compliance when the token hands it an attributed settlement notification.
+    event SettlementNotified(
+        bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
+    );
 
     // TREXImplementationAuthority Events
 

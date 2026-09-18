@@ -69,19 +69,21 @@ import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableM
 
 import { ERC3643EventsLib } from "../../ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
+import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { IModule } from "./modules/IModule.sol";
 
-contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeable {
+contract ModularCompliance is IModularCompliance, ISettlementHandler, AccessManagedOwnableUpgradeable {
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
-    /// @custom:storage-location erc7201:ERC3643.storage.ModularCompliance
+    /// @custom:storage-location erc7201:erc3643.storage.ModularCompliance
     struct Storage {
         /// token linked to the compliance contract
         address tokenBound;
@@ -89,8 +91,8 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
         EnumerableMap.AddressToUintMap modules;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0x44b49c37d3109105ef492022bec834e94dca859d191a0d5323d3afbc4aa69400;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ModularCompliance")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0x972d3465c5929ffd473d79fb161cfbf94769d128c05bf176951400ec5dc1cb00;
 
     /**
      * @dev Throws if called by any address that is not a token bound to the compliance.
@@ -188,6 +190,16 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
                 IModule(module).moduleTransferAction(_from, _to, _value);
             }
         }
+    }
+
+    /// @inheritdoc ISettlementHandler
+    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+        external
+        onlyBoundedToken
+    {
+        emit EventsLib.SettlementNotified(
+            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
+        );
     }
 
     /**
@@ -347,7 +359,8 @@ contract ModularCompliance is IModularCompliance, AccessManagedOwnableUpgradeabl
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643Compliance).interfaceId
+            || interfaceId == type(ISettlementHandler).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @dev Sets the bound token on the compliance storage and emits the corresponding event.

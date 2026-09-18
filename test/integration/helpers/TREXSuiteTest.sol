@@ -17,6 +17,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
+import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { VersionLib } from "contracts/libraries/VersionLib.sol";
@@ -67,6 +68,8 @@ contract TREXSuiteTest is AccessManagerHelper {
     Identity public claimIssuer;
 
     // Admin roles
+    TrustedGatewayRegistry public trustedGatewayRegistry;
+
     address public deployer = makeAddr("deployer");
     address public agent = makeAddr("agent");
 
@@ -132,15 +135,17 @@ contract TREXSuiteTest is AccessManagerHelper {
         claimIssuer = _deployClaimIssuer();
     }
 
-    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory. The ASSET module bundle is
-    ///      registered on the IdentityFactory per type (`setIdentityTypeModules`), so the TREX factory
-    ///      carries no module configuration of its own.
+    /// @dev Builds a TREXFactory wired to the suite's IdentityFactory and gateway registry. The ASSET
+    ///      module bundle is registered on the IdentityFactory per type (`setIdentityTypeModules`), so
+    ///      the TREX factory carries no module configuration of its own.
     function _newTREXFactory(address implementationAuthority, address accessManagerAddress)
         internal
         returns (TREXFactory factory)
     {
         vm.startPrank(deployer);
-        factory = new TREXFactory(implementationAuthority, address(idFactory), accessManagerAddress);
+        factory = new TREXFactory(
+            implementationAuthority, address(idFactory), address(trustedGatewayRegistry), accessManagerAddress
+        );
         vm.stopPrank();
     }
 
@@ -254,6 +259,11 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     function _deployFactories() internal {
         trexImplementationAuthority = _deployTREXImplementationAuthority();
+
+        // Network-level, shared by every suite. Deployed before the factory, which wires it into every token.
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(trustedGatewayRegistry));
+        _grantInteropManagerRole(address(this));
 
         trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 

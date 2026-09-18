@@ -91,7 +91,7 @@ abstract contract AbstractModuleUpgradeable is
     ERC165Upgradeable
 {
 
-    /// @custom:storage-location erc7201:ERC3643.storage.AbstractModule
+    /// @custom:storage-location erc7201:erc3643.storage.AbstractModuleUpgradeable
     struct AbstractModuleStorage {
         /// Compliance contract binding status
         mapping(address compliance => bool) complianceBound;
@@ -103,9 +103,9 @@ abstract contract AbstractModuleUpgradeable is
         mapping(address compliance => uint256) nonces;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.AbstractModule")) - 1)) & ~bytes32(uint256(0xff))
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.AbstractModuleUpgradeable")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant _ABSTRACT_MODULE_STORAGE_LOCATION =
-        0xf6cc97de1266c180cd39f3b311632644143ce7873d2927755382ad4b39e8ae00;
+        0x444fa4c260ed0f6b1ae0af41fab4e6d2db0fa3e7e1fd34f89c069636d02e9200;
 
     /**
      * @dev Throws if `_compliance` is not a bound compliance contract address.
