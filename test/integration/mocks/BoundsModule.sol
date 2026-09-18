@@ -38,13 +38,14 @@ contract BoundsModule is AbstractModuleUpgradeable {
         _settings[msg.sender].shouldRevert = shouldRevert;
     }
 
-    function validationBounds(bytes calldata, bytes calldata, uint256 currentMin, uint256 currentMax, address)
-        external
-        view
-        virtual
-        override
-        returns (uint256 min, uint256 max)
-    {
+    function validationBounds(
+        bytes calldata,
+        bytes calldata,
+        bytes calldata,
+        uint256 currentMin,
+        uint256 currentMax,
+        address
+    ) external view virtual override returns (uint256 min, uint256 max) {
         Settings storage s = _settings[msg.sender];
         require(!s.shouldRevert, BoundsModuleRefused());
         min = currentMin > s.floor ? currentMin : s.floor;
@@ -71,10 +72,34 @@ contract BoundsModule is AbstractModuleUpgradeable {
 
 }
 
+/// @dev Refuses any validation naming a spender: the satellite runs no module, so a spender policy can only
+///      refuse at issuance.
+contract SpenderPolicyModule is BoundsModule {
+
+    error SpenderRefused(bytes spender);
+
+    function validationBounds(
+        bytes calldata,
+        bytes calldata,
+        bytes calldata spender,
+        uint256 currentMin,
+        uint256 currentMax,
+        address
+    ) external pure override returns (uint256 min, uint256 max) {
+        require(spender.length == 0, SpenderRefused(spender));
+        return (currentMin, currentMax);
+    }
+
+    function name() external pure override returns (string memory) {
+        return "SpenderPolicyModule";
+    }
+
+}
+
 /// @dev Answers wider than what it received: the engine must intersect it back to the running range.
 contract WideningBoundsModule is BoundsModule {
 
-    function validationBounds(bytes calldata, bytes calldata, uint256, uint256, address)
+    function validationBounds(bytes calldata, bytes calldata, bytes calldata, uint256, uint256, address)
         external
         pure
         override

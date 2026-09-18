@@ -6,7 +6,7 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
-import { BoundsModule, WideningBoundsModule } from "test/integration/mocks/BoundsModule.sol";
+import { BoundsModule, SpenderPolicyModule, WideningBoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import { CheckTransferOnlyModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 
 /// @dev The bounds engine against real modules: the running range, intersection, order independence, the clamp
@@ -46,12 +46,12 @@ contract ValidationBoundsTest is InteropSuiteTest {
 
         vm.expectCall(
             address(first),
-            abi.encodeCall(IModule.validationBounds, (aliceSat, bobSat, 10, BALANCE, address(boundCompliance))),
+            abi.encodeCall(IModule.validationBounds, (aliceSat, bobSat, "", 10, BALANCE, address(boundCompliance))),
             1
         );
         vm.expectCall(
             address(second),
-            abi.encodeCall(IModule.validationBounds, (aliceSat, bobSat, 20, 90, address(boundCompliance))),
+            abi.encodeCall(IModule.validationBounds, (aliceSat, bobSat, "", 20, 90, address(boundCompliance))),
             1
         );
         (uint256 min, uint256 max) = _issue(10, 200);
@@ -147,6 +147,35 @@ contract ValidationBoundsTest is InteropSuiteTest {
 
         assertEq(clampedMax, 50);
         assertEq(looseMax, 80);
+    }
+
+    /// @notice The spender reaches the hook, so a module sees the whole request and not just the amounts.
+    function test_requestTransferValidation_Success_WhenTheSpenderReachesTheModule() public {
+        _bindWith(first, 20, 80);
+        bytes memory spender = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("spenderOnPolygon"));
+
+        vm.expectCall(
+            address(first),
+            abi.encodeCall(
+                IModule.validationBounds, (aliceSat, bobSat, spender, 10, BALANCE, address(boundCompliance))
+            ),
+            1
+        );
+        vm.prank(address(aliceIdentity));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender);
+    }
+
+    /// @notice A spender the policy refuses never obtains a validation, which is the only place it can be stopped:
+    ///         the satellite executes `transferFrom` with no module behind it.
+    function test_requestTransferValidation_RevertWhen_AModuleRefusesTheSpender() public {
+        address policy = _deployBounds(address(new SpenderPolicyModule()));
+        vm.prank(deployer);
+        boundCompliance.addModule(policy);
+        bytes memory spender = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("refusedSpender"));
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(SpenderPolicyModule.SpenderRefused.selector, spender));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender);
     }
 
     /// @notice Two wallets of one identity: no module is consulted and only the balance narrows.

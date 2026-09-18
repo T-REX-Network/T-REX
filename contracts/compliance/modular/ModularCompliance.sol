@@ -421,12 +421,13 @@ contract ModularCompliance is
 
     /// @inheritdoc TransferValidation
     /// @dev Each module receives the range as the ones before it left it; its answer is intersected, never trusted.
-    function _moduleBounds(bytes memory from, bytes memory to, uint256 currentMin, uint256 currentMax)
-        internal
-        view
-        override
-        returns (uint256 min, uint256 max)
-    {
+    function _moduleBounds(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 currentMin,
+        uint256 currentMax
+    ) internal view override returns (uint256 min, uint256 max) {
         min = currentMin;
         max = currentMax;
         Storage storage s = _getStorage();
@@ -434,7 +435,8 @@ contract ModularCompliance is
         for (uint256 i = 0; i < length; i++) {
             (address module, uint256 capabilities) = s.modules.pos(i);
             if (capabilities & ModuleCapabilitiesLib.BOUNDS == 0) continue;
-            (uint256 moduleMin, uint256 moduleMax) = IModule(module).validationBounds(from, to, min, max, address(this));
+            (uint256 moduleMin, uint256 moduleMax) =
+                IModule(module).validationBounds(from, to, spender, min, max, address(this));
             if (moduleMin > min) min = moduleMin;
             if (moduleMax < max) max = moduleMax;
         }

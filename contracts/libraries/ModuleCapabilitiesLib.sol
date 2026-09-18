@@ -88,7 +88,7 @@ library ModuleCapabilitiesLib {
     uint256 internal constant HOOK_BURN = 1 << 4;
 
     /// @dev The module implements {IModule-validationBounds}: it narrows the amount range of a compliance
-    ///  validation issued for a satellite movement.
+    ///  validation issued for a satellite movement, and is where a spender policy refuses one.
     uint256 internal constant BOUNDS = 1 << 5;
 
     /// @dev Mask of every defined flag, used to reject undefined bits at binding time.

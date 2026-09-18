@@ -159,9 +159,12 @@ interface IModule {
      *  balance and narrowed by the modules before it, and must answer a range inside it (the compliance intersects
      *  the answer anyway). Additive rules evaluate at `_currentMax`, retention rules at `_currentMin`; a module may
      *  narrow to a point or revert to refuse
+     *  it is also where a spender policy is enforced for a satellite movement: no module runs on the satellite, so
+     *  issuance is the only place `_spender`'s authority can be checked, and a module that refuses it reverts here
      *  This function can be called only on a compliance contract that is bound to the module
      *  @param _from ERC-7930 interoperable address of the sender
      *  @param _to ERC-7930 interoperable address of the recipient
+     *  @param _spender ERC-7930 interoperable address allowed to execute the movement, empty when only `_from` may
      *  @param _currentMin inclusive lower bound of the running range
      *  @param _currentMax inclusive upper bound of the running range
      *  @param _compliance address of the compliance contract issuing the validation
@@ -171,6 +174,7 @@ interface IModule {
     function validationBounds(
         bytes calldata _from,
         bytes calldata _to,
+        bytes calldata _spender,
         uint256 _currentMin,
         uint256 _currentMax,
         address _compliance

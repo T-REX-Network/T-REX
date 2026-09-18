@@ -223,7 +223,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         mc.addModule(address(checker));
         vm.stopPrank();
 
-        vm.expectCall(bounds, abi.encodeCall(IModule.validationBounds, (from, to, 10, 100, address(mc))), 1);
+        vm.expectCall(bounds, abi.encodeCall(IModule.validationBounds, (from, to, "", 10, 100, address(mc))), 1);
         vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
         vm.expectCall(address(checker), abi.encodeWithSelector(IModule.moduleCheck.selector), 0);
         _requestValidation(alice, from, to, 10, 100);

@@ -112,7 +112,7 @@ contract ModuleCapabilitiesUnitTest is Test {
         IModule module = IModule(_deploy(address(new CheckTransferOnlyModule())));
 
         (uint256 min, uint256 max) =
-            module.validationBounds(hex"0001000001890114", hex"00010000010a0114", 9, 11, address(this));
+            module.validationBounds(hex"0001000001890114", hex"00010000010a0114", "", 9, 11, address(this));
 
         assertEq(min, 9);
         assertEq(max, 11);

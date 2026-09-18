@@ -181,12 +181,15 @@ abstract contract TransferValidation is ITransferValidation {
     /// @dev Whether the AccessManager lets `caller` call `selector` on this contract now.
     function _canCallSelector(address caller, bytes4 selector) internal view virtual returns (bool);
 
-    /// @dev Narrows the running range by intersection through every module that declared `BOUNDS`.
-    function _moduleBounds(bytes memory from, bytes memory to, uint256 currentMin, uint256 currentMax)
-        internal
-        view
-        virtual
-        returns (uint256 min, uint256 max);
+    /// @dev Narrows the running range by intersection through every module that declared `BOUNDS`. `spender` rides
+    /// along so a spender policy can refuse there: the satellite runs no module, so this is where it is checked.
+    function _moduleBounds(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 currentMin,
+        uint256 currentMax
+    ) internal view virtual returns (uint256 min, uint256 max);
 
     /// @dev Reserves the compliance slots of a validation being issued. Empty until the slot lifecycle fills it.
     function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax)
@@ -317,7 +320,7 @@ abstract contract TransferValidation is ITransferValidation {
         require(min <= max, ErrorsLib.EmptyValidationRange(min, max));
 
         if (fromIdentity != registry.resolveIdentity(validation.to)) {
-            (min, max) = _moduleBounds(validation.from, validation.to, min, max);
+            (min, max) = _moduleBounds(validation.from, validation.to, validation.spender, min, max);
         }
         uint256 clamp = s.validationClamp;
         if (clamp != 0 && clamp < max) max = clamp;

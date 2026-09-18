@@ -169,9 +169,11 @@ All notable changes to this project will be documented in this file.
     `TransferValidationIssued` carries the full envelopes, and one leg per involved satellite chain
     leaves through `Token.dispatchComplianceValidation` under the same id. Both wallets on the
     reference chain is refused (`NoSatelliteLeg`).
-  - `IModule.validationBounds(from, to, currentMin, currentMax, compliance)` behind the
+  - `IModule.validationBounds(from, to, spender, currentMin, currentMax, compliance)` behind the
     `ModuleCapabilitiesLib.BOUNDS` flag: a module narrows the running range or reverts to refuse.
-    `AbstractModuleUpgradeable` ships a pass-through default, so existing modules are unaffected.
+    The spender rides along because no module runs on the satellite, so issuance is the only place a
+    spender policy can refuse one. `AbstractModuleUpgradeable` ships a pass-through default, so
+    existing modules are unaffected.
   - `TREXRegistry.resolveIdentity(bytes)` and `isWalletVerified(bytes)`, backed by the registry's
     IdentityFactory: the first attributes (revoked bindings included), the second admits (active
     binding, then the same claim check as `isVerified`).

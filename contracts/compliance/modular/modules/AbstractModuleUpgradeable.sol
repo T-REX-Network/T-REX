@@ -195,12 +195,14 @@ abstract contract AbstractModuleUpgradeable is
      *  @dev See {IModule-validationBounds}.
      *  Default pass-through: a module overrides it only when it declares `BOUNDS`.
      */
-    function validationBounds(bytes calldata, bytes calldata, uint256 _currentMin, uint256 _currentMax, address)
-        external
-        view
-        virtual
-        returns (uint256 min, uint256 max)
-    {
+    function validationBounds(
+        bytes calldata,
+        bytes calldata,
+        bytes calldata,
+        uint256 _currentMin,
+        uint256 _currentMax,
+        address
+    ) external view virtual returns (uint256 min, uint256 max) {
         return (_currentMin, _currentMax);
     }
 
