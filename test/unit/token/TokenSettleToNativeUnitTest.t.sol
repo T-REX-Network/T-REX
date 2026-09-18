@@ -92,10 +92,11 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         _assertPartition();
     }
 
-    function test_settleToNative_ThenSettlesBackOut() public {
+    /// @notice A settled position comes back out through a delegation-out, the only native-to-satellite move.
+    function test_settleToNative_ThenDelegatesBackOut() public {
         vm.startPrank(agent);
         ledger.settleToNative(satellite1, user2, 50, VALIDATION_ID);
-        ledger.settleFromNative(user2, satellite3, 50, VALIDATION_ID + 1);
+        ledger.delegateOut(user2, satellite3, 50);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 0);

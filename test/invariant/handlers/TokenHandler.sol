@@ -17,6 +17,8 @@ contract TokenHandler is Test {
 
     TokenLedgerHarness public immutable token;
     address public immutable agent;
+    /// @dev The only caller the token accepts a hold from.
+    address public immutable compliance;
 
     address[] public actors;
     bytes[][] internal satellites;
@@ -25,6 +27,7 @@ contract TokenHandler is Test {
     uint256 public ghostMinted; // total ever minted via this handler
     uint256 public ghostBurned; // total ever burned via this handler
     uint256 public ghostBridgedTotal; // every transition that moves a position across the native boundary
+    uint256 public ghostInTransit; // held minus settled from a hold
     bool public pausedTransferLeak; // set true if a transfer ever succeeded while paused (must stay false)
     bool public unverifiedRecipientLeak; // set true if a successful transfer landed on an unverified recipient
 
@@ -39,12 +42,24 @@ contract TokenHandler is Test {
     uint256 public callsDelegateOut;
     uint256 public callsRecall;
     uint256 public callsBridgedTransfer;
-    uint256 public callsSettleFromNative;
     uint256 public callsSettleToNative;
+    uint256 public callsHoldInTransit;
+    uint256 public callsSettleHeld;
+
+    struct Hold {
+        uint256 validationId;
+        bytes from;
+        uint256 amount;
+    }
+
+    /// @dev Live holds, so a settlement can pick one; ids are never reused.
+    Hold[] internal holds;
+    uint256 internal nextValidationId = 1;
 
     constructor(TokenLedgerHarness token_, address agent_, address[] memory actors_, bytes[][] memory satellites_) {
         token = token_;
         agent = agent_;
+        compliance = address(token_.compliance());
         actors = actors_;
         satellites = satellites_;
     }
@@ -186,21 +201,8 @@ contract TokenHandler is Test {
         try token.bridgedTransfer(from, to, amount, validationId) { } catch { }
     }
 
-    /// @dev The native side and the satellite side come from independent seeds, so the leg crosses identities.
-    function settleFromNative(uint256 nativeSeed, uint256 walletActorSeed, uint256 walletSeed, uint256 amount)
-        external
-    {
-        callsSettleFromNative++;
-        address from = actors[_actor(nativeSeed)];
-        bytes memory to = _satellite(_actor(walletActorSeed), walletSeed);
-        amount = bound(amount, 0, token.freeBalanceOf(from));
-        vm.prank(agent);
-        try token.settleFromNative(from, to, amount, nativeSeed) {
-            ghostBridgedTotal += amount;
-        } catch { }
-    }
-
-    /// @dev The mirror: a satellite position lands on another identity's native wallet.
+    /// @dev A satellite position lands on another identity's native wallet: the seeds are independent, so the
+    ///  leg crosses identities.
     function settleToNative(uint256 walletActorSeed, uint256 walletSeed, uint256 nativeSeed, uint256 amount) external {
         callsSettleToNative++;
         bytes memory from = _satellite(_actor(walletActorSeed), walletSeed);
@@ -209,6 +211,35 @@ contract TokenHandler is Test {
         vm.prank(agent);
         try token.settleToNative(from, to, amount, nativeSeed) {
             ghostBridgedTotal -= amount;
+        } catch { }
+    }
+
+    /// @dev The burn leg of a cross-chain validation: the amount leaves the wallet and waits under a fresh id.
+    function holdInTransit(uint256 fromActorSeed, uint256 fromWalletSeed, uint256 amount) external {
+        callsHoldInTransit++;
+        bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
+        amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        uint256 validationId = nextValidationId++;
+        vm.prank(compliance);
+        try token.holdInTransit(from, amount, validationId) {
+            holds.push(Hold({ validationId: validationId, from: from, amount: amount }));
+            ghostInTransit += amount;
+        } catch { }
+    }
+
+    /// @dev The mint leg: a live hold is credited to some wallet, at its amount or at a wrong one.
+    function settleHeld(uint256 holdSeed, uint256 toActorSeed, uint256 toWalletSeed, bool exact) external {
+        callsSettleHeld++;
+        if (holds.length == 0) return;
+        uint256 i = holdSeed % holds.length;
+        Hold memory hold = holds[i];
+        bytes memory to = _satellite(_actor(toActorSeed), toWalletSeed);
+        uint256 amount = exact ? hold.amount : hold.amount + 1;
+        vm.prank(agent);
+        try token.bridgedTransfer(hold.from, to, amount, hold.validationId) {
+            ghostInTransit -= hold.amount;
+            holds[i] = holds[holds.length - 1];
+            holds.pop();
         } catch { }
     }
 
