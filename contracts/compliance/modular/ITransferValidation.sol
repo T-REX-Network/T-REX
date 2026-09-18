@@ -81,7 +81,8 @@ interface ITransferValidation {
         uint64 expiry;
         /// `expiry + reconciliationWindow`: past it, the slot may be released and the validation discarded.
         uint64 releaseAt;
-        /// `keccak256(chainType, chainReference)` of `from`'s chain; the reference chain's own key for a native wallet.
+        /// `from`'s chain, keyed as `MessageTypesLib.chainKey` computes it; the reference chain's own key
+        /// for a native wallet.
         bytes32 fromChainKey;
         /// Same for `to`'s chain.
         bytes32 toChainKey;
@@ -138,7 +139,7 @@ interface ITransferValidation {
     /// - `duration` must not be zero; otherwise reverts with `ZeroDuration`.
     ///
     /// Emits `ReconciliationWindowSet`.
-    /// @param chainKey `keccak256(chainType, chainReference)` of the chain.
+    /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param duration The window in seconds.
     function setReconciliationWindow(bytes32 chainKey, uint64 duration) external;
 
@@ -158,7 +159,7 @@ interface ITransferValidation {
     /// - The chain must not already be paused; otherwise reverts with `ValidationIssuancePaused`.
     ///
     /// Emits `ValidationIssuancePaused`.
-    /// @param chainKey `keccak256(chainType, chainReference)` of the chain.
+    /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
     function pauseValidationIssuance(bytes32 chainKey) external;
 
     /// @dev Resumes issuance for `chainKey`, the explicit step after a late-reconciliation exception is resolved.
@@ -168,7 +169,7 @@ interface ITransferValidation {
     /// - The chain must be paused; otherwise reverts with `ValidationIssuanceNotPaused`.
     ///
     /// Emits `ValidationIssuanceUnpaused`.
-    /// @param chainKey `keccak256(chainType, chainReference)` of the chain.
+    /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
     function unpauseValidationIssuance(bytes32 chainKey) external;
 
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
