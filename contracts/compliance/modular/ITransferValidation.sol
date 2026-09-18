@@ -186,7 +186,7 @@ interface ITransferValidation {
     function isIssuancePaused(bytes32 chainKey) external view returns (bool);
 
     /// @dev The last validation id issued; ids start at 1 and increase by one, so zero is never a valid id.
-    function nextValidationId() external view returns (uint256);
+    function lastValidationId() external view returns (uint256);
 
     /// @dev The record kept for `validationId`, all zeros when the id was never issued.
     /// @param validationId The validation to look up.

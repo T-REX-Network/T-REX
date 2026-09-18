@@ -187,7 +187,7 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_views_Success_WhenNothingWasIssued() public view {
-        assertEq(mc.nextValidationId(), 0);
+        assertEq(mc.lastValidationId(), 0);
         ITransferValidation.ValidationRecord memory record = mc.validationOf(1);
         assertEq(record.hash, bytes32(0));
         assertEq(record.expiry, 0);

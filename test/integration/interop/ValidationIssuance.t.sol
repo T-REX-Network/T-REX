@@ -149,7 +149,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 90, "");
 
-        assertEq(boundCompliance.nextValidationId(), 0);
+        assertEq(boundCompliance.lastValidationId(), 0);
         assertEq(boundCompliance.validationOf(1).hash, bytes32(0));
         assertEq(polygonGateway.queueLength(), 0);
     }
@@ -164,7 +164,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         boundCompliance.requestTransferValidation(aliceSat, bobOptimism, 10, 90, "");
 
         assertEq(polygonGateway.queueLength(), 0);
-        assertEq(boundCompliance.nextValidationId(), 0);
+        assertEq(boundCompliance.lastValidationId(), 0);
     }
 
     function test_requestTransferValidation_Success_WhenARouteSwitchPinsTheNewGatewayForNewIdsOnly() public {

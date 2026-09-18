@@ -88,7 +88,7 @@ contract ValidationBoundsTest is InteropSuiteTest {
         vm.expectRevert(BoundsModule.BoundsModuleRefused.selector);
         boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "");
 
-        assertEq(boundCompliance.nextValidationId(), 0);
+        assertEq(boundCompliance.lastValidationId(), 0);
     }
 
     /// @notice A module narrowing to nothing empties the range, which is refused.

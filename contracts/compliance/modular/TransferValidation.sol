@@ -95,7 +95,7 @@ abstract contract TransferValidation is ITransferValidation {
         /// Per-chain issuance pause, set by the manager or a late reconciliation, lifted by the manager only.
         mapping(bytes32 chainKey => bool paused) issuancePaused;
         /// The last id issued. Ids start at 1.
-        uint256 nextValidationId;
+        uint256 lastValidationId;
         /// What the slot lifecycle keys on.
         mapping(uint256 validationId => ValidationRecord record) validations;
     }
@@ -160,8 +160,8 @@ abstract contract TransferValidation is ITransferValidation {
     }
 
     /// @inheritdoc ITransferValidation
-    function nextValidationId() public view returns (uint256) {
-        return _validationStorage().nextValidationId;
+    function lastValidationId() public view returns (uint256) {
+        return _validationStorage().lastValidationId;
     }
 
     /// @inheritdoc ITransferValidation
@@ -326,7 +326,7 @@ abstract contract TransferValidation is ITransferValidation {
         returns (uint256 validationId)
     {
         ValidationStorage storage s = _validationStorage();
-        validationId = ++s.nextValidationId;
+        validationId = ++s.lastValidationId;
         validation.validationId = validationId;
         _record(s, validation, legs);
         _reserveSlots(validationId, validation.from, validation.to, validation.amountMax);

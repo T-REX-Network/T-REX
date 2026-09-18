@@ -82,7 +82,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
         assertEq(id, 1);
-        assertEq(mc.nextValidationId(), 1);
+        assertEq(mc.lastValidationId(), 1);
     }
 
     function test_requestTransferValidation_Success_WhenCalledByTheNativeHolder() public configured {
@@ -236,7 +236,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 150, BRIDGED_BALANCE));
         mc.requestTransferValidation(fromSat, toSat, 150, 200, "");
 
-        assertEq(mc.nextValidationId(), 0);
+        assertEq(mc.lastValidationId(), 0);
     }
 
     /// @notice A validation authorizing nothing is never issued, whichever step made the maximum zero.
@@ -250,7 +250,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
         mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
 
-        assertEq(mc.nextValidationId(), 0);
+        assertEq(mc.lastValidationId(), 0);
     }
 
     function test_requestTransferValidation_Success_WhenTheClampAppliesLast() public configured {
@@ -269,7 +269,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 5));
         mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
-        assertEq(mc.nextValidationId(), 0);
+        assertEq(mc.lastValidationId(), 0);
     }
 
     /// @notice Two wallets of one identity: issued, recorded, but no module consulted.
@@ -305,7 +305,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         assertEq(first, 1);
         assertEq(second, 2);
-        assertEq(mc.nextValidationId(), 2);
+        assertEq(mc.lastValidationId(), 2);
         assertTrue(mc.validationOf(first).hash != mc.validationOf(second).hash);
     }
 
@@ -402,7 +402,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
-        assertEq(mc.nextValidationId(), 0);
+        assertEq(mc.lastValidationId(), 0);
         assertEq(mc.validationOf(1).hash, bytes32(0));
     }
 
