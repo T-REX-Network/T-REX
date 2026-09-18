@@ -123,6 +123,7 @@ abstract contract TransferValidation is ITransferValidation {
         bytes calldata spender
     ) external returns (uint256 validationId) {
         require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
+        // Parsed for its revert: `from` and `to` are checked by leg resolution, the spender has no such pass.
         if (spender.length != 0) WalletKeyLib.parse(spender);
         Legs memory legs = _legsOf(from, to);
         _authorize(msg.sender, from, legs);

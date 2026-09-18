@@ -102,6 +102,16 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(_decodeQueuedValidation(polygonGateway, 0).spender, spender);
     }
 
+    /// @notice One encoding per wallet on the wire too: a spender carrying trailing bytes never leaves.
+    function test_requestTransferValidation_RevertWhen_TheSpenderIsNotCanonical() public {
+        bytes memory spender =
+            bytes.concat(InteroperableAddress.formatEvmV1(POLYGON, makeAddr("operatorOnPolygon")), hex"00");
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, spender));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 90, spender);
+    }
+
     function test_requestTransferValidation_Success_WhenSlippageIsCappedAtTheBalance() public {
         uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 90, 110);
 
