@@ -159,7 +159,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_setIdentityRegistryStorage_Success_EmitsEvent() public {
-        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage();
+        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage(address(registry));
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
@@ -204,13 +204,46 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
     }
 
+    /// @notice Behavior: a storage that does not list this registry as bound is refused, so the
+    ///         registry cannot end up pointing at a storage whose `_globalIdentity` skips it.
+    function test_setIdentityRegistryStorage_RevertWhen_NotBoundToStorage() public {
+        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage(address(0));
+        address before = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
+        registry.setIdentityRegistryStorage(address(replacement));
+
+        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
+    }
+
+    /// @notice Behavior: binding the registry on the storage after the failed swap makes it succeed,
+    ///         so the check is on the bound set and not on the storage itself.
+    function test_setIdentityRegistryStorage_Success_AfterBinding() public {
+        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage(address(0));
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
+        registry.setIdentityRegistryStorage(address(replacement));
+
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(replacement));
+        vm.prank(deployer);
+        replacement.bindIdentityRegistry(address(registry));
+
+        vm.prank(deployer);
+        registry.setIdentityRegistryStorage(address(replacement));
+
+        assertEq(address(registry.identityStorage()), address(replacement));
+    }
+
     /// @dev Shares the suite AccessManager so the new IRS passes `onlySharedAuthority`.
-    function _deployIdentityRegistryStorage() private returns (IdentityRegistryStorage) {
+    ///      `initialIR` is bound at init, which is what the pre-bind check reads.
+    function _deployIdentityRegistryStorage(address initialIR) private returns (IdentityRegistryStorage) {
         return IdentityRegistryStorage(
             address(
                 new ERC1967Proxy(
                     address(identityRegistryStorageImpl),
-                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), initialIR))
                 )
             )
         );
