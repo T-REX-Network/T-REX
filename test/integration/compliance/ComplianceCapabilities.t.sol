@@ -8,6 +8,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { ModuleCapabilitiesLib as Caps } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import {
     AllCapabilitiesModule,
     BurnOnlyModule,
@@ -65,6 +66,23 @@ contract ComplianceCapabilitiesTest is TREXSuiteTest {
         assertEq(modules[0], mintOnly);
         assertEq(modules[1], burnOnly);
         assertEq(modules[2], everything);
+    }
+
+    /// @notice A module declaring only the bounds hook binds and is recorded with that flag alone.
+    function test_addModule_Success_WhenModuleDeclaresOnlyBounds() public {
+        address module =
+            address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())));
+
+        vm.expectEmit(true, false, false, true);
+        emit EventsLib.ModuleCapabilitiesRecorded(module, Caps.BOUNDS);
+        vm.prank(deployer);
+        mc.addModule(module);
+
+        assertEq(mc.getModuleCapabilities(module), Caps.BOUNDS);
+        address[] memory bounded = mc.getModulesByCapability(Caps.BOUNDS);
+        assertEq(bounded.length, 1);
+        assertEq(bounded[0], module);
+        assertEq(mc.getModulesByCapability(Caps.CHECK_TRANSFER).length, 0);
     }
 
     /// @notice A module declaring nothing cannot be bound.
