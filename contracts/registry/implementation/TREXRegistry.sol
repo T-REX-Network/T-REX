@@ -337,7 +337,7 @@ contract TREXRegistry is
     ///  interface support and for a shared authority. `onlySharedAuthority` is a misconfiguration guard
     ///  only: `authority()` is spoofable.
     function _authorizeRegistryUpdate(address newRegistry) internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
         _checkSharedAuthority(newRegistry);
         require(
             ERC165Checker.supportsInterface(newRegistry, type(IERC3643IdentityRegistryStorage).interfaceId),
@@ -347,12 +347,12 @@ contract TREXRegistry is
 
     /// @dev T-REX authorization for the trusted-issuer functions.
     function _authorizeIssuersUpdate() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
     }
 
     /// @dev T-REX authorization for the claim-topic functions.
     function _authorizeClaimTopicsUpdate() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
     }
 
     function _getStorage() internal pure returns (Storage storage s) {

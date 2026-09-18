@@ -240,14 +240,14 @@ contract IdentityRegistryStorage is
 
     /// @dev T-REX authorization for the identity-writing functions: the configured AccessManager role.
     function _authorizeIdentityWrite() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
     }
 
     /// @dev Binding is authorized by the two dedicated external overrides above, which apply `restricted`
     ///  and `onlySharedAuthority` directly. This hook is therefore never the sole gate on the public path;
     ///  it exists so any future internal caller still passes through the role check.
     function _authorizeRegistryBinding(address) internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
     }
 
     /// @dev Asks the IdentityFactory of each bound registry in turn and returns the first identity found,

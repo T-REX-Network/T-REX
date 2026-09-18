@@ -35,6 +35,11 @@ jobs:
         run: forge fmt --check
         id: lint
 
+      # Use `_msgData()`, not raw `msg.data`, to stay ERC-2771 safe.
+      - name: Check no raw msg.data in contracts
+        run: "! grep -rn 'msg\\.data' contracts/"
+        id: msg-data
+
       - name: Run tests
         run: forge test --gas-report
         id: test
