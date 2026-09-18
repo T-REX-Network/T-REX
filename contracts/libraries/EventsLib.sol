@@ -105,6 +105,7 @@ library EventsLib {
 
     // Token Events
     event ForcedTransfer(address indexed agent);
+    event IdentityTransfer(address indexed identity, address indexed from, address indexed to, uint256 amount);
 
     // TREXFactory Events
 

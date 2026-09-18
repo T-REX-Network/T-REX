@@ -166,6 +166,35 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         return super.transferFrom(from, to, value);
     }
 
+    /// @notice Moves tokens out of a wallet on behalf of the investor's own identity.
+    /// @dev The identity itself must be the caller: it is an ERC-7579 account, so the call already carries
+    ///      the account's own authentication. A key holder calling the token directly is just another caller.
+    /// @dev No allowance is read or written, and the spender gate never runs: it vets third-party spenders,
+    ///      and the owner's own identity is not one. `approve`, `transferFrom` and `permit` stay plain ERC-20.
+    /// @dev Carries no revocation gate of its own. A wallet revoked in ONCHAINID still resolves here whenever
+    ///      it holds a local registration, and it can still {transfer} out, so gating this path alone would be
+    ///      bypassable rather than protective. Revoked wallets are a token-wide policy question, not this
+    ///      function's.
+    /// @param from wallet the tokens are taken from, linked to the calling identity
+    /// @param to address the tokens are sent to
+    /// @param amount number of tokens moved
+    /// @return true when the transfer succeeded
+    function identityTransfer(address from, address to, uint256 amount) external returns (bool) {
+        // An unlinked wallet resolves to the zero identity. No caller can be the zero address, so the sender
+        // check alone already rejects it; the explicit guard keeps the zero identity from ever authorizing
+        // itself if `_msgSender()` is later overridden.
+        IIdentity identity = _getIdentityRegistry().identity(from);
+        require(
+            address(identity) != address(0) && _msgSender() == address(identity),
+            ErrorsLib.NotLinkedIdentity(from, _msgSender())
+        );
+        _transfer(from, to, amount);
+        // Emitted after the move so the operator event follows `Transfer`, the ordering {_forcedTransfer} keeps.
+        emit EventsLib.IdentityTransfer(address(identity), from, to, amount);
+
+        return true;
+    }
+
     /* ----- Utility Functions ----- */
 
     /// @inheritdoc AccessManagedOwnableBase
