@@ -92,11 +92,6 @@ library EventsLib {
         bytes to,
         uint256 amount
     );
-    /// @notice Emitted on a settled movement leaving a native wallet for a satellite one, under the validation it
-    ///  consumed. Ownership moves between identities, unlike {DelegatedOut}.
-    event SettledFromNative(
-        address indexed from, bytes32 indexed toKey, uint256 indexed validationId, bytes toWallet, uint256 amount
-    );
     /// @notice Emitted on a settled movement leaving a satellite wallet for a native one, under the validation it
     ///  consumed. Ownership moves between identities, unlike {Recalled}.
     event SettledToNative(

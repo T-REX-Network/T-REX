@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -57,26 +56,11 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
         _assertPartition();
     }
 
-    function test_settleValidation_Success_WhenFromIsNative() public {
-        vm.expectEmit(true, true, false, true, address(token));
-        emit IERC20.Transfer(user1, address(0), 25);
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.DelegatedOut(user1, keccak256(satellite2), satellite2, 25);
-        vm.prank(compliance);
-        token.settleValidation(nativeUser1, satellite2, 25, VALIDATION_ID);
-
-        assertEq(token.balanceOf(user1), 15);
-        assertEq(token.bridgedBalanceOf(satellite2), 25);
-        assertEq(token.totalBridged(), 85);
-        assertEq(token.totalSupply(), 100);
-        _assertPartition();
-    }
-
     function test_settleValidation_Success_WhenToIsNative() public {
         vm.expectEmit(true, true, false, true, address(token));
         emit IERC20.Transfer(address(0), user2, 20);
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.Recalled(keccak256(satellite1), user2, satellite1, 20);
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.SettledToNative(keccak256(satellite1), user2, VALIDATION_ID, satellite1, 20);
         vm.prank(compliance);
         token.settleValidation(satellite1, nativeUser2, 20, VALIDATION_ID);
 
@@ -89,10 +73,12 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
 
     // ==== refusal Tests ====
 
-    function test_settleValidation_RevertWhen_TheNativeSenderNoLongerHasTheFreeBalance() public {
+    /// @notice The compliance never issues a validation out of a native wallet, and the ledger refuses one on
+    ///         its own account: a settlement only ever debits a position a satellite held.
+    function test_settleValidation_RevertWhen_FromIsNative() public {
         vm.prank(compliance);
-        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user1, 40, 41));
-        token.settleValidation(nativeUser1, satellite2, 41, VALIDATION_ID);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
+        token.settleValidation(nativeUser1, satellite2, 25, VALIDATION_ID);
     }
 
     function test_settleValidation_RevertWhen_TheSatelliteSenderHasNotEnoughBridged() public {
@@ -111,7 +97,7 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
 
     function test_settleValidation_RevertWhen_BothWalletsAreNative() public {
         vm.prank(compliance);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser2));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
         token.settleValidation(nativeUser1, nativeUser2, 10, VALIDATION_ID);
     }
 

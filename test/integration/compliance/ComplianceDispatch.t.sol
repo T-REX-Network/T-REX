@@ -8,6 +8,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import {
     BurnOnlyModule,
@@ -213,7 +214,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     ///         any other module.
     function test_requestTransferValidation_Success_WhenOnlyTheBoundsHookIsDeclared() public {
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
-        bytes memory from = InteroperableAddress.formatEvmV1(block.chainid, alice);
+        bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
         address bounds =
@@ -227,7 +228,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.expectCall(bounds, abi.encodeCall(IModule.validationBounds, (from, to, "", 10, 100, address(mc))), 1);
         vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
         vm.expectCall(address(checker), abi.encodeWithSelector(IModule.moduleCheck.selector), 0);
-        _requestValidation(alice, from, to, 10, 100);
+        _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(mintOnly.totalHookCalls(), 0);
         assertEq(burnOnly.totalHookCalls(), 0);
@@ -238,7 +239,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     ///         touches no module that did not.
     function test_requestTransferValidation_Success_WhenOnlyTheSlotHooksAreDeclared() public {
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
-        bytes memory from = InteroperableAddress.formatEvmV1(block.chainid, alice);
+        bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
         SlotsOnlyModule slotsOnly = SlotsOnlyModule(
@@ -254,7 +255,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.expectCall(address(slotsOnly), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
         vm.expectCall(address(checker), abi.encodeWithSelector(IModule.reserveSlot.selector), 0);
         vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
-        _requestValidation(alice, from, to, 10, 100);
+        _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(slotsOnly.reserveCalls(), 1);
         assertEq(slotsOnly.lastValidationId(), 1);
@@ -266,6 +267,14 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     function _deploy(address implementation) private returns (address) {
         return address(new ModuleProxy(implementation, abi.encodeCall(RecordingModule.initialize, ())));
+    }
+
+    /// @dev A satellite wallet for alice holding `amount`, delegated out of the balance minted in `setUp` so the
+    ///  module counters stay clean.
+    function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
+        envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
+        vm.prank(agent);
+        TokenLedgerHarness(address(token)).delegateOut(alice, envelope, amount);
     }
 
 }

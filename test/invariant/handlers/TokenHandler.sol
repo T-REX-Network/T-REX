@@ -42,7 +42,6 @@ contract TokenHandler is Test {
     uint256 public callsDelegateOut;
     uint256 public callsRecall;
     uint256 public callsBridgedTransfer;
-    uint256 public callsSettleFromNative;
     uint256 public callsSettleToNative;
     uint256 public callsHoldInTransit;
     uint256 public callsSettleHeld;
@@ -202,21 +201,8 @@ contract TokenHandler is Test {
         try token.bridgedTransfer(from, to, amount, validationId) { } catch { }
     }
 
-    /// @dev The native side and the satellite side come from independent seeds, so the leg crosses identities.
-    function settleFromNative(uint256 nativeSeed, uint256 walletActorSeed, uint256 walletSeed, uint256 amount)
-        external
-    {
-        callsSettleFromNative++;
-        address from = actors[_actor(nativeSeed)];
-        bytes memory to = _satellite(_actor(walletActorSeed), walletSeed);
-        amount = bound(amount, 0, token.freeBalanceOf(from));
-        vm.prank(agent);
-        try token.settleFromNative(from, to, amount, nativeSeed) {
-            ghostBridgedTotal += amount;
-        } catch { }
-    }
-
-    /// @dev The mirror: a satellite position lands on another identity's native wallet.
+    /// @dev A satellite position lands on another identity's native wallet: the seeds are independent, so the
+    ///  leg crosses identities.
     function settleToNative(uint256 walletActorSeed, uint256 walletSeed, uint256 nativeSeed, uint256 amount) external {
         callsSettleToNative++;
         bytes memory from = _satellite(_actor(walletActorSeed), walletSeed);

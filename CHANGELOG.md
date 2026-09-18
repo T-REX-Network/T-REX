@@ -129,7 +129,7 @@ All notable changes to this project will be documented in this file.
     native-side settlement leg leaves it unmoved while emitting a native `Transfer` to or from `0x0`, which
     is what makes `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price: a
     consumer deriving supply by summing `Transfer` events under-reports by `totalBridged`, and reconciles on
-    `DelegatedOut`, `Recalled`, `SettledFromNative` and `SettledToNative`. The native figure is
+    `DelegatedOut`, `Recalled` and `SettledToNative`. The native figure is
     `totalSupply() - totalBridged()`. An escrow address holding the delegated float would have kept
     Transfer-summing whole and was rejected: it would show the token holding its own supply. `INV-7` asserts
     the balance at the token's own address is always zero, and sums the three buckets to `totalSupply()`.
@@ -159,16 +159,18 @@ All notable changes to this project will be documented in this file.
     `COMPLIANCE_VALIDATION_TYPEHASH`, `hashValidation` and the `encodeValidation` / `decodeValidation`
     codec.
   - `ITransferValidation.requestTransferValidation(from, to, requestedMin, requestedMax, spender)`.
-    Callable by `from` itself when native, by the identity `from` is linked to, or by an `AGENT`.
-    `from` must resolve to an identity (revoked included), `to` must pass `isWalletVerified`, every
-    envelope must be canonical. The range is capped at `from`'s balance on its chain (bridged for a
-    satellite wallet, free for a native one), narrowed by intersection through every module declaring
+    Callable by the identity `from` is linked to, or by an `AGENT`. `from` must be a satellite wallet
+    (`SenderNotOnSatellite`): the Lite executing a validation has to physically hold the position it
+    moves, where a native balance stays free to leave between issuance and settlement; a native
+    position reaches a satellite through delegation-out, which burns before it instructs. `from` must
+    resolve to an identity (revoked included), `to` must pass `isWalletVerified`, every envelope must
+    be canonical. The range is capped at `from`'s bridged position, narrowed by intersection through
+    every module declaring
     the new `BOUNDS` capability (skipped when both wallets belong to one identity), then by the
     manager's clamp; an empty range reverts with `EmptyValidationRange`, a zero maximum with
     `ZeroValue`, and nothing is written. The record (`validationOf`) is stored for the slot lifecycle,
     `TransferValidationIssued` carries the full envelopes, and one leg per involved satellite chain
-    leaves through `Token.dispatchComplianceValidation` under the same id. Both wallets on the
-    reference chain is refused (`NoSatelliteLeg`).
+    leaves through `Token.dispatchComplianceValidation` under the same id.
   - `IModule.validationBounds(from, to, spender, currentMin, currentMax, compliance)` behind the
     `ModuleCapabilitiesLib.BOUNDS` flag: a module narrows the running range or reverts to refuse.
     The spender rides along because no module runs on the satellite, so issuance is the only place a
@@ -191,7 +193,7 @@ All notable changes to this project will be documented in this file.
     `LateReconciliation`. Errors: `ZeroDuration`, `ValidationIssuancePaused`,
     `ValidationIssuanceNotPaused`, `ValidityWindowNotSet`, `ReconciliationWindowNotSet`,
     `InvalidRequestedRange`, `EmptyValidationRange`, `NotAuthorizedForWallet`, `UnverifiedWallet`,
-    `NoSatelliteLeg`.
+    `SenderNotOnSatellite`.
   - Test assets: `BoundsModule`, `TransferValidationHarness`, `ModularComplianceBaseUnitTest`, and
     the satellite-wallet fixtures on `TREXSuiteTest`.
 - **Compliance slots: reservation, settlement and discard lifecycle.** Once a validation is issued the
@@ -201,8 +203,9 @@ All notable changes to this project will be documented in this file.
     and `releaseSlot(validationId)` behind the new `ModuleCapabilitiesLib.SLOTS` flag; static modules
     are untouched. A reservation counts the worst case at `amountMax`; a commit reconciles to the exact
     amount and MUST tolerate an id the module never reserved (bound after issuance, or a late
-    reconciliation) by applying the delta anyway; a release undoes it entirely. `ModularCompliance`
-    dispatches to declaring modules only, right after the record is written.
+    reconciliation) by applying the delta anyway, returning whether the state it then holds breaches
+    its rule; a release undoes it entirely. `ModularCompliance` dispatches to declaring modules only,
+    right after the record is written, and reports a breach when any of them does.
   - `ITransferValidation.ValidationStatus` (`Pending`, `LegConfirmed`, `Settled`, `Expired`,
     `Discarded`, `LateReconciled`) and `ValidationState` (status, the two per-leg consumption flags,
     the executed amount, the wallet the first of two legs carried), read through `statusOf` and
@@ -223,12 +226,12 @@ All notable changes to this project will be documented in this file.
     the pair is applied atomically when the burn leg lands. A leg for a `Pending` validation settles
     whatever the clock says.
   - `IToken.settleValidation(from, to, amount, validationId)`: the ledger entry, callable by the bound
-    compliance only (`OnlyBoundCompliance`), routing by wallet shape to a delegation-out (native
-    sender), a recall (native recipient) or a bridged transfer. A bridged transfer under an id that
-    holds an amount in transit credits the recipient from the hold, which must be the settled amount
-    exactly (`TransitAmountMismatch`), instead of debiting the sender again. Nothing locks a native
-    sender at issuance: a native leg whose free balance no longer covers the amount reverts and stays
-    deliverable.
+    compliance only (`OnlyBoundCompliance`), routing by wallet shape to a native credit (native
+    recipient, `SettledToNative`) or a bridged transfer. Both debit a satellite position, `from` never
+    being a native wallet, and both carry the `validationId`, where `DelegatedOut` and `Recalled` move
+    one identity's own position between two locations. A bridged transfer under an id that holds an
+    amount in transit credits the recipient from the hold, which must be the settled amount exactly
+    (`TransitAmountMismatch`), instead of debiting the sender again.
   - `IToken.holdInTransit(from, amount, validationId)`, `inTransitOf(validationId)` and
     `totalInTransit()`: the in-transit bucket inside the bridged one. A hold debits the sender's
     position, leaves `totalBridged` and `totalSupply` untouched, and is taken once per validation
@@ -240,9 +243,11 @@ All notable changes to this project will be documented in this file.
     The role is restricted by design: `RolesLib` names the discard front-running vector a permissionless
     keeper would open, against the liveness dependency a restricted one carries.
   - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the modules catch up
-    through `commitSlot` with no live reservation, the status becomes `LateReconciled`,
-    `LateReconciliation` fires and the leg's chain is paused for issuance until the manager unpauses
-    it. A late first leg of two stays `Discarded` with its flag set and warns for its own chain.
+    through `commitSlot` with no live reservation, the status becomes `LateReconciled` and
+    `LateReconciliation` fires. Issuance for that chain pauses only when a module reports the state it
+    then holds as breaching its rule, forcing a late delivery being cheap enough that pausing on every
+    one would be a denial of service. A late first leg of two commits no module, so it stays
+    `Discarded` with its flag set and only warns for its own chain.
   - Emergencies: a leg already consumed, or an id never issued, applies nothing, emits
     `ReplayedSettlement` and halts the whole token through its pause (`handleSettlement` returns
     `haltToken`); only `AGENT_PAUSER` lifts it through `unpause`. While the token is paused every

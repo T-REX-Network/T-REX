@@ -122,10 +122,9 @@ interface ITransferValidation {
         uint64 expiry;
         /// `expiry + reconciliationWindow`: past it, the slot may be released and the validation discarded.
         uint64 releaseAt;
-        /// `from`'s chain, keyed as `MessageTypesLib.chainKey` computes it; the reference chain's own key
-        /// for a native wallet.
+        /// `from`'s satellite chain, keyed as `MessageTypesLib.chainKey` computes it.
         bytes32 fromChainKey;
-        /// Same for `to`'s chain.
+        /// Same for `to`'s chain; the reference chain's own key for a native wallet.
         bytes32 toChainKey;
         /// `keccak256` of the canonical `from` envelope, what a settlement leg's `from` is matched against.
         bytes32 fromKey;
@@ -135,18 +134,20 @@ interface ITransferValidation {
         bool twoLegs;
     }
 
-    /// @dev Issues a `ComplianceValidation` for a movement between two ERC-7930 wallets, at least one on a
-    /// satellite, and dispatches one leg per involved satellite chain through the token. The caller derives the
+    /// @dev Issues a `ComplianceValidation` for a movement out of a satellite wallet, toward another satellite
+    /// wallet or a native one, and dispatches one leg per involved satellite chain through the token. A sender on
+    /// the reference chain is refused: the Lite that executes a validation must physically hold the position it
+    /// moves, where a native balance stays free to leave between issuance and settlement. The caller derives the
     /// requested range from an amount and a slippage tolerance; the range is only ever narrowed: capped at `from`'s
-    /// balance on its chain, narrowed by every module declaring `BOUNDS` (skipped when both wallets belong to one
+    /// bridged position, narrowed by every module declaring `BOUNDS` (skipped when both wallets belong to one
     /// identity), then clamped.
     ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
-    /// - At least one side on a satellite; otherwise reverts with `NoSatelliteLeg`.
-    /// - The caller is `from` (native only), the identity `from` is linked to, or authorised by the AccessManager
-    ///   for this selector; otherwise reverts with `NotAuthorizedForWallet`.
+    /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
+    /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
+    ///   otherwise reverts with `NotAuthorizedForWallet`.
     /// - A validity window set, no involved satellite chain paused, and each with a reconciliation window;
     ///   otherwise `ValidityWindowNotSet`, `ValidationIssuancePaused` or `ReconciliationWindowNotSet`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.

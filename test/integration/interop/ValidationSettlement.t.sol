@@ -28,7 +28,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
     SlotsModule internal slots;
     bytes internal aliceSat;
     bytes internal bobSat;
-    bytes internal nativeAlice;
     bytes internal nativeBob;
     uint256 internal issuedAt;
 
@@ -41,7 +40,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
-        nativeAlice = InteroperableAddress.formatEvmV1(block.chainid, alice);
         nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
 
         slots = SlotsModule(
@@ -86,29 +84,14 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
     }
 
-    /// @notice A native sender's validation settles with one leg from the recipient's chain: a delegation-out.
-    function test_handleSettlement_Success_WhenTheSenderIsNative() public {
-        uint256 id = _issue(nativeAlice, bobSat, 10, 100);
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, nativeAlice, bobSat, 100));
-
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.DelegatedOut(alice, keccak256(bobSat), bobSat, 100);
-        polygonGateway.relay(index);
-
-        assertEq(token.balanceOf(alice), NATIVE_BALANCE - 100);
-        assertEq(token.bridgedBalanceOf(bobSat), 100);
-        assertEq(token.totalBridged(), BALANCE + 100);
-        assertEq(token.totalSupply(), BALANCE + NATIVE_BALANCE);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-    }
-
-    /// @notice A satellite sender toward a native wallet settles with one leg from the sender's chain: a recall.
+    /// @notice A satellite sender toward a native wallet settles with one leg from the sender's chain, crediting
+    ///         the recipient under the validation it consumed.
     function test_handleSettlement_Success_WhenTheRecipientIsNative() public {
         uint256 id = _issue(aliceSat, nativeBob, 10, 100);
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, nativeBob, 40));
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.Recalled(keccak256(aliceSat), bob, aliceSat, 40);
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.SettledToNative(keccak256(aliceSat), bob, id, aliceSat, 40);
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(bob), 40);
@@ -180,21 +163,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
         optimismGateway.relay(index);
 
         _assertNothingApplied(optimismGateway, index);
-    }
-
-    /// @notice A native sender who moved their balance away in the meantime cannot be debited: the leg reverts,
-    ///         stays deliverable, and the compliance state is untouched.
-    function test_handleSettlement_RevertWhen_TheNativeSenderNoLongerHasTheBalance() public {
-        uint256 id = _issue(nativeAlice, bobSat, 10, 100);
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, nativeAlice, bobSat, 100));
-        vm.prank(alice);
-        token.transfer(bob, NATIVE_BALANCE - 50);
-
-        vm.expectRevert();
-        polygonGateway.relay(index);
-
-        _assertNothingApplied(polygonGateway, index);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
     }
 
     // ==== emergency Tests ====

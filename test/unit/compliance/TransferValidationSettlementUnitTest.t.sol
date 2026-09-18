@@ -27,17 +27,17 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     uint64 internal constant OPTIMISM_WINDOW = 45 minutes;
     uint256 internal constant ISSUED_AT = 1_700_000_000;
     uint256 internal constant BRIDGED_BALANCE = 100;
-    uint256 internal constant FREE_BALANCE = 50;
 
     bytes32 internal polygon = _evmChainKey(POLYGON);
     bytes32 internal optimism = _evmChainKey(OPTIMISM);
     address internal alice = makeAddr("alice");
+    address internal bob = makeAddr("bob");
     address internal aliceIdentity = makeAddr("AliceIdentity");
     address internal bobIdentity = makeAddr("BobIdentity");
     bytes internal fromSat;
     bytes internal toSat;
     bytes internal toOptimism;
-    bytes internal nativeAlice;
+    bytes internal nativeBob;
     bytes internal carolSat;
 
     function setUp() public override {
@@ -45,7 +45,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         fromSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("aliceOnPolygon"));
         toSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("bobOnPolygon"));
         toOptimism = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("bobOnOptimism"));
-        nativeAlice = InteroperableAddress.formatEvmV1(block.chainid, alice);
+        nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
         carolSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("carolOnPolygon"));
 
         mc.setDefaultValidityWindow(VALIDITY_WINDOW);
@@ -53,13 +53,12 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         mc.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
-        vm.mockCall(token, abi.encodeWithSignature("freeBalanceOf(address)", alice), abi.encode(FREE_BALANCE));
         vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
         vm.mockCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), "");
         vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
         _bind(fromSat, aliceIdentity);
-        _bind(nativeAlice, aliceIdentity);
+        _bind(nativeBob, bobIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
 
@@ -289,16 +288,30 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.stateOf(second).executedAmount, 90);
     }
 
-    function test_handleSettlement_Success_WhenTheNativeSideIsTheSender() public {
-        vm.prank(alice);
-        uint256 id = mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
+    /// @notice A native recipient has no chain of its own, so the movement stays one leg, settled by the
+    ///         satellite that burned the position.
+    function test_handleSettlement_Success_WhenTheNativeSideIsTheRecipient() public {
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (nativeAlice, toSat, 40, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, nativeBob, 40, id)), 1);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, nativeAlice, toSat, 40));
+        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, nativeBob, 40));
 
         assertFalse(halt);
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+    }
+
+    /// @notice A native recipient's recorded chain key is the reference chain's own, which has no peer: a leg
+    ///         claiming to come from it is refused, the sender's chain being the only origin a one-leg
+    ///         validation can have.
+    function test_handleSettlement_RevertWhen_TheLegClaimsTheReferenceChain() public {
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
+
+        vm.prank(token);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
+        mc.handleSettlement(_evmChainKey(block.chainid), _leg(id, fromSat, nativeBob, 40));
     }
 
     function test_handleSettlement_Success_WhenPastTheReleaseDeadlineBeforeAnyDiscard() public {

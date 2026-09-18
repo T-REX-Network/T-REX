@@ -77,7 +77,11 @@ import { ITransferValidation } from "./ITransferValidation.sol";
  * issued validation, the issuance itself, the slot reservation it triggers, and the late-reconciliation surface.
  * Own ERC-7201 namespace, so the module registry's layout is untouched and the slot lifecycle can extend it.
  *
- * Issuance never widens what was asked: the request is capped at the sender's recorded balance, narrowed by every
+ * `from` is always a satellite wallet, never a native one: the Lite that executes a validation has to physically
+ * hold the position it moves, where a native balance stays free to leave between issuance and settlement. A native
+ * position reaches a satellite through delegation-out instead, which burns before it instructs.
+ *
+ * Issuance never widens what was asked: the request is capped at the sender's recorded position, narrowed by every
  * `BOUNDS` module, then clamped. The cap is what keeps a settlement from carrying an amount the ledger cannot absorb,
  * so none is ever rejected to protect it. Tokens invented on a satellite obtain no validation only if the Lite
  * consumes one per transfer and the bridged ledger is correct.
@@ -106,10 +110,9 @@ abstract contract TransferValidation is ITransferValidation {
         mapping(uint256 validationId => ValidationState state) states;
     }
 
-    /// @dev Both sides of a movement, parsed once. Native means a non-zero EVM address on this chain.
+    /// @dev Both sides of a movement, parsed once. Native means a non-zero EVM address on this chain, which
+    ///  only `to` may be: a validation's sender always sits on a satellite.
     struct Legs {
-        bool fromNative;
-        address fromWallet;
         bytes32 fromChainKey;
         bool toNative;
         bytes32 toChainKey;
@@ -131,7 +134,7 @@ abstract contract TransferValidation is ITransferValidation {
         // Parsed for its revert: `from` and `to` are checked by leg resolution, the spender has no such pass.
         if (spender.length != 0) WalletKeyLib.parse(spender);
         Legs memory legs = _legsOf(from, to);
-        _authorize(msg.sender, from, legs);
+        _authorize(msg.sender, from);
 
         // Built once; the bounds are refined in place, then the id is assigned.
         MessageTypesLib.ComplianceValidation memory validation;
@@ -337,7 +340,7 @@ abstract contract TransferValidation is ITransferValidation {
         bool fromMatches = n.from.length != 0 && keccak256(n.from) == record.fromKey;
         bool toMatches = n.to.length != 0 && keccak256(n.to) == record.toKey;
         if (!record.twoLegs) {
-            bool originMatches = originChainKey == record.fromChainKey || originChainKey == record.toChainKey;
+            bool originMatches = originChainKey == record.fromChainKey;
             require(fromMatches && toMatches && originMatches, ErrorsLib.SettlementLegMismatch(n.validationId));
             return Leg.Single;
         }
@@ -455,13 +458,14 @@ abstract contract TransferValidation is ITransferValidation {
 
     /* ----- Issuance steps ----- */
 
-    /// @dev Parses both envelopes. A movement with no satellite side has nothing to dispatch.
+    /// @dev Parses both envelopes and refuses a sender on the reference chain, so that every issued validation
+    ///  is backed by a position its executing satellite physically holds.
     function _legsOf(bytes calldata from, bytes calldata to) private view returns (Legs memory legs) {
-        (legs.fromNative, legs.fromWallet) = WalletKeyLib.isReferenceChain(from);
+        (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
+        require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
         legs.fromChainKey = _chainKeyOf(from);
         (legs.toNative,) = WalletKeyLib.isReferenceChain(to);
         legs.toChainKey = _chainKeyOf(to);
-        require(!legs.fromNative || !legs.toNative, ErrorsLib.NoSatelliteLeg());
     }
 
     function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
@@ -469,10 +473,9 @@ abstract contract TransferValidation is ITransferValidation {
         return MessageTypesLib.chainKey(chainType, chainReference);
     }
 
-    /// @dev `from` itself when native, the identity it is linked to, or a caller the AccessManager authorises.
-    ///  A satellite wallet never matches its own bytes: a caller proves control of a key here, not elsewhere.
-    function _authorize(address caller, bytes calldata from, Legs memory legs) private view {
-        if (legs.fromNative && caller == legs.fromWallet) return;
+    /// @dev The identity `from` is linked to, or a caller the AccessManager authorises. A satellite wallet never
+    ///  matches its own bytes, so it never speaks for itself: a caller proves control of a key here, not elsewhere.
+    function _authorize(address caller, bytes calldata from) private view {
         IIdentity fromIdentity = _boundRegistry().resolveIdentity(from);
         if (address(fromIdentity) != address(0) && caller == address(fromIdentity)) return;
         require(
@@ -484,8 +487,8 @@ abstract contract TransferValidation is ITransferValidation {
     /// @dev The larger window of the involved satellite chains, each of which must be open and configured.
     function _windowOf(ValidationStorage storage s, Legs memory legs) private view returns (uint64 window) {
         require(s.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
-        if (!legs.fromNative) window = _chainWindow(s, legs.fromChainKey);
-        if (!legs.toNative && (legs.fromNative || legs.toChainKey != legs.fromChainKey)) {
+        window = _chainWindow(s, legs.fromChainKey);
+        if (!legs.toNative && legs.toChainKey != legs.fromChainKey) {
             uint64 toWindow = _chainWindow(s, legs.toChainKey);
             if (toWindow > window) window = toWindow;
         }
@@ -502,24 +505,23 @@ abstract contract TransferValidation is ITransferValidation {
         ValidationStorage storage s = _validationStorage();
         validation.reconciliationWindow = _windowOf(s, legs);
         validation.expiry = uint64(block.timestamp) + s.defaultValidityWindow;
-        (validation.amountMin, validation.amountMax) = _bounds(s, validation, legs);
+        (validation.amountMin, validation.amountMax) = _bounds(s, validation);
     }
 
-    /// @dev Eligibility, then the bounds: the request capped at `from`'s balance, narrowed by the modules unless
-    ///  both sides belong to one identity, clamped last. An empty or zero range is refused before any write.
-    function _bounds(
-        ValidationStorage storage s,
-        MessageTypesLib.ComplianceValidation memory validation,
-        Legs memory legs
-    ) private view returns (uint256 min, uint256 max) {
+    /// @dev Eligibility, then the bounds: the request capped at `from`'s bridged position, narrowed by the
+    ///  modules unless both sides belong to one identity, clamped last. An empty or zero range is refused before
+    ///  any write.
+    function _bounds(ValidationStorage storage s, MessageTypesLib.ComplianceValidation memory validation)
+        private
+        view
+        returns (uint256 min, uint256 max)
+    {
         ITREXRegistry registry = _boundRegistry();
         IIdentity fromIdentity = registry.resolveIdentity(validation.from);
         require(address(fromIdentity) != address(0), ErrorsLib.UnverifiedWallet(validation.from));
         require(registry.isWalletVerified(validation.to), ErrorsLib.UnverifiedWallet(validation.to));
 
-        uint256 balance = legs.fromNative
-            ? _boundToken().freeBalanceOf(legs.fromWallet)
-            : _boundToken().bridgedBalanceOf(validation.from);
+        uint256 balance = _boundToken().bridgedBalanceOf(validation.from);
         min = validation.amountMin;
         max = validation.amountMax < balance ? validation.amountMax : balance;
         require(min <= max, ErrorsLib.EmptyValidationRange(min, max));
@@ -572,15 +574,15 @@ abstract contract TransferValidation is ITransferValidation {
             toChainKey: legs.toChainKey,
             fromKey: WalletKeyLib.canonicalKey(validation.from),
             toKey: WalletKeyLib.canonicalKey(validation.to),
-            twoLegs: !legs.fromNative && !legs.toNative && legs.fromChainKey != legs.toChainKey
+            twoLegs: !legs.toNative && legs.fromChainKey != legs.toChainKey
         });
     }
 
     /// @dev One leg per distinct satellite chain, under the same id.
     function _dispatchLegs(Legs memory legs, MessageTypesLib.ComplianceValidation memory validation) private {
         bytes memory body = abi.encode(validation);
-        if (!legs.fromNative) _dispatch(legs.fromChainKey, validation.validationId, body);
-        if (!legs.toNative && (legs.fromNative || legs.toChainKey != legs.fromChainKey)) {
+        _dispatch(legs.fromChainKey, validation.validationId, body);
+        if (!legs.toNative && legs.toChainKey != legs.fromChainKey) {
             _dispatch(legs.toChainKey, validation.validationId, body);
         }
     }

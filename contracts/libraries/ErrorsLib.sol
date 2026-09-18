@@ -176,12 +176,12 @@ library ErrorsLib {
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     /// @dev The balance cap, the modules or the clamp left no amount to authorize.
     error EmptyValidationRange(uint256 min, uint256 max);
-    /// @dev The caller is neither the native wallet, its identity, nor authorised by the AccessManager.
+    /// @dev The caller is neither the identity `from` is linked to nor authorised by the AccessManager.
     error NotAuthorizedForWallet(address caller, bytes wallet);
     /// @dev `from` has no identity, or `to` is not eligible for new activity.
     error UnverifiedWallet(bytes wallet);
-    /// @dev Both wallets live on the reference chain: nothing for a satellite to execute.
-    error NoSatelliteLeg();
+    /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
+    error SenderNotOnSatellite(bytes wallet);
     /// @dev The id was never issued by this compliance.
     error UnknownValidation(uint256 validationId);
     /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.

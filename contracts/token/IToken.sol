@@ -95,14 +95,15 @@ interface IToken is IERC3643 {
     /// @notice Returns the sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
     function totalInTransit() external view returns (uint256);
 
-    /// @notice Applies a settled validation to the ledger, once, by the shape of its wallets: a native `from` is a
-    ///  delegation-out of the holder's free balance to `to`, a native `to` is a recall of `from` onto the holder,
-    ///  and two satellite wallets are a bridged transfer under `validationId`.
+    /// @notice Applies a settled validation to the ledger, once, by the shape of its wallets: a native `to` lands
+    ///  on that holder's free balance, two satellite wallets are a bridged transfer, both under `validationId`.
+    ///  `from` is always a satellite wallet, the compliance refusing to issue a validation out of a native one, so
+    ///  the position a settlement debits is one the executing satellite held all along.
     /// @dev Callable by the bound compliance only, which classified the settlement against the validation it
-    ///  issued; reverts with `OnlyBoundCompliance` otherwise. A native `from` whose free balance no longer covers
-    ///  `amount` reverts with `ERC20InsufficientBalance` and leaves the settlement retryable: nothing locks the
-    ///  native side at issuance. Bypasses `_update`, like every ledger transition.
-    /// @param from the ERC-7930 envelope of the sender
+    ///  issued; reverts with `OnlyBoundCompliance` otherwise. Reverts with `InsufficientBridgedBalance` when
+    ///  `from`'s position no longer covers `amount`, which leaves the settlement deliverable again. Bypasses
+    ///  `_update`, like every ledger transition.
+    /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param to the ERC-7930 envelope of the recipient
     /// @param amount the exact amount the satellite executed
     /// @param validationId the validation the settlement consumed

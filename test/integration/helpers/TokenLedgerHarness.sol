@@ -29,13 +29,6 @@ contract TokenLedgerHarness is Token {
         _bridgedTransfer(from, to, amount, validationId);
     }
 
-    function settleFromNative(address from, bytes calldata toWallet, uint256 amount, uint256 validationId)
-        external
-        restrictedFor(this.mint.selector)
-    {
-        _settleFromNative(from, toWallet, amount, validationId);
-    }
-
     function settleToNative(bytes calldata fromWallet, address to, uint256 amount, uint256 validationId)
         external
         restrictedFor(this.mint.selector)

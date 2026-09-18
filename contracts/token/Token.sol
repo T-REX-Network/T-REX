@@ -295,14 +295,9 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
         require(_msgSender() == address(_tokenStorage().compliance), ErrorsLib.OnlyBoundCompliance());
 
-        (bool fromNative, address holder) = WalletKeyLib.isReferenceChain(from);
-        if (fromNative) {
-            _delegateOut(holder, to, amount);
-            return;
-        }
         (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
         if (toNative) {
-            _recall(from, recipient, amount);
+            _settleToNative(from, recipient, amount, validationId);
             return;
         }
         _bridgedTransfer(from, to, amount, validationId);
@@ -324,12 +319,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     ///  The register reports the issuance, not the native float, and the events say so at the cost of one
     ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
     ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
-    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled`,
-    ///  `SettledFromNative` and `SettledToNative` are the reconciliation for anyone deriving it that way, and
+    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled` and
+    ///  `SettledToNative` are the reconciliation for anyone deriving it that way, and
     ///  `totalSupply() - totalBridged()` is the native float. An escrow address holding the delegated float
     ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
     ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
-    ///  `totalBridged` to the positions, whichever of the four transitions moved it.
+    ///  `totalBridged` to the positions, whichever transition moved it.
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         return super.totalSupply() + _tokenStorage().totalBridged;
     }
@@ -704,7 +699,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
     ///  Relocation of one identity's own position, so ownership does not move: the calling flow checks pause,
     ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
-    ///  the buckets and the envelope only. A settlement leg that crosses identities is {_settleFromNative}.
+    ///  the buckets and the envelope only. It is the only way a native position reaches a satellite.
     function _delegateOut(address holder, bytes memory toWallet, uint256 amount) internal {
         bytes32 toKey = _moveNativeToBridged(holder, toWallet, amount);
 
@@ -759,20 +754,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         emit EventsLib.BridgedTransfer(fromKey, toKey, validationId, from, to, amount);
     }
 
-    /// @dev Applies the settled leg of a validation whose sender is on the reference chain and whose receiver is
-    ///  on a satellite: `from`'s free balance down, the satellite position up. Same bucket arithmetic as
-    ///  {_delegateOut} and a distinct event, because ownership moves between identities here. `validationId` is
-    ///  the validation the settlement consumed. The calling flow owns the lifecycle; the ledger checks the
-    ///  buckets and the envelope only.
-    function _settleFromNative(address from, bytes memory toWallet, uint256 amount, uint256 validationId) internal {
-        bytes32 toKey = _moveNativeToBridged(from, toWallet, amount);
-
-        emit EventsLib.SettledFromNative(from, toKey, validationId, toWallet, amount);
-    }
-
     /// @dev Applies the settled leg of a validation whose sender is on a satellite and whose receiver is on the
-    ///  reference chain: the satellite position down, `to`'s free balance up. The mirror of {_settleFromNative},
-    ///  and the cross-identity counterpart of {_recall}.
+    ///  reference chain: the satellite position down, `to`'s free balance up. Same bucket arithmetic as {_recall}
+    ///  and a distinct event, because ownership moves between identities here. `validationId` is the validation
+    ///  the settlement consumed. The calling flow owns the lifecycle; the ledger checks the buckets and the
+    ///  envelope only. There is no mirror leaving a native wallet: the compliance issues no validation whose
+    ///  sender is native, so the satellite executing one always holds the position it moves.
     function _settleToNative(bytes memory fromWallet, address to, uint256 amount, uint256 validationId) internal {
         bytes32 fromKey = _moveBridgedToNative(fromWallet, to, amount);
 

@@ -65,7 +65,7 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
         // Only fuzz the handler's transitions.
         targetContract(address(handler));
-        bytes4[] memory selectors = new bytes4[](15);
+        bytes4[] memory selectors = new bytes4[](14);
         selectors[0] = TokenHandler.mint.selector;
         selectors[1] = TokenHandler.burn.selector;
         selectors[2] = TokenHandler.transfer.selector;
@@ -77,10 +77,9 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         selectors[8] = TokenHandler.delegateOut.selector;
         selectors[9] = TokenHandler.recall.selector;
         selectors[10] = TokenHandler.bridgedTransfer.selector;
-        selectors[11] = TokenHandler.settleFromNative.selector;
-        selectors[12] = TokenHandler.settleToNative.selector;
-        selectors[13] = TokenHandler.holdInTransit.selector;
-        selectors[14] = TokenHandler.settleHeld.selector;
+        selectors[11] = TokenHandler.settleToNative.selector;
+        selectors[12] = TokenHandler.holdInTransit.selector;
+        selectors[13] = TokenHandler.settleHeld.selector;
         targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
 
         // The handler pranks `agent` for restricted calls; exclude the named privileged addresses as senders
@@ -184,7 +183,6 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         console.log("delegateOut    ", handler.callsDelegateOut());
         console.log("recall         ", handler.callsRecall());
         console.log("bridgedTransfer", handler.callsBridgedTransfer());
-        console.log("settleFromNative", handler.callsSettleFromNative());
         console.log("settleToNative ", handler.callsSettleToNative());
         console.log("holdInTransit  ", handler.callsHoldInTransit());
         console.log("settleHeld     ", handler.callsSettleHeld());
