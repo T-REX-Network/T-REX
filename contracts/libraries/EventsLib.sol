@@ -190,7 +190,8 @@ library EventsLib {
         uint64 reconciliationWindow
     );
     /// @notice Warning: a reconciliation of `validationId` arrived from `chainKey` after its release deadline.
-    ///         The settlement is recorded regardless, and issuance for that chain is paused until unpaused.
+    ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
+    ///         breaches a rule; otherwise this warning is the whole record.
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXImplementationAuthority Events
 

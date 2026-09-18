@@ -152,7 +152,8 @@ interface ITransferValidation {
     /// @param maxAmount The ceiling, or zero to clear it.
     function setValidationClamp(uint256 maxAmount) external;
 
-    /// @dev Stops issuing validations involving `chainKey`. Also triggered by a late reconciliation from it.
+    /// @dev Stops issuing validations involving `chainKey`. Also triggered by a late reconciliation from it whose
+    /// recorded state breaches a rule; a late reconciliation that breaches nothing only warns.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

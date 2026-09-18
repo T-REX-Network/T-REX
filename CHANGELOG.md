@@ -180,9 +180,9 @@ All notable changes to this project will be documented in this file.
     `pauseValidationIssuance(chainKey)` and `unpauseValidationIssuance(chainKey)`. Windows are
     snapshot at issuance; a cross-chain validation takes the larger of its two chains' windows;
     issuance refuses to run without them (`ValidityWindowNotSet`, `ReconciliationWindowNotSet`).
-  - Late-reconciliation surface: `LateReconciliation(validationId, chainKey)` and an automatic pause
-    of that chain, lifted by the manager only. Recording the late settlement belongs to the slot
-    lifecycle.
+  - Late-reconciliation surface: `LateReconciliation(validationId, chainKey)` on every late leg, and
+    an automatic pause of that chain only when the recorded state breaches a rule, lifted by the
+    manager only. Recording the late settlement and judging the breach belong to the slot lifecycle.
   - Storage in `ERC3643.storage.TransferValidation`, a namespace of its own on the compliance. Events:
     `TransferValidationIssued`, `DefaultValidityWindowSet`, `ReconciliationWindowSet`,
     `ValidationClampSet`, `ValidationIssuancePaused`, `ValidationIssuanceUnpaused`,

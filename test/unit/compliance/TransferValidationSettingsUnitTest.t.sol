@@ -141,21 +141,32 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     // ==== ._onLateReconciliation Tests ====
 
-    function test_onLateReconciliation_Success_WhenChainIsOpen() public {
+    /// @notice A late settlement that leaves a breaching state closes the chain, so it cannot compound.
+    function test_onLateReconciliation_Success_WhenTheRecordedStateBreachesARule() public {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.LateReconciliation(7, POLYGON);
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationIssuancePaused(POLYGON);
-        mc.exposed_onLateReconciliation(7, POLYGON);
+        mc.exposed_onLateReconciliation(7, POLYGON, true);
 
         assertTrue(mc.isIssuancePaused(POLYGON));
+    }
+
+    /// @notice Lateness alone is not an exception: warn, and keep issuing. Otherwise one held message would be a
+    ///         denial of service on the chain's issuance.
+    function test_onLateReconciliation_Success_WhenTheRecordedStateBreachesNothing() public {
+        vm.recordLogs();
+        mc.exposed_onLateReconciliation(7, POLYGON, false);
+
+        assertEq(vm.getRecordedLogs().length, 1, "only the warning is emitted");
+        assertFalse(mc.isIssuancePaused(POLYGON));
     }
 
     function test_onLateReconciliation_Success_WhenChainIsAlreadyPaused() public {
         mc.pauseValidationIssuance(POLYGON);
 
         vm.recordLogs();
-        mc.exposed_onLateReconciliation(7, POLYGON);
+        mc.exposed_onLateReconciliation(7, POLYGON, true);
 
         assertEq(vm.getRecordedLogs().length, 1, "only the warning is emitted");
         assertTrue(mc.isIssuancePaused(POLYGON));
@@ -163,7 +174,7 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     /// @notice Only the manager lifts an automatic pause, and issuance stays closed until then.
     function test_unpauseValidationIssuance_Success_AfterALateReconciliation() public {
-        mc.exposed_onLateReconciliation(7, POLYGON);
+        mc.exposed_onLateReconciliation(7, POLYGON, true);
 
         mc.unpauseValidationIssuance(POLYGON);
 

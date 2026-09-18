@@ -8,8 +8,8 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 ///         lifecycle will drive once it lands.
 contract TransferValidationHarness is ModularCompliance {
 
-    function exposed_onLateReconciliation(uint256 validationId, bytes32 chainKey) external {
-        _onLateReconciliation(validationId, chainKey);
+    function exposed_onLateReconciliation(uint256 validationId, bytes32 chainKey, bool breachesRule) external {
+        _onLateReconciliation(validationId, chainKey, breachesRule);
     }
 
 }

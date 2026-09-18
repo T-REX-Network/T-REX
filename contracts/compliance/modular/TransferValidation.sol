@@ -92,7 +92,8 @@ abstract contract TransferValidation is ITransferValidation {
         uint256 validationClamp;
         /// Per-chain worst-case reconciliation latency. Zero blocks issuance toward that chain.
         mapping(bytes32 chainKey => uint64 window) reconciliationWindows;
-        /// Per-chain issuance pause, set by the manager or a late reconciliation, lifted by the manager only.
+        /// Per-chain issuance pause, set by the manager or a breaching late reconciliation, lifted by the manager
+        /// only.
         mapping(bytes32 chainKey => bool paused) issuancePaused;
         /// The last id issued. Ids start at 1.
         uint256 lastValidationId;
@@ -229,10 +230,14 @@ abstract contract TransferValidation is ITransferValidation {
         emit EventsLib.ValidationIssuanceUnpaused(chainKey);
     }
 
-    /// @dev A settlement of `validationId` arrived from `chainKey` after `releaseAt`. The slot lifecycle records it
-    ///  and calls this: a warning, and the chain paused until the issuer explicitly unpauses. Never reverts.
-    function _onLateReconciliation(uint256 validationId, bytes32 chainKey) internal {
+    /// @dev A settlement of `validationId` arrived from `chainKey` after `releaseAt`. Always warns; pauses the chain
+    /// only on a breach, since late delivery is cheap to force and pausing on it would be a denial of service. Never
+    /// reverts.
+    /// @param breachesRule Whether the state the slot lifecycle recorded fails a compliance rule.
+    function _onLateReconciliation(uint256 validationId, bytes32 chainKey, bool breachesRule) internal {
         emit EventsLib.LateReconciliation(validationId, chainKey);
+        if (!breachesRule) return;
+
         ValidationStorage storage s = _validationStorage();
         if (!s.issuancePaused[chainKey]) {
             s.issuancePaused[chainKey] = true;
