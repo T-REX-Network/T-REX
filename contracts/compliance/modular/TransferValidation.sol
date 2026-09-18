@@ -77,10 +77,13 @@ import { ITransferValidation } from "./ITransferValidation.sol";
  * issued validation, the issuance itself, and the late-reconciliation surface. Own ERC-7201 namespace, so the
  * module registry's layout is untouched and the slot lifecycle can extend it.
  *
- * Issuance never widens what was asked: the request is capped at the sender's balance, narrowed by every `BOUNDS`
- * module, then clamped. The balance cap is a firewall: a validation can never authorize more than the register
- * recorded, so tokens created out of nothing on a satellite can never obtain one. `expiry` is the satellite's hard
- * deadline; `expiry + reconciliationWindow` is when T-REX may release the slot, never a refusal of a late leg.
+ * Issuance never widens what was asked: the request is capped at the sender's recorded balance, narrowed by every
+ * `BOUNDS` module, then clamped. The cap is what keeps a settlement from carrying an amount the ledger cannot absorb,
+ * so none is ever rejected to protect it. Tokens invented on a satellite obtain no validation only if the Lite
+ * consumes one per transfer and the bridged ledger is correct.
+ *
+ * `expiry` is the satellite's hard deadline; `expiry + reconciliationWindow` is when T-REX may release the slot,
+ * never a refusal of a late leg. Validations expire; settlements never do.
  */
 abstract contract TransferValidation is ITransferValidation {
 

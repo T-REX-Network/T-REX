@@ -102,6 +102,7 @@ library MessageTypesLib {
 
     /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, the only thing
     /// a satellite executes a transfer against.
+    /// Validations expire; settlements never do.
     struct ComplianceValidation {
         /// Unique per compliance contract, single-use: consumed on the satellite, keys the slot on T-REX.
         uint256 validationId;
@@ -113,7 +114,10 @@ library MessageTypesLib {
         bytes spender;
         /// Inclusive lower bound, caller-proposed and engine-narrowed.
         uint256 amountMin;
-        /// Inclusive upper bound, caller-proposed, engine-narrowed, capped at `from`'s balance.
+        /// Inclusive upper bound, caller-proposed, engine-narrowed, capped at `from`'s recorded balance so no
+        /// settlement carries an amount the ledger cannot absorb, and none is ever rejected to protect it. Tokens
+        /// invented on a satellite obtain no validation only if the Lite consumes one per transfer and the bridged
+        /// ledger is correct.
         uint256 amountMax;
         /// The asset's reference-chain address, its canonical identifier everywhere.
         address token;
