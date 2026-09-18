@@ -80,16 +80,18 @@ The Token's frozen state also changed shape, per issue #54: one mapping to a pac
 `ERC3643Storage`. This costs one extra SSTORE when both fields are set together and removes the need to
 virtualize every internal frozen access on the upstream base.
 
-### Mutable name and symbol (open question for upstream)
+### Mutable name and symbol
 
 `ERC3643Token._setName` / `_setSymbol` write into `ERC20Upgradeable`'s **private** storage through a copy
 of OpenZeppelin's struct at a hardcoded slot, because the ERC-20 base ships no setter. This depends on
 OpenZeppelin never reordering that private struct's fields: the namespace test checks the slot, not the
 order, so a reordering upstream would be silent.
 
-**Ask @ernestognw / @Amxx how openzeppelin-contracts#5838 stores mutable name and symbol before adopting
-its base** -- issue #54 said "use the ERC-20's own storage", but it has no setter, so upstream must keep
-them somewhere of its own, and that decides where `name`, `symbol` and `decimals` land after the swap.
+Upstream is adding `name` and `symbol` setters to openzeppelin-contracts#5838 (@ernestognw), which
+removes the hardcoded-slot copy at the swap. The remaining question there is how a name change interacts
+with the EIP-712 domain, since both are usually set to the same value at construction: changing the name
+rotates the domain separator and invalidates outstanding ERC-2612 permit signatures, which is why
+`Token._setName` carries that note.
 
 ### Typed getters (#54) are not provided
 
@@ -107,24 +109,29 @@ after the swap.
 
 ## Divergences to re-decide at swap time
 
-`ERC3643Token` deliberately differs from openzeppelin-contracts#5838 as that PR stands. Each is a T-REX
-behavior the standard suite pins, so the swap must re-decide it rather than silently change it. They are
-listed on the contract itself; the ones with teeth:
+The behavioral divergences this section used to list are closed: openzeppelin-contracts#5838 was aligned
+with what this layer 2 needs (@ernestognw, commit `55f35f91d`). Upstream now makes the contract abstract
+and gates every admin path on an abstract `_checkAdmin()` instead of `Ownable` plus `isAgent`; mint and
+burn work while paused; `created` and `destroyed` fire on mint and burn; `isVerified` / `canTransfer`
+skip a zero recipient; every batch entry point checks array lengths with `onlyAdmin` running first; and
+burn auto-unfreezes just enough to keep `frozenTokens <= balanceOf`.
 
-1. **Mint and burn while paused.** OpenZeppelin puts `whenNotPaused` on `_update`, which blocks both.
-   T-REX pauses circulation, not issuance and redemption.
-2. **Compliance notifications.** T-REX calls `created` on a mint and `destroyed` on a burn. OpenZeppelin
-   calls only `transferred`, and only on transfers. Modules that track balances need all three.
-3. **Burn and recipient verification.** OpenZeppelin's `_update` checks `isVerified(to)` unconditionally,
-   so a burn would ask the registry to verify the zero address and revert.
-4. **Authorization.** T-REX authorizes through an AccessManager via `_checkTokenAdmin(bytes4)`;
-   OpenZeppelin uses `Ownable` plus an abstract `isAgent`. The hook makes this a one-line override, but
-   every test asserting a revert selector changes.
-5. **Freeze semantics.** The #5838 thread shows `_freezePartialTokens` / `_unfreezePartialTokens` that
-   clamp with `Math.min` and return the amount; ours revert and return nothing. The names match, so only
-   the standard suite would catch this. **Re-verify against the current upstream branch before adopting.**
+Two things still differ, neither a behavior change:
 
-Items other than 4 should be raised on the upstream PR before adopting its base.
+1. **Freeze error surface.** Upstream keeps a silent clamp in `_freezePartialTokens` and the Solidity
+   panic on under-freeze in `_unfreezePartialTokens`; ours revert with named errors. Both are
+   overridable upstream, so this stays a T-REX override rather than an upstream request.
+2. **Storage field names.** Upstream's struct uses `_frozen`, `_frozenTokens`, `_identityRegistry`,
+   `_compliance` and `_onchainID`, all private, so the namespace-migration procedure above still
+   applies at the swap.
+
+Upstream also documents a deliberate ERC-173 incompatibility (`transferOwnership(address(0))` is not
+accepted), so anything needing that surface layers its own.
+
+One item is not closed and is tracked separately: the recovery flow's ordering corrupts identity-keyed
+compliance aggregates (#70). Upstream's `_recoveryAddress` already orders the steps so
+`compliance.transferred` sees both endpoints of the identity migration resolvable; **this layer 2 must
+adopt that ordering**, either when #70 is fixed or at the swap.
 
 ## Upstream status
 
@@ -134,3 +141,7 @@ base and the interfaces only. There is no upstream implementation for the identi
 registry storage, the trusted issuers registry, the claim topics registry, or the compliance; those are
 expected in `openzeppelin-community-contracts`, if anywhere. Until then the five non-token bases have
 nothing to swap to, and their namespace strings stay provisional.
+
+As of commit `55f35f91d` that PR is aligned with this layer 2: the contract is abstract, authorization
+goes through an abstract `_checkAdmin()` hook, and the behaviors listed under divergences above match.
+It ships no ERC-3643 tests yet, so the standard suite here stays the regression net for the swap.

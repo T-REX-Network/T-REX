@@ -309,7 +309,8 @@ contract TREXRegistry is
         return _getClaimTopics();
     }
 
-    /// @dev The eligibility kill switch short-circuits verification for every address.
+    /// @dev The eligibility kill switch short-circuits verification for every address, including one
+    ///  with no identity binding: the identity-exists check is skipped too, not only the claims.
     function _isVerified(address userAddress) internal view override returns (bool) {
         if (_getStorage().checksDisabled) return true;
         return super._isVerified(userAddress);
