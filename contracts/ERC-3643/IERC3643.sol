@@ -46,6 +46,51 @@ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/I
 
 interface IERC3643 is IERC20, IERC20Metadata {
 
+    /// @dev Emitted when the token information is updated, at deployment and on every metadata change.
+    /// @param _newName The new name of the token.
+    /// @param _newSymbol The new symbol of the token.
+    /// @param _newDecimals The number of decimals of the token.
+    /// @param _newVersion The version of the token implementation.
+    /// @param _newOnchainID The address of the token's ONCHAINID.
+    event UpdatedTokenInformation(
+        string _newName, string _newSymbol, uint8 _newDecimals, string _newVersion, address indexed _newOnchainID
+    );
+
+    /// @dev Emitted when the Identity Registry bound to the token is set or replaced.
+    /// @param _identityRegistry The address of the Identity Registry.
+    event IdentityRegistryAdded(address indexed _identityRegistry);
+
+    /// @dev Emitted when the Compliance contract bound to the token is set or replaced.
+    /// @param _compliance The address of the Compliance contract.
+    event ComplianceAdded(address indexed _compliance);
+
+    /// @dev Emitted when a wallet recovery succeeds and the balance moves to the new wallet.
+    /// @param _lostWallet The address of the wallet that lost access.
+    /// @param _newWallet The address of the replacement wallet.
+    /// @param _investorOnchainID The address of the investor's ONCHAINID.
+    event RecoverySuccess(address indexed _lostWallet, address indexed _newWallet, address indexed _investorOnchainID);
+
+    /// @dev Emitted when a wallet's frozen status changes.
+    /// @notice `_owner` records the actor that set the frozen status (`_msgSender()`). When the call is
+    /// routed through `AccessManager.execute`, `_msgSender()` is the AccessManager, so this field
+    /// reflects the executing contract rather than the originator address (the EOA or contract behind
+    /// the role). Consumers that need the originator address must read it from the AccessManager
+    /// execution context, not here.
+    /// @param _userAddress The address of the wallet whose status changed.
+    /// @param _isFrozen The new frozen status.
+    /// @param _owner The actor that set the status.
+    event AddressFrozen(address indexed _userAddress, bool indexed _isFrozen, address indexed _owner);
+
+    /// @dev Emitted when part of a wallet's balance is frozen.
+    /// @param _userAddress The address of the wallet.
+    /// @param _amount The amount of tokens frozen.
+    event TokensFrozen(address indexed _userAddress, uint256 _amount);
+
+    /// @dev Emitted when part of a wallet's frozen balance is released.
+    /// @param _userAddress The address of the wallet.
+    /// @param _amount The amount of tokens unfrozen.
+    event TokensUnfrozen(address indexed _userAddress, uint256 _amount);
+
     /// Functions
     /// Setters
     /**

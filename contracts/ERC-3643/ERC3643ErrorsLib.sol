@@ -36,7 +36,6 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-
 /**
  *     NOTICE
  *
@@ -63,97 +62,51 @@
 
 pragma solidity 0.8.30;
 
-/// @dev Errors of the ERC-3643 standard surface are declared canonically in
-///  {ERC3643ErrorsLib}, inside the standard layer, because the standard bases may not import from the
-///  T-REX layer (issue #65). The names below are re-declared here for the T-REX layer and for tests.
-///  Solidity identifies errors by selector, so a re-declaration with the same signature is the same
-///  error on the wire; `forge lint` reporting some of them as unused only means no T-REX-layer contract
-///  raises them any more, not that they are unreachable.
-library ErrorsLib {
+/// @title ERC3643ErrorsLib
+/// @notice The errors raised by the ERC-3643 standard bases in `contracts/ERC-3643/base/`.
+/// @dev The standard bases may not import from the T-REX layer, so their errors live here rather than in
+///  `ErrorsLib`, which re-declares the same names. Same signature means same selector, so a caller
+///  catching either gets the same result.
+library ERC3643ErrorsLib {
 
-    // Common Errors
+    // Common
     error ZeroAddress();
     error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error ArrayLengthMismatch();
-    error InvalidImplementationAuthority();
 
-    // Token Errors
+    // Batch
+    /// @dev A batch call whose arrays differ in length. Unchecked, a short first array would silently
+    ///  skip the trailing entries and still succeed.
+    error ArrayLengthMismatch();
+
+    // Token
     error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
     error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
     error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error InvalidCompliance();
-    error InvalidIdentityRegistry();
-    error NoTokenToRecover();
-    error NotLinkedIdentity(address from, address caller);
-    error RecoveryNotPossible();
-    error SameWalletRecovery();
-    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
 
-    // ModularCompliance Errors
+    // Compliance
     error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
-
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
-    error TokenAlreadyDeployed();
-    error IsolatedSuiteCannotReuseIRS();
-
-    // ClaimTopicsRegistry Errors
+    // ClaimTopicsRegistry
     error ClaimTopicAlreadyExists();
-    error InvalidIdentityType();
+    error MaxClaimTopicsReached(uint256 max);
 
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-    error InvalidIdentityRegistryStorage();
+    // TrustedIssuersRegistry
+    error MaxTrustedIssuersReached(uint256 max);
+    error NotATrustedIssuer();
+    /// @dev Raised by `addTrustedIssuer` when the issuer is registered with no claim topics.
+    error TrustedClaimTopicsCannotBeEmpty();
 
-    // IdentityRegistryStorage Errors
+    /// @dev Raised by `updateIssuerClaimTopics` when the new topic set is empty. Distinct from
+    ///  `TrustedClaimTopicsCannotBeEmpty` so callers can tell the two entry points apart.
+    error ClaimTopicsCannotBeEmpty();
+    error TrustedIssuerAlreadyExists();
+
+    // IdentityRegistryStorage
     error AddressAlreadyStored();
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-
-    // TREXImplementationAuthority Errors
-    error EmptyImplementations();
-    error UnknownVersion();
-    error VersionAlreadyPublished();
-    error VersionNotNewer();
-
-    // TREXRegistry Errors
-    error Deprecated();
 
 }

@@ -2,8 +2,7 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import {
@@ -19,7 +18,7 @@ contract IdentityRegistryStorageModifyIdentityUnitTest is IdentityRegistryStorag
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
 
         vm.expectEmit(address(irs));
-        emit ERC3643EventsLib.IdentityModified(IIdentity(localIdentity), IIdentity(newIdentity));
+        emit IERC3643IdentityRegistryStorage.IdentityModified(IIdentity(localIdentity), IIdentity(newIdentity));
         vm.expectEmit(address(irs));
         emit EventsLib.InvestorIdentityChanged(wallet);
         vm.expectEmit(address(irs));
@@ -34,7 +33,7 @@ contract IdentityRegistryStorageModifyIdentityUnitTest is IdentityRegistryStorag
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
 
         vm.expectEmit(address(irs));
-        emit ERC3643EventsLib.IdentityModified(IIdentity(localIdentity), IIdentity(globalIdentity));
+        emit IERC3643IdentityRegistryStorage.IdentityModified(IIdentity(localIdentity), IIdentity(globalIdentity));
         vm.expectEmit(address(irs));
         emit EventsLib.InvestorIdentityChanged(wallet);
         vm.expectEmit(address(irs));
@@ -85,7 +84,7 @@ contract IdentityRegistryStorageModifyIdentityUnitTest is IdentityRegistryStorag
 
     function _assertOnlyModificationLogs() private {
         bytes32[] memory selectors = new bytes32[](2);
-        selectors[0] = ERC3643EventsLib.IdentityModified.selector;
+        selectors[0] = IERC3643IdentityRegistryStorage.IdentityModified.selector;
         selectors[1] = EventsLib.InvestorIdentityChanged.selector;
         _assertLogSelectors(vm.getRecordedLogs(), selectors);
     }

@@ -5,7 +5,6 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -13,6 +12,7 @@ import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
 contract TokenRecoveryUnitTest is TokenBaseUnitTest {
 
@@ -82,7 +82,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
             1
         );
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
+        emit IERC3643.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
         vm.prank(agent);
         bool success = token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
 
@@ -118,9 +118,9 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.TokensUnfrozen(lostWallet, frozenAmount);
+        emit IERC3643.TokensUnfrozen(lostWallet, frozenAmount);
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.TokensFrozen(newWallet, frozenAmount);
+        emit IERC3643.TokensFrozen(newWallet, frozenAmount);
         vm.prank(agent);
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
 
@@ -139,9 +139,9 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.AddressFrozen(lostWallet, false, address(token));
+        emit IERC3643.AddressFrozen(lostWallet, false, address(token));
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.AddressFrozen(newWallet, true, address(token));
+        emit IERC3643.AddressFrozen(newWallet, true, address(token));
         vm.prank(agent);
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
 
@@ -158,7 +158,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
+        emit IERC3643.RecoverySuccess(lostWallet, newWallet, investorOnchainId);
         vm.prank(agent);
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
 

@@ -4,11 +4,11 @@ pragma solidity 0.8.30;
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
 contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
@@ -54,7 +54,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
     function testTokenFreezePartialTokensNominal() public {
         vm.expectEmit(true, true, true, true);
-        emit ERC3643EventsLib.TokensFrozen(user, freezeAmount);
+        emit IERC3643.TokensFrozen(user, freezeAmount);
 
         vm.prank(agent);
         token.freezePartialTokens(user, freezeAmount);
@@ -96,7 +96,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
         uint256 unfreezeAmount = 200;
 
         vm.expectEmit(true, true, true, true);
-        emit ERC3643EventsLib.TokensUnfrozen(user, unfreezeAmount);
+        emit IERC3643.TokensUnfrozen(user, unfreezeAmount);
 
         vm.prank(agent);
         token.unfreezePartialTokens(user, unfreezeAmount);
@@ -123,7 +123,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
     function testTokenSetAddressFrozenNominal() public {
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.AddressFrozen(user, true, agent);
+        emit IERC3643.AddressFrozen(user, true, agent);
         vm.prank(agent);
         token.setAddressFrozen(user, true);
 
@@ -136,7 +136,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
         token.setAddressFrozen(user, true);
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.AddressFrozen(user, false, agent);
+        emit IERC3643.AddressFrozen(user, false, agent);
         vm.prank(agent);
         token.setAddressFrozen(user, false);
 

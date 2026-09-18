@@ -67,12 +67,16 @@ import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdenti
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
+import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
+import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
+import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
-import { Token } from "../token/Token.sol";
 import { RolesLib } from "./RolesLib.sol";
 
 /// @title AccessManagerSetupLib
@@ -82,49 +86,49 @@ library AccessManagerSetupLib {
     function setupTokenRoles(IAccessManager accessManager, address token) internal {
         // ------ TOKEN_MANAGER role ------
         bytes4[] memory functions = new bytes4[](2);
-        functions[0] = Token.setName.selector;
-        functions[1] = Token.setSymbol.selector;
+        functions[0] = IERC3643.setName.selector;
+        functions[1] = IERC3643.setSymbol.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
         // ------ IDENTITY_MANAGER role ------
         functions = new bytes4[](3);
-        functions[0] = Token.setOnchainID.selector;
-        functions[1] = Token.setIdentityRegistry.selector;
-        functions[2] = Token.setCompliance.selector;
+        functions[0] = IERC3643.setOnchainID.selector;
+        functions[1] = IERC3643.setIdentityRegistry.selector;
+        functions[2] = IERC3643.setCompliance.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
 
         // ------ AGENT_MINTER role ------
         functions = new bytes4[](1);
-        functions[0] = Token.mint.selector;
+        functions[0] = IERC3643.mint.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_MINTER);
 
         // ------ AGENT_BURNER role ------
-        functions[0] = Token.burn.selector;
+        functions[0] = IERC3643.burn.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_BURNER);
 
         // ------ AGENT_PARTIAL_FREEZER role ------
         functions = new bytes4[](2);
-        functions[0] = Token.freezePartialTokens.selector;
-        functions[1] = Token.unfreezePartialTokens.selector;
+        functions[0] = IERC3643.freezePartialTokens.selector;
+        functions[1] = IERC3643.unfreezePartialTokens.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PARTIAL_FREEZER);
 
         // ------ AGENT_ADDRESS_FREEZER role ------
         functions = new bytes4[](1);
-        functions[0] = Token.setAddressFrozen.selector;
+        functions[0] = IERC3643.setAddressFrozen.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_ADDRESS_FREEZER);
 
         // ------ AGENT_RECOVERY_ADDRESS role ------
-        functions[0] = Token.recoveryAddress.selector;
+        functions[0] = IERC3643.recoveryAddress.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_RECOVERY_ADDRESS);
 
         // ------ AGENT_FORCED_TRANSFER role ------
-        functions[0] = Token.forcedTransfer.selector;
+        functions[0] = IERC3643.forcedTransfer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_FORCED_TRANSFER);
 
         // ------ AGENT_PAUSER role ------
         functions = new bytes4[](2);
-        functions[0] = Token.pause.selector;
-        functions[1] = Token.unpause.selector;
+        functions[0] = IERC3643.pause.selector;
+        functions[1] = IERC3643.unpause.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT_PAUSER);
     }
 
@@ -141,9 +145,9 @@ library AccessManagerSetupLib {
 
         // ------ AGENT role ------
         functions = new bytes4[](3);
-        functions[0] = IdentityRegistryStorage.addIdentityToStorage.selector;
+        functions[0] = IERC3643IdentityRegistryStorage.addIdentityToStorage.selector;
         functions[1] = IdentityRegistryStorage.modifyStoredIdentity.selector;
-        functions[2] = IdentityRegistryStorage.removeIdentityFromStorage.selector;
+        functions[2] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
         accessManager.setTargetFunctionRole(identityRegistryStorage, functions, RolesLib.AGENT);
     }
 
@@ -151,24 +155,24 @@ library AccessManagerSetupLib {
     function setupTREXRegistryRoles(IAccessManager accessManager, address registry) internal {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](10);
-        functions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
+        functions[0] = IERC3643IdentityRegistry.setIdentityRegistryStorage.selector;
         functions[1] = TREXRegistry.disableEligibilityChecks.selector;
         functions[2] = TREXRegistry.enableEligibilityChecks.selector;
-        functions[3] = TREXRegistry.addTrustedIssuer.selector;
-        functions[4] = TREXRegistry.removeTrustedIssuer.selector;
-        functions[5] = TREXRegistry.updateIssuerClaimTopics.selector;
-        functions[6] = TREXRegistry.addClaimTopic.selector;
-        functions[7] = TREXRegistry.removeClaimTopic.selector;
+        functions[3] = IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector;
+        functions[4] = IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector;
+        functions[5] = IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector;
+        functions[6] = IERC3643ClaimTopicsRegistry.addClaimTopic.selector;
+        functions[7] = IERC3643ClaimTopicsRegistry.removeClaimTopic.selector;
         functions[8] = TREXRegistry.addClaimTopicForIdentityType.selector;
         functions[9] = TREXRegistry.removeClaimTopicForIdentityType.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.OWNER);
 
         // ------ AGENT role ------
         functions = new bytes4[](4);
-        functions[0] = TREXRegistry.registerIdentity.selector;
-        functions[1] = TREXRegistry.batchRegisterIdentity.selector;
-        functions[2] = TREXRegistry.updateIdentity.selector;
-        functions[3] = TREXRegistry.deleteIdentity.selector;
+        functions[0] = IERC3643IdentityRegistry.registerIdentity.selector;
+        functions[1] = IERC3643IdentityRegistry.batchRegisterIdentity.selector;
+        functions[2] = IERC3643IdentityRegistry.updateIdentity.selector;
+        functions[3] = IERC3643IdentityRegistry.deleteIdentity.selector;
         accessManager.setTargetFunctionRole(registry, functions, RolesLib.AGENT);
     }
 

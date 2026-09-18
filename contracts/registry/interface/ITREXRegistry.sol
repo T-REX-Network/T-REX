@@ -72,8 +72,9 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
 
     /// @dev Disables the eligibility checks for token transfers and other operations.
     ///
-    /// Once disabled, all users are considered verified by `isVerified`, bypassing the
-    /// required-claims / trusted-issuer verification.
+    /// Once disabled, `isVerified` returns true for every address, including addresses with no
+    /// identity binding at all: the identity-exists check is bypassed along with the required-claims
+    /// and trusted-issuer verification.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

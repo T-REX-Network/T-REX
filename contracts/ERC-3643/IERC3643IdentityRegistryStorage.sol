@@ -41,6 +41,34 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 
 interface IERC3643IdentityRegistryStorage {
 
+    /// @dev Emitted when an identity is registered into the storage contract.
+    /// @param _investorAddress The address of the investor's wallet.
+    /// @param _identity The address of the investor's ONCHAINID.
+    event IdentityStored(address indexed _investorAddress, IIdentity indexed _identity);
+
+    /// @dev Emitted when an identity is removed from the storage contract.
+    /// @param _investorAddress The address of the investor's wallet.
+    /// @param _identity The address of the investor's ONCHAINID.
+    event IdentityUnstored(address indexed _investorAddress, IIdentity indexed _identity);
+
+    /// @dev Emitted when an identity contract is replaced in the storage contract.
+    /// @param _oldIdentity The old ONCHAINID address.
+    /// @param _newIdentity The new ONCHAINID address.
+    event IdentityModified(IIdentity indexed _oldIdentity, IIdentity indexed _newIdentity);
+
+    /// @dev Emitted when an investor's country is updated in the storage contract.
+    /// @param _investorAddress The address of the investor's wallet.
+    /// @param _country The investor's new country code (ISO-3166).
+    event CountryModified(address indexed _investorAddress, uint16 indexed _country);
+
+    /// @dev Emitted when an Identity Registry is bound to the storage contract.
+    /// @param _identityRegistry The address of the bound Identity Registry.
+    event IdentityRegistryBound(address indexed _identityRegistry);
+
+    /// @dev Emitted when an Identity Registry is unbound from the storage contract.
+    /// @param _identityRegistry The address of the unbound Identity Registry.
+    event IdentityRegistryUnbound(address indexed _identityRegistry);
+
     /// functions
     /**
      *  @dev adds an identity contract corresponding to a user address in the storage.

@@ -3,10 +3,10 @@ pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
 contract TokenBurnUnitTest is TokenBaseUnitTest {
 
@@ -57,7 +57,7 @@ contract TokenBurnUnitTest is TokenBaseUnitTest {
 
         uint256 tokensToUnfreeze = burnAmountExceedingFree - (mintAmount - frozenAmount); // 800 - 700 = 100
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.TokensUnfrozen(user1, tokensToUnfreeze);
+        emit IERC3643.TokensUnfrozen(user1, tokensToUnfreeze);
         vm.prank(agent);
         token.burn(user1, burnAmountExceedingFree);
 

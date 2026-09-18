@@ -3,10 +3,10 @@ pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
 contract TokenSetOnchainIDUnitTest is TokenBaseUnitTest {
 
@@ -28,7 +28,7 @@ contract TokenSetOnchainIDUnitTest is TokenBaseUnitTest {
 
     function testTokenSetOnchainIDNominal() public {
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.UpdatedTokenInformation(
+        emit IERC3643.UpdatedTokenInformation(
             token.name(), token.symbol(), token.decimals(), token.version(), newOnchainId
         );
         token.setOnchainID(newOnchainId);
@@ -40,7 +40,7 @@ contract TokenSetOnchainIDUnitTest is TokenBaseUnitTest {
         address zeroAddress = address(0);
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.UpdatedTokenInformation(
+        emit IERC3643.UpdatedTokenInformation(
             token.name(), token.symbol(), token.decimals(), token.version(), zeroAddress
         );
         token.setOnchainID(zeroAddress);

@@ -3,8 +3,7 @@ pragma solidity 0.8.30;
 
 import { Vm } from "@forge-std/Test.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import {
@@ -17,7 +16,7 @@ contract IdentityRegistryStorageAddIdentityUnitTest is IdentityRegistryStorageBa
         irs.bindIdentityRegistry(registry);
 
         vm.expectEmit(address(irs));
-        emit ERC3643EventsLib.IdentityStored(wallet, IIdentity(localIdentity));
+        emit IERC3643IdentityRegistryStorage.IdentityStored(wallet, IIdentity(localIdentity));
         vm.expectEmit(address(irs));
         emit EventsLib.IdentityOverridden(wallet, IIdentity(globalIdentity), IIdentity(localIdentity));
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
@@ -62,7 +61,7 @@ contract IdentityRegistryStorageAddIdentityUnitTest is IdentityRegistryStorageBa
 
     function _assertOnlyIdentityStored(Vm.Log[] memory logs) private pure {
         assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
+        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityStored.selector);
     }
 
 }
