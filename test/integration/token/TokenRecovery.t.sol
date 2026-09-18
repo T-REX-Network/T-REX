@@ -3,9 +3,11 @@ pragma solidity 0.8.30;
 
 import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -53,6 +55,46 @@ contract TokenRecoveryTest is TREXSuiteTest {
         token.recoveryAddress(bob, another, address(bobIdentity));
     }
 
+    /// @notice Should still recover when the lost wallet is no longer locally registered but is known
+    /// globally through the IdFactory fallback — the global fallback makes the identity resolvable.
+    function test_recoveryAddress_Success_WhenLostWalletOnlyGloballyRegistered() public {
+        // Delete bob from the local identity registry. Bob still has a global identity.
+        vm.prank(agent);
+        identityRegistry.deleteIdentity(bob);
+
+        vm.prank(agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertTrue(identityRegistry.isLocallyRegistered(another));
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+    }
+
+    /// @notice Should not register the new wallet locally when the global identity registry already binds it
+    ///         to the investor: a local copy would outlive the global binding and stop following it.
+    function test_recoveryAddress_Success_NewWalletOnlyGloballyRegistered_StaysGlobal() public {
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, another)
+            ),
+            abi.encode(address(bobIdentity))
+        );
+        assertTrue(identityRegistry.contains(another));
+        assertFalse(identityRegistry.isLocallyRegistered(another));
+
+        vm.prank(agent);
+        vm.expectEmit(true, true, true, false, address(token));
+        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertFalse(identityRegistry.isLocallyRegistered(another));
+        assertEq(address(identityRegistry.identity(another)), address(bobIdentity));
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertEq(token.balanceOf(another), 500);
+    }
+
     /// @notice Should recover and freeze tokens on the new wallet when wallet has frozen token
     function test_recoveryAddress_Success_WithFrozenTokens() public {
         // Add key to bobIdentity for another address. addKey now derives the signer bytes from the
@@ -72,16 +114,6 @@ contract TokenRecoveryTest is TREXSuiteTest {
     }
 
     /// @notice Should revert when identity registry does not contain the lost or new wallet
-    function test_recoveryAddress_RevertWhen_IdentityNotInRegistry() public {
-        // Delete bob from identity registry
-        vm.prank(agent);
-        identityRegistry.deleteIdentity(bob);
-
-        vm.prank(agent);
-        vm.expectRevert(ErrorsLib.RecoveryNotPossible.selector);
-        token.recoveryAddress(bob, another, address(bobIdentity));
-    }
-
     /// @notice Should update the identity registry correctly when recovery is successful
     function test_recoveryAddress_Success_WithIdentityTransfer() public {
         vm.prank(agent);
@@ -89,8 +121,30 @@ contract TokenRecoveryTest is TREXSuiteTest {
         emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
-        assertFalse(identityRegistry.contains(bob));
-        assertTrue(identityRegistry.contains(another));
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertTrue(identityRegistry.isLocallyRegistered(another));
+    }
+
+    /// @notice The lost wallet's local binding shadowed a different global identity: deleting it during
+    ///         recovery hands the wallet back to that global identity, which the agent must reconcile.
+    function test_recoveryAddress_EmitsIdentityOverrideReleased_WhenLostWalletShadowedAGlobalIdentity() public {
+        address identityStorage = address(identityRegistry.identityStorage());
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
+            ),
+            abi.encode(address(charlieIdentity))
+        );
+
+        vm.expectEmit(identityStorage);
+        emit EventsLib.IdentityOverrideReleased(bob, bobIdentity, charlieIdentity);
+        vm.prank(agent);
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertEq(address(identityRegistry.identity(bob)), address(charlieIdentity));
+        assertEq(token.balanceOf(another), 500);
     }
 
     /// @notice Should only remove the lost wallet from the registry when new wallet is already in it
@@ -104,8 +158,8 @@ contract TokenRecoveryTest is TREXSuiteTest {
         emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
-        assertFalse(identityRegistry.contains(bob));
-        assertTrue(identityRegistry.contains(another));
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertTrue(identityRegistry.isLocallyRegistered(another));
     }
 
     /// @notice Should revert when the new wallet is already registered with an identity that differs from
@@ -140,8 +194,8 @@ contract TokenRecoveryTest is TREXSuiteTest {
         emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
-        assertFalse(identityRegistry.contains(bob));
-        assertTrue(identityRegistry.contains(another));
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertTrue(identityRegistry.isLocallyRegistered(another));
     }
 
     /// @notice Should transfer the frozen status and transfer frozen tokens when old wallet is frozen and new is not
@@ -226,7 +280,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertEq(token.balanceOf(another), 500);
-        assertTrue(identityRegistry.contains(another));
+        assertTrue(identityRegistry.isLocallyRegistered(another));
     }
 
 }

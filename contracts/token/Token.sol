@@ -89,6 +89,7 @@ import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -516,8 +517,9 @@ contract Token is
         }
     }
 
-    /// @dev Moves the on-chain identity from the lost wallet to the new wallet (registering the new wallet only
-    ///      when it is not already known to the identity registry).
+    /// @dev Moves the on-chain identity from the lost wallet to the new wallet. The new wallet is registered
+    ///  only when it resolves nowhere, so a wallet the global registry already binds keeps following that
+    ///  binding rather than a local copy. Only local entries can be deleted. Country is not stored, so 0.
     function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainId) private {
         TokenStorage storage s = _tokenStorage();
 
@@ -527,13 +529,10 @@ contract Token is
             ErrorsLib.RecoveryNotPossible()
         );
 
-        if (s.identityRegistry.contains(lostWallet)) {
-            if (!s.identityRegistry.contains(newWallet)) {
-                s.identityRegistry
-                    .registerIdentity(
-                        newWallet, IIdentity(investorOnchainId), s.identityRegistry.investorCountry(lostWallet)
-                    );
-            }
+        if (!s.identityRegistry.contains(newWallet)) {
+            s.identityRegistry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
+        }
+        if (ITREXRegistry(address(s.identityRegistry)).isLocallyRegistered(lostWallet)) {
             s.identityRegistry.deleteIdentity(lostWallet);
         }
     }
@@ -564,6 +563,37 @@ contract Token is
     /// @inheritdoc IERC3643
     function forcedTransfer(address from, address to, uint256 amount) public restricted returns (bool) {
         return _forcedTransfer(from, to, amount);
+    }
+
+    /// @notice Moves tokens out of a wallet on behalf of the investor's own identity.
+    /// @dev The identity itself must be the caller: it is an ERC-7579 account, so the call already carries the
+    ///      account's own authentication. A key holder calling the token directly is just another caller.
+    /// @dev No allowance is read or written, and the spender gate never runs: it vets third-party spenders, and
+    ///      the owner's own identity is not one. `approve`, `transferFrom` and `permit` stay plain ERC-20.
+    /// @dev Carries no revocation gate of its own. A wallet revoked in ONCHAINID still resolves here whenever it
+    ///      holds a local registration, and it can still {transfer} out, so gating this path alone would be
+    ///      bypassable rather than protective. Revoked wallets are a token-wide policy question, not this
+    ///      function's.
+    /// @param from wallet the tokens are taken from, linked to the calling identity
+    /// @param to address the tokens are sent to
+    /// @param amount number of tokens moved
+    /// @return true when the transfer succeeded
+    function identityTransfer(address from, address to, uint256 amount) external returns (bool) {
+        TokenStorage storage s = _tokenStorage();
+
+        // An unlinked wallet resolves to the zero identity. No caller can be the zero address, so the sender
+        // check alone already rejects it; the explicit guard keeps the zero identity from ever authorizing
+        // itself if `_msgSender()` is later overridden.
+        IIdentity identity = s.identityRegistry.identity(from);
+        require(
+            address(identity) != address(0) && _msgSender() == address(identity),
+            ErrorsLib.NotLinkedIdentity(from, _msgSender())
+        );
+        _transfer(from, to, amount);
+        // Emitted after the move so the operator event follows `Transfer`, the ordering {_forcedTransfer} keeps.
+        emit EventsLib.IdentityTransfer(address(identity), from, to, amount);
+
+        return true;
     }
 
     /// @inheritdoc IERC3643

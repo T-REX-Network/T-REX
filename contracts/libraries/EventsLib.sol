@@ -62,6 +62,8 @@
  */
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { MessageTypesLib } from "./MessageTypesLib.sol";
 import { Version } from "./VersionLib.sol";
@@ -94,18 +96,17 @@ library EventsLib {
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
-    /// @notice Emitted by `IdentityRegistryStorage.modifyStoredIdentity` right after the standard
-    ///         `IdentityModified(oldIdentity, newIdentity)`, which omits the investor wallet. Pair the two logs of
-    ///         the same transaction; the identities are not repeated here.
     event InvestorIdentityChanged(address indexed investor);
+    event IdentityOverridden(
+        address indexed investor, IIdentity indexed globalIdentity, IIdentity indexed localIdentity
+    );
+    event IdentityOverrideReleased(
+        address indexed investor, IIdentity indexed localIdentity, IIdentity indexed globalIdentity
+    );
 
     // Token Events
-
-    /// @notice Emitted as the very next log after the standard `Transfer` of each `forcedTransfer` /
-    ///         `batchForcedTransfer` item, before the compliance hook runs, so nothing can sit between the two.
-    ///         A `Transfer` alone cannot be told apart from a regular transfer. `agent` is the authorized caller
-    ///         (`_msgSender()`); from / to / value are in the paired `Transfer`.
     event ForcedTransfer(address indexed agent);
+    event IdentityTransfer(address indexed identity, address indexed from, address indexed to, uint256 amount);
 
     // TREXFactory Events
 
