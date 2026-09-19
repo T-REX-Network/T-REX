@@ -55,6 +55,19 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
+- **Module removal never depends on the module** (OZ M-11, L-13): a module upgraded to revert
+  everywhere can no longer hold the token hostage.
+  - `removeModule` deletes the entry first and calls `unbindCompliance` best effort; a failing call
+    emits `ModuleUnbindingFailed(address indexed module)` instead of rolling the removal back.
+  - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
+    module and emits `ModuleForceRemoved(address indexed module)`. The module keeps its own binding
+    record, so the same proxy address cannot be re-added afterwards; a fresh deployment can.
+  - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
+    compliance still lists the module, so an unbind forwarded through `callModuleFunction`, directly
+    or nested in `multicall`, cannot leave the compliance routing to a module that considers itself
+    unbound. Only the two removal paths unbind.
+  - Deployments upgrading an existing `ModularCompliance` must register the `forceRemoveModule`
+    selector for OWNER on their AccessManager; `AccessManagerSetupLib` does it for new deployments.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
