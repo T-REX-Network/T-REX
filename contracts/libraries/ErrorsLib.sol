@@ -118,18 +118,10 @@ library ErrorsLib {
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
     /// @dev The IdentityFactory already binds the predicted token address to a different identity.
     error TokenIdentityAlreadyBound(address token, address boundIdentity);
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
-
-    // SuiteAuthorityMigrator Errors
-    error IdentityNotManagedByAuthority(address identity, address authority);
-    error IdentityRotationFailed(address identity);
-    error OnlyAuthorityCanCall();
-    error SameAuthority();
-    error SharedIdentityRegistryStorage(address identityRegistryStorage);
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();

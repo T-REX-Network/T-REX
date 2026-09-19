@@ -102,9 +102,9 @@ library RolesLib {
 
     // ---- Deploy-time transient roles (self-granted for a single call, revoked before returning) ----
 
-    // Gates IdentityRegistryStorage.bindIdentityRegistry so the factory can bind a new IR onto a reused
-    // IRS during deployTREXSuite without standing OWNER. Unassigned at rest, self-granted for the bind call
-    // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
+    // Gates IdentityRegistryStorage.bindIdentityRegistry, so an issuer can bind a new IR onto a reused
+    // IRS without standing OWNER. The factory never holds it: it deploys against a reused IRS without
+    // binding, and the issuer binds afterwards.
     uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
 
     // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
@@ -114,7 +114,5 @@ library RolesLib {
     // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
     // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
     uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
-
-    uint64 constant SUITE_MIGRATOR = ROLE_PREFIX + 17;
 
 }
