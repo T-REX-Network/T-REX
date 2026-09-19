@@ -80,7 +80,6 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
-import { RolesLib } from "../libraries/RolesLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
@@ -202,7 +201,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
         if (tokenDetails.accessManager == address(0)) {
-            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token, registry);
+            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin);
         }
 
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
@@ -316,10 +315,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         );
     }
 
-    function _handOverAccessManager(address manager, address admin, address token, address registry) private {
+    function _handOverAccessManager(address manager, address admin) private {
         IAccessManager accessManager = IAccessManager(manager);
-        accessManager.grantRole(RolesLib.AGENT, token, 0);
-        accessManager.grantRole(RolesLib.AGENT, registry, 0);
         accessManager.grantRole(0, admin, 0);
         accessManager.renounceRole(0, address(this));
     }

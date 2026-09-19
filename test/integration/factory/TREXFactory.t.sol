@@ -1095,7 +1095,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory does NOT get any
         // standing role here: it self-grants IRS_BINDER (admin = AGENT_ADMIN, which it already holds)
         // for the bind window during deployTREXSuite and revokes it before returning.
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, RolesLib.SHARED);
 
         // Sanity: the factory holds neither OWNER nor IRS_BINDER going into the reused-IRS deploy.
         (bool hasOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
@@ -1172,7 +1172,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         address irAddress = address(tempToken.identityRegistry());
         address deployedIRS = address(IERC3643IdentityRegistry(irAddress).identityStorage());
 
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, RolesLib.SHARED);
 
         // Remove the factory's ability to administer IRS_BINDER (admin = AGENT_ADMIN). Without it,
         // the self-grant inside deployTREXSuite reverts and the reused-IRS bind cannot proceed.

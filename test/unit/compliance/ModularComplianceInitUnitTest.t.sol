@@ -168,7 +168,7 @@ contract ModularComplianceInitUnitTest is Test {
         returns (ModularCompliance)
     {
         ModularCompliance mc = ModularCompliance(_newMcProxy(_token, address(accessManager), _modules, _moduleSettings));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc));
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc), RolesLib.SHARED);
         return mc;
     }
 

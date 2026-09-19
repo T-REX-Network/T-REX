@@ -55,12 +55,66 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
+- **Per-suite role namespaces** (OZ H-02, #55): role ids on a shared AccessManager were one set for
+  every suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
+  - `RolesLib.forSuite(role, namespace)` derives a suite-specific role id
+    (`uint64(keccak256(abi.encode("TREX-Suite", role, namespace)))`, never `ADMIN_ROLE` or
+    `PUBLIC_ROLE`); `RolesLib.namespaceOf(address)` is the conventional namespace of a suite (its token)
+    or of a storage (its own address); `RolesLib.SHARED` (zero) returns the global ids unchanged.
+  - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins` and `setupLabels` takes a `namespace`.
+    Selector mappings, role admins and labels land in that namespace. Passing `SHARED` is the explicit
+    opt-in to one set of agents across the manager's suites. There is no silent default.
+  - `AccessManagerSetupLib.commissionSuite(manager, token, namespace)` does the whole commissioning in
+    one call: maps the token, registry, storage and compliance, sets role admins and labels, and makes
+    the structural grants in the same namespace, `AGENT` to the token (it writes to the registry) and
+    `AGENT` in the storage's namespace to the registry (it writes to the storage). It runs once per
+    suite (`AlreadyCommissioned` otherwise), and it never rewrites a storage that is already
+    commissioned: the new registry only receives the storage's write role, whatever policy the storage
+    carries stays as configured. Commissioning is tracked in the manager itself: a reserved
+    pseudo-selector, `RolesLib.COMMISSIONED`, is mapped on the token, on the storage and on a
+    per-namespace pseudo-target to the namespace's `OWNER` id. Role administrators and labels of a
+    namespace are set only the first time that namespace is commissioned, and a storage's policy is
+    read from its marker, never inferred from role ids, since `ADMIN_ROLE` (0) is a legitimate
+    explicit configuration and cannot mean "unset". A second suite in `SHARED` mode therefore leaves
+    administrators the issuer set on the global roles untouched, including ones set to `ADMIN_ROLE`,
+    and a storage the issuer restricted to `ADMIN_ROLE` stays restricted. Storage roles are
+    namespaced by the storage, not the token, because one storage has one role per selector: suites
+    sharing a storage share its identity data by construction, and per-suite isolation applies to
+    token operations and registry writes, not to the records themselves. Commissioning a second suite
+    onto a storage already commissioned needs `AGENT_ADMIN` in the storage's namespace.
+  - The factory no longer grants `AGENT` on a manager it deploys; it hands over `ADMIN_ROLE` only, and
+    the issuer commissions the suite in the namespace of their choice.
+  - `AccessManagerSetupLib.migrateSuitesToNamespaces(manager, tokens, namespaces, entitlements)` moves
+    suites commissioned `SHARED` into namespaces in one call. An entitlement is an (account, token)
+    pair: the account receives, in that token's namespace, the namespaced version of every suite role
+    it holds globally (the eight agent roles, `OWNER`, `TOKEN_MANAGER`, `IDENTITY_MANAGER`,
+    `AGENT_ADMIN`, `SUITE_ADMIN`; and when the storage moves, `OWNER`, `AGENT_ADMIN` and `IRS_BINDER`
+    again in the storage's namespace, so the owner can still unbind and the administrator can still
+    grant storage roles), with the same execution delay. Order inside the call: read every membership and grant every destination first, then remap
+    selectors, role admins and labels, then revoke the global roles last, admin roles after the rest.
+    An account listed for several suites therefore keeps all of them, and a failure anywhere reverts
+    the whole call. The token and the registry are handled without being listed. The storage always
+    moves with its suites, into its own namespace, and `OWNER`, `AGENT_ADMIN` and `IRS_BINDER` are
+    mirrored there for each entitled account; every registry bound to the storage must therefore
+    belong to a suite in the same call, else `StorageSharedOutsideBatch`. Keeping a shared storage on
+    global roles while revoking global memberships was not possible without either stranding the
+    storage's administration or leaving a global `AGENT_ADMIN` that reaches sibling suites. A pending
+    global grant (delayed, not yet active) reverts `PendingRoleGrant` rather than being skipped or
+    activated early; migrate after it activates or cancel it first. Grant delays are not copied:
+    every namespaced role of every namespace the call sets up, with or without members, must already
+    carry the same grant delay as its global counterpart, else `GrantDelayNotPrepared`; set it on the
+    namespaced id beforehand and wait out the manager's setback.
+    A migrated membership under a grant delay is pending for that delay while the global one is
+    already revoked, so the account holds neither role for that window. `AccessManager` cannot enumerate members,
+    so the caller lists the accounts. Reverts `InvalidRoleNamespace` for a `SHARED` target and
+    `EntitlementTokenNotMigrated` for an entitlement naming a token outside the call. Guardians and
+    scheduled operations are not migrated.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts (`SuiteImplementations.accessManagerImplementation`,
   `SuiteBeacons.accessManagerBeacon`). `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys
-  one under the suite salt, makes the token and the registry `AGENT` on it, hands `ADMIN_ROLE` to the new
-  `TokenDetails.accessManagerAdmin` and renounces its own. `deployTREXSuiteIsolated` clones the manager
+  one under the suite salt, hands `ADMIN_ROLE` to the new `TokenDetails.accessManagerAdmin` and renounces
+  its own. `deployTREXSuiteIsolated` clones the manager
   beacon too, owned by the manager itself. A supplied manager is used as is and gets no beacon.
   - The manager's address never changes across versions, so the token identity's MANAGEMENT key, every
     suite contract's `authority()` and all role state survive an upgrade. Key rotation is role rotation
@@ -82,10 +136,11 @@ All notable changes to this project will be documented in this file.
     `publishAndUpgrade`, `beacons`, `implementations`, `implementationsFor` and the signatures of the
     `BeaconsDeployed`, `VersionPublished`, `SuiteUpgraded` and `IsolatedSuiteDeployed` events. SDKs,
     deployment scripts and indexers decoding them need updating.
-- **The factory no longer writes into the issuer's AccessManager**: `TokenDetails.irAgents` and
-  `TokenDetails.tokenAgents` are gone, `deployTREXSuite` grants no role to anyone, and a suite deployed
-  against a reused registry storage is no longer bound to it by the factory. The factory therefore needs
-  no role on any issuer manager. Before, any holder of the factory OWNER role could name another issuer's
+- **The factory no longer writes into a supplied AccessManager**: `TokenDetails.irAgents` and
+  `TokenDetails.tokenAgents` are gone, a deploy against a supplied manager makes no call into it, and a
+  suite deployed against a reused registry storage is no longer bound to it by the factory. The factory
+  therefore needs no role on any issuer manager. The only grant it still makes is `ADMIN_ROLE` to
+  `accessManagerAdmin` on a manager it deploys itself, before renouncing its own. Before, any holder of the factory OWNER role could name another issuer's
   manager, list their own addresses as agents and receive the shared `AGENT` role there through the
   factory's `AGENT_ADMIN` grant: identity registration and deletion on every registry of every suite
   under that manager. Now the issuer grants the roles the suite needs on their own manager after

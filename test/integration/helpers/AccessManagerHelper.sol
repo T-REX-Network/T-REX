@@ -21,8 +21,8 @@ abstract contract AccessManagerHelper is Test {
     ///         and labels the roles.
     function _deployAccessManager() internal returns (AccessManager) {
         accessManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupRoleAdmins(accessManager);
-        AccessManagerSetupLib.setupLabels(accessManager);
+        AccessManagerSetupLib.setupRoleAdmins(accessManager, RolesLib.SHARED);
+        AccessManagerSetupLib.setupLabels(accessManager, RolesLib.SHARED);
         // Operational roles are now administered by the giver roles, not ADMIN_ROLE(0); the test
         // admin needs the givers to be able to grant AGENT/AGENT_* and TOKEN_MANAGER/IDENTITY_MANAGER.
         _grantAgentAdminRole(address(this));
@@ -43,10 +43,10 @@ abstract contract AccessManagerHelper is Test {
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
     /// @dev `registry` is the TREXRegistry, which serves as the suite's IR, CTR and TIR.
     function _setupSuiteRoles(address token, address registry, address irs, address mc) internal {
-        AccessManagerSetupLib.setupTokenRoles(accessManager, token);
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry);
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs);
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc);
+        AccessManagerSetupLib.setupTokenRoles(accessManager, token, RolesLib.SHARED);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry, RolesLib.SHARED);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs, RolesLib.SHARED);
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc, RolesLib.SHARED);
     }
 
     function _grantOwnerRole(address account) internal {

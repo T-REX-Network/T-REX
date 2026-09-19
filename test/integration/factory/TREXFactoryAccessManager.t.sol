@@ -45,41 +45,36 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertFalse(factoryIsAdmin);
     }
 
-    function test_deployTREXSuite_Success_IssuerWiresTheFreshManager() public {
+    function test_deployTREXSuite_Success_IssuerCommissionsTheFreshManager() public {
         Token deployed = _deployWithFreshManager("wired");
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());
-        address irs = address(deployed.identityRegistry().identityStorage());
+        bytes32 ns = RolesLib.namespaceOf(address(deployed));
 
-        (bool tokenIsAgent,) = manager.hasRole(RolesLib.AGENT, address(deployed));
-        (bool registryIsAgent,) = manager.hasRole(RolesLib.AGENT, registry);
-        assertTrue(tokenIsAgent);
-        assertTrue(registryIsAgent);
+        (bool tokenIsAgentBefore,) = manager.hasRole(RolesLib.AGENT, address(deployed));
+        assertFalse(tokenIsAgentBefore);
         assertEq(manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector), manager.ADMIN_ROLE());
 
         vm.startPrank(issuerAdmin);
-        AccessManagerSetupLib.setupRoleAdmins(manager);
-        AccessManagerSetupLib.setupTokenRoles(manager, address(deployed));
-        AccessManagerSetupLib.setupTREXRegistryRoles(manager, registry);
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(manager, irs);
-        manager.grantRole(RolesLib.AGENT_ADMIN, issuerAdmin, 0);
-        manager.grantRole(RolesLib.AGENT, agent, 0);
+        AccessManagerSetupLib.commissionSuite(manager, address(deployed), ns);
+        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_ADMIN, ns), issuerAdmin, 0);
+        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT, ns), agent, 0);
+        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_PAUSER, ns), agent, 0);
+        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_MINTER, ns), agent, 0);
         vm.stopPrank();
 
-        assertEq(manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
-        vm.prank(agent);
-        IERC3643IdentityRegistry(registry).registerIdentity(alice, aliceIdentity, 0);
-        assertTrue(IERC3643IdentityRegistry(registry).contains(alice));
-
-        vm.startPrank(issuerAdmin);
-        AccessManagerSetupLib.setupModularComplianceRoles(manager, address(deployed.compliance()));
-        manager.grantRole(RolesLib.AGENT_PAUSER, agent, 0);
-        manager.grantRole(RolesLib.AGENT_MINTER, agent, 0);
-        vm.stopPrank();
+        (bool tokenIsAgent,) = manager.hasRole(RolesLib.forSuite(RolesLib.AGENT, ns), address(deployed));
+        assertTrue(tokenIsAgent);
+        assertEq(
+            manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector),
+            RolesLib.forSuite(RolesLib.AGENT_MINTER, ns)
+        );
         vm.startPrank(agent);
+        IERC3643IdentityRegistry(registry).registerIdentity(alice, aliceIdentity, 0);
         deployed.unpause();
         deployed.mint(alice, 100);
         vm.stopPrank();
+        assertTrue(IERC3643IdentityRegistry(registry).contains(alice));
         assertEq(deployed.balanceOf(alice), 100);
     }
 

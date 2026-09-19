@@ -72,7 +72,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
             abi.encode(address(accessManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, newIdentityRegistry);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, newIdentityRegistry, RolesLib.SHARED);
         accessManager.grantRole(RolesLib.AGENT, address(token), 0);
 
         vm.expectEmit(true, true, true, true, address(token));

@@ -115,4 +115,26 @@ library RolesLib {
     // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
     uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
 
+    bytes32 constant SHARED = bytes32(0);
+
+    bytes4 constant COMMISSIONED = bytes4(keccak256("TREX-Suite.commissioned"));
+
+    function namespaceOf(address target) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(target)));
+    }
+
+    function forSuite(uint64 role, bytes32 namespace) internal pure returns (uint64) {
+        if (namespace == SHARED) {
+            return role;
+        }
+        uint64 id = uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace))));
+        if (id == 0) {
+            return 1;
+        }
+        if (id == type(uint64).max) {
+            return type(uint64).max - 1;
+        }
+        return id;
+    }
+
 }

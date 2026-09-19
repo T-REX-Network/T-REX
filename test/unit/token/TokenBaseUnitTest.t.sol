@@ -7,6 +7,7 @@ import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
@@ -50,7 +51,7 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
             )
         );
 
-        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token));
+        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token), RolesLib.SHARED);
         _grantAllAgentRoles(agent);
     }
 

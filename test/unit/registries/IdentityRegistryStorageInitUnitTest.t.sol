@@ -101,7 +101,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
                 irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), _initialIR))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs));
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), RolesLib.SHARED);
         return irs;
     }
 

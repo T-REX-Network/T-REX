@@ -45,7 +45,7 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
                 beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs));
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), RolesLib.SHARED);
 
         vm.mockCall(
             registry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
