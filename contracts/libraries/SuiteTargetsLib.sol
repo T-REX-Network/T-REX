@@ -63,104 +63,62 @@
 
 pragma solidity 0.8.30;
 
-/// @dev Errors of the ERC-3643 standard surface are declared canonically in
-///  {ERC3643ErrorsLib}, inside the standard layer, because the standard bases may not import from the
-///  T-REX layer (issue #65). The names below are re-declared here for the T-REX layer and for tests.
-///  Solidity identifies errors by selector, so a re-declaration with the same signature is the same
-///  error on the wire; `forge lint` reporting some of them as unused only means no T-REX-layer contract
-///  raises them any more, not that they are unreachable.
-library ErrorsLib {
+import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
+import { ErrorsLib } from "./ErrorsLib.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error ArrayLengthMismatch();
-    error InvalidImplementationAuthority();
+library SuiteTargetsLib {
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error InvalidCompliance();
-    error InvalidIdentityRegistry();
-    error NoTokenToRecover();
-    error NotLinkedIdentity(address from, address caller);
-    error RecoveryNotPossible();
-    error SameWalletRecovery();
-    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
-    error UnverifiedIdentity();
+    function targets(address[] memory tokens, address[] memory extraTargets)
+        internal
+        view
+        returns (address[] memory list)
+    {
+        address[] memory registries = new address[](tokens.length);
+        address[] memory storages = new address[](tokens.length);
+        uint256 storageCount;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(tokens[i] != address(0), ErrorsLib.ZeroAddress());
+            IERC3643IdentityRegistry registry = IERC3643(tokens[i]).identityRegistry();
+            registries[i] = address(registry);
+            address irs = address(registry.identityStorage());
+            if (!_contains(storages, storageCount, irs)) {
+                storages[storageCount++] = irs;
+            }
+        }
+        for (uint256 i = 0; i < storageCount; i++) {
+            address[] memory linked = IERC3643IdentityRegistryStorage(storages[i]).linkedIdentityRegistries();
+            for (uint256 j = 0; j < linked.length; j++) {
+                require(
+                    _contains(registries, registries.length, linked[j]),
+                    ErrorsLib.SharedIdentityRegistryStorage(storages[i])
+                );
+            }
+        }
 
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
+        list = new address[](3 * tokens.length + storageCount + extraTargets.length);
+        uint256 count;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            list[count++] = tokens[i];
+            list[count++] = registries[i];
+            list[count++] = address(IERC3643(tokens[i]).compliance());
+        }
+        for (uint256 i = 0; i < storageCount; i++) {
+            list[count++] = storages[i];
+        }
+        for (uint256 i = 0; i < extraTargets.length; i++) {
+            list[count++] = extraTargets[i];
+        }
+    }
 
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
-
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
-    error TokenAlreadyDeployed();
-    error IsolatedSuiteCannotReuseIRS();
-
-    // SuiteAuthorityMigrator Errors
-    error IdentityNotManagedByAuthority(address identity, address authority);
-    error IdentityRotationFailed(address identity);
-    error OnlyAuthorityCanCall();
-    error SameAuthority();
-    error SharedIdentityRegistryStorage(address identityRegistryStorage);
-
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
-    error InvalidIdentityType();
-
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-    error InvalidIdentityRegistryStorage();
-
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-
-    // TREXImplementationAuthority Errors
-    error EmptyImplementations();
-    error UnknownVersion();
-    error VersionAlreadyPublished();
-    error VersionNotNewer();
-
-    // TREXRegistry Errors
-    error Deprecated();
+    function _contains(address[] memory list, uint256 length, address item) private pure returns (bool) {
+        for (uint256 i = 0; i < length; i++) {
+            if (list[i] == item) {
+                return true;
+            }
+        }
+        return false;
+    }
 
 }
