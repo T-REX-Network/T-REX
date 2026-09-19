@@ -75,7 +75,12 @@ All notable changes to this project will be documented in this file.
     per-namespace pseudo-target to the namespace's `OWNER` id. Role administrators and labels of a
     namespace are set only the first time that namespace is commissioned, and a storage's policy is
     read from its marker, never inferred from role ids, since `ADMIN_ROLE` (0) is a legitimate
-    explicit configuration and cannot mean "unset". A second suite in `SHARED` mode therefore leaves
+    explicit configuration and cannot mean "unset". `setupTokenRoles`, `setupIdentityRegistryStorageRoles`
+    and `setupRoleAdmins` write the marker themselves, so a target wired through the individual
+    functions is recognised by `commissionSuite` exactly like one it commissioned. The per-namespace
+    marker lives on a synthetic address derived from the namespace, which holds no code by design.
+    A target configured with raw `setTargetFunctionRole` calls, outside the library, carries no marker
+    and is treated as never configured. A second suite in `SHARED` mode therefore leaves
     administrators the issuer set on the global roles untouched, including ones set to `ADMIN_ROLE`,
     and a storage the issuer restricted to `ADMIN_ROLE` stays restricted. Storage roles are
     namespaced by the storage, not the token, because one storage has one role per selector: suites
@@ -100,7 +105,16 @@ All notable changes to this project will be documented in this file.
     global roles while revoking global memberships was not possible without either stranding the
     storage's administration or leaving a global `AGENT_ADMIN` that reaches sibling suites. A pending
     global grant (delayed, not yet active) reverts `PendingRoleGrant` rather than being skipped or
-    activated early; migrate after it activates or cancel it first. Grant delays are not copied:
+    activated early; migrate after it activates or cancel it first. A pending execution-delay
+    change on a membership (a delay decrease that has not taken effect yet) reverts
+    `PendingDelayChange` for the same reason. Duplicate tokens or namespaces in one call revert
+    `DuplicateMigrationEntry`. Migration remaps rather than resets: every selector the setup library
+    knows is read on its target and its current role is translated, a global suite role becoming the
+    namespaced one while `ADMIN_ROLE` and custom role ids stay as they are; role administrators and
+    guardians are translated the same way. A suite the issuer hardened by hand keeps that shape in
+    its namespace. Scheduled operations are not touched: `AccessManager` re-checks authorisation at
+    execution, so an entitled account's scheduled calls still run under its namespaced role. Grant
+    delays are not copied:
     every namespaced role of every namespace the call sets up, with or without members, must already
     carry the same grant delay as its global counterpart, else `GrantDelayNotPrepared`; set it on the
     namespaced id beforehand and wait out the manager's setback.

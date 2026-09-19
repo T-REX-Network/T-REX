@@ -141,6 +141,8 @@ library ErrorsLib {
     error GrantDelayNotPrepared(uint64 role, bytes32 namespace);
     error AlreadyCommissioned(address token);
     error StorageSharedOutsideBatch(address identityRegistryStorage);
+    error PendingDelayChange(address account, uint64 role);
+    error DuplicateMigrationEntry();
     error AddressAlreadyStored();
     error AddressNotYetStored();
     error IdentityRegistryNotStored();

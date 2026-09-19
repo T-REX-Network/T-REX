@@ -600,6 +600,119 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         registryA.registerIdentity(alice, aliceIdentity, 0);
     }
 
+    function test_setupIdentityRegistryStorageRoles_MarksTheStorageSoCommissioningLeavesItAlone() public {
+        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
+        Token tokenC = _deployBare("manual-c", address(irs));
+        bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), storageNamespace);
+        bytes4[] memory remove = new bytes4[](1);
+        remove[0] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
+        accessManager.setTargetFunctionRole(address(irs), remove, 0);
+
+        _commission(tokenC, RolesLib.namespaceOf(address(tokenC)));
+
+        assertEq(
+            accessManager.getTargetFunctionRole(
+                address(irs), IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector
+            ),
+            0
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(
+                address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
+            ),
+            RolesLib.forSuite(RolesLib.AGENT, storageNamespace)
+        );
+    }
+
+    function test_migrateSuitesToNamespaces_Success_RemapsCustomPolicyInsteadOfResettingIt() public {
+        _commission(tokenA, RolesLib.SHARED);
+        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
+        bytes4[] memory remove = new bytes4[](1);
+        remove[0] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
+        accessManager.setTargetFunctionRole(address(irs), remove, 0);
+        bytes4[] memory mint = new bytes4[](1);
+        mint[0] = IERC3643.mint.selector;
+        accessManager.setTargetFunctionRole(address(tokenA), mint, 4343);
+        accessManager.setRoleAdmin(RolesLib.AGENT_MINTER, 4242);
+        accessManager.setRoleGuardian(RolesLib.AGENT_BURNER, RolesLib.SUITE_ADMIN);
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+
+        AccessManagerSetupLib.migrateSuitesToNamespaces(
+            accessManager, _only(tokenA), _namespaces(nsA), new AccessManagerSetupLib.Entitlement[](0)
+        );
+
+        assertEq(
+            accessManager.getTargetFunctionRole(
+                address(irs), IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector
+            ),
+            0
+        );
+        assertEq(accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector), 4343);
+        assertEq(
+            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.burn.selector),
+            RolesLib.forSuite(RolesLib.AGENT_BURNER, nsA)
+        );
+        assertEq(accessManager.getRoleAdmin(RolesLib.forSuite(RolesLib.AGENT_MINTER, nsA)), 4242);
+        assertEq(
+            accessManager.getRoleGuardian(RolesLib.forSuite(RolesLib.AGENT_BURNER, nsA)),
+            RolesLib.forSuite(RolesLib.SUITE_ADMIN, nsA)
+        );
+        assertEq(
+            accessManager.getRoleAdmin(RolesLib.forSuite(RolesLib.AGENT, nsA)),
+            RolesLib.forSuite(RolesLib.AGENT_ADMIN, nsA)
+        );
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_AHolderHasAPendingDelayChange() public {
+        _commission(tokenA, RolesLib.SHARED);
+        accessManager.grantRole(RolesLib.AGENT_MINTER, agentA, 1 hours);
+        accessManager.grantRole(RolesLib.AGENT_MINTER, agentA, 0);
+        (, uint32 currentDelay, uint32 pendingDelay, uint48 effect) =
+            accessManager.getAccess(RolesLib.AGENT_MINTER, agentA);
+        assertEq(currentDelay, 1 hours);
+        assertEq(pendingDelay, 0);
+        assertGt(effect, block.timestamp);
+
+        AccessManagerSetupLib.Entitlement[] memory entitlements = new AccessManagerSetupLib.Entitlement[](1);
+        entitlements[0] = AccessManagerSetupLib.Entitlement({ account: agentA, token: address(tokenA) });
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PendingDelayChange.selector, agentA, RolesLib.AGENT_MINTER));
+        this.migrateExternally(_only(tokenA), _namespaces(RolesLib.namespaceOf(address(tokenA))), entitlements);
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_ATokenOrNamespaceIsListedTwice() public {
+        _commission(tokenA, RolesLib.SHARED);
+        _commission(tokenB, RolesLib.SHARED);
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+        bytes32 nsB = RolesLib.namespaceOf(address(tokenB));
+        address[] memory twice = new address[](2);
+        twice[0] = address(tokenA);
+        twice[1] = address(tokenA);
+
+        vm.expectRevert(ErrorsLib.DuplicateMigrationEntry.selector);
+        this.migrateExternally(twice, _namespaces(nsA, nsB), new AccessManagerSetupLib.Entitlement[](0));
+
+        vm.expectRevert(ErrorsLib.DuplicateMigrationEntry.selector);
+        this.migrateExternally(_both(), _namespaces(nsA, nsA), new AccessManagerSetupLib.Entitlement[](0));
+    }
+
+    function test_commissionedMarker_DoesNotCollideWithAnyMappedSelector() public pure {
+        (bytes4[] memory tokenSelectors,) = AccessManagerSetupLib.tokenTable();
+        (bytes4[] memory registrySelectors,) = AccessManagerSetupLib.registryTable();
+        (bytes4[] memory storageSelectors,) = AccessManagerSetupLib.storageTable();
+        (bytes4[] memory complianceSelectors,) = AccessManagerSetupLib.complianceTable();
+        _assertNoneIsTheMarker(tokenSelectors);
+        _assertNoneIsTheMarker(registrySelectors);
+        _assertNoneIsTheMarker(storageSelectors);
+        _assertNoneIsTheMarker(complianceSelectors);
+    }
+
+    function _assertNoneIsTheMarker(bytes4[] memory selectors) private pure {
+        for (uint256 i = 0; i < selectors.length; i++) {
+            assertNotEq(selectors[i], RolesLib.COMMISSIONED);
+        }
+    }
+
     function migrateExternally(
         address[] memory tokens,
         bytes32[] memory namespaces,
