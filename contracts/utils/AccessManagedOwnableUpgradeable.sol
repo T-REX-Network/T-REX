@@ -104,7 +104,7 @@ abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, A
         // that are configured; `getTargetFunctionRole` distinguishes that from the ADMIN_ROLE fallback
         // an unconfigured selector returns, which must not silently widen access to the admin.
         if (selector == msg.sig || IAccessManager(authority()).getTargetFunctionRole(address(this), msg.sig) != 0) {
-            _checkCanCall(_msgSender(), msg.data);
+            _checkCanCall(_msgSender(), _msgData());
             return;
         }
 
