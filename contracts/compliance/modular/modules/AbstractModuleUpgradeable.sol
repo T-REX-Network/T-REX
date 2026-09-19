@@ -69,6 +69,7 @@ import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/int
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
+import { IModularCompliance } from "../IModularCompliance.sol";
 import { IModule } from "./IModule.sol";
 
 /**
@@ -150,6 +151,7 @@ abstract contract AbstractModuleUpgradeable is
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
         require(msg.sender == _compliance, ErrorsLib.OnlyComplianceContractCanCall());
+        require(!IModularCompliance(_compliance).isModuleBound(address(this)), ErrorsLib.ModuleStillBound());
 
         s.complianceBound[_compliance] = false;
         s.nonces[_compliance]++;

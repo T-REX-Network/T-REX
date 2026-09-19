@@ -96,6 +96,8 @@ interface IModularCompliance is IERC3643Compliance {
      */
     function removeModule(address _module) external;
 
+    function forceRemoveModule(address _module) external;
+
     /**
      *  @dev calls any function on bound modules
      *  can be called only on bound modules

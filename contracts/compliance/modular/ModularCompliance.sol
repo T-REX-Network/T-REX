@@ -125,11 +125,16 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
      *  @dev See {IModularCompliance-removeModule}.
      */
     function removeModule(address _module) external restricted {
-        require(_module != address(0), ErrorsLib.ZeroAddress());
-
-        require(_getStorage().modules.remove(_module), ErrorsLib.ModuleNotBound());
-        IModule(_module).unbindCompliance(address(this));
+        _removeModule(_module);
+        if (!LowLevelCall.callNoReturn(_module, abi.encodeCall(IModule.unbindCompliance, (address(this))))) {
+            emit EventsLib.ModuleUnbindingFailed(_module);
+        }
         emit EventsLib.ModuleRemoved(_module);
+    }
+
+    function forceRemoveModule(address _module) external restricted {
+        _removeModule(_module);
+        emit EventsLib.ModuleForceRemoved(_module);
     }
 
     /**
@@ -329,6 +334,11 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
 
         emit EventsLib.ModuleAdded(_module);
         emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
+    }
+
+    function _removeModule(address _module) internal {
+        require(_module != address(0), ErrorsLib.ZeroAddress());
+        require(_getStorage().modules.remove(_module), ErrorsLib.ModuleNotBound());
     }
 
     /// @dev Reads a module's declaration and rejects anything the compliance cannot route.

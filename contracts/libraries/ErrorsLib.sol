@@ -108,6 +108,7 @@ library ErrorsLib {
     // Module Errors
     error ComplianceNotBound();
     error ComplianceAlreadyBound();
+    error ModuleStillBound();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(address spender);
