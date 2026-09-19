@@ -151,7 +151,8 @@ interface ITREXFactory {
 
     /**
      *  @dev deploys a suite that does not follow the shared implementation authority.
-     *  Clones 4 fresh `UpgradeableBeacon`s from the authority's active implementations and points the
+     *  Clones fresh `UpgradeableBeacon`s from the authority's active implementations, one per suite contract
+     *  plus one for the access manager when the factory deploys it, and points the
      *  suite at those clones instead of the shared beacons, so later `publish` / `upgrade` calls on the
      *  authority never reach this suite. The clones are owned by `_tokenDetails.accessManager`.
      *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always

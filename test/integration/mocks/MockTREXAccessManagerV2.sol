@@ -63,97 +63,12 @@
 
 pragma solidity 0.8.30;
 
-/// @dev Errors of the ERC-3643 standard surface are declared canonically in
-///  {ERC3643ErrorsLib}, inside the standard layer, because the standard bases may not import from the
-///  T-REX layer (issue #65). The names below are re-declared here for the T-REX layer and for tests.
-///  Solidity identifies errors by selector, so a re-declaration with the same signature is the same
-///  error on the wire; `forge lint` reporting some of them as unused only means no T-REX-layer contract
-///  raises them any more, not that they are unreachable.
-library ErrorsLib {
+import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 
-    // Common Errors
-    error ZeroAddress();
-    error ZeroValue();
-    error ArraySizeLimited(uint256 maxSize);
-    error ArrayLengthMismatch();
-    error InvalidImplementationAuthority();
+contract MockTREXAccessManagerV2 is TREXAccessManager {
 
-    // Token Errors
-    error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
-    error ComplianceNotFollowed();
-    error DecimalsOutOfRange(uint256 decimals);
-    error EmptyString();
-    error FrozenWallet(address user);
-    error ComplianceAlreadyBoundToToken();
-    error InvalidCompliance();
-    error InvalidIdentityRegistry();
-    error NoTokenToRecover();
-    error NotLinkedIdentity(address from, address caller);
-    error RecoveryNotPossible();
-    error SameWalletRecovery();
-    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
-    error UnverifiedIdentity();
-
-    // ModularCompliance Errors
-    error AddressNotATokenBoundToComplianceContract();
-    error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
-    error MaxModulesReached(uint256 maxValue);
-    error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
-    error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
-    error TokenNotBound();
-
-    // Module Errors
-    error ComplianceNotBound();
-    error ComplianceAlreadyBound();
-    error OnlyBoundComplianceCanCall();
-    error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
-
-    // TREXFactory Errors
-    error AuthorityMismatch();
-    error InvalidAccessManagerAdmin();
-    error InvalidClaimPattern();
-    error InvalidCompliancePattern();
-    error MaxClaimIssuersReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
-    error TokenAlreadyDeployed();
-    error IsolatedSuiteCannotReuseIRS();
-
-    // ClaimTopicsRegistry Errors
-    error ClaimTopicAlreadyExists();
-    error InvalidIdentityType();
-
-    // IdentityRegistry Errors
-    error EligibilityChecksDisabledAlready();
-    error EligibilityChecksEnabledAlready();
-    error InvalidIdentityRegistryStorage();
-
-    // IdentityRegistryStorage Errors
-    error AddressAlreadyStored();
-    error AddressNotYetStored();
-    error IdentityRegistryNotStored();
-    error MaxIRByIRSReached(uint256 max);
-
-    // TrustedIssuersRegistry Errors
-    error ClaimTopicsCannotBeEmpty();
-    error MaxClaimTopicsReached(uint256 max);
-    error MaxTrustedIssuersReached(uint256 max);
-    error NotATrustedIssuer();
-    error TrustedClaimTopicsCannotBeEmpty();
-    error TrustedIssuerAlreadyExists();
-
-    // TREXImplementationAuthority Errors
-    error EmptyImplementations();
-    error UnknownVersion();
-    error VersionAlreadyPublished();
-    error VersionNotNewer();
-
-    // TREXRegistry Errors
-    error Deprecated();
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 
 }

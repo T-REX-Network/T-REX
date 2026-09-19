@@ -67,8 +67,21 @@ All notable changes to this project will be documented in this file.
     inside the manager. Replacing the manager contract is not a supported operation; the ERC-173
     `transferOwnership` shim on suite contracts still forwards to `setAuthority` for the manager only and
     does not move the token identity's key.
+  - Trust statement: the shared manager beacon is owned by `TREXImplementationAuthority`, so whoever
+    holds `VERSION_MANAGER` there can replace the code behind every factory-deployed manager on the
+    shared beacon, and with it the code at each token identity's MANAGEMENT-key address. Issuers who do
+    not accept that use `deployTREXSuiteIsolated`, whose manager beacon is owned by the manager itself,
+    or supply their own manager.
+  - `accessManagerAdmin` must not be the factory (`InvalidAccessManagerAdmin`): the factory renounces
+    its admin role at the end of the deploy, so a suite would otherwise end up without an administrator.
+  - A fresh manager cannot be combined with a reused registry storage: the storage's authority must
+    equal the suite manager (`AuthorityMismatch`), and a manager that does not exist yet cannot be.
   - Breaking: `TokenDetails` gains `accessManagerAdmin`, `SuiteImplementations` and `SuiteBeacons` gain
     a fifth entry, and `TREXImplementationAuthority` requires a manager implementation at construction.
+    The struct changes alter the ABI of `deployTREXSuite`, `deployTREXSuiteIsolated`, `publish`,
+    `publishAndUpgrade`, `beacons`, `implementations`, `implementationsFor` and the signatures of the
+    `BeaconsDeployed`, `VersionPublished`, `SuiteUpgraded` and `IsolatedSuiteDeployed` events. SDKs,
+    deployment scripts and indexers decoding them need updating.
 - **The factory no longer writes into the issuer's AccessManager**: `TokenDetails.irAgents` and
   `TokenDetails.tokenAgents` are gone, `deployTREXSuite` grants no role to anyone, and a suite deployed
   against a reused registry storage is no longer bound to it by the factory. The factory therefore needs
@@ -78,8 +91,15 @@ All notable changes to this project will be documented in this file.
   under that manager. Now the issuer grants the roles the suite needs on their own manager after
   deployment, in the same transaction through a batching wallet if desired: `AGENT` to the registry (it
   writes to the storage), `AGENT` to the token (it moves identities during `recoveryAddress`), the
-  operational agent roles to their agents, and `bindIdentityRegistry` on a reused storage for the new
-  registry. `MaxAgentsReached` is removed.
+  operational agent roles to their agents. For a reused storage, two more steps on the storage's
+  manager: `bindIdentityRegistry` for the new registry (mapped to `IRS_BINDER` by the setup library) and
+  `AGENT` to the new registry so it can write, since binding alone grants no write permission. The reused
+  storage must already report the suite's manager as its authority; a storage under another manager is
+  rejected with `AuthorityMismatch`, because `bindIdentityRegistry` requires matching authorities and the
+  suite could never be completed. `MaxAgentsReached` is removed.
+  - Rollout: this stops new grants. It does not revoke the `AGENT_ADMIN` that issuers granted to
+    previously deployed factories on their managers. Revoke it on every manager that holds it; until
+    then the old grant path stays open through the old factory code.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance

@@ -70,6 +70,7 @@ import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import {
     AccessManagerUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -169,10 +170,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         ClaimDetails calldata claimDetails
     ) private view {
         require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
-        require(
-            tokenDetails.accessManager != address(0) || tokenDetails.accessManagerAdmin != address(0),
-            ErrorsLib.ZeroAddress()
-        );
+        if (tokenDetails.accessManager == address(0)) {
+            require(tokenDetails.accessManagerAdmin != address(0), ErrorsLib.ZeroAddress());
+            require(tokenDetails.accessManagerAdmin != address(this), ErrorsLib.InvalidAccessManagerAdmin());
+        }
 
         require(claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
         require(claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
@@ -193,6 +194,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address irs = tokenDetails.irs;
         if (irs == address(0)) {
             irs = _deployIRS(salt, beacons.irsBeacon, manager);
+        } else {
+            require(IAccessManaged(irs).authority() == manager, ErrorsLib.AuthorityMismatch());
         }
         address registry = _deployTREXRegistry(salt, beacons.trexRegistryBeacon, manager, irs, claimDetails);
         address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
@@ -302,11 +305,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return bytes20(address(this)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
     }
 
-    /// function used to deploy the merged eligibility registry using CREATE3.
-    /// The deployed contract is a stock OZ `BeaconProxy` whose beacon resolves to the current
-    /// `TREXRegistry` implementation; `init(...)` is invoked atomically through the proxy constructor,
-    /// seeding claim topics and issuers so the factory needs no OWNER privilege over a fresh registry.
-    /// Deployed under "REGISTRY" so `_deployIRS` can pre-bind its address via `_predictAddress(salt, "REGISTRY")`.
     function _deployAccessManager(string memory salt, address accessManagerBeacon) private returns (address) {
         require(accessManagerBeacon != address(0), ErrorsLib.ZeroAddress());
         return _deploy(

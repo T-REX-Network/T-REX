@@ -22,6 +22,7 @@ import { Token } from "contracts/token/Token.sol";
 import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { MockTREXAccessManagerV2 } from "test/integration/mocks/MockTREXAccessManagerV2.sol";
 
 contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
@@ -69,6 +70,68 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         vm.prank(agent);
         IERC3643IdentityRegistry(registry).registerIdentity(alice, aliceIdentity, 0);
         assertTrue(IERC3643IdentityRegistry(registry).contains(alice));
+
+        vm.startPrank(issuerAdmin);
+        AccessManagerSetupLib.setupModularComplianceRoles(manager, address(deployed.compliance()));
+        manager.grantRole(RolesLib.AGENT_PAUSER, agent, 0);
+        manager.grantRole(RolesLib.AGENT_MINTER, agent, 0);
+        vm.stopPrank();
+        vm.startPrank(agent);
+        deployed.unpause();
+        deployed.mint(alice, 100);
+        vm.stopPrank();
+        assertEq(deployed.balanceOf(alice), 100);
+    }
+
+    function test_deployTREXSuite_RevertWhen_AccessManagerAdminIsTheFactory() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);
+        trexFactory.deployTREXSuite("self-admin", _details(address(0), address(trexFactory)), _noClaims());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);
+        trexFactory.deployTREXSuiteIsolated("self-admin", _details(address(0), address(trexFactory)), _noClaims());
+    }
+
+    function test_deployTREXSuite_RevertWhen_FreshManagerReusesAStorage() public {
+        ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
+        details.irs = address(token.identityRegistry().identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
+        trexFactory.deployTREXSuite("fresh-reused", details, _noClaims());
+    }
+
+    function test_deployTREXSuite_Success_SuppliedIdentityKeysAreUntouched() public {
+        address wallet = makeAddr("issuerWallet");
+        address supplied = address(_deployIdentity(wallet, "supplied-oid"));
+        ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
+        details.ONCHAINID = supplied;
+
+        vm.prank(deployer);
+        trexFactory.deployTREXSuite("supplied-oid", details, _noClaims());
+
+        Token deployed = Token(trexFactory.getToken("supplied-oid"));
+        assertEq(deployed.onchainID(), supplied);
+        assertTrue(_isManager(supplied, wallet));
+        assertFalse(_isManager(supplied, IERC173(address(deployed)).owner()));
+        assertFalse(_isManager(supplied, address(trexFactory)));
+    }
+
+    function test_deployTREXSuiteIsolated_Success_SuppliedIdentityKeysAreUntouched() public {
+        address wallet = makeAddr("issuerWallet");
+        address supplied = address(_deployIdentity(wallet, "supplied-oid-isolated"));
+        ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
+        details.ONCHAINID = supplied;
+
+        vm.prank(deployer);
+        trexFactory.deployTREXSuiteIsolated("supplied-oid-isolated", details, _noClaims());
+
+        Token deployed = Token(trexFactory.getToken("supplied-oid-isolated"));
+        assertEq(deployed.onchainID(), supplied);
+        assertTrue(_isManager(supplied, wallet));
+        assertFalse(_isManager(supplied, IERC173(address(deployed)).owner()));
+        assertFalse(_isManager(supplied, address(trexFactory)));
     }
 
     function test_deployTREXSuite_Success_FreshManagerHoldsTheIdentityManagementKey() public {
@@ -85,28 +148,47 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertTrue(_isManager(oid, another));
     }
 
-    function test_upgrade_Success_ManagerKeepsAddressRolesAndIdentityKey() public {
+    function test_upgrade_Success_ManagerKeepsAddressStateAndIdentityKey() public {
         Token deployed = _deployWithFreshManager("upgrade");
-        address manager = IERC173(address(deployed)).owner();
-        bytes32 beaconBefore = vm.load(manager, BEACON_SLOT);
+        TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
+        bytes32 beaconBefore = vm.load(address(manager), BEACON_SLOT);
+        bytes4[] memory mint = new bytes4[](1);
+        mint[0] = IERC3643.mint.selector;
+        vm.startPrank(issuerAdmin);
+        manager.grantRole(RolesLib.AGENT_ADMIN, issuerAdmin, 0);
+        manager.setTargetFunctionRole(address(deployed), mint, RolesLib.AGENT_MINTER);
+        manager.setRoleAdmin(RolesLib.AGENT_MINTER, RolesLib.AGENT_ADMIN);
+        manager.setRoleGuardian(RolesLib.AGENT_MINTER, RolesLib.SUITE_ADMIN);
+        manager.setGrantDelay(RolesLib.AGENT_MINTER, 2 hours);
+        manager.grantRole(RolesLib.AGENT_MINTER, agent, 1 hours);
+        vm.stopPrank();
+        vm.warp(block.timestamp + 6 days);
 
         ITREXImplementationAuthority.SuiteImplementations memory impls = _suiteImplementations();
-        impls.accessManagerImplementation = address(new TREXAccessManager());
+        impls.accessManagerImplementation = address(new MockTREXAccessManagerV2());
         vm.prank(deployer);
         trexImplementationAuthority.publishAndUpgrade(VersionLib.pack(5, 0, 1), impls);
 
-        assertEq(IERC173(address(deployed)).owner(), manager);
-        assertEq(vm.load(manager, BEACON_SLOT), beaconBefore);
+        assertEq(IERC173(address(deployed)).owner(), address(manager));
+        assertEq(vm.load(address(manager), BEACON_SLOT), beaconBefore);
         assertEq(
             UpgradeableBeacon(trexImplementationAuthority.beacons().accessManagerBeacon).implementation(),
             impls.accessManagerImplementation
         );
-        (bool issuerIsAdmin,) = TREXAccessManager(manager).hasRole(TREXAccessManager(manager).ADMIN_ROLE(), issuerAdmin);
+        assertEq(MockTREXAccessManagerV2(address(manager)).version(), 2);
+        (bool issuerIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), issuerAdmin);
         assertTrue(issuerIsAdmin);
+        (bool agentIsMinter, uint32 executionDelay) = manager.hasRole(RolesLib.AGENT_MINTER, agent);
+        assertTrue(agentIsMinter);
+        assertEq(executionDelay, 1 hours);
+        assertEq(manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
+        assertEq(manager.getRoleAdmin(RolesLib.AGENT_MINTER), RolesLib.AGENT_ADMIN);
+        assertEq(manager.getRoleGuardian(RolesLib.AGENT_MINTER), RolesLib.SUITE_ADMIN);
+        assertEq(manager.getRoleGrantDelay(RolesLib.AGENT_MINTER), 2 hours);
         address oid = deployed.onchainID();
-        assertTrue(_isManager(oid, manager));
+        assertTrue(_isManager(oid, address(manager)));
         vm.prank(issuerAdmin);
-        TREXAccessManager(manager).execute(oid, _addKeyCall(another));
+        manager.execute(oid, _addKeyCall(another));
         assertTrue(_isManager(oid, another));
     }
 

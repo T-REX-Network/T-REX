@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
-import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ITREXFactory } from "contracts/factory/TREXFactory.sol";
+import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -29,12 +32,13 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         assertEq(IERC173(address(deployed.identityRegistry())).owner(), address(victim));
     }
 
-    function test_deployTREXSuite_MakesNoCallIntoTargetAccessManager() public {
-        vm.expectCall(address(victim), abi.encodeWithSelector(IAccessManager.grantRole.selector), 0);
-        vm.expectCall(address(victim), abi.encodeWithSelector(IAccessManager.revokeRole.selector), 0);
+    function test_deployTREXSuite_MakesNoCallIntoTargetAccessManager_EvenWithLegacyPrivilege() public {
+        _grantLegacyFactoryPrivilege();
 
+        vm.startStateDiffRecording();
         vm.prank(deployer);
         trexFactory.deployTREXSuite("foreign", _details(address(victim)), _noClaims());
+        _assertNoAccessTo(address(victim), vm.stopAndReturnStateDiff());
 
         Token deployed = Token(trexFactory.getToken("foreign"));
         (bool tokenIsAgent,) = victim.hasRole(RolesLib.AGENT, address(deployed));
@@ -43,6 +47,17 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         assertFalse(tokenIsAgent);
         assertFalse(registryIsAgent);
         assertFalse(deployerIsAgent);
+    }
+
+    function test_deployTREXSuiteIsolated_MakesNoCallIntoTargetAccessManager_EvenWithLegacyPrivilege() public {
+        _grantLegacyFactoryPrivilege();
+
+        vm.startStateDiffRecording();
+        vm.prank(deployer);
+        trexFactory.deployTREXSuiteIsolated("foreign-isolated", _details(address(victim)), _noClaims());
+        _assertNoAccessTo(address(victim), vm.stopAndReturnStateDiff());
+
+        assertEq(IERC173(trexFactory.getToken("foreign-isolated")).owner(), address(victim));
     }
 
     function test_deployTREXSuite_Success_ReusedStorageIsBoundByTheIssuerAfterwards() public {
@@ -59,9 +74,31 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         (bool binder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
         assertFalse(binder);
 
+        address siblingRegistry = address(sibling.identityRegistry());
         _grantIRSBinderRole(address(this));
-        irs.bindIdentityRegistry(address(sibling.identityRegistry()));
+        irs.bindIdentityRegistry(siblingRegistry);
         assertEq(irs.linkedIdentityRegistries().length, 2);
+
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, siblingRegistry);
+        _grantAgentRole(siblingRegistry);
+        address newcomer = makeAddr("newcomer");
+        IIdentity newcomerIdentity = _deployIdentity(newcomer, "newcomer-oid");
+        vm.prank(agent);
+        IERC3643IdentityRegistry(siblingRegistry).registerIdentity(newcomer, newcomerIdentity, 0);
+        assertTrue(IERC3643IdentityRegistry(siblingRegistry).contains(newcomer));
+        assertEq(address(irs.storedIdentity(newcomer)), address(newcomerIdentity));
+    }
+
+    function _grantLegacyFactoryPrivilege() private {
+        victim.grantRole(RolesLib.AGENT_ADMIN, address(trexFactory), 0);
+        victim.grantRole(RolesLib.IRS_BINDER, address(trexFactory), 0);
+        AccessManagerSetupLib.setupRoleAdmins(victim);
+    }
+
+    function _assertNoAccessTo(address target, Vm.AccountAccess[] memory accesses) private pure {
+        for (uint256 i = 0; i < accesses.length; i++) {
+            assertNotEq(accesses[i].account, target);
+        }
     }
 
     function _details(address manager) private pure returns (ITREXFactory.TokenDetails memory) {
