@@ -115,6 +115,11 @@ library EventsLib {
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
     event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
 
+    // SuiteAuthorityMigrator Events
+    event SuiteAuthorityMigrated(
+        address indexed token, address indexed oldAuthority, address indexed newAuthority, bool identityRotated
+    );
+
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

@@ -55,6 +55,30 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
+- **Atomic suite authority migration** (OZ M-10): `SuiteAuthorityMigrator.migrateSuite(token,
+  extraTargets, newAuthority, rotateIdentity)` rotates the token, its registry, the registry storage,
+  the compliance and any extra ERC-173 target from the current AccessManager to `newAuthority`, and
+  rotates the token identity's MANAGEMENT key with them: the new manager's key is added and verified
+  first, the authorities move, the old manager's key is removed last and verified gone. Any failure
+  reverts the whole migration. `rotateIdentity` is explicit: `true` requires the outgoing manager to
+  hold MANAGEMENT on the identity (reverts `IdentityNotManagedByAuthority` otherwise, the
+  caller-supplied `ONCHAINID` case); `false` migrates the contracts only and leaves the identity's
+  keys untouched, recorded by the `identityRotated` flag of `SuiteAuthorityMigrated`.
+  - Invoked through the outgoing manager: an administrator calls
+    `AccessManager.execute(migrator, migrateSuite(...))`, so the manager's own role, delay and
+    scheduling rules apply to the migration exactly as to any other administrative call. The migrator
+    accepts the current manager as caller only (`OnlyAuthorityCanCall`) and relays every step through
+    that manager's `execute`, since `setAuthority` accepts the current manager only. The manager must
+    hold the migrator under the new `SUITE_MIGRATOR` role: `AccessManagerSetupLib.setupSuiteMigrationRoles`
+    maps `transferOwnership` on each target and `addKeyWithData` / `removeKey` on each identity.
+  - A registry storage shared by several suites moves only when every suite bound to it migrates in
+    the same call: `migrateSuites(tokens, ...)` takes them together, and a single-suite migration
+    reverts `SharedIdentityRegistryStorage` instead of stranding the siblings under the old manager.
+  - Isolated-suite beacons are not discoverable from the proxies, so they are passed in
+    `extraTargets` (the factory emits them in `IsolatedSuiteDeployed`). A migration that omits them
+    leaves upgrade control with the old manager.
+  - New errors: `IdentityNotManagedByAuthority`, `IdentityRotationFailed`, `OnlyAuthorityCanCall`,
+    `SameAuthority`, `SharedIdentityRegistryStorage`.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
