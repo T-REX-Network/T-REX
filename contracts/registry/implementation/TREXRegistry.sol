@@ -342,7 +342,7 @@ contract TREXRegistry is
     ///  makes a forgotten pre-bind revert now instead of silently breaking `_globalIdentity` later.
     ///  Unbinding the old storage stays the IRS admin's job for the same reason.
     function _authorizeRegistryUpdate(address newRegistry) internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
         _checkSharedAuthority(newRegistry);
         require(
             ERC165Checker.supportsInterface(newRegistry, type(IERC3643IdentityRegistryStorage).interfaceId),
@@ -364,12 +364,12 @@ contract TREXRegistry is
 
     /// @dev T-REX authorization for the trusted-issuer functions.
     function _authorizeIssuersUpdate() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
     }
 
     /// @dev T-REX authorization for the claim-topic functions.
     function _authorizeClaimTopicsUpdate() internal override {
-        _checkCanCall(_msgSender(), msg.data);
+        _checkCanCall(_msgSender(), _msgData());
     }
 
     function _getStorage() internal pure returns (Storage storage s) {
