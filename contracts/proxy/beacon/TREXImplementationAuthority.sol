@@ -77,6 +77,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     address private immutable _TREX_REGISTRY_BEACON;
     address private immutable _IRS_BEACON;
     address private immutable _MC_BEACON;
+    address private immutable _ACCESS_MANAGER_BEACON;
 
     /// @dev implementations per published version.
     mapping(Version version => SuiteImplementations implementations) private _implementations;
@@ -95,6 +96,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         _TREX_REGISTRY_BEACON = address(new UpgradeableBeacon(impls.trexRegistryImplementation, address(this)));
         _IRS_BEACON = address(new UpgradeableBeacon(impls.irsImplementation, address(this)));
         _MC_BEACON = address(new UpgradeableBeacon(impls.mcImplementation, address(this)));
+        _ACCESS_MANAGER_BEACON = address(new UpgradeableBeacon(impls.accessManagerImplementation, address(this)));
         _currentVersion = v0;
 
         emit EventsLib.BeaconsDeployed(_assembleBeacons());
@@ -145,7 +147,8 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         require(_implementations[version].tokenImplementation == address(0), ErrorsLib.VersionAlreadyPublished());
         require(
             impls.tokenImplementation != address(0) && impls.trexRegistryImplementation != address(0)
-                && impls.irsImplementation != address(0) && impls.mcImplementation != address(0),
+                && impls.irsImplementation != address(0) && impls.mcImplementation != address(0)
+                && impls.accessManagerImplementation != address(0),
             ErrorsLib.EmptyImplementations()
         );
 
@@ -166,6 +169,7 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
         UpgradeableBeacon(_TREX_REGISTRY_BEACON).upgradeTo(impls.trexRegistryImplementation);
         UpgradeableBeacon(_IRS_BEACON).upgradeTo(impls.irsImplementation);
         UpgradeableBeacon(_MC_BEACON).upgradeTo(impls.mcImplementation);
+        UpgradeableBeacon(_ACCESS_MANAGER_BEACON).upgradeTo(impls.accessManagerImplementation);
 
         _currentVersion = version;
 
@@ -178,7 +182,8 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
             tokenBeacon: _TOKEN_BEACON,
             trexRegistryBeacon: _TREX_REGISTRY_BEACON,
             irsBeacon: _IRS_BEACON,
-            mcBeacon: _MC_BEACON
+            mcBeacon: _MC_BEACON,
+            accessManagerBeacon: _ACCESS_MANAGER_BEACON
         });
     }
 

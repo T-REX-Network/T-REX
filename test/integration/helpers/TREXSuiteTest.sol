@@ -27,6 +27,7 @@ import {
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
+import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { IdentityModulesHelper } from "test/helpers/IdentityModulesHelper.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
@@ -54,6 +55,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     Token tokenImplementation;
     IdentityRegistryStorage identityRegistryStorageImplementation;
     ModularCompliance modularComplianceImplementation;
+    TREXAccessManager accessManagerImplementation;
     TREXRegistry trexRegistryImplementation;
 
     // Factories
@@ -250,6 +252,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         identityRegistryStorageImplementation = new IdentityRegistryStorage();
         modularComplianceImplementation = new ModularCompliance();
         trexRegistryImplementation = new TREXRegistry(address(idFactory));
+        accessManagerImplementation = new TREXAccessManager();
     }
 
     function _deployFactories() internal {
@@ -262,8 +265,6 @@ contract TREXSuiteTest is AccessManagerHelper {
         _grantTokenOidMinterRole(address(trexFactory));
 
         _setupFactoryRoles(address(trexFactory));
-        // deployTREXSuite grants the AGENT role, which is administered by AGENT_ADMIN
-        _grantAgentAdminRole(address(trexFactory));
     }
 
     /// @dev Deploys an authority seeded with version 5.0.0. The constructor deploys and owns the 4
@@ -286,25 +287,22 @@ contract TREXSuiteTest is AccessManagerHelper {
             tokenImplementation: address(tokenImplementation),
             trexRegistryImplementation: address(trexRegistryImplementation),
             irsImplementation: address(identityRegistryStorageImplementation),
-            mcImplementation: address(modularComplianceImplementation)
+            mcImplementation: address(modularComplianceImplementation),
+            accessManagerImplementation: address(accessManagerImplementation)
         });
     }
 
     function _deployToken(string memory salt, string memory name, string memory symbol) internal returns (Token) {
-        address[] memory agents = new address[](1);
-        agents[0] = agent;
-
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: name,
             symbol: symbol,
             decimals: 0,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: agents,
-            tokenAgents: agents,
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         ITREXFactory.ClaimDetails memory claimDetails = ITREXFactory.ClaimDetails({
@@ -326,20 +324,16 @@ contract TREXSuiteTest is AccessManagerHelper {
         internal
         returns (Token)
     {
-        address[] memory agents = new address[](1);
-        agents[0] = agent;
-
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: name,
             symbol: symbol,
             decimals: 0,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: agents,
-            tokenAgents: agents,
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         uint256[] memory claimTopics = new uint256[](1);
@@ -383,6 +377,9 @@ contract TREXSuiteTest is AccessManagerHelper {
         // registry wiring covers all three sub-surfaces.
         IERC3643IdentityRegistry ir = _token.identityRegistry();
         _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
+        _grantAgentRole(address(_token));
+        _grantAgentRole(address(ir));
+        _grantAgentRole(agent);
     }
 
     /// @notice Deploys a fresh ModularCompliance proxy with no token bound, managed by the test AccessManager

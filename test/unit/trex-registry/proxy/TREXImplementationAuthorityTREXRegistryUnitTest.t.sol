@@ -59,7 +59,8 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
             tokenImplementation: address(tokenImpl),
             trexRegistryImplementation: address(trexRegistryImpl),
             irsImplementation: address(irsImpl),
-            mcImplementation: address(mcImpl)
+            mcImplementation: address(mcImpl),
+            accessManagerImplementation: address(mcImpl)
         });
     }
 

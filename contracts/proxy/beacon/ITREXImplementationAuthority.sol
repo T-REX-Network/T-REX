@@ -76,6 +76,8 @@ interface ITREXImplementationAuthority {
         address irsImplementation;
         // address of ModularCompliance implementation contract
         address mcImplementation;
+        // address of TREXAccessManager implementation contract
+        address accessManagerImplementation;
     }
 
     struct SuiteBeacons {
@@ -87,6 +89,8 @@ interface ITREXImplementationAuthority {
         address irsBeacon;
         // address of UpgradeableBeacon for ModularCompliance
         address mcBeacon;
+        // address of UpgradeableBeacon for TREXAccessManager
+        address accessManagerBeacon;
     }
 
     /// functions

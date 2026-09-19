@@ -55,30 +55,31 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
-- **Atomic suite authority migration** (OZ M-10): `SuiteAuthorityMigrator.migrateSuite(token,
-  extraTargets, newAuthority, rotateIdentity)` rotates the token, its registry, the registry storage,
-  the compliance and any extra ERC-173 target from the current AccessManager to `newAuthority`, and
-  rotates the token identity's MANAGEMENT key with them: the new manager's key is added and verified
-  first, the authorities move, the old manager's key is removed last and verified gone. Any failure
-  reverts the whole migration. `rotateIdentity` is explicit: `true` requires the outgoing manager to
-  hold MANAGEMENT on the identity (reverts `IdentityNotManagedByAuthority` otherwise, the
-  caller-supplied `ONCHAINID` case); `false` migrates the contracts only and leaves the identity's
-  keys untouched, recorded by the `identityRotated` flag of `SuiteAuthorityMigrated`.
-  - Invoked through the outgoing manager: an administrator calls
-    `AccessManager.execute(migrator, migrateSuite(...))`, so the manager's own role, delay and
-    scheduling rules apply to the migration exactly as to any other administrative call. The migrator
-    accepts the current manager as caller only (`OnlyAuthorityCanCall`) and relays every step through
-    that manager's `execute`, since `setAuthority` accepts the current manager only. The manager must
-    hold the migrator under the new `SUITE_MIGRATOR` role: `AccessManagerSetupLib.setupSuiteMigrationRoles`
-    maps `transferOwnership` on each target and `addKeyWithData` / `removeKey` on each identity.
-  - A registry storage shared by several suites moves only when every suite bound to it migrates in
-    the same call: `migrateSuites(tokens, ...)` takes them together, and a single-suite migration
-    reverts `SharedIdentityRegistryStorage` instead of stranding the siblings under the old manager.
-  - Isolated-suite beacons are not discoverable from the proxies, so they are passed in
-    `extraTargets` (the factory emits them in `IsolatedSuiteDeployed`). A migration that omits them
-    leaves upgrade control with the old manager.
-  - New errors: `IdentityNotManagedByAuthority`, `IdentityRotationFailed`, `OnlyAuthorityCanCall`,
-    `SameAuthority`, `SharedIdentityRegistryStorage`.
+- **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
+  `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
+  `TREXImplementationAuthority` like the four suite contracts (`SuiteImplementations.accessManagerImplementation`,
+  `SuiteBeacons.accessManagerBeacon`). `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys
+  one under the suite salt, makes the token and the registry `AGENT` on it, hands `ADMIN_ROLE` to the new
+  `TokenDetails.accessManagerAdmin` and renounces its own. `deployTREXSuiteIsolated` clones the manager
+  beacon too, owned by the manager itself. A supplied manager is used as is and gets no beacon.
+  - The manager's address never changes across versions, so the token identity's MANAGEMENT key, every
+    suite contract's `authority()` and all role state survive an upgrade. Key rotation is role rotation
+    inside the manager. Replacing the manager contract is not a supported operation; the ERC-173
+    `transferOwnership` shim on suite contracts still forwards to `setAuthority` for the manager only and
+    does not move the token identity's key.
+  - Breaking: `TokenDetails` gains `accessManagerAdmin`, `SuiteImplementations` and `SuiteBeacons` gain
+    a fifth entry, and `TREXImplementationAuthority` requires a manager implementation at construction.
+- **The factory no longer writes into the issuer's AccessManager**: `TokenDetails.irAgents` and
+  `TokenDetails.tokenAgents` are gone, `deployTREXSuite` grants no role to anyone, and a suite deployed
+  against a reused registry storage is no longer bound to it by the factory. The factory therefore needs
+  no role on any issuer manager. Before, any holder of the factory OWNER role could name another issuer's
+  manager, list their own addresses as agents and receive the shared `AGENT` role there through the
+  factory's `AGENT_ADMIN` grant: identity registration and deletion on every registry of every suite
+  under that manager. Now the issuer grants the roles the suite needs on their own manager after
+  deployment, in the same transaction through a batching wallet if desired: `AGENT` to the registry (it
+  writes to the storage), `AGENT` to the token (it moves identities during `recoveryAddress`), the
+  operational agent roles to their agents, and `bindIdentityRegistry` on a reused storage for the new
+  registry. `MaxAgentsReached` is removed.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance

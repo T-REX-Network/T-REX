@@ -77,17 +77,16 @@ interface ITREXFactory {
         address irs;
         // ONCHAINID of the token
         address ONCHAINID;
-        // list of agents of the identity registry (can be set to an AgentManager contract)
-        address[] irAgents;
-        // list of agents of the token
-        address[] tokenAgents;
         // modules to bind to the compliance, indexes are corresponding to the settings callData indexes
         // if a module doesn't require settings, it can be added at the end of the array, at index > settings.length
         address[] complianceModules;
         // settings calls for compliance modules
         bytes[] complianceSettings;
         // access manager address
+        // set it to ZERO address to have the factory deploy a TREXAccessManager for the suite
         address accessManager;
+        // account receiving ADMIN_ROLE on the deployed access manager, ignored when one is supplied
+        address accessManagerAdmin;
     }
 
     struct ClaimDetails {
@@ -125,9 +124,9 @@ interface ITREXFactory {
     /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
      *  this function will deploy and set the contracts as follow :
-     *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner, agents,
+     *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner,
      *  IR address , Compliance address
-     *  Identity Registry : deploy the IR contract (proxy) and set the owner, agents,
+     *  Identity Registry : deploy the IR contract (proxy) and set the owner,
      *  IRS address, TIR address, CTR address
      *  IRS : deploy IRS contract (proxy) if required (address set as 0 in the TokenDetails, bind IRS to IR, set owner
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
@@ -141,7 +140,6 @@ interface ITREXFactory {
      *  @param _salt the salt used to make the contracts deployments with CREATE2
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)
      *  @param _claimDetails The details of the claims and claim issuers (see struct ClaimDetails for more details)
-     *  cannot add more than 5 agents on IR and 5 agents on Token
      *  cannot add more than 5 claim topics required and more than 5 trusted issuers
      *  cannot add more than 30 compliance settings transactions
      */

@@ -471,7 +471,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
             tokenImplementation: address(tokenImplV0),
             trexRegistryImplementation: address(trexRegistryImplV0),
             irsImplementation: address(irsImplV0),
-            mcImplementation: address(mcImplV0)
+            mcImplementation: address(mcImplV0),
+            accessManagerImplementation: address(mcImplV0)
         });
     }
 
@@ -480,7 +481,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
             tokenImplementation: address(tokenImplV1),
             trexRegistryImplementation: address(trexRegistryImplV1),
             irsImplementation: address(irsImplV1),
-            mcImplementation: address(mcImplV1)
+            mcImplementation: address(mcImplV1),
+            accessManagerImplementation: address(mcImplV1)
         });
     }
 

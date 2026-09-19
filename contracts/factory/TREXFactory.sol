@@ -67,6 +67,9 @@ import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurpose
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
+import {
+    AccessManagerUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -80,7 +83,6 @@ import { RolesLib } from "../libraries/RolesLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
-import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
 import { Token } from "../token/Token.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
@@ -142,11 +144,17 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         // ADMIN_ROLE, so only that AccessManager's admin can upgrade until an operator maps `upgradeTo`
         // to a narrower role. The shared authority's beacons are untouched and never propagate here.
         address beaconOwner = tokenDetails.accessManager;
+        address accessManagerBeacon;
+        if (beaconOwner == address(0)) {
+            beaconOwner = _predictAddress(salt, "AccessManager");
+            accessManagerBeacon = address(new UpgradeableBeacon(impls.accessManagerImplementation, beaconOwner));
+        }
         ITREXImplementationAuthority.SuiteBeacons memory beacons = ITREXImplementationAuthority.SuiteBeacons({
             tokenBeacon: address(new UpgradeableBeacon(impls.tokenImplementation, beaconOwner)),
             trexRegistryBeacon: address(new UpgradeableBeacon(impls.trexRegistryImplementation, beaconOwner)),
             irsBeacon: address(new UpgradeableBeacon(impls.irsImplementation, beaconOwner)),
-            mcBeacon: address(new UpgradeableBeacon(impls.mcImplementation, beaconOwner))
+            mcBeacon: address(new UpgradeableBeacon(impls.mcImplementation, beaconOwner)),
+            accessManagerBeacon: accessManagerBeacon
         });
 
         address token = _deploySuiteContracts(salt, tokenDetails, claimDetails, beacons);
@@ -161,13 +169,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         ClaimDetails calldata claimDetails
     ) private view {
         require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
-        require(tokenDetails.accessManager != address(0), ErrorsLib.ZeroAddress());
+        require(
+            tokenDetails.accessManager != address(0) || tokenDetails.accessManagerAdmin != address(0),
+            ErrorsLib.ZeroAddress()
+        );
 
         require(claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
         require(claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
-        require(
-            tokenDetails.irAgents.length <= 5 && tokenDetails.tokenAgents.length <= 5, ErrorsLib.MaxAgentsReached(5)
-        );
     }
 
     /// @dev Deploys the 4 beacon proxies against `beacons`, wires them, and records the token.
@@ -178,23 +186,21 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         ClaimDetails calldata claimDetails,
         ITREXImplementationAuthority.SuiteBeacons memory beacons
     ) private returns (address) {
+        address manager = tokenDetails.accessManager;
+        if (manager == address(0)) {
+            manager = _deployAccessManager(salt, beacons.accessManagerBeacon);
+        }
         address irs = tokenDetails.irs;
         if (irs == address(0)) {
-            irs = _deployIRS(salt, beacons.irsBeacon, tokenDetails);
+            irs = _deployIRS(salt, beacons.irsBeacon, manager);
         }
-
-        address registry = _deployTREXRegistry(salt, beacons.trexRegistryBeacon, tokenDetails, irs, claimDetails);
-        address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails);
-
-        // a reused IRS must share the suite's AccessManager; the bind reverts otherwise (restricted guard)
-        if (tokenDetails.irs != address(0)) {
-            _bindReusedIRS(IAccessManager(tokenDetails.accessManager), irs, registry);
-        }
-
-        address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, registry, mc);
+        address registry = _deployTREXRegistry(salt, beacons.trexRegistryBeacon, manager, irs, claimDetails);
+        address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
+        address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
-
-        _grantAgentRoles(tokenDetails, token, registry);
+        if (tokenDetails.accessManager == address(0)) {
+            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token, registry);
+        }
 
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
         return token;
@@ -243,7 +249,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             ITREXImplementationAuthority(implementationAuthorityAddress).beacons();
         require(
             beacons.tokenBeacon != address(0) && beacons.trexRegistryBeacon != address(0)
-                && beacons.irsBeacon != address(0) && beacons.mcBeacon != address(0),
+                && beacons.irsBeacon != address(0) && beacons.mcBeacon != address(0)
+                && beacons.accessManagerBeacon != address(0),
             ErrorsLib.InvalidImplementationAuthority()
         );
         _implementationAuthority = implementationAuthorityAddress;
@@ -300,10 +307,29 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// `TREXRegistry` implementation; `init(...)` is invoked atomically through the proxy constructor,
     /// seeding claim topics and issuers so the factory needs no OWNER privilege over a fresh registry.
     /// Deployed under "REGISTRY" so `_deployIRS` can pre-bind its address via `_predictAddress(salt, "REGISTRY")`.
+    function _deployAccessManager(string memory salt, address accessManagerBeacon) private returns (address) {
+        require(accessManagerBeacon != address(0), ErrorsLib.ZeroAddress());
+        return _deploy(
+            salt,
+            "AccessManager",
+            _beaconProxyBytecode(
+                accessManagerBeacon, abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
+            )
+        );
+    }
+
+    function _handOverAccessManager(address manager, address admin, address token, address registry) private {
+        IAccessManager accessManager = IAccessManager(manager);
+        accessManager.grantRole(RolesLib.AGENT, token, 0);
+        accessManager.grantRole(RolesLib.AGENT, registry, 0);
+        accessManager.grantRole(0, admin, 0);
+        accessManager.renounceRole(0, address(this));
+    }
+
     function _deployTREXRegistry(
         string memory salt,
         address trexRegistryBeacon,
-        TokenDetails calldata tokenDetails,
+        address manager,
         address identityStorage,
         ClaimDetails calldata claimDetails
     ) private returns (address) {
@@ -316,7 +342,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     TREXRegistry.init,
                     (
                         identityStorage,
-                        tokenDetails.accessManager,
+                        manager,
                         claimDetails.claimTopics,
                         claimDetails.issuers,
                         claimDetails.issuerClaims
@@ -327,7 +353,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /// function used to deploy modular compliance contract using CREATE3.
-    function _deployMC(string memory salt, address mcBeacon, TokenDetails calldata tokenDetails)
+    function _deployMC(string memory salt, address mcBeacon, TokenDetails calldata tokenDetails, address manager)
         private
         returns (address)
     {
@@ -340,7 +366,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     ModularCompliance.init,
                     (
                         _predictAddress(salt, "Token"),
-                        tokenDetails.accessManager,
+                        manager,
                         tokenDetails.complianceModules,
                         tokenDetails.complianceSettings
                     )
@@ -350,18 +376,12 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /// function used to deploy an identity registry storage using CREATE3.
-    function _deployIRS(string memory salt, address irsBeacon, TokenDetails calldata tokenDetails)
-        private
-        returns (address)
-    {
+    function _deployIRS(string memory salt, address irsBeacon, address manager) private returns (address) {
         return _deploy(
             salt,
             "IRS",
             _beaconProxyBytecode(
-                irsBeacon,
-                abi.encodeCall(
-                    IdentityRegistryStorage.init, (tokenDetails.accessManager, _predictAddress(salt, "REGISTRY"))
-                )
+                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, "REGISTRY")))
             )
         );
     }
@@ -388,6 +408,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         string memory salt,
         address tokenBeacon,
         TokenDetails calldata tokenDetails,
+        address manager,
         address identityRegistry,
         address compliance
     ) private returns (address) {
@@ -395,9 +416,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address oid = tokenDetails.ONCHAINID;
         if (oid == address(0)) {
             oid = IIdentityFactory(_idFactory)
-                .createIdentityFor(
-                    predictedToken, IdentityTypes.ASSET, salt, _managementKeys(tokenDetails.accessManager)
-                );
+                .createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, _managementKeys(manager));
         } else {
             // The token address is predictable, so anyone allowed to create ASSET identities can
             // bind it to their own identity before this deploy runs. The binding is permanent, and
@@ -410,9 +429,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                 ErrorsLib.TokenIdentityAlreadyBound(predictedToken, boundIdentity)
             );
         }
-        address token =
-            _deploy(salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, identityRegistry, compliance, oid));
-        return token;
+        return
+            _deploy(
+                salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, manager, identityRegistry, compliance, oid)
+            );
     }
 
     /// @dev Builds the single-entry MANAGEMENT key set granting `managementKey` control of the minted
@@ -432,6 +452,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     function _tokenBytecode(
         address tokenBeacon,
         TokenDetails calldata tokenDetails,
+        address manager,
         address identityRegistry,
         address compliance,
         address oid
@@ -447,36 +468,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     identityRegistry,
                     compliance,
                     oid,
-                    tokenDetails.accessManager
+                    manager
                 )
             )
         );
-    }
-
-    /// Binds a new IR onto a reused IRS using a transient IRS_BINDER grant.
-    /// bindIdentityRegistry is gated to IRS_BINDER (see AccessManagerSetupLib): the factory holds no
-    /// standing privilege over the IRS, so it self-grants IRS_BINDER for the single bind call and
-    /// revokes it immediately after, leaving no residual authority. Requires the factory to hold the
-    /// admin of IRS_BINDER (AGENT_ADMIN) on `accessManager`.
-    function _bindReusedIRS(IAccessManager accessManager, address irs, address identityRegistry) private {
-        accessManager.grantRole(RolesLib.IRS_BINDER, address(this), 0);
-        IIdentityRegistryStorage(irs).bindIdentityRegistry(identityRegistry);
-        accessManager.revokeRole(RolesLib.IRS_BINDER, address(this));
-    }
-
-    /// Grants the AGENT role to the token, the identity registry and the configured agents.
-    /// Requires the factory to hold the admin role of AGENT on `tokenDetails.accessManager`.
-    function _grantAgentRoles(TokenDetails calldata tokenDetails, address token, address identityRegistry) private {
-        IAccessManager accessManager = IAccessManager(tokenDetails.accessManager);
-
-        accessManager.grantRole(RolesLib.AGENT, token, 0);
-        accessManager.grantRole(RolesLib.AGENT, identityRegistry, 0);
-        for (uint256 i = 0; i < tokenDetails.irAgents.length; i++) {
-            accessManager.grantRole(RolesLib.AGENT, tokenDetails.irAgents[i], 0);
-        }
-        for (uint256 i = 0; i < tokenDetails.tokenAgents.length; i++) {
-            accessManager.grantRole(RolesLib.AGENT, tokenDetails.tokenAgents[i], 0);
-        }
     }
 
 }
