@@ -332,8 +332,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     function _handOverAccessManager(address manager, address admin, address token) private {
         IAccessManager accessManager = IAccessManager(manager);
         AccessManagerSetupLib.commissionSuite(accessManager, token);
-        accessManager.grantRole(0, admin, 0);
-        accessManager.renounceRole(0, address(this));
+        accessManager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, admin, 0);
+        accessManager.renounceRole(AccessManagerSetupLib.ADMIN_ROLE, address(this));
     }
 
     function _deployTREXRegistry(

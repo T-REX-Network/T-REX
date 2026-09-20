@@ -184,9 +184,10 @@ All notable changes to this project will be documented in this file.
   under that manager. Now the issuer grants the roles the suite needs on their own manager after
   deployment, in the same transaction through a batching wallet if desired: `AGENT` to the registry (it
   writes to the storage), `AGENT` to the token (it moves identities during `recoveryAddress`), the
-  operational agent roles to their agents. For a reused storage, two more steps on the storage's
-  manager: `bindIdentityRegistry` for the new registry (mapped to `IRS_BINDER` by the setup library) and
-  `AGENT` to the new registry so it can write, since binding alone grants no write permission. The reused
+  operational agent roles to their agents. `AccessManagerSetupLib.commissionSuite` on the issuer's
+  manager does the structural part in one call, including, for a reused storage, binding the new
+  registry (which needs `IRS_BINDER` in the storage's namespace once the storage is commissioned) and
+  granting it `AGENT` in the storage's namespace, since binding alone grants no write permission. The reused
   storage must already report the suite's manager as its authority; a storage under another manager is
   rejected with `StorageAuthorityMismatch`, because `bindIdentityRegistry` requires matching authorities
   and the suite could never be completed. `MaxAgentsReached` is removed.

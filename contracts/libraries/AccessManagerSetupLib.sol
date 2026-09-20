@@ -106,7 +106,7 @@ library AccessManagerSetupLib {
         uint64 role;
     }
 
-    uint64 private constant ADMIN_ROLE = 0;
+    uint64 internal constant ADMIN_ROLE = 0;
 
     function setupTokenRoles(IAccessManager accessManager, address token, bytes32 namespace) internal {
         _apply(accessManager, token, tokenTable(), namespace);

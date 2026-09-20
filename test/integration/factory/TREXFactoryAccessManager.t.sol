@@ -108,7 +108,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         details.irs = address(token.identityRegistry().identityStorage());
 
         vm.prank(deployer);
-        vm.expectRevert();
+        vm.expectPartialRevert(ErrorsLib.StorageAuthorityMismatch.selector);
         trexFactory.deployTREXSuite("fresh-reused", details, _noClaims());
         assertEq(trexFactory.getToken("fresh-reused"), address(0));
     }
