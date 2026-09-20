@@ -115,8 +115,6 @@ library RolesLib {
     // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
     uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
 
-    uint64 constant SUITE_MIGRATOR = ROLE_PREFIX + 17;
-
     bytes32 constant SHARED = bytes32(0);
 
     bytes4 constant COMMISSIONED = bytes4(keccak256("TREX-Suite.commissioned"));

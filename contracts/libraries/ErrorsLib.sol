@@ -125,15 +125,6 @@ library ErrorsLib {
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
 
-    // SuiteAuthorityMigrator Errors
-    error IdentityNotManagedByAuthority(address identity, address authority);
-    error IdentityRotationFailed(address identity);
-    error OnlyAuthorityCanCall();
-    error SameAuthority();
-    error SharedIdentityRegistryStorage(address identityRegistryStorage);
-    error IdentityRotationRequired(address identity);
-    error NewAuthorityNotAContract(address newAuthority);
-
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();
     error InvalidIdentityType();

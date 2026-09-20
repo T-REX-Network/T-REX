@@ -63,9 +63,7 @@
 
 pragma solidity 0.8.30;
 
-import { KeyManager } from "@onchain-id/solidity/contracts/KeyManager.sol";
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
-import { IERC734 } from "@onchain-id/solidity/contracts/interface/IERC734.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
@@ -80,10 +78,8 @@ import { TREXFactory } from "../factory/TREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
-import { IERC173 } from "../vendor/IERC173.sol";
 import { ErrorsLib } from "./ErrorsLib.sol";
 import { RolesLib } from "./RolesLib.sol";
-import { SuiteTargetsLib } from "./SuiteTargetsLib.sol";
 
 /// @title AccessManagerSetupLib
 /// @notice Library for setting up roles and functions in AccessManager for the TREX suite contracts
@@ -311,32 +307,6 @@ library AccessManagerSetupLib {
         }
     }
 
-    function setupSuiteMigrationRoles(
-        IAccessManager accessManager,
-        address migrator,
-        address[] memory tokens,
-        address[] memory extraTargets
-    ) internal {
-        bytes4[] memory transfer = new bytes4[](1);
-        transfer[0] = IERC173.transferOwnership.selector;
-        address[] memory targets = SuiteTargetsLib.targets(tokens, extraTargets);
-        for (uint256 i = 0; i < targets.length; i++) {
-            accessManager.setTargetFunctionRole(targets[i], transfer, RolesLib.SUITE_MIGRATOR);
-        }
-
-        bytes4[] memory keys = new bytes4[](2);
-        keys[0] = KeyManager.addKeyWithData.selector;
-        keys[1] = IERC734.removeKey.selector;
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address identity = IERC3643(tokens[i]).onchainID();
-            if (identity != address(0)) {
-                accessManager.setTargetFunctionRole(identity, keys, RolesLib.SUITE_MIGRATOR);
-            }
-        }
-
-        accessManager.grantRole(RolesLib.SUITE_MIGRATOR, migrator, 0);
-    }
-
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](4);
@@ -421,9 +391,6 @@ library AccessManagerSetupLib {
 
     function setupLabels(IAccessManager accessManager, bytes32 namespace) internal {
         accessManager.labelRole(RolesLib.forSuite(RolesLib.OWNER, namespace), _label("TREX-Suite Owner", namespace));
-        if (namespace == RolesLib.SHARED) {
-            accessManager.labelRole(RolesLib.SUITE_MIGRATOR, "TREX-Suite Migrator");
-        }
 
         accessManager.labelRole(RolesLib.forSuite(RolesLib.AGENT, namespace), _label("TREX-Suite Agent", namespace));
         accessManager.labelRole(

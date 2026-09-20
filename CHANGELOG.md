@@ -120,36 +120,6 @@ All notable changes to this project will be documented in this file.
     for that window; preparation of the delay does not remove it. Scheduled operations are left in
     place: `AccessManager` re-checks authorisation at execution, so an entitled account's scheduled
     calls run under its namespaced role, and a non-entitled account's fail.
-- **Atomic suite authority migration** (OZ M-10): `SuiteAuthorityMigrator.migrateSuite(token,
-  extraTargets, newAuthority, rotateIdentity)` rotates the token, its registry, the registry storage,
-  the compliance and any extra ERC-173 target from the current AccessManager to `newAuthority`, and
-  rotates the token identity's MANAGEMENT key with them: the new manager's key is added and verified
-  first, the authorities move, the old manager's key is removed last and verified gone. Any failure
-  reverts the whole migration. `rotateIdentity` is explicit: `true` requires the outgoing manager to
-  hold MANAGEMENT on the identity (reverts `IdentityNotManagedByAuthority` otherwise, the
-  caller-supplied `ONCHAINID` case); `false` migrates the contracts only and leaves the identity's
-  keys untouched, recorded by the `identityRotated` flag of `SuiteAuthorityMigrated`. `false` is
-  accepted only when the outgoing manager holds no MANAGEMENT key on the identity; skipping the
-  rotation of an identity it does manage would recreate the very state this fixes, and reverts
-  `IdentityRotationRequired`. A `newAuthority` without code reverts `NewAuthorityNotAContract` before
-  anything moves.
-  - Invoked through the outgoing manager: an administrator calls
-    `AccessManager.execute(migrator, migrateSuite(...))`, so the manager's own role, delay and
-    scheduling rules apply to the migration exactly as to any other administrative call. The migrator
-    accepts the current manager as caller only (`OnlyAuthorityCanCall`) and relays every step through
-    that manager's `execute`, since `setAuthority` accepts the current manager only. The manager must
-    hold the migrator under the `SUITE_MIGRATOR` role: `AccessManagerSetupLib.setupSuiteMigrationRoles`
-    maps `transferOwnership` on each target and `addKeyWithData` / `removeKey` on each identity.
-  - A registry storage shared by several suites moves only when every suite bound to it migrates in
-    the same call: `migrateSuites(tokens, ...)` takes them together, and a single-suite migration
-    reverts `SharedIdentityRegistryStorage` instead of stranding the siblings under the old manager.
-  - Isolated-suite beacons are not discoverable from the proxies, so they are passed in
-    `extraTargets` (the factory emits them in `IsolatedSuiteDeployed`). A migration that omits them
-    leaves upgrade control with the old manager.
-  - Suites whose manager is the upgradeable `TREXAccessManager` (next entry) normally never need this:
-    the manager is upgraded in place. The primitive covers a deliberate manager replacement.
-  - New errors: `IdentityNotManagedByAuthority`, `IdentityRotationFailed`, `IdentityRotationRequired`,
-    `NewAuthorityNotAContract`, `OnlyAuthorityCanCall`, `SameAuthority`, `SharedIdentityRegistryStorage`.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts (`SuiteImplementations.accessManagerImplementation`,
