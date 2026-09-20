@@ -127,13 +127,12 @@ library RolesLib {
         if (namespace == SHARED) {
             return role;
         }
-        uint64 id = uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace))));
-        if (id == 0) {
-            return 1;
-        }
-        if (id == type(uint64).max) {
-            return type(uint64).max - 1;
-        }
+        uint64 id;
+        uint256 attempt;
+        do {
+            id = uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace, attempt))));
+            attempt++;
+        } while (id == 0 || id == type(uint64).max || (id >> 16) == (ROLE_PREFIX >> 16));
         return id;
     }
 

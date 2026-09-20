@@ -78,6 +78,7 @@ import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
+import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
@@ -97,6 +98,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
+
+    string private constant ACCESS_MANAGER = "AccessManager";
 
     constructor(address implementationAuthority, address idFactory, address accessManager)
         AccessManagedOwnable(accessManager)
@@ -146,8 +149,9 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address beaconOwner = tokenDetails.accessManager;
         address accessManagerBeacon;
         if (beaconOwner == address(0)) {
-            beaconOwner = _predictAddress(salt, "AccessManager");
-            accessManagerBeacon = address(new UpgradeableBeacon(impls.accessManagerImplementation, beaconOwner));
+            beaconOwner = _predictAddress(salt, ACCESS_MANAGER);
+            accessManagerBeacon =
+                address(new UpgradeableBeacon(impls.accessManagerImplementation, tokenDetails.accessManagerAdmin));
         }
         ITREXImplementationAuthority.SuiteBeacons memory beacons = ITREXImplementationAuthority.SuiteBeacons({
             tokenBeacon: address(new UpgradeableBeacon(impls.tokenImplementation, beaconOwner)),
@@ -171,14 +175,23 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
         if (tokenDetails.accessManager == address(0)) {
             require(tokenDetails.accessManagerAdmin != address(0), ErrorsLib.ZeroAddress());
-            require(tokenDetails.accessManagerAdmin != address(this), ErrorsLib.InvalidAccessManagerAdmin());
+            require(
+                tokenDetails.accessManagerAdmin != address(this)
+                    && tokenDetails.accessManagerAdmin != _predictAddress(salt, ACCESS_MANAGER),
+                ErrorsLib.InvalidAccessManagerAdmin()
+            );
+        } else {
+            require(
+                tokenDetails.accessManager.code.length != 0,
+                ErrorsLib.AccessManagerNotAContract(tokenDetails.accessManager)
+            );
         }
 
         require(claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));
         require(claimDetails.claimTopics.length <= 5, ErrorsLib.MaxClaimTopicsReached(5));
     }
 
-    /// @dev Deploys the 4 beacon proxies against `beacons`, wires them, and records the token.
+    /// @dev Deploys the beacon proxies against `beacons`, wires them, and records the token.
     ///      Kept in its own frame so both entry points stay inside the stack budget.
     function _deploySuiteContracts(
         string memory salt,
@@ -194,14 +207,15 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         if (irs == address(0)) {
             irs = _deployIRS(salt, beacons.irsBeacon, manager);
         } else {
-            require(IAccessManaged(irs).authority() == manager, ErrorsLib.AuthorityMismatch());
+            address authority = IAccessManaged(irs).authority();
+            require(authority == manager, ErrorsLib.StorageAuthorityMismatch(irs, manager, authority));
         }
         address registry = _deployTREXRegistry(salt, beacons.trexRegistryBeacon, manager, irs, claimDetails);
         address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
         if (tokenDetails.accessManager == address(0)) {
-            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin);
+            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token);
         }
 
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
@@ -246,7 +260,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// internal setter for the implementation authority, see {ITREXFactory-setImplementationAuthority}
     function _setImplementationAuthority(address implementationAuthorityAddress) internal {
         require(implementationAuthorityAddress != address(0), ErrorsLib.ZeroAddress());
-        // should not be possible to set an authority that is missing any of the 4 beacons
+        // should not be possible to set an authority that is missing any of the beacons
         ITREXImplementationAuthority.SuiteBeacons memory beacons =
             ITREXImplementationAuthority(implementationAuthorityAddress).beacons();
         require(
@@ -308,15 +322,16 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(accessManagerBeacon != address(0), ErrorsLib.ZeroAddress());
         return _deploy(
             salt,
-            "AccessManager",
+            ACCESS_MANAGER,
             _beaconProxyBytecode(
                 accessManagerBeacon, abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
             )
         );
     }
 
-    function _handOverAccessManager(address manager, address admin) private {
+    function _handOverAccessManager(address manager, address admin, address token) private {
         IAccessManager accessManager = IAccessManager(manager);
+        AccessManagerSetupLib.commissionSuite(accessManager, token);
         accessManager.grantRole(0, admin, 0);
         accessManager.renounceRole(0, address(this));
     }

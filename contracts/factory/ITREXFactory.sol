@@ -73,7 +73,8 @@ interface ITREXFactory {
         uint8 decimals;
         // identity registry storage address
         // set it to ZERO address if you want to deploy a new storage
-        // if an address is provided, please ensure that the factory is set as owner of the contract
+        // if an address is provided, its authority must be the suite's access manager; the factory never
+        // binds the new identity registry to it, the issuer does
         address irs;
         // ONCHAINID of the token
         address ONCHAINID;
@@ -141,7 +142,7 @@ interface ITREXFactory {
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)
      *  @param _claimDetails The details of the claims and claim issuers (see struct ClaimDetails for more details)
      *  cannot add more than 5 claim topics required and more than 5 trusted issuers
-     *  cannot add more than 30 compliance settings transactions
+     *  cannot bind more than 25 compliance modules
      */
     function deployTREXSuite(
         string memory _salt,
@@ -154,7 +155,11 @@ interface ITREXFactory {
      *  Clones fresh `UpgradeableBeacon`s from the authority's active implementations, one per suite contract
      *  plus one for the access manager when the factory deploys it, and points the
      *  suite at those clones instead of the shared beacons, so later `publish` / `upgrade` calls on the
-     *  authority never reach this suite. The clones are owned by `_tokenDetails.accessManager`.
+     *  authority never reach this suite. The suite-contract clones are owned by the suite's access
+     *  manager, supplied or factory-deployed; the access-manager clone, when the factory deploys the
+     *  manager, is owned by `_tokenDetails.accessManagerAdmin`. Rotating that administrator is two steps:
+     *  the `ADMIN_ROLE` rotation inside the manager and `transferOwnership` on the access-manager clone,
+     *  which the manager's roles do not govern.
      *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always
      *  deploys its own identity storage through the cloned IRS beacon.
      *  Restricted to the configured AccessManager role (OWNER).

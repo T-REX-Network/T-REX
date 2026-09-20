@@ -351,7 +351,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(linkedIRs.length, 1, "IRS must have exactly one linked IR after deploy");
         assertEq(linkedIRs[0], irAddress, "IRS linked IR must match the deployed IR");
 
-        // Verify IR is owned by the suite AccessManager, with the Token and configured irAgents holding
+        // Verify IR is owned by the suite AccessManager, with neither the Token nor any account holding
         // the AGENT role from deploy time.
         TREXRegistry ir = TREXRegistry(irAddress);
         assertEq(
@@ -369,7 +369,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(mc.getTokenBound(), tokenAddress, "MC must be bound to the deployed Token at init time");
 
         // Verify Token is owned by the suite AccessManager, its OID was wired in via init (the auto-OID
-        // path), the configured tokenAgents hold the AGENT role, and the factory holds no AGENT role.
+        // path), nobody holds the AGENT role, and the factory holds no AGENT role.
         assertEq(
             IAccessManaged(address(deployedToken)).authority(),
             address(accessManager),
@@ -819,8 +819,8 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertFalse(_hasAgentRole(charlie), "factory must not grant AGENT");
     }
 
-    /// @notice End-to-end guard: with a fully-populated `_claimTopics`, `_issuers`, `_irAgents`,
-    ///         `_tokenAgents`, `_complianceModules` + `_complianceSettings`, and the auto-OID path
+    /// @notice End-to-end guard: with a fully-populated `_claimTopics`, `_issuers`,
+    ///         `_complianceModules` + `_complianceSettings`, and the auto-OID path
     ///         (`ONCHAINID == address(0)`), every configuration item must land at init time, all six
     ///         suite contracts must end up owned by the suite AccessManager, and the factory must hold
     ///         no role on any suite contract.
@@ -1131,7 +1131,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             "Both tokens should share the same identity registry storage"
         );
 
-        // Reused-IRS path must bind the new IR (regression guard for Part 3)
+        // Reused-IRS path leaves binding to the issuer (regression guard)
         IdentityRegistryStorage reusedIRS = IdentityRegistryStorage(deployedIRS);
         assertEq(reusedIRS.linkedIdentityRegistries().length, 1, "factory must not bind the new IR");
         _grantIRSBinderRole(address(this));
@@ -1241,7 +1241,14 @@ contract TREXFactoryTest is TREXSuiteTest {
         // The storage reports another manager as its authority, so the suite could never be bound to
         // it: the factory rejects the combination up front.
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.StorageAuthorityMismatch.selector,
+                foreignIRS,
+                address(accessManager),
+                address(otherAccessManager)
+            )
+        );
         trexFactory.deployTREXSuite("salt-authority-mismatch", tokenDetails, claimDetails);
 
         assertEq(trexFactory.getToken("salt-authority-mismatch"), address(0));

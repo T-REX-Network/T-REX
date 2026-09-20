@@ -140,7 +140,7 @@ interface ITREXImplementationAuthority {
     function currentVersion() external view returns (Version);
 
     /**
-     *  @dev returns the 4 beacon addresses driving every shared-mode suite.
+     *  @dev returns the beacon addresses driving every shared-mode suite.
      *  beacon addresses never change after construction.
      */
     function beacons() external view returns (SuiteBeacons memory);

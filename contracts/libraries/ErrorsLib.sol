@@ -115,6 +115,8 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error AuthorityMismatch();
+    error StorageAuthorityMismatch(address identityRegistryStorage, address expected, address actual);
+    error AccessManagerNotAContract(address accessManager);
     error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
@@ -134,23 +136,27 @@ library ErrorsLib {
     error InvalidIdentityRegistryStorage();
 
     // IdentityRegistryStorage Errors
-    error UnknownStoragePolicy(address identityRegistryStorage);
-    error InvalidRoleNamespace();
-    error PendingRoleGrant(address account, uint64 role);
-    error EntitlementTokenNotMigrated(address token);
-    error GrantDelayNotPrepared(uint64 role, bytes32 namespace);
-    error AlreadyCommissioned(address token);
-    error StorageSharedOutsideBatch(address identityRegistryStorage);
-    error PendingDelayChange(address account, uint64 role);
-    error DuplicateMigrationEntry();
-    error NonStandardPolicy(address target, bytes4 selector);
-    error NonStandardAdministration(uint64 role);
-    error NotCommissionedShared(address token);
-    error DestinationNamespaceInUse(bytes32 namespace);
     error AddressAlreadyStored();
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
+
+    // AccessManagerSetupLib Errors
+    error AssignmentNamespaceNotMigrated(bytes32 namespace);
+    error InvalidRoleForNamespace(uint64 role, bytes32 namespace);
+    error RoleNotHeld(address account, uint64 role);
+    error AlreadyCommissioned(address token);
+    error DestinationNamespaceInUse(bytes32 namespace);
+    error DuplicateMigrationEntry();
+    error GrantDelayNotPrepared(uint64 role, bytes32 namespace);
+    error InvalidRoleNamespace();
+    error NonStandardAdministration(uint64 role);
+    error NonStandardPolicy(address target, bytes4 selector);
+    error NotCommissionedShared(address token);
+    error PendingDelayChange(address account, uint64 role);
+    error PendingRoleGrant(address account, uint64 role);
+    error StorageSharedOutsideBatch(address identityRegistryStorage);
+    error UnknownStoragePolicy(address identityRegistryStorage);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

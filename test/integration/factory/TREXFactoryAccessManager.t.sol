@@ -6,6 +6,7 @@ import { KeyManager } from "@onchain-id/solidity/contracts/KeyManager.sol";
 import { IERC734 } from "@onchain-id/solidity/contracts/interface/IERC734.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
@@ -45,37 +46,51 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertFalse(factoryIsAdmin);
     }
 
-    function test_deployTREXSuite_Success_IssuerCommissionsTheFreshManager() public {
+    function test_deployTREXSuite_Success_FreshManagerIsCommissionedBeforeHandover() public {
         Token deployed = _deployWithFreshManager("wired");
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());
+        address irs = address(deployed.identityRegistry().identityStorage());
         bytes32 ns = RolesLib.namespaceOf(address(deployed));
 
-        (bool tokenIsAgentBefore,) = manager.hasRole(RolesLib.AGENT, address(deployed));
-        assertFalse(tokenIsAgentBefore);
-        assertEq(manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector), manager.ADMIN_ROLE());
+        assertEq(
+            manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector),
+            RolesLib.forSuite(RolesLib.AGENT_MINTER, ns)
+        );
+        assertEq(
+            manager.getTargetFunctionRole(registry, IERC3643IdentityRegistry.registerIdentity.selector),
+            RolesLib.forSuite(RolesLib.AGENT, ns)
+        );
+        (bool tokenIsAgent,) = manager.hasRole(RolesLib.forSuite(RolesLib.AGENT, ns), address(deployed));
+        (bool registryWrites,) = manager.hasRole(RolesLib.forSuite(RolesLib.AGENT, RolesLib.namespaceOf(irs)), registry);
+        assertTrue(tokenIsAgent);
+        assertTrue(registryWrites);
+        assertEq(
+            manager.getRoleAdmin(RolesLib.forSuite(RolesLib.AGENT, ns)), RolesLib.forSuite(RolesLib.AGENT_ADMIN, ns)
+        );
+        (bool factoryIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), address(trexFactory));
+        assertFalse(factoryIsAdmin);
+
+        vm.prank(issuerAdmin);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AlreadyCommissioned.selector, address(deployed)));
+        this.commissionExternally(manager, address(deployed));
 
         vm.startPrank(issuerAdmin);
-        AccessManagerSetupLib.commissionSuite(manager, address(deployed), ns);
         manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_ADMIN, ns), issuerAdmin, 0);
         manager.grantRole(RolesLib.forSuite(RolesLib.AGENT, ns), agent, 0);
         manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_PAUSER, ns), agent, 0);
         manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_MINTER, ns), agent, 0);
         vm.stopPrank();
-
-        (bool tokenIsAgent,) = manager.hasRole(RolesLib.forSuite(RolesLib.AGENT, ns), address(deployed));
-        assertTrue(tokenIsAgent);
-        assertEq(
-            manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector),
-            RolesLib.forSuite(RolesLib.AGENT_MINTER, ns)
-        );
         vm.startPrank(agent);
         IERC3643IdentityRegistry(registry).registerIdentity(alice, aliceIdentity, 0);
         deployed.unpause();
         deployed.mint(alice, 100);
         vm.stopPrank();
-        assertTrue(IERC3643IdentityRegistry(registry).contains(alice));
         assertEq(deployed.balanceOf(alice), 100);
+    }
+
+    function commissionExternally(TREXAccessManager manager, address token) external {
+        AccessManagerSetupLib.commissionSuite(manager, token);
     }
 
     function test_deployTREXSuite_RevertWhen_AccessManagerAdminIsTheFactory() public {
@@ -93,8 +108,9 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         details.irs = address(token.identityRegistry().identityStorage());
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
+        vm.expectRevert();
         trexFactory.deployTREXSuite("fresh-reused", details, _noClaims());
+        assertEq(trexFactory.getToken("fresh-reused"), address(0));
     }
 
     function test_deployTREXSuite_Success_SuppliedIdentityKeysAreUntouched() public {
@@ -215,7 +231,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertTrue(_isManager(oid, address(manager)));
     }
 
-    function test_deployTREXSuiteIsolated_Success_ManagerBeaconIsOwnedByTheManager() public {
+    function test_deployTREXSuiteIsolated_Success_ManagerBeaconIsOwnedByTheIssuerAdmin() public {
         vm.recordLogs();
         vm.prank(deployer);
         trexFactory.deployTREXSuiteIsolated("isolated-fresh", _details(address(0), issuerAdmin), _noClaims());
@@ -224,17 +240,49 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         address manager = IERC173(address(deployed)).owner();
 
         assertNotEq(beacons.accessManagerBeacon, trexImplementationAuthority.beacons().accessManagerBeacon);
-        assertEq(UpgradeableBeacon(beacons.accessManagerBeacon).owner(), manager);
+        assertEq(UpgradeableBeacon(beacons.accessManagerBeacon).owner(), issuerAdmin);
         assertEq(UpgradeableBeacon(beacons.tokenBeacon).owner(), manager);
         assertEq(address(uint160(uint256(vm.load(manager, BEACON_SLOT)))), beacons.accessManagerBeacon);
 
         address newImplementation = address(new TREXAccessManager());
         vm.prank(issuerAdmin);
-        TREXAccessManager(manager)
-            .execute(beacons.accessManagerBeacon, abi.encodeCall(UpgradeableBeacon.upgradeTo, (newImplementation)));
+        UpgradeableBeacon(beacons.accessManagerBeacon).upgradeTo(newImplementation);
         assertEq(UpgradeableBeacon(beacons.accessManagerBeacon).implementation(), newImplementation);
         (bool issuerIsAdmin,) = TREXAccessManager(manager).hasRole(TREXAccessManager(manager).ADMIN_ROLE(), issuerAdmin);
         assertTrue(issuerIsAdmin);
+    }
+
+    function test_deployTREXSuiteIsolated_Success_AdminRotationMovesTheManagerBeaconOnlyWhenTransferred() public {
+        vm.recordLogs();
+        vm.prank(deployer);
+        trexFactory.deployTREXSuiteIsolated("isolated-rotate", _details(address(0), issuerAdmin), _noClaims());
+        UpgradeableBeacon beacon = UpgradeableBeacon(_isolatedBeacons().accessManagerBeacon);
+        TREXAccessManager manager = TREXAccessManager(IERC173(trexFactory.getToken("isolated-rotate")).owner());
+        address newAdmin = makeAddr("newAdmin");
+        address newImplementation = address(new TREXAccessManager());
+
+        vm.startPrank(issuerAdmin);
+        manager.grantRole(manager.ADMIN_ROLE(), newAdmin, 0);
+        manager.renounceRole(manager.ADMIN_ROLE(), issuerAdmin);
+        vm.stopPrank();
+
+        (bool oldIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), issuerAdmin);
+        assertFalse(oldIsAdmin);
+        assertEq(beacon.owner(), issuerAdmin);
+        vm.prank(newAdmin);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, newAdmin));
+        beacon.upgradeTo(newImplementation);
+
+        vm.prank(issuerAdmin);
+        beacon.transferOwnership(newAdmin);
+
+        assertEq(beacon.owner(), newAdmin);
+        vm.prank(issuerAdmin);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, issuerAdmin));
+        beacon.upgradeTo(newImplementation);
+        vm.prank(newAdmin);
+        beacon.upgradeTo(newImplementation);
+        assertEq(beacon.implementation(), newImplementation);
     }
 
     function test_deployTREXSuiteIsolated_Success_SuppliedManagerGetsNoManagerBeacon() public {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { Vm } from "@forge-std/Vm.sol";
+import { Vm, VmSafe } from "@forge-std/Vm.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 
@@ -97,6 +97,9 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
 
     function _assertNoAccessTo(address target, Vm.AccountAccess[] memory accesses) private pure {
         for (uint256 i = 0; i < accesses.length; i++) {
+            if (accesses[i].kind == VmSafe.AccountAccessKind.Extcodesize) {
+                continue;
+            }
             assertNotEq(accesses[i].account, target);
         }
     }

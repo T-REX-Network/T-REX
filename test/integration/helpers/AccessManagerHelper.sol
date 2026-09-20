@@ -23,6 +23,7 @@ abstract contract AccessManagerHelper is Test {
         accessManager = new AccessManager(address(this));
         AccessManagerSetupLib.setupRoleAdmins(accessManager, RolesLib.SHARED);
         AccessManagerSetupLib.setupLabels(accessManager, RolesLib.SHARED);
+        AccessManagerSetupLib.setupGlobalLabels(accessManager);
         // Operational roles are now administered by the giver roles, not ADMIN_ROLE(0); the test
         // admin needs the givers to be able to grant AGENT/AGENT_* and TOKEN_MANAGER/IDENTITY_MANAGER.
         _grantAgentAdminRole(address(this));
