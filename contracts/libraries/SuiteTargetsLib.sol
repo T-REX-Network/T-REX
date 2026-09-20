@@ -61,82 +61,64 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-library RolesLib {
+import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
+import { ErrorsLib } from "./ErrorsLib.sol";
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
+library SuiteTargetsLib {
 
-    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
+    function targets(address[] memory tokens, address[] memory extraTargets)
+        internal
+        view
+        returns (address[] memory list)
+    {
+        address[] memory registries = new address[](tokens.length);
+        address[] memory storages = new address[](tokens.length);
+        uint256 storageCount;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(tokens[i] != address(0), ErrorsLib.ZeroAddress());
+            IERC3643IdentityRegistry registry = IERC3643(tokens[i]).identityRegistry();
+            registries[i] = address(registry);
+            address irs = address(registry.identityStorage());
+            if (!_contains(storages, storageCount, irs)) {
+                storages[storageCount++] = irs;
+            }
+        }
+        for (uint256 i = 0; i < storageCount; i++) {
+            address[] memory linked = IERC3643IdentityRegistryStorage(storages[i]).linkedIdentityRegistries();
+            for (uint256 j = 0; j < linked.length; j++) {
+                require(
+                    _contains(registries, registries.length, linked[j]),
+                    ErrorsLib.SharedIdentityRegistryStorage(storages[i])
+                );
+            }
+        }
 
-    // ---- Operational roles (gate contract functions: "what you can do") ----
-
-    uint64 constant OWNER = ROLE_PREFIX + 1;
-
-    uint64 constant AGENT = ROLE_PREFIX + 2;
-    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
-    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
-    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
-    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
-    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
-    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
-    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
-
-    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
-    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
-
-    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
-    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
-    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
-
-    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
-    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
-    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
-    // handing out the AccessManager ADMIN_ROLE (0).
-
-    // Admin of AGENT and every granular AGENT_* role.
-    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
-
-    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
-    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
-
-    // ---- Storage binding ----
-
-    // Gates IdentityRegistryStorage.bindIdentityRegistry, so an issuer can bind a new IR onto a reused
-    // IRS without standing OWNER. The factory never holds it: it deploys against a reused IRS without
-    // binding, and the issuer binds afterwards.
-    uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
-
-    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
-
-    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
-    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
-    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
-    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
-
-    uint64 constant SUITE_MIGRATOR = ROLE_PREFIX + 17;
-
-    bytes32 constant SHARED = bytes32(0);
-
-    bytes4 constant COMMISSIONED = bytes4(keccak256("TREX-Suite.commissioned"));
-
-    function namespaceOf(address target) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(target)));
+        list = new address[](3 * tokens.length + storageCount + extraTargets.length);
+        uint256 count;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            list[count++] = tokens[i];
+            list[count++] = registries[i];
+            list[count++] = address(IERC3643(tokens[i]).compliance());
+        }
+        for (uint256 i = 0; i < storageCount; i++) {
+            list[count++] = storages[i];
+        }
+        for (uint256 i = 0; i < extraTargets.length; i++) {
+            list[count++] = extraTargets[i];
+        }
     }
 
-    function forSuite(uint64 role, bytes32 namespace) internal pure returns (uint64) {
-        if (namespace == SHARED) {
-            return role;
+    function _contains(address[] memory list, uint256 length, address item) private pure returns (bool) {
+        for (uint256 i = 0; i < length; i++) {
+            if (list[i] == item) {
+                return true;
+            }
         }
-        uint64 id = uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace))));
-        if (id == 0) {
-            return 1;
-        }
-        if (id == type(uint64).max) {
-            return type(uint64).max - 1;
-        }
-        return id;
+        return false;
     }
 
 }

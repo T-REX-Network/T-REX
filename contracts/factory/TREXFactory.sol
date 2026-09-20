@@ -70,6 +70,7 @@ import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import {
     AccessManagerUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
+import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -172,6 +173,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         if (tokenDetails.accessManager == address(0)) {
             require(tokenDetails.accessManagerAdmin != address(0), ErrorsLib.ZeroAddress());
             require(tokenDetails.accessManagerAdmin != address(this), ErrorsLib.InvalidAccessManagerAdmin());
+        } else {
+            (bool immediate,) =
+                AuthorityUtils.canCallWithDelay(tokenDetails.accessManager, _msgSender(), address(this), msg.sig);
+            require(immediate, ErrorsLib.DeployerNotAuthorizedOnAccessManager(_msgSender(), tokenDetails.accessManager));
         }
 
         require(claimDetails.issuers.length <= 5, ErrorsLib.MaxClaimIssuersReached(5));

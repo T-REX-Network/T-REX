@@ -21,6 +21,7 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
     function setUp() public override {
         super.setUp();
         victim = new AccessManager(address(this));
+        victim.grantRole(victim.ADMIN_ROLE(), deployer, 0);
     }
 
     function test_deployTREXSuite_Success_WhenFactoryHoldsNoRoleOnTargetAccessManager() public {
@@ -32,7 +33,7 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         assertEq(IERC173(address(deployed.identityRegistry())).owner(), address(victim));
     }
 
-    function test_deployTREXSuite_MakesNoCallIntoTargetAccessManager_EvenWithLegacyPrivilege() public {
+    function test_deployTREXSuite_WritesNothingIntoTargetAccessManager_EvenWithLegacyPrivilege() public {
         _grantLegacyFactoryPrivilege();
 
         vm.startStateDiffRecording();
@@ -49,7 +50,7 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         assertFalse(deployerIsAgent);
     }
 
-    function test_deployTREXSuiteIsolated_MakesNoCallIntoTargetAccessManager_EvenWithLegacyPrivilege() public {
+    function test_deployTREXSuiteIsolated_WritesNothingIntoTargetAccessManager_EvenWithLegacyPrivilege() public {
         _grantLegacyFactoryPrivilege();
 
         vm.startStateDiffRecording();
@@ -97,7 +98,13 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
 
     function _assertNoAccessTo(address target, Vm.AccountAccess[] memory accesses) private pure {
         for (uint256 i = 0; i < accesses.length; i++) {
-            assertNotEq(accesses[i].account, target);
+            if (accesses[i].account != target) {
+                continue;
+            }
+            assertEq(accesses[i].value, 0);
+            for (uint256 j = 0; j < accesses[i].storageAccesses.length; j++) {
+                assertFalse(accesses[i].storageAccesses[j].isWrite);
+            }
         }
     }
 

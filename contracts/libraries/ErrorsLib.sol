@@ -115,6 +115,7 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error AuthorityMismatch();
+    error DeployerNotAuthorizedOnAccessManager(address deployer, address accessManager);
     error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
@@ -123,6 +124,15 @@ library ErrorsLib {
     error TokenIdentityAlreadyBound(address token, address boundIdentity);
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
+
+    // SuiteAuthorityMigrator Errors
+    error IdentityNotManagedByAuthority(address identity, address authority);
+    error IdentityRotationFailed(address identity);
+    error OnlyAuthorityCanCall();
+    error SameAuthority();
+    error SharedIdentityRegistryStorage(address identityRegistryStorage);
+    error IdentityRotationRequired(address identity);
+    error NewAuthorityNotAContract(address newAuthority);
 
     // ClaimTopicsRegistry Errors
     error ClaimTopicAlreadyExists();

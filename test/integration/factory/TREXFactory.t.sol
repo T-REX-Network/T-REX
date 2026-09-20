@@ -562,8 +562,8 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
     }
 
-    /// @notice Token must be owned by the suite AccessManager, with the configured tokenAgents pre-granted
-    ///         at init time, the OID minted by IdentityFactory and wired in at init time, and the factory holding
+    /// @notice Token must be owned by the suite AccessManager, with no agent role granted by the factory,
+    ///         the OID minted by IdentityFactory and wired in at init time, and the factory holding
     ///         no role on the Token (no agent, no pending ownership)
     function test_deployTREXSuite_Token_OwnershipAgentsAndOID_SetAtInit() public {
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
@@ -790,7 +790,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite("foreign-authority-salt", _createEmptyTokenDetails(), _createEmptyClaimDetails());
     }
 
-    /// @notice IR must be owned by the suite AccessManager, with the Token + irAgents pre-granted at init time
+    /// @notice IR must be owned by the suite AccessManager, with no agent role granted by the factory
     function test_deployTREXSuite_IR_OwnershipAndAgents_SetAtInit() public {
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: "Token name",
@@ -954,8 +954,8 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertFalse(_hasAgentRole(bob), "factory must not grant AGENT");
     }
 
-    /// @notice deployTREXSuite must grant the AGENT role to the token, the IR and every configured
-    ///         agent, with the factory holding only the AGENT_ADMIN role on the AccessManager
+    /// @notice deployTREXSuite must grant the AGENT role to nobody: not the token, not the IR, not any
+    ///         account; the issuer grants what the suite needs afterwards
     function test_deployTREXSuite_GrantsNoAgentRole() public {
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: "Token name",
@@ -1092,9 +1092,8 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         require(deployedIRS != address(0), "IRS should be deployed");
 
-        // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory does NOT get any
-        // standing role here: it self-grants IRS_BINDER (admin = AGENT_ADMIN, which it already holds)
-        // for the bind window during deployTREXSuite and revokes it before returning.
+        // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory never binds: the
+        // issuer binds the new registry after the deploy with IRS_BINDER of its own.
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, RolesLib.SHARED);
 
         // Sanity: the factory holds neither OWNER nor IRS_BINDER going into the reused-IRS deploy.
@@ -1149,18 +1148,15 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertTrue(sawOld, "Reused IRS should still have the old IR bound");
         assertTrue(sawNew, "Reused IRS should have the new IR bound");
 
-        // Transient-grant invariant: the factory must hold no standing privilege over the IRS after
-        // the deploy. IRS_BINDER was self-granted only for the bind call and revoked before return.
+        // The factory holds no privilege over the IRS at any point: it never granted itself IRS_BINDER.
         (bool stillBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
         assertFalse(stillBinder, "Factory must not retain IRS_BINDER after deploy");
         (bool stillOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
         assertFalse(stillOwner, "Factory must not hold standing OWNER on the IRS");
     }
 
-    /// @notice The reused-IRS bind must fail closed when the factory cannot obtain IRS_BINDER, proving
-    ///         the bind is genuinely gated and not reachable without the transient grant. Stripping the
-    ///         factory's AGENT_ADMIN removes its ability to self-grant IRS_BINDER, so deployTREXSuite
-    ///         reverts at the bind step.
+    /// @notice A reused-IRS deploy needs no privilege from the factory: with AGENT_ADMIN stripped from
+    ///         the factory the deploy still succeeds, and the storage stays unbound until the issuer binds.
     function test_deployTREXSuite_Success_WithProvidedIRS_WhenFactoryHoldsNoAgentAdmin() public {
         // Deploy a first suite to obtain a properly initialized IRS to reuse.
         ITREXFactory.TokenDetails memory tempTokenDetails = _createEmptyTokenDetails();
@@ -1174,8 +1170,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, RolesLib.SHARED);
 
-        // Remove the factory's ability to administer IRS_BINDER (admin = AGENT_ADMIN). Without it,
-        // the self-grant inside deployTREXSuite reverts and the reused-IRS bind cannot proceed.
+        // Strip the factory's AGENT_ADMIN: the deploy must not depend on it.
         accessManager.revokeRole(RolesLib.AGENT_ADMIN, address(trexFactory));
 
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
@@ -1243,8 +1238,8 @@ contract TREXFactoryTest is TREXSuiteTest {
         tokenDetails.irs = foreignIRS;
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
-        // bindIdentityRegistry's `restricted` guard rejects the factory: it holds no IRS_BINDER on the
-        // foreign AccessManager, so the revert is AccessManagedUnauthorized, not AuthorityMismatch.
+        // The storage reports another manager as its authority, so the suite could never be bound to
+        // it: the factory rejects the combination up front.
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
         trexFactory.deployTREXSuite("salt-authority-mismatch", tokenDetails, claimDetails);

@@ -64,8 +64,10 @@ All notable changes to this project will be documented in this file.
   - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins` and `setupLabels` takes a `namespace`.
     Selector mappings, role admins and labels land in that namespace. Passing `SHARED` is the explicit
     opt-in to one set of agents across the manager's suites. There is no silent default.
-  - `AccessManagerSetupLib.commissionSuite(manager, token, namespace)` does the whole commissioning in
-    one call: maps the token, registry, storage and compliance, sets role admins and labels, and makes
+  - `AccessManagerSetupLib.commissionSuite(manager, token)` commissions a suite in its own namespace,
+    the per-suite default; `commissionSuite(manager, token, namespace)` takes an explicit namespace,
+    `RolesLib.SHARED` being the opt-in to one agent set across the manager. Either does the whole
+    commissioning in one call: maps the token, registry, storage and compliance, sets role admins and labels, and makes
     the structural grants in the same namespace, `AGENT` to the token (it writes to the registry) and
     `AGENT` in the storage's namespace to the registry (it writes to the storage). It runs once per
     suite (`AlreadyCommissioned` otherwise), and it never rewrites a storage that is already
@@ -89,40 +91,65 @@ All notable changes to this project will be documented in this file.
     onto a storage already commissioned needs `AGENT_ADMIN` in the storage's namespace.
   - The factory no longer grants `AGENT` on a manager it deploys; it hands over `ADMIN_ROLE` only, and
     the issuer commissions the suite in the namespace of their choice.
-  - `AccessManagerSetupLib.migrateSuitesToNamespaces(manager, tokens, namespaces, entitlements)` moves
-    suites commissioned `SHARED` into namespaces in one call. An entitlement is an (account, token)
-    pair: the account receives, in that token's namespace, the namespaced version of every suite role
-    it holds globally (the eight agent roles, `OWNER`, `TOKEN_MANAGER`, `IDENTITY_MANAGER`,
-    `AGENT_ADMIN`, `SUITE_ADMIN`; and when the storage moves, `OWNER`, `AGENT_ADMIN` and `IRS_BINDER`
-    again in the storage's namespace, so the owner can still unbind and the administrator can still
-    grant storage roles), with the same execution delay. Order inside the call: read every membership and grant every destination first, then remap
-    selectors, role admins and labels, then revoke the global roles last, admin roles after the rest.
-    An account listed for several suites therefore keeps all of them, and a failure anywhere reverts
-    the whole call. The token and the registry are handled without being listed. The storage always
-    moves with its suites, into its own namespace, and `OWNER`, `AGENT_ADMIN` and `IRS_BINDER` are
-    mirrored there for each entitled account; every registry bound to the storage must therefore
-    belong to a suite in the same call, else `StorageSharedOutsideBatch`. Keeping a shared storage on
-    global roles while revoking global memberships was not possible without either stranding the
-    storage's administration or leaving a global `AGENT_ADMIN` that reaches sibling suites. A pending
-    global grant (delayed, not yet active) reverts `PendingRoleGrant` rather than being skipped or
-    activated early; migrate after it activates or cancel it first. A pending execution-delay
-    change on a membership (a delay decrease that has not taken effect yet) reverts
-    `PendingDelayChange` for the same reason. Duplicate tokens or namespaces in one call revert
-    `DuplicateMigrationEntry`. Migration remaps rather than resets: every selector the setup library
-    knows is read on its target and its current role is translated, a global suite role becoming the
-    namespaced one while `ADMIN_ROLE` and custom role ids stay as they are; role administrators and
-    guardians are translated the same way. A suite the issuer hardened by hand keeps that shape in
-    its namespace. Scheduled operations are not touched: `AccessManager` re-checks authorisation at
-    execution, so an entitled account's scheduled calls still run under its namespaced role. Grant
-    delays are not copied:
-    every namespaced role of every namespace the call sets up, with or without members, must already
-    carry the same grant delay as its global counterpart, else `GrantDelayNotPrepared`; set it on the
-    namespaced id beforehand and wait out the manager's setback.
-    A migrated membership under a grant delay is pending for that delay while the global one is
-    already revoked, so the account holds neither role for that window. `AccessManager` cannot enumerate members,
-    so the caller lists the accounts. Reverts `InvalidRoleNamespace` for a `SHARED` target and
-    `EntitlementTokenNotMigrated` for an entitlement naming a token outside the call. Guardians and
-    scheduled operations are not migrated.
+  - `AccessManagerSetupLib.migrateSuitesToNamespaces(manager, tokens, namespaces, entitlements)`
+    atomically migrates the supported shared configuration into namespaces, or reverts without
+    changing anything. Supported means exactly what the library sets up: every suite commissioned
+    `SHARED` (token and storage markers present), every selector of the token, registry, storage and
+    compliance mapped to its standard global role, the fourteen suite roles administered as
+    `setupRoleAdmins` sets them with guardians at the `ADMIN_ROLE` default, the destination
+    namespaces unused (no marker, no administrator or guardian set on any of their roles), and grant
+    delays either zero or already set to the same value on the namespaced ids. Anything else reverts
+    before the first mutation: `NotCommissionedShared`, `NonStandardPolicy(target, selector)`,
+    `NonStandardAdministration(role)`, `DestinationNamespaceInUse(namespace)`,
+    `GrantDelayNotPrepared(role, namespace)`. Only the affected targets and the suite roles are
+    inspected; unrelated configuration on the manager is not. A manager customised by hand is
+    migrated by a separately reviewed plan, not by this helper.
+  - Inside the call: an entitlement is an (account, token) pair, and the account receives in that
+    token's namespace the namespaced version of every suite role it holds globally, with the same
+    execution delay, plus `OWNER`, `AGENT_ADMIN` and `IRS_BINDER` in the storage's namespace. The
+    token and the registry are handled without being listed. Order: grant every destination, apply
+    the standard setup in the namespaces, revoke the global memberships last, admin roles after the
+    rest. An account entitled on several suites keeps all of them. Every registry bound to a storage
+    must belong to a suite in the same call (`StorageSharedOutsideBatch`); the storage moves into its
+    own namespace with them. Duplicate tokens or namespaces revert `DuplicateMigrationEntry`.
+    `AccessManager` cannot enumerate members, so the caller lists the accounts.
+  - Pending state is rejected rather than guessed: a delayed global grant not yet active
+    (`PendingRoleGrant`) or a delay decrease not yet in effect (`PendingDelayChange`). Operational
+    interruption to expect: when a role carries a nonzero grant delay, the migrated membership is
+    pending for that delay while the global one is already revoked, so the account holds neither role
+    for that window; preparation of the delay does not remove it. Scheduled operations are left in
+    place: `AccessManager` re-checks authorisation at execution, so an entitled account's scheduled
+    calls run under its namespaced role, and a non-entitled account's fail.
+- **Atomic suite authority migration** (OZ M-10): `SuiteAuthorityMigrator.migrateSuite(token,
+  extraTargets, newAuthority, rotateIdentity)` rotates the token, its registry, the registry storage,
+  the compliance and any extra ERC-173 target from the current AccessManager to `newAuthority`, and
+  rotates the token identity's MANAGEMENT key with them: the new manager's key is added and verified
+  first, the authorities move, the old manager's key is removed last and verified gone. Any failure
+  reverts the whole migration. `rotateIdentity` is explicit: `true` requires the outgoing manager to
+  hold MANAGEMENT on the identity (reverts `IdentityNotManagedByAuthority` otherwise, the
+  caller-supplied `ONCHAINID` case); `false` migrates the contracts only and leaves the identity's
+  keys untouched, recorded by the `identityRotated` flag of `SuiteAuthorityMigrated`. `false` is
+  accepted only when the outgoing manager holds no MANAGEMENT key on the identity; skipping the
+  rotation of an identity it does manage would recreate the very state this fixes, and reverts
+  `IdentityRotationRequired`. A `newAuthority` without code reverts `NewAuthorityNotAContract` before
+  anything moves.
+  - Invoked through the outgoing manager: an administrator calls
+    `AccessManager.execute(migrator, migrateSuite(...))`, so the manager's own role, delay and
+    scheduling rules apply to the migration exactly as to any other administrative call. The migrator
+    accepts the current manager as caller only (`OnlyAuthorityCanCall`) and relays every step through
+    that manager's `execute`, since `setAuthority` accepts the current manager only. The manager must
+    hold the migrator under the `SUITE_MIGRATOR` role: `AccessManagerSetupLib.setupSuiteMigrationRoles`
+    maps `transferOwnership` on each target and `addKeyWithData` / `removeKey` on each identity.
+  - A registry storage shared by several suites moves only when every suite bound to it migrates in
+    the same call: `migrateSuites(tokens, ...)` takes them together, and a single-suite migration
+    reverts `SharedIdentityRegistryStorage` instead of stranding the siblings under the old manager.
+  - Isolated-suite beacons are not discoverable from the proxies, so they are passed in
+    `extraTargets` (the factory emits them in `IsolatedSuiteDeployed`). A migration that omits them
+    leaves upgrade control with the old manager.
+  - Suites whose manager is the upgradeable `TREXAccessManager` (next entry) normally never need this:
+    the manager is upgraded in place. The primitive covers a deliberate manager replacement.
+  - New errors: `IdentityNotManagedByAuthority`, `IdentityRotationFailed`, `IdentityRotationRequired`,
+    `NewAuthorityNotAContract`, `OnlyAuthorityCanCall`, `SameAuthority`, `SharedIdentityRegistryStorage`.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts (`SuiteImplementations.accessManagerImplementation`,
@@ -150,10 +177,18 @@ All notable changes to this project will be documented in this file.
     `publishAndUpgrade`, `beacons`, `implementations`, `implementationsFor` and the signatures of the
     `BeaconsDeployed`, `VersionPublished`, `SuiteUpgraded` and `IsolatedSuiteDeployed` events. SDKs,
     deployment scripts and indexers decoding them need updating.
+- **The factory deploys only into a manager the caller controls**: `deployTREXSuite` and
+  `deployTREXSuiteIsolated` require `tokenDetails.accessManager` to authorise the caller for the
+  deploy selector on the factory (`AuthorityUtils.canCallWithDelay`, immediate only), reverting
+  `DeployerNotAuthorizedOnAccessManager` otherwise. An unmapped selector resolves to that manager's
+  `ADMIN_ROLE`; an issuer delegating deployment maps the selector on their own manager and grants the
+  role; execution delays are not honoured. The check is read-only on the target manager. It applies
+  to supplied managers only, since a factory-deployed manager does not exist before the call.
 - **The factory no longer writes into a supplied AccessManager**: `TokenDetails.irAgents` and
   `TokenDetails.tokenAgents` are gone, a deploy against a supplied manager makes no call into it, and a
   suite deployed against a reused registry storage is no longer bound to it by the factory. The factory
-  therefore needs no role on any issuer manager. The only grant it still makes is `ADMIN_ROLE` to
+  therefore needs no role on any issuer manager. Two independent guards: the authority check above
+  stops the deploy, the absence of grants stops the damage if a deploy ever goes through. The only grant it still makes is `ADMIN_ROLE` to
   `accessManagerAdmin` on a manager it deploys itself, before renouncing its own. Before, any holder of the factory OWNER role could name another issuer's
   manager, list their own addresses as agents and receive the shared `AGENT` role there through the
   factory's `AGENT_ADMIN` grant: identity registration and deletion on every registry of every suite

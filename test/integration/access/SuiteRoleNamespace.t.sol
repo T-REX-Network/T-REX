@@ -480,6 +480,19 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertTrue(isMinter);
     }
 
+    function test_commissionSuite_DefaultsToTheSuiteNamespace() public {
+        AccessManagerSetupLib.commissionSuite(accessManager, address(tokenA));
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+
+        assertEq(
+            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
+            RolesLib.forSuite(RolesLib.AGENT_MINTER, nsA)
+        );
+        assertNotEq(accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
+        _grantAllAgentRoles(agentA, nsA);
+        _assertLockedOut(agentA, tokenB);
+    }
+
     function test_commissionSuite_RevertWhen_SuiteIsAlreadyCommissioned() public {
         _commission(tokenA, RolesLib.namespaceOf(address(tokenA)));
 
