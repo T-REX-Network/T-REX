@@ -147,18 +147,11 @@ All notable changes to this project will be documented in this file.
     `publishAndUpgrade`, `beacons`, `implementations`, `implementationsFor` and the signatures of the
     `BeaconsDeployed`, `VersionPublished`, `SuiteUpgraded` and `IsolatedSuiteDeployed` events. SDKs,
     deployment scripts and indexers decoding them need updating.
-- **The factory deploys only into a manager the caller controls**: `deployTREXSuite` and
-  `deployTREXSuiteIsolated` require `tokenDetails.accessManager` to authorise the caller for the
-  deploy selector on the factory (`AuthorityUtils.canCallWithDelay`, immediate only), reverting
-  `DeployerNotAuthorizedOnAccessManager` otherwise. An unmapped selector resolves to that manager's
-  `ADMIN_ROLE`; an issuer delegating deployment maps the selector on their own manager and grants the
-  role; execution delays are not honoured. The check is read-only on the target manager. It applies
-  to supplied managers only, since a factory-deployed manager does not exist before the call.
 - **The factory no longer writes into a supplied AccessManager**: `TokenDetails.irAgents` and
   `TokenDetails.tokenAgents` are gone, a deploy against a supplied manager makes no call into it, and a
   suite deployed against a reused registry storage is no longer bound to it by the factory. The factory
-  therefore needs no role on any issuer manager. Two independent guards: the authority check above
-  stops the deploy, the absence of grants stops the damage if a deploy ever goes through. The only grant it still makes is `ADMIN_ROLE` to
+  therefore needs no role on any issuer manager. A deploy that names a manager the caller does not
+  control is not rejected: it creates contracts nobody uses and changes nothing on that manager. The only grant it still makes is `ADMIN_ROLE` to
   `accessManagerAdmin` on a manager it deploys itself, before renouncing its own. Before, any holder of the factory OWNER role could name another issuer's
   manager, list their own addresses as agents and receive the shared `AGENT` role there through the
   factory's `AGENT_ADMIN` grant: identity registration and deletion on every registry of every suite

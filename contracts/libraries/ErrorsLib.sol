@@ -115,7 +115,6 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error AuthorityMismatch();
-    error DeployerNotAuthorizedOnAccessManager(address deployer, address accessManager);
     error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
