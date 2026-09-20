@@ -143,6 +143,10 @@ library ErrorsLib {
     error StorageSharedOutsideBatch(address identityRegistryStorage);
     error PendingDelayChange(address account, uint64 role);
     error DuplicateMigrationEntry();
+    error NonStandardPolicy(address target, bytes4 selector);
+    error NonStandardAdministration(uint64 role);
+    error NotCommissionedShared(address token);
+    error DestinationNamespaceInUse(bytes32 namespace);
     error AddressAlreadyStored();
     error AddressNotYetStored();
     error IdentityRegistryNotStored();

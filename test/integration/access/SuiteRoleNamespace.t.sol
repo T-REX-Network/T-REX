@@ -383,13 +383,15 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
     function test_migrateSuitesToNamespaces_RevertWhen_ARevokeFailsAfterMutationsBegan_LeavesNothingChanged() public {
         _commission(tokenA, RolesLib.SHARED);
         _grantAllAgentRoles(agentA, RolesLib.SHARED);
-        accessManager.setRoleAdmin(RolesLib.AGENT_PAUSER, 4242);
+        accessManager.revokeRole(RolesLib.AGENT_ADMIN, address(this));
         bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
 
         AccessManagerSetupLib.Entitlement[] memory entitlements = new AccessManagerSetupLib.Entitlement[](1);
         entitlements[0] = AccessManagerSetupLib.Entitlement({ account: agentA, token: address(tokenA) });
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, address(this), 4242)
+            abi.encodeWithSelector(
+                IAccessManager.AccessManagerUnauthorizedAccount.selector, address(this), RolesLib.AGENT_ADMIN
+            )
         );
         this.migrateExternally(_only(tokenA), _namespaces(nsA), entitlements);
 
@@ -625,43 +627,97 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         );
     }
 
-    function test_migrateSuitesToNamespaces_Success_RemapsCustomPolicyInsteadOfResettingIt() public {
+    function test_migrateSuitesToNamespaces_RevertWhen_ASelectorIsCustomised_LeavesNothingChanged() public {
         _commission(tokenA, RolesLib.SHARED);
+        _grantAllAgentRoles(agentA, RolesLib.SHARED);
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         bytes4[] memory remove = new bytes4[](1);
         remove[0] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
         accessManager.setTargetFunctionRole(address(irs), remove, 0);
-        bytes4[] memory mint = new bytes4[](1);
-        mint[0] = IERC3643.mint.selector;
-        accessManager.setTargetFunctionRole(address(tokenA), mint, 4343);
-        accessManager.setRoleAdmin(RolesLib.AGENT_MINTER, 4242);
-        accessManager.setRoleGuardian(RolesLib.AGENT_BURNER, RolesLib.SUITE_ADMIN);
         bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
 
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _only(tokenA), _namespaces(nsA), new AccessManagerSetupLib.Entitlement[](0)
+        AccessManagerSetupLib.Entitlement[] memory entitlements = new AccessManagerSetupLib.Entitlement[](1);
+        entitlements[0] = AccessManagerSetupLib.Entitlement({ account: agentA, token: address(tokenA) });
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.NonStandardPolicy.selector,
+                address(irs),
+                IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector
+            )
         );
+        this.migrateExternally(_only(tokenA), _namespaces(nsA), entitlements);
 
-        assertEq(
-            accessManager.getTargetFunctionRole(
-                address(irs), IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector
-            ),
-            0
+        assertEq(accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
+        _assertHoldsEveryAgentRole(agentA, RolesLib.SHARED);
+        _assertHoldsNoAgentRole(agentA, nsA);
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_AnAdministratorIsCustomised() public {
+        _commission(tokenA, RolesLib.SHARED);
+        accessManager.setRoleAdmin(RolesLib.AGENT_MINTER, 4242);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonStandardAdministration.selector, RolesLib.AGENT_MINTER));
+        this.migrateExternally(
+            _only(tokenA),
+            _namespaces(RolesLib.namespaceOf(address(tokenA))),
+            new AccessManagerSetupLib.Entitlement[](0)
         );
-        assertEq(accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector), 4343);
-        assertEq(
-            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.burn.selector),
-            RolesLib.forSuite(RolesLib.AGENT_BURNER, nsA)
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_AGuardianIsSet() public {
+        _commission(tokenA, RolesLib.SHARED);
+        accessManager.setRoleGuardian(RolesLib.AGENT_BURNER, RolesLib.SUITE_ADMIN);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonStandardAdministration.selector, RolesLib.AGENT_BURNER));
+        this.migrateExternally(
+            _only(tokenA),
+            _namespaces(RolesLib.namespaceOf(address(tokenA))),
+            new AccessManagerSetupLib.Entitlement[](0)
         );
-        assertEq(accessManager.getRoleAdmin(RolesLib.forSuite(RolesLib.AGENT_MINTER, nsA)), 4242);
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_SuiteWasNotCommissionedShared() public {
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+        _commission(tokenA, nsA);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotCommissionedShared.selector, address(tokenA)));
+        this.migrateExternally(_only(tokenA), _namespaces(nsA), new AccessManagerSetupLib.Entitlement[](0));
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_DestinationNamespaceIsAlreadyInUse() public {
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+        _commission(tokenA, RolesLib.SHARED);
+        _commission(tokenB, nsA);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DestinationNamespaceInUse.selector, nsA));
+        this.migrateExternally(_only(tokenA), _namespaces(nsA), new AccessManagerSetupLib.Entitlement[](0));
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_StorageNamespaceIsAlreadyAdministered() public {
+        _commission(tokenA, RolesLib.SHARED);
+        address irs = address(tokenA.identityRegistry().identityStorage());
+        bytes32 storageNamespace = RolesLib.namespaceOf(irs);
+        AccessManagerSetupLib.setupRoleAdmins(accessManager, storageNamespace);
+        accessManager.setRoleGuardian(RolesLib.forSuite(RolesLib.AGENT, storageNamespace), 4242);
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DestinationNamespaceInUse.selector, storageNamespace));
+        this.migrateExternally(_only(tokenA), _namespaces(nsA), new AccessManagerSetupLib.Entitlement[](0));
+
+        assertEq(accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
         assertEq(
-            accessManager.getRoleGuardian(RolesLib.forSuite(RolesLib.AGENT_BURNER, nsA)),
-            RolesLib.forSuite(RolesLib.SUITE_ADMIN, nsA)
+            accessManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
+            RolesLib.AGENT
         );
-        assertEq(
-            accessManager.getRoleAdmin(RolesLib.forSuite(RolesLib.AGENT, nsA)),
-            RolesLib.forSuite(RolesLib.AGENT_ADMIN, nsA)
-        );
+    }
+
+    function test_migrateSuitesToNamespaces_RevertWhen_DestinationAdministrationIsPreset() public {
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+        _commission(tokenA, RolesLib.SHARED);
+        accessManager.setRoleGuardian(RolesLib.forSuite(RolesLib.AGENT, nsA), 4242);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DestinationNamespaceInUse.selector, nsA));
+        this.migrateExternally(_only(tokenA), _namespaces(nsA), new AccessManagerSetupLib.Entitlement[](0));
     }
 
     function test_migrateSuitesToNamespaces_RevertWhen_AHolderHasAPendingDelayChange() public {
