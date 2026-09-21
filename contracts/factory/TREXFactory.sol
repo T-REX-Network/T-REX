@@ -146,18 +146,18 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         // `AccessManager.execute(beacon, upgradeTo(...))`. An unmapped target function resolves to
         // ADMIN_ROLE, so only that AccessManager's admin can upgrade until an operator maps `upgradeTo`
         // to a narrower role. The shared authority's beacons are untouched and never propagate here.
-        address beaconOwner = tokenDetails.accessManager;
+        address manager = tokenDetails.accessManager;
         address accessManagerBeacon;
-        if (beaconOwner == address(0)) {
-            beaconOwner = _predictAddress(salt, ACCESS_MANAGER);
+        if (manager == address(0)) {
+            manager = _predictAddress(salt, ACCESS_MANAGER);
             accessManagerBeacon =
                 address(new UpgradeableBeacon(impls.accessManagerImplementation, tokenDetails.accessManagerAdmin));
         }
         ITREXImplementationAuthority.SuiteBeacons memory beacons = ITREXImplementationAuthority.SuiteBeacons({
-            tokenBeacon: address(new UpgradeableBeacon(impls.tokenImplementation, beaconOwner)),
-            trexRegistryBeacon: address(new UpgradeableBeacon(impls.trexRegistryImplementation, beaconOwner)),
-            irsBeacon: address(new UpgradeableBeacon(impls.irsImplementation, beaconOwner)),
-            mcBeacon: address(new UpgradeableBeacon(impls.mcImplementation, beaconOwner)),
+            tokenBeacon: address(new UpgradeableBeacon(impls.tokenImplementation, manager)),
+            trexRegistryBeacon: address(new UpgradeableBeacon(impls.trexRegistryImplementation, manager)),
+            irsBeacon: address(new UpgradeableBeacon(impls.irsImplementation, manager)),
+            mcBeacon: address(new UpgradeableBeacon(impls.mcImplementation, manager)),
             accessManagerBeacon: accessManagerBeacon
         });
 
@@ -174,12 +174,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     ) private view {
         require(tokenDeployed[salt] == address(0), ErrorsLib.TokenAlreadyDeployed());
         if (tokenDetails.accessManager == address(0)) {
-            require(tokenDetails.accessManagerAdmin != address(0), ErrorsLib.ZeroAddress());
-            require(
-                tokenDetails.accessManagerAdmin != address(this)
-                    && tokenDetails.accessManagerAdmin != _predictAddress(salt, ACCESS_MANAGER),
-                ErrorsLib.InvalidAccessManagerAdmin()
-            );
+            address admin = tokenDetails.accessManagerAdmin;
+            require(admin != address(0), ErrorsLib.ZeroAddress());
+            require(admin != address(this), ErrorsLib.InvalidAccessManagerAdmin());
+            require(admin != _predictAddress(salt, ACCESS_MANAGER), ErrorsLib.InvalidAccessManagerAdmin());
         } else {
             require(
                 tokenDetails.accessManager.code.length != 0,
