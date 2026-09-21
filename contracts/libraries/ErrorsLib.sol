@@ -155,8 +155,7 @@ library ErrorsLib {
     error NotCommissionedShared(address token);
     error PendingDelayChange(address account, uint64 role);
     error PendingRoleGrant(address account, uint64 role);
-    error StorageSharedOutsideBatch(address identityRegistryStorage);
-    error UnknownStoragePolicy(address identityRegistryStorage);
+    error StorageOutsideItsNamespace(address identityRegistryStorage);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

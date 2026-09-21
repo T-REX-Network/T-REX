@@ -140,7 +140,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(tokenB.balanceOf(bob), 20);
     }
 
-    function test_mixedModes_SharedSuiteJoiningAPerSuiteStorageKeepsTheStoragePerSuite() public {
+    function test_mixedModes_SharedSuiteJoiningAStorageUsesTheStorageNamespace() public {
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         Token tokenC = _deployBare("mixed-c", address(irs));
         bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
@@ -160,31 +160,30 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _assertLockedOut(agentB, tokenA);
     }
 
-    function test_mixedModes_PerSuiteSuiteJoiningASharedStorageKeepsTheStorageShared() public {
+    function test_mixedModes_PerSuiteSuiteJoiningASharedModeStorageUsesTheStorageNamespace() public {
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         Token tokenC = _deployBare("mixed-c", address(irs));
+        bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
         _commission(tokenA, RolesLib.SHARED);
-        _grantIRSBinderRole(address(this));
+        _grantStorageAdmin(irs);
         _commission(tokenC, RolesLib.namespaceOf(address(tokenC)));
 
         assertEq(
             accessManager.getTargetFunctionRole(
                 address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
             ),
-            RolesLib.AGENT
+            RolesLib.forSuite(RolesLib.AGENT, storageNamespace)
         );
         _assertBothRegistriesWrite(tokenA, RolesLib.SHARED, tokenC, RolesLib.namespaceOf(address(tokenC)), irs);
         _assertLockedOut(agentB, tokenA);
         _assertLockedOut(agentA, tokenC);
     }
 
-    function test_commissionSuite_RevertWhen_StorageCarriesAnUnknownPolicy() public {
+    function test_commissionSuite_RevertWhen_StorageWasConfiguredOutsideItsNamespace() public {
         address irs = address(tokenA.identityRegistry().identityStorage());
-        bytes4[] memory selectors = new bytes4[](1);
-        selectors[0] = RolesLib.COMMISSIONED;
-        accessManager.setTargetFunctionRole(AccessManagerSetupLib.markerTarget(irs), selectors, FOREIGN_ROLE);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs, RolesLib.SHARED);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownStoragePolicy.selector, irs));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.StorageOutsideItsNamespace.selector, irs));
         this.commissionExternally(address(tokenA), RolesLib.namespaceOf(address(tokenA)));
     }
 
@@ -395,14 +394,16 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
     function test_commissionSuite_BindsAReusedStorageAndRevertsWhenTheCallerCannotBind() public {
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         Token tokenC = _deployBare("bind-c", address(irs));
+        bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
         _commission(tokenA, RolesLib.SHARED);
+        accessManager.grantRole(RolesLib.forSuite(RolesLib.AGENT_ADMIN, storageNamespace), address(this), 0);
         assertFalse(_isBound(irs, address(tokenC.identityRegistry())));
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
         this.commissionExternally(address(tokenC), RolesLib.SHARED);
         assertEq(accessManager.getTargetFunctionRole(address(tokenC), IERC3643.mint.selector), 0);
 
-        _grantIRSBinderRole(address(this));
+        accessManager.grantRole(RolesLib.forSuite(RolesLib.IRS_BINDER, storageNamespace), address(this), 0);
         _commission(tokenC, RolesLib.SHARED);
         assertTrue(_isBound(irs, address(tokenC.identityRegistry())));
     }
@@ -568,46 +569,6 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _assertHoldsNoAgentRole(agentA, RolesLib.SHARED);
     }
 
-    function test_migrate_Success_SuiteAndStorageAssignmentsAreIndependent() public {
-        _commission(tokenA, RolesLib.SHARED);
-        accessManager.grantRole(RolesLib.AGENT, agentA, 0);
-        address owner = makeAddr("owner");
-        accessManager.grantRole(RolesLib.OWNER, owner, 0);
-        accessManager.grantRole(RolesLib.AGENT_ADMIN, owner, 0);
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
-        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
-        bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
-
-        AccessManagerSetupLib.RoleAssignment[] memory assignments = new AccessManagerSetupLib.RoleAssignment[](3);
-        assignments[0] = _assign(agentA, RolesLib.AGENT, storageNamespace);
-        assignments[1] = _assign(owner, RolesLib.OWNER, storageNamespace);
-        assignments[2] = _assign(owner, RolesLib.AGENT_ADMIN, nsA);
-        AccessManagerSetupLib.GlobalRevocation[] memory revocations = new AccessManagerSetupLib.GlobalRevocation[](3);
-        revocations[0] = _revoke(agentA, RolesLib.AGENT);
-        revocations[1] = _revoke(owner, RolesLib.OWNER);
-        revocations[2] = _revoke(owner, RolesLib.AGENT_ADMIN);
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _only(tokenA), _namespaces(nsA), assignments, revocations
-        );
-
-        vm.prank(agentA);
-        irs.addIdentityToStorage(alice, aliceIdentity, 0);
-        assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
-        (bool registryAgent,) = accessManager.hasRole(RolesLib.forSuite(RolesLib.AGENT, nsA), agentA);
-        assertFalse(registryAgent);
-
-        address registryA = address(tokenA.identityRegistry());
-        vm.prank(owner);
-        irs.unbindIdentityRegistry(registryA);
-        assertEq(irs.linkedIdentityRegistries().length, 0);
-        (bool suiteOwner,) = accessManager.hasRole(RolesLib.forSuite(RolesLib.OWNER, nsA), owner);
-        assertFalse(suiteOwner);
-        vm.prank(owner);
-        accessManager.grantRole(RolesLib.forSuite(RolesLib.AGENT_MINTER, nsA), agentA, 0);
-        (bool minter,) = accessManager.hasRole(RolesLib.forSuite(RolesLib.AGENT_MINTER, nsA), agentA);
-        assertTrue(minter);
-    }
-
     function test_migrate_Success_KeepsStructuralGrantsAndExecutionDelays() public {
         _commission(tokenA, RolesLib.SHARED);
         accessManager.grantRole(RolesLib.AGENT_MINTER, agentA, 1 hours);
@@ -641,30 +602,19 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         );
     }
 
-    function test_migrate_Success_MovesASharedStorageWhenEverySuiteBoundToItIsInTheBatch() public {
+    function test_migrate_Success_LeavesASharedStorageAloneSoBothRegistriesKeepWriting() public {
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         Token tokenC = _deployBare("batch-c", address(irs));
         _commission(tokenA, RolesLib.SHARED);
-        _grantIRSBinderRole(address(this));
+        _grantStorageAdmin(irs);
         _commission(tokenC, RolesLib.SHARED);
-        address owner = makeAddr("owner");
-        accessManager.grantRole(RolesLib.OWNER, owner, 0);
-        accessManager.grantRole(RolesLib.AGENT_ADMIN, owner, 0);
+        _grantAllAgentRoles(agentA, RolesLib.SHARED);
+        _grantAllAgentRoles(agentB, RolesLib.SHARED);
         bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
-        bytes32 nsC = RolesLib.namespaceOf(address(tokenC));
         bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
 
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(tokenA);
-        tokens[1] = address(tokenC);
-        AccessManagerSetupLib.RoleAssignment[] memory assignments = new AccessManagerSetupLib.RoleAssignment[](2);
-        assignments[0] = _assign(owner, RolesLib.OWNER, storageNamespace);
-        assignments[1] = _assign(owner, RolesLib.AGENT_ADMIN, storageNamespace);
-        AccessManagerSetupLib.GlobalRevocation[] memory revocations = new AccessManagerSetupLib.GlobalRevocation[](2);
-        revocations[0] = _revoke(owner, RolesLib.OWNER);
-        revocations[1] = _revoke(owner, RolesLib.AGENT_ADMIN);
         AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, tokens, _namespaces(nsA, nsC), assignments, revocations
+            accessManager, _only(tokenA), _namespaces(nsA), _assignAgentRoles(agentA, nsA), _revokeAgentRoles(agentA)
         );
 
         assertEq(
@@ -673,38 +623,15 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
             ),
             RolesLib.forSuite(RolesLib.AGENT, storageNamespace)
         );
-        (bool registryAWrites,) = accessManager.hasRole(
-            RolesLib.forSuite(RolesLib.AGENT, storageNamespace), address(tokenA.identityRegistry())
-        );
-        (bool registryCWrites,) = accessManager.hasRole(
-            RolesLib.forSuite(RolesLib.AGENT, storageNamespace), address(tokenC.identityRegistry())
-        );
-        assertTrue(registryAWrites);
-        assertTrue(registryCWrites);
-        address registryC = address(tokenC.identityRegistry());
-        vm.startPrank(owner);
-        irs.unbindIdentityRegistry(registryC);
-        accessManager.grantRole(RolesLib.forSuite(RolesLib.IRS_BINDER, storageNamespace), agentA, 0);
-        vm.stopPrank();
+        IERC3643IdentityRegistry registryA = tokenA.identityRegistry();
+        IERC3643IdentityRegistry registryC = tokenC.identityRegistry();
         vm.prank(agentA);
-        irs.bindIdentityRegistry(registryC);
-        assertEq(irs.linkedIdentityRegistries().length, 2);
-    }
-
-    function test_migrate_RevertWhen_StorageIsSharedWithASuiteOutsideTheBatch() public {
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
-        Token tokenC = _deployBare("outside-c", address(irs));
-        _commission(tokenA, RolesLib.SHARED);
-        _grantIRSBinderRole(address(this));
-        _commission(tokenC, RolesLib.SHARED);
-        _grantAllAgentRoles(agentA, RolesLib.SHARED);
-        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.StorageSharedOutsideBatch.selector, address(irs)));
-        this.migrateExternally(_only(tokenA), _namespaces(nsA), _assignAgentRoles(agentA, nsA), _noRevocations());
-
-        assertEq(accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
-        _assertHoldsEveryAgentRole(agentA, RolesLib.SHARED);
+        registryA.registerIdentity(alice, aliceIdentity, 0);
+        vm.prank(agentB);
+        registryC.registerIdentity(bob, bobIdentity, 0);
+        assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
+        assertEq(address(irs.storedIdentity(bob)), address(bobIdentity));
+        _assertLockedOut(agentA, tokenC);
     }
 
     function test_migrate_RevertWhen_AssignmentIsInvalid() public {
@@ -720,9 +647,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         this.migrateExternally(_only(tokenA), _namespaces(nsA), one, _noRevocations());
 
         one[0] = _assign(agentA, RolesLib.AGENT_MINTER, storageNamespace);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.InvalidRoleForNamespace.selector, RolesLib.AGENT_MINTER, storageNamespace)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AssignmentNamespaceNotMigrated.selector, storageNamespace));
         this.migrateExternally(_only(tokenA), _namespaces(nsA), one, _noRevocations());
 
         one[0] = _assign(agentA, RolesLib.AGENT_MINTER, RolesLib.namespaceOf(address(tokenB)));
@@ -842,6 +767,31 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(accessManager.getRoleGrantDelay(namespacedMinter), 2 days);
     }
 
+    function test_migrate_RevertWhen_StorageWasReconfiguredOutsideItsNamespace() public {
+        _commission(tokenA, RolesLib.SHARED);
+        address irs = address(tokenA.identityRegistry().identityStorage());
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs, RolesLib.SHARED);
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.StorageOutsideItsNamespace.selector, irs));
+        this.migrateExternally(_only(tokenA), _namespaces(nsA), _noAssignments(), _noRevocations());
+    }
+
+    function test_migrate_IgnoresTheGlobalBinderGrantDelay() public {
+        _commission(tokenA, RolesLib.SHARED);
+        accessManager.setGrantDelay(RolesLib.IRS_BINDER, 1 days);
+        vm.warp(block.timestamp + 6 days);
+        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
+
+        AccessManagerSetupLib.migrateSuitesToNamespaces(
+            accessManager, _only(tokenA), _namespaces(nsA), _noAssignments(), _noRevocations()
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
+            RolesLib.forSuite(RolesLib.AGENT_MINTER, nsA)
+        );
+    }
+
     function test_migrate_RevertWhen_GrantDelayNotPreparedForARoleWithoutMembers() public {
         _commission(tokenA, RolesLib.SHARED);
         accessManager.setGrantDelay(RolesLib.AGENT_BURNER, 1 days);
@@ -859,22 +809,6 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(
             accessManager.getTargetFunctionRole(address(tokenA), IERC3643.burn.selector),
             RolesLib.forSuite(RolesLib.AGENT_BURNER, nsA)
-        );
-    }
-
-    function test_migrate_AcceptsAStorageNamespaceWithOnlyItsFourRolesPrepared() public {
-        _commission(tokenA, RolesLib.SHARED);
-        accessManager.setGrantDelay(RolesLib.TOKEN_MANAGER, 1 days);
-        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
-        accessManager.setGrantDelay(RolesLib.forSuite(RolesLib.TOKEN_MANAGER, nsA), 1 days);
-        vm.warp(block.timestamp + 6 days);
-
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _only(tokenA), _namespaces(nsA), _noAssignments(), _noRevocations()
-        );
-        assertEq(
-            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.setName.selector),
-            RolesLib.forSuite(RolesLib.TOKEN_MANAGER, nsA)
         );
     }
 
@@ -914,17 +848,15 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
     function test_migrate_RevertWhen_ASelectorIsCustomised_LeavesNothingChanged() public {
         _commission(tokenA, RolesLib.SHARED);
         _grantAllAgentRoles(agentA, RolesLib.SHARED);
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
+        address registry = address(tokenA.identityRegistry());
         bytes4[] memory remove = new bytes4[](1);
-        remove[0] = IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector;
-        accessManager.setTargetFunctionRole(address(irs), remove, 0);
+        remove[0] = IERC3643IdentityRegistry.deleteIdentity.selector;
+        accessManager.setTargetFunctionRole(registry, remove, 0);
         bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.NonStandardPolicy.selector,
-                address(irs),
-                IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector
+                ErrorsLib.NonStandardPolicy.selector, registry, IERC3643IdentityRegistry.deleteIdentity.selector
             )
         );
         this.migrateExternally(
@@ -979,18 +911,6 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         accessManager.setRoleGuardian(RolesLib.forSuite(RolesLib.AGENT, nsA), FOREIGN_ROLE);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DestinationNamespaceInUse.selector, nsA));
-        this.migrateExternally(_only(tokenA), _namespaces(nsA), _noAssignments(), _noRevocations());
-    }
-
-    function test_migrate_RevertWhen_StorageNamespaceIsAlreadyAdministered() public {
-        _commission(tokenA, RolesLib.SHARED);
-        address irs = address(tokenA.identityRegistry().identityStorage());
-        bytes32 storageNamespace = RolesLib.namespaceOf(irs);
-        AccessManagerSetupLib.setupRoleAdmins(accessManager, storageNamespace);
-        accessManager.setRoleGuardian(RolesLib.forSuite(RolesLib.AGENT, storageNamespace), FOREIGN_ROLE);
-        bytes32 nsA = RolesLib.namespaceOf(address(tokenA));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DestinationNamespaceInUse.selector, storageNamespace));
         this.migrateExternally(_only(tokenA), _namespaces(nsA), _noAssignments(), _noRevocations());
     }
 
@@ -1256,6 +1176,12 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
 
     function _commission(Token target, bytes32 namespace) private {
         AccessManagerSetupLib.commissionSuite(accessManager, address(target), namespace);
+    }
+
+    function _grantStorageAdmin(IdentityRegistryStorage irs) private {
+        bytes32 storageNamespace = RolesLib.namespaceOf(address(irs));
+        accessManager.grantRole(RolesLib.forSuite(RolesLib.AGENT_ADMIN, storageNamespace), address(this), 0);
+        accessManager.grantRole(RolesLib.forSuite(RolesLib.IRS_BINDER, storageNamespace), address(this), 0);
     }
 
     function _grantAllAgentRoles(address account, bytes32 namespace) private {

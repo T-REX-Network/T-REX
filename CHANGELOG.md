@@ -69,54 +69,53 @@ All notable changes to this project will be documented in this file.
     strings out of commissioning is also what keeps the factory, which inlines the library, well under
     the bytecode limit. Passing `SHARED` is the explicit opt-in to one set of agents across the
     manager's suites. There is no silent default.
+  - Storage roles always live in the storage's own namespace, `namespaceOf(storage)`, in every mode
+    including `SHARED`. One storage can serve several suites, so its roles cannot belong to one token,
+    and a fixed rule means nothing about the storage has to be remembered or detected. Suites sharing
+    a storage share its identity data by construction; per-suite isolation applies to token
+    operations and registry writes, not to the records themselves. Agents are unaffected, they never
+    call the storage. Binding or unbinding a registry needs `IRS_BINDER` or `OWNER` in the storage's
+    namespace, also for issuers running `SHARED`.
   - `AccessManagerSetupLib.commissionSuite(manager, token)` commissions a suite in its own namespace,
     the per-suite default; `commissionSuite(manager, token, namespace)` takes an explicit namespace,
     `RolesLib.SHARED` being the opt-in to one agent set across the manager. Either does the whole
-    commissioning in one call: maps the token, registry, storage and compliance, sets role admins, and makes
-    the structural grants in the same namespace, `AGENT` to the token (it writes to the registry) and
-    `AGENT` in the storage's namespace to the registry (it writes to the storage). It runs once per
-    suite (`AlreadyCommissioned` otherwise), rejects the storage's own namespace as a suite namespace
-    (`InvalidRoleNamespace`), and it never rewrites a storage that is already commissioned: the new
-    registry only receives the storage's write role. In every case the registry is bound to the storage
-    when it is not bound yet: on the storage's first commissioning before the storage is mapped, which
-    needs whatever `bindIdentityRegistry` currently requires, on a commissioned storage under its policy,
-    which needs `IRS_BINDER` in the storage's namespace; either way it reverts rather than leaving a
-    suite that looks commissioned but is not linked. Whatever policy the storage carries stays as
-    configured. Commissioning into a namespace another suite already uses is allowed and merges the
-    two suites' agents, which needs `AGENT_ADMIN` in that namespace. Commissioning is tracked in the manager itself: a reserved
-    pseudo-selector, `RolesLib.COMMISSIONED`, is mapped on the token, on the storage and on a
-    per-namespace pseudo-target to the namespace's `OWNER` id. Role administrators of a namespace are
-    set only the first time that namespace is commissioned, and a storage's policy is
-    read from its marker, never inferred from role ids, since `ADMIN_ROLE` (0) is a legitimate
-    explicit configuration and cannot mean "unset". Markers are written on synthetic addresses derived
-    from the real target (`AccessManagerSetupLib.markerTarget`), never on the token or storage itself,
-    so no present or future function selector on those contracts can collide with the marker. `setupTokenRoles`, `setupIdentityRegistryStorageRoles`
-    and `setupRoleAdmins` write the marker themselves, so a target wired through the individual
-    functions is recognised by `commissionSuite` exactly like one it commissioned. The per-namespace
-    marker lives on a synthetic address derived from the namespace, which holds no code by design.
-    A target configured with raw `setTargetFunctionRole` calls, outside the library, carries no marker
-    and is treated as never configured. A second suite in `SHARED` mode therefore leaves
-    administrators the issuer set on the global roles untouched, including ones set to `ADMIN_ROLE`,
-    and a storage the issuer restricted to `ADMIN_ROLE` stays restricted. Storage roles are
-    namespaced by the storage, not the token, because one storage has one role per selector: suites
-    sharing a storage share its identity data by construction, and per-suite isolation applies to
-    token operations and registry writes, not to the records themselves. Commissioning a second suite
-    onto a storage already commissioned needs `AGENT_ADMIN` in the storage's namespace.
+    commissioning in one call: maps the token, registry and compliance in the suite namespace, sets
+    that namespace's role admins, grants `AGENT` to the token (it writes to the registry) and `AGENT`
+    in the storage's namespace to the registry (it writes to the storage), binds the registry to the
+    storage when it is not bound yet, and, the first time a storage is seen, maps the storage in its
+    own namespace and sets that namespace's role admins. It runs once per suite (`AlreadyCommissioned`),
+    rejects the storage's namespace as a suite namespace (`InvalidRoleNamespace`), and rejects a
+    storage that was configured in any other namespace through the individual setup functions
+    (`StorageOutsideItsNamespace`). A storage already configured is never rewritten: the new registry
+    only receives the storage's write role, which needs `AGENT_ADMIN` in the storage's namespace, and
+    the binding needs `IRS_BINDER` there. Commissioning into a namespace another suite already uses is
+    allowed and merges the two suites' agents, which needs `AGENT_ADMIN` in that namespace.
+    "Already configured" is tracked in the manager itself: the reserved pseudo-selector
+    `RolesLib.COMMISSIONED` is mapped on a synthetic address derived from the token, the storage or
+    the namespace (`AccessManagerSetupLib.markerTarget`), never on the contract itself, so no function
+    selector can collide with it. `setupTokenRoles`, `setupIdentityRegistryStorageRoles` and
+    `setupRoleAdmins` write the marker themselves. A target configured with raw
+    `setTargetFunctionRole` calls carries no marker and is treated as never configured. Role admins of
+    a namespace are set only the first time that namespace is seen, so a second suite in `SHARED`
+    mode leaves administrators the issuer set on the global roles untouched, including ones set to
+    `ADMIN_ROLE`, and a storage the issuer restricted to `ADMIN_ROLE` stays restricted.
   - A manager the factory deploys is commissioned by the factory, in the token's namespace, while it
     still holds `ADMIN_ROLE`, and only then handed over. A supplied manager is never touched; its issuer
     commissions the suite.
   - `AccessManagerSetupLib.migrateSuitesToNamespaces(manager, tokens, namespaces, assignments,
     revocations)` atomically migrates the supported shared configuration into namespaces, or reverts
     without changing anything. The plan is explicit: a `RoleAssignment(account, role, namespace)` grants
-    the account, in a migrated suite or storage namespace, the namespaced version of a global suite role
-    it currently holds, with the same execution delay; a `GlobalRevocation(account, role)` removes a
+    the account, in a migrated suite namespace, the namespaced version of a global suite role it
+    currently holds, with the same execution delay; a `GlobalRevocation(account, role)` removes a
     global role the account currently holds. Nothing is inferred: an account listed for suite A keeps
     every global role that is not explicitly revoked, so a sibling suite that stays shared keeps working
-    for it, while the remapped selectors of A no longer accept the global role. Suite namespaces accept
-    suite roles, storage namespaces accept `AGENT`, `OWNER`, `AGENT_ADMIN` and `IRS_BINDER` only.
+    for it, while the remapped selectors of A no longer accept the global role. Storages are not
+    migrated: their roles already live in the storage's own namespace, so a storage shared with a
+    suite outside the batch keeps working for both.
   - Supported source means exactly what the library sets up: every suite commissioned `SHARED` (token
-    and storage markers present), every selector of the token, registry, storage and compliance mapped
-    to its standard global role, the fourteen suite roles administered as `setupRoleAdmins` sets them
+    marker present and the storage in its own namespace, `StorageOutsideItsNamespace` otherwise),
+    every selector of the token, registry and compliance mapped to its standard global role, the
+    fourteen roles administered as `setupRoleAdmins` sets them
     with guardians at the `ADMIN_ROLE` default, destination namespaces unused (no marker, no
     administrator or guardian set on any of their roles), grant delays either zero or already set to
     the same value on the namespaced ids and settled. The manager exposes only the effective grant
@@ -124,15 +123,15 @@ All notable changes to this project will be documented in this file.
     and would leave the two ids apart once it takes effect: migrate only when no grant-delay change is
     pending on either side. Anything else reverts before the first mutation:
     `NotCommissionedShared`, `NonStandardPolicy(target, selector)`, `NonStandardAdministration(role)`,
-    `DestinationNamespaceInUse(namespace)`, `GrantDelayNotPrepared(role, namespace)`,
+    `DestinationNamespaceInUse(namespace)`, `GrantDelayNotPrepared(role, namespace)` for the thirteen
+    suite roles (`IRS_BINDER` is a storage role and is not checked),
     `AssignmentNamespaceNotMigrated(namespace)`, `InvalidRoleForNamespace(role, namespace)`,
     `RoleNotHeld(account, role)`, `DuplicateMigrationEntry`, `PendingRoleGrant`, `PendingDelayChange`.
     A manager customised by hand is migrated by a separately reviewed plan, not by this helper.
-  - Order inside the call: validate the whole plan, grant every assignment, grant the structural roles
-    to the migrated tokens and registries, apply the standard setup in the namespaces, revoke the
-    structural global grants, apply the requested revocations, administrative roles last. Every registry
-    bound to a storage must belong to a suite in the same call (`StorageSharedOutsideBatch`); the
-    storage moves into its own namespace with them. Operational interruption to expect: when a role
+  - Order inside the call: validate the whole plan, grant every assignment, grant `AGENT` in the new
+    namespace to each migrated token, apply the standard setup in the namespaces, revoke the tokens'
+    global `AGENT`, apply the requested revocations, administrative roles last. Operational
+    interruption to expect: when a role
     carries a nonzero grant delay, the migrated membership is pending for that delay while the global
     one is already revoked, so the account holds neither role for that window. Scheduled operations are
     left in place: `AccessManager` re-checks authorisation at execution.
@@ -186,8 +185,8 @@ All notable changes to this project will be documented in this file.
   writes to the storage), `AGENT` to the token (it moves identities during `recoveryAddress`), the
   operational agent roles to their agents. `AccessManagerSetupLib.commissionSuite` on the issuer's
   manager does the structural part in one call, including, for a reused storage, binding the new
-  registry (which needs `IRS_BINDER` in the storage's namespace once the storage is commissioned) and
-  granting it `AGENT` in the storage's namespace, since binding alone grants no write permission. The reused
+  registry (which needs `IRS_BINDER` in the storage's namespace) and granting it `AGENT` there, since
+  binding alone grants no write permission. The reused
   storage must already report the suite's manager as its authority; a storage under another manager is
   rejected with `StorageAuthorityMismatch`, because `bindIdentityRegistry` requires matching authorities
   and the suite could never be completed. `MaxAgentsReached` is removed.
