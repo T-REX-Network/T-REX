@@ -105,7 +105,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
 
         // Wire AccessManager roles for the new contracts (this contract is the AccessManager admin).
         _setupTREXRegistryRoles(address(registry));
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(identityRegistryStorage), 1);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(identityRegistryStorage), NS);
 
         // Grant standard owner/agent roles to deployer/agent so they can drive the registry.
         _grantOwnerRole(deployer);
@@ -113,9 +113,9 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         _grantAllAgentRoles(agent);
         // bindIdentityRegistry is gated on the transient IRS_BINDER role, not OWNER.
         _grantIRSBinderRole(deployer);
-        // The registry writes to the IRS, whose mutators are AGENT-gated. `bindIdentityRegistry`
-        // does not confer that role, so grant it here exactly as TREXFactory does for a deployed IR.
-        _grantAgentRole(address(registry));
+        // The registry writes to the IRS, whose mutators are IRS_WRITER-gated. `bindIdentityRegistry`
+        // does not confer that role, so grant it here exactly as commissioning does for a deployed IR.
+        _grantStorageWriterRole(address(registry));
 
         // Bind the registry as an "identity registry" of the IRS so it can write to it.
         vm.prank(deployer);
@@ -163,7 +163,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
         factory.setIdentityTypePolicy(
-            IdentityTypes.ASSET, RolesLib.forNamespace(1, RolesLib.Role.ASSET_DEPLOYER), false, true
+            IdentityTypes.ASSET, RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), false, true
         );
         factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
@@ -222,16 +222,14 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         ownerFunctions[9] = IERC3643ClaimTopicsRegistry.removeClaimTopic.selector;
         ownerFunctions[10] = TREXRegistry.addClaimTopicForIdentityType.selector;
         ownerFunctions[11] = TREXRegistry.removeClaimTopicForIdentityType.selector;
-        IAccessManager(accessManager)
-            .setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.forNamespace(1, RolesLib.Role.OWNER));
+        IAccessManager(accessManager).setTargetFunctionRole(registryAddress, ownerFunctions, _role(RolesLib.Role.OWNER));
 
         // ------ AGENT role ------
         bytes4[] memory agentFunctions = new bytes4[](3);
         agentFunctions[0] = IERC3643IdentityRegistry.updateIdentity.selector;
         agentFunctions[1] = IERC3643IdentityRegistry.deleteIdentity.selector;
         agentFunctions[2] = IERC3643IdentityRegistry.registerIdentity.selector;
-        IAccessManager(accessManager)
-            .setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.forNamespace(1, RolesLib.Role.AGENT));
+        IAccessManager(accessManager).setTargetFunctionRole(registryAddress, agentFunctions, _role(RolesLib.Role.AGENT));
     }
 
     /// @notice Creates a claim signed now with no expiry and adds it to `_identity`.

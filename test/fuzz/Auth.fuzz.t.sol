@@ -22,42 +22,42 @@ contract AuthFuzzTest is TREXSuiteTest {
     }
 
     function testFuzz_mintUnauthorized(address caller, address to, uint256 amount) public {
-        _assumeNoRole(caller, RolesLib.forNamespace(1, RolesLib.Role.AGENT_MINTER));
+        _assumeNoRole(caller, _role(RolesLib.Role.AGENT_MINTER));
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.mint(to, amount);
     }
 
     function testFuzz_burnUnauthorized(address caller, address from, uint256 amount) public {
-        _assumeNoRole(caller, RolesLib.forNamespace(1, RolesLib.Role.AGENT_BURNER));
+        _assumeNoRole(caller, _role(RolesLib.Role.AGENT_BURNER));
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.burn(from, amount);
     }
 
     function testFuzz_forcedTransferUnauthorized(address caller, address from, address to, uint256 amount) public {
-        _assumeNoRole(caller, RolesLib.forNamespace(1, RolesLib.Role.AGENT_FORCED_TRANSFER));
+        _assumeNoRole(caller, _role(RolesLib.Role.AGENT_FORCED_TRANSFER));
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.forcedTransfer(from, to, amount);
     }
 
     function testFuzz_pauseUnauthorized(address caller) public {
-        _assumeNoRole(caller, RolesLib.forNamespace(1, RolesLib.Role.AGENT_PAUSER));
+        _assumeNoRole(caller, _role(RolesLib.Role.AGENT_PAUSER));
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.pause();
     }
 
     function testFuzz_freezePartialUnauthorized(address caller, address user, uint256 amount) public {
-        _assumeNoRole(caller, RolesLib.forNamespace(1, RolesLib.Role.AGENT_PARTIAL_FREEZER));
+        _assumeNoRole(caller, _role(RolesLib.Role.AGENT_PARTIAL_FREEZER));
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.freezePartialTokens(user, amount);
     }
 
     function testFuzz_setNameUnauthorized(address caller, string calldata newName) public {
-        _assumeNoRole(caller, RolesLib.forNamespace(1, RolesLib.Role.TOKEN_MANAGER));
+        _assumeNoRole(caller, _role(RolesLib.Role.TOKEN_MANAGER));
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, caller));
         token.setName(newName);

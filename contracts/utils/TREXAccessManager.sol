@@ -84,8 +84,10 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00;
 
     modifier onlyAdmin() {
-        (bool isAdmin,) = hasRole(ADMIN_ROLE, _msgSender());
-        require(isAdmin, IAccessManager.AccessManagerUnauthorizedAccount(_msgSender(), ADMIN_ROLE));
+        (bool isAdmin, uint32 executionDelay) = hasRole(ADMIN_ROLE, _msgSender());
+        require(
+            isAdmin && executionDelay == 0, IAccessManager.AccessManagerUnauthorizedAccount(_msgSender(), ADMIN_ROLE)
+        );
         _;
     }
 

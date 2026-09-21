@@ -41,10 +41,9 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         _assertNoAccessTo(address(victim), vm.stopAndReturnStateDiff());
 
         Token deployed = Token(trexFactory.getToken("foreign"));
-        (bool tokenIsAgent,) = victim.hasRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), address(deployed));
-        (bool registryIsAgent,) =
-            victim.hasRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), address(deployed.identityRegistry()));
-        (bool deployerIsAgent,) = victim.hasRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), deployer);
+        (bool tokenIsAgent,) = victim.hasRole(_role(RolesLib.Role.AGENT), address(deployed));
+        (bool registryIsAgent,) = victim.hasRole(_role(RolesLib.Role.AGENT), address(deployed.identityRegistry()));
+        (bool deployerIsAgent,) = victim.hasRole(_role(RolesLib.Role.AGENT), deployer);
         assertFalse(tokenIsAgent);
         assertFalse(registryIsAgent);
         assertFalse(deployerIsAgent);
@@ -72,7 +71,7 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         Token sibling = Token(trexFactory.getToken("sibling"));
         assertEq(address(sibling.identityRegistry().identityStorage()), address(irs));
         assertEq(irs.linkedIdentityRegistries().length, 1);
-        (bool binder,) = accessManager.hasRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_BINDER), address(trexFactory));
+        (bool binder,) = accessManager.hasRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory));
         assertFalse(binder);
 
         address siblingRegistry = address(sibling.identityRegistry());
@@ -80,8 +79,8 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         irs.bindIdentityRegistry(siblingRegistry);
         assertEq(irs.linkedIdentityRegistries().length, 2);
 
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, siblingRegistry, 1);
-        _grantAgentRole(siblingRegistry);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, siblingRegistry, NS);
+        _grantStorageWriterRole(siblingRegistry);
         address newcomer = makeAddr("newcomer");
         IIdentity newcomerIdentity = _deployIdentity(newcomer, "newcomer-oid");
         vm.prank(agent);
@@ -91,9 +90,9 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
     }
 
     function _grantLegacyFactoryPrivilege() private {
-        victim.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT_ADMIN), address(trexFactory), 0);
-        victim.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_BINDER), address(trexFactory), 0);
-        AccessManagerSetupLib.setupRoleAdmins(victim, 1);
+        victim.grantRole(_role(RolesLib.Role.AGENT_ADMIN), address(trexFactory), 0);
+        victim.grantRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory), 0);
+        AccessManagerSetupLib.setupRoleAdmins(victim, NS);
     }
 
     function _assertNoAccessTo(address target, Vm.AccountAccess[] memory accesses) private pure {

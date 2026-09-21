@@ -69,7 +69,7 @@ library RolesLib {
 
     bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
 
-    // ---- Standard roles. A role id is a namespace id in the upper 32 bits and a role number below ----
+    // ---- Suite roles. A role id is a namespace id in the upper 32 bits and a role number below ----
 
     enum Role {
         OWNER,
@@ -86,30 +86,47 @@ library RolesLib {
         AGENT_ADMIN,
         SUITE_ADMIN,
         IRS_BINDER,
+        IRS_WRITER
+    }
+
+    // ---- Platform roles: factory, implementation authority and identity factory governance ----
+
+    enum PlatformRole {
+        OWNER,
         VERSION_MANAGER,
         ASSET_DEPLOYER
     }
+
+    uint32 constant PLATFORM_NAMESPACE = type(uint32).max;
+
+    // Role numbers start at 1 so no standard role packs to a zero role number.
+    uint32 constant ROLE_NUMBER_OFFSET = 1;
 
     // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
     uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
 
     function forNamespace(uint32 namespaceId, Role role) internal pure returns (uint64) {
-        return _pack(namespaceId, uint32(role) + 1);
+        return _pack(namespaceId, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
     function forNamespace(uint32 namespaceId, bytes32 customName) internal pure returns (uint64) {
         return _pack(namespaceId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
     }
 
-    function decode(uint64 roleId) internal pure returns (uint32 namespaceId, uint32 role, bool custom) {
-        namespaceId = uint32(roleId >> 32);
-        role = uint32(roleId);
-        custom = role & CUSTOM_ROLE_FLAG != 0;
+    function platform(PlatformRole role) internal pure returns (uint64) {
+        return _pack(PLATFORM_NAMESPACE, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
-    function _pack(uint32 namespaceId, uint32 role) private pure returns (uint64) {
+    function decode(uint64 roleId) internal pure returns (uint32 namespaceId, uint32 roleNumber, bool custom) {
+        namespaceId = uint32(roleId >> 32);
+        roleNumber = uint32(roleId);
+        custom = roleNumber & CUSTOM_ROLE_FLAG != 0;
+    }
+
+    function _pack(uint32 namespaceId, uint32 roleNumber) private pure returns (uint64 roleId) {
         require(namespaceId != 0, ErrorsLib.InvalidNamespace());
-        return (uint64(namespaceId) << 32) | role;
+        roleId = (uint64(namespaceId) << 32) | roleNumber;
+        require(roleId != type(uint64).max, ErrorsLib.InvalidNamespace());
     }
 
 }

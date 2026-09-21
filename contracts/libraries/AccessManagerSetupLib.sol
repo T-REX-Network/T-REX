@@ -170,9 +170,10 @@ library AccessManagerSetupLib {
         table = new SelectorRole[](5);
         table[0] = SelectorRole(IdentityRegistryStorage.bindIdentityRegistry.selector, RolesLib.Role.IRS_BINDER);
         table[1] = SelectorRole(IdentityRegistryStorage.unbindIdentityRegistry.selector, RolesLib.Role.OWNER);
-        table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.Role.AGENT);
-        table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.AGENT);
-        table[4] = SelectorRole(IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector, RolesLib.Role.AGENT);
+        table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.Role.IRS_WRITER);
+        table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.IRS_WRITER);
+        table[4] =
+            SelectorRole(IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector, RolesLib.Role.IRS_WRITER);
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
@@ -186,7 +187,7 @@ library AccessManagerSetupLib {
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {
-        table = new RoleAdmin[](11);
+        table = new RoleAdmin[](12);
         table[0] = RoleAdmin(RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
         table[1] = RoleAdmin(RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);
         table[2] = RoleAdmin(RolesLib.Role.AGENT_BURNER, RolesLib.Role.AGENT_ADMIN);
@@ -196,8 +197,9 @@ library AccessManagerSetupLib {
         table[6] = RoleAdmin(RolesLib.Role.AGENT_FORCED_TRANSFER, RolesLib.Role.AGENT_ADMIN);
         table[7] = RoleAdmin(RolesLib.Role.AGENT_PAUSER, RolesLib.Role.AGENT_ADMIN);
         table[8] = RoleAdmin(RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
-        table[9] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
-        table[10] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[9] = RoleAdmin(RolesLib.Role.IRS_WRITER, RolesLib.Role.AGENT_ADMIN);
+        table[10] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[11] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
     }
 
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
@@ -212,8 +214,10 @@ library AccessManagerSetupLib {
         _commission(accessManager, token, namespaceId, storageNamespaceId);
     }
 
-    function commissionSuite(IAccessManager accessManager, address token, uint32 namespaceId) internal {
-        _commission(accessManager, token, namespaceId, namespaceId);
+    function commissionSuite(IAccessManager accessManager, address token, uint32 namespaceId, uint32 storageNamespaceId)
+        internal
+    {
+        _commission(accessManager, token, namespaceId, storageNamespaceId);
     }
 
     function migrateSuitesToNamespaces(
@@ -258,22 +262,20 @@ library AccessManagerSetupLib {
         }
     }
 
-    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory, uint32 namespaceId) internal {
+    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         bytes4[] memory functions = new bytes4[](4);
         functions[0] = ITREXFactory.setImplementationAuthority.selector;
         functions[1] = ITREXFactory.setIdFactory.selector;
         functions[2] = ITREXFactory.deployTREXSuite.selector;
         functions[3] = ITREXFactory.deployTREXSuiteIsolated.selector;
-        accessManager.setTargetFunctionRole(
-            trexFactory, functions, RolesLib.forNamespace(namespaceId, RolesLib.Role.OWNER)
-        );
+        accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.platform(RolesLib.PlatformRole.OWNER));
     }
 
     /// @notice Wires the two prerequisites the {TREXFactory} auto-mint path needs, so a deployer does
     ///         not have to rediscover them. Without both, `deployTREXSuite` reverts with
     ///         `NotAuthorizedForIdentityType` whenever `TokenDetails.ONCHAINID` is left at zero.
     /// @dev Call order does not matter, but both must land before the first auto-mint deploy.
-    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind the namespaced ASSET_DEPLOYER
+    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind the platform ASSET_DEPLOYER
     ///         role and with self-deploy off: only a registered factory mints token OIDs, and a token
     ///         must not be able to sign one for itself.
     ///      2. Grant that role to the TREX factory.
@@ -289,30 +291,26 @@ library AccessManagerSetupLib {
     /// @param accessManager The IdentityFactory's authority, where the role is resolved
     /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
     /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
-    /// @param namespaceId The namespace the ASSET_DEPLOYER role is derived in
     function setupIdentityFactoryPolicy(
         IAccessManager accessManager,
         IIdentityFactory identityFactory,
-        address trexFactory,
-        uint32 namespaceId
+        address trexFactory
     ) internal {
-        uint64 assetDeployer = RolesLib.forNamespace(namespaceId, RolesLib.Role.ASSET_DEPLOYER);
+        uint64 assetDeployer = RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER);
         // ASSET is single-binding: a token OID binds to exactly one token and cannot be re-linked.
         identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, assetDeployer, false, true);
         accessManager.grantRole(assetDeployer, trexFactory, 0);
     }
 
-    function setupTREXImplementationAuthorityRoles(
-        IAccessManager accessManager,
-        address trexImplementationAuthority,
-        uint32 namespaceId
-    ) internal {
+    function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
+        internal
+    {
         bytes4[] memory functions = new bytes4[](3);
         functions[0] = TREXImplementationAuthority.publish.selector;
         functions[1] = TREXImplementationAuthority.upgrade.selector;
         functions[2] = TREXImplementationAuthority.publishAndUpgrade.selector;
         accessManager.setTargetFunctionRole(
-            trexImplementationAuthority, functions, RolesLib.forNamespace(namespaceId, RolesLib.Role.VERSION_MANAGER)
+            trexImplementationAuthority, functions, RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER)
         );
     }
 
@@ -332,7 +330,7 @@ library AccessManagerSetupLib {
         address identityRegistryStorage = _storageOf(registry);
 
         accessManager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.AGENT), token, 0);
-        accessManager.grantRole(RolesLib.forNamespace(storageNamespaceId, RolesLib.Role.AGENT), registry, 0);
+        accessManager.grantRole(RolesLib.forNamespace(storageNamespaceId, RolesLib.Role.IRS_WRITER), registry, 0);
 
         setupTokenRoles(accessManager, token, namespaceId);
         setupTREXRegistryRoles(accessManager, registry, namespaceId);

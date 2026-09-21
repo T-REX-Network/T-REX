@@ -50,11 +50,11 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
 
     function testFuzz_forNamespace_PacksAndDecodes(uint32 namespaceId, uint8 roleIndex) public pure {
         vm.assume(namespaceId != 0);
-        RolesLib.Role role = RolesLib.Role(roleIndex % 16);
+        RolesLib.Role role = RolesLib.Role(roleIndex % (uint8(type(RolesLib.Role).max) + 1));
         uint64 id = RolesLib.forNamespace(namespaceId, role);
         (uint32 decodedNamespace, uint32 decodedRole, bool custom) = RolesLib.decode(id);
         assertEq(decodedNamespace, namespaceId);
-        assertEq(decodedRole, uint32(role) + 1);
+        assertEq(decodedRole, uint32(role) + RolesLib.ROLE_NUMBER_OFFSET);
         assertFalse(custom);
         assertNotEq(id, 0);
     }
@@ -76,7 +76,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(namespaceId, NS_A);
         assertTrue(isCustom);
         assertTrue(role & RolesLib.CUSTOM_ROLE_FLAG != 0);
-        for (uint8 i = 0; i < 16; i++) {
+        for (uint8 i = 0; i <= uint8(type(RolesLib.Role).max); i++) {
             assertNotEq(custom, RolesLib.forNamespace(NS_A, RolesLib.Role(i)));
         }
         assertEq(custom, RolesLib.forNamespace(NS_A, bytes32("COMPLIANCE_OFFICER")));
@@ -179,7 +179,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         );
         assertEq(
             accessManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT)
+            RolesLib.forNamespace(NS_A, RolesLib.Role.IRS_WRITER)
         );
         assertEq(
             accessManager.getTargetFunctionRole(mc, IModularCompliance.addModule.selector),
@@ -190,7 +190,8 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
             RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_ADMIN)
         );
         (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT), address(tokenA));
-        (bool registryWrites,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT), suiteRegistry);
+        (bool registryWrites,) =
+            accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.IRS_WRITER), suiteRegistry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
     }
@@ -211,7 +212,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         );
         assertEq(
             registry.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forNamespace(fund, RolesLib.Role.AGENT)
+            RolesLib.forNamespace(fund, RolesLib.Role.IRS_WRITER)
         );
         _grantAllAgentRoles(registry, agentA, fund);
         vm.startPrank(agentA);
@@ -258,6 +259,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
         assertEq(address(irs.storedIdentity(bob)), address(bobIdentity));
         assertTrue(_isBound(irs, address(classB.identityRegistry())));
+        _assertCannotTouchStorage(agentA, irs);
     }
 
     function test_registry_ReusedStorageKeepsItsNamespaceAcrossFunds() public {
@@ -275,10 +277,11 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(registry.namespaceOf(address(irs)), fundX);
         assertEq(
             registry.getTargetFunctionRole(address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forNamespace(fundX, RolesLib.Role.AGENT)
+            RolesLib.forNamespace(fundX, RolesLib.Role.IRS_WRITER)
         );
-        (bool registryYWrites,) =
-            registry.hasRole(RolesLib.forNamespace(fundX, RolesLib.Role.AGENT), address(tokenY.identityRegistry()));
+        (bool registryYWrites,) = registry.hasRole(
+            RolesLib.forNamespace(fundX, RolesLib.Role.IRS_WRITER), address(tokenY.identityRegistry())
+        );
         assertTrue(registryYWrites);
 
         _grantAllAgentRoles(registry, agentA, fundX);
@@ -293,6 +296,8 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(address(irs.storedIdentity(bob)), address(bobIdentity));
         _assertLockedOut(agentA, tokenY);
         _assertLockedOut(agentB, tokenX);
+        _assertCannotTouchStorage(agentA, irs);
+        _assertCannotTouchStorage(agentB, irs);
     }
 
     function test_registry_BindsAReusedStorageAndRevertsWhenTheCallerCannotBind() public {
@@ -457,7 +462,8 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertTrue(isMinter);
         assertEq(delay, 1 hours);
         (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT), address(tokenA));
-        (bool registryWrites,) = accessManager.hasRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT), suiteRegistry);
+        (bool registryWrites,) =
+            accessManager.hasRole(RolesLib.forNamespace(TEAM, RolesLib.Role.IRS_WRITER), suiteRegistry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
         (bool tokenStillInTeam,) =
@@ -491,7 +497,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
             accessManager.getTargetFunctionRole(
                 address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
             ),
-            RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT)
+            RolesLib.forNamespace(TEAM, RolesLib.Role.IRS_WRITER)
         );
         IERC3643IdentityRegistry registryA = tokenA.identityRegistry();
         IERC3643IdentityRegistry registryC = tokenC.identityRegistry();
@@ -720,12 +726,25 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
+    function _assertCannotTouchStorage(address agentAccount, IdentityRegistryStorage irs) private {
+        bytes memory unauthorized =
+            abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agentAccount);
+        vm.startPrank(agentAccount);
+        vm.expectRevert(unauthorized);
+        irs.addIdentityToStorage(another, aliceIdentity, 0);
+        vm.expectRevert(unauthorized);
+        irs.modifyStoredIdentity(alice, bobIdentity);
+        vm.expectRevert(unauthorized);
+        irs.removeIdentityFromStorage(bob);
+        vm.stopPrank();
+    }
+
     function _commission(Token target, uint32 namespaceId) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), namespaceId);
+        AccessManagerSetupLib.commissionSuite(accessManager, address(target), namespaceId, namespaceId);
     }
 
     function _commissionIntoTeam(Token target) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), TEAM);
+        AccessManagerSetupLib.commissionSuite(accessManager, address(target), TEAM, TEAM);
         accessManager.grantRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_ADMIN), address(this), 0);
     }
 

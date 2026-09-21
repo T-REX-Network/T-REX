@@ -87,6 +87,23 @@ contract TREXAccessManagerUnitTest is Test {
         manager.assign(first, token);
     }
 
+    function test_createNamespaceAndAssign_RevertWhen_AdminHasAnExecutionDelay() public {
+        address delayedAdmin = makeAddr("delayedAdmin");
+        manager.grantRole(manager.ADMIN_ROLE(), delayedAdmin, 1 hours);
+        uint32 first = manager.createNamespace("Fund A");
+
+        vm.prank(delayedAdmin);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, uint64(0))
+        );
+        manager.createNamespace("Fund B");
+        vm.prank(delayedAdmin);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, uint64(0))
+        );
+        manager.assign(first, token);
+    }
+
     function test_namespaceOf_IsZeroForUnassignedTargets() public view {
         assertEq(manager.namespaceOf(token), 0);
         assertEq(manager.namespaceName(0), "");

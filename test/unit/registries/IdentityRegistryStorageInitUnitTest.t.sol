@@ -51,7 +51,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         address[] memory linked = storageContract.linkedIdentityRegistries();
         assertEq(linked.length, 1);
         assertEq(linked[0], ir);
-        assertFalse(_hasAgentRole(ir));
+        assertFalse(_hasWriterRole(ir));
     }
 
     function test_init_BinderCanStillBindAdditionalIRAfterInit() public {
@@ -66,10 +66,10 @@ contract IdentityRegistryStorageInitUnitTest is Test {
 
         address[] memory linked = storageContract.linkedIdentityRegistries();
         assertEq(linked.length, 2);
-        assertFalse(_hasAgentRole(ir2));
+        assertFalse(_hasWriterRole(ir2));
     }
 
-    function test_bindIdentityRegistry_AdminGrantsAgentRoleExplicitly() public {
+    function test_bindIdentityRegistry_AdminGrantsWriterRoleExplicitly() public {
         IdentityRegistryStorage storageContract = _deployProxy(address(0));
 
         address ir = makeAddr("ir");
@@ -77,9 +77,9 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         // AccessManager as its authority.
         vm.mockCall(ir, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager)));
         storageContract.bindIdentityRegistry(ir);
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), ir, 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_WRITER), ir, 0);
 
-        assertTrue(_hasAgentRole(ir));
+        assertTrue(_hasWriterRole(ir));
     }
 
     function test_bindIdentityRegistry_RevertWhen_NotBinder() public {
@@ -105,8 +105,8 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         return irs;
     }
 
-    function _hasAgentRole(address account) private view returns (bool) {
-        (bool isMember,) = accessManager.hasRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), account);
+    function _hasWriterRole(address account) private view returns (bool) {
+        (bool isMember,) = accessManager.hasRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_WRITER), account);
         return isMember;
     }
 

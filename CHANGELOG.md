@@ -62,25 +62,38 @@ All notable changes to this project will be documented in this file.
     plain `uint64` constants are gone and an enum value cannot be passed to `grantRole` by accident, so
     no unscoped role is reachable by omission. `forNamespace(namespaceId, bytes32 customName)` derives
     a custom role by hashing the name into the upper half of the role number, so `RolesLib.decode`
-    tells standard from custom without a lookup. Namespace 0 is rejected (`InvalidNamespace`), so no
-    id is ever `ADMIN_ROLE`. Ids are reversible: tooling reads `namespaceId = id >> 32` off
+    tells standard from custom without a lookup. Role numbers start at `ROLE_NUMBER_OFFSET` (1).
+    Namespace 0 is rejected and so is an id equal to `PUBLIC_ROLE` (`InvalidNamespace`), so neither
+    OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `namespaceId = id >> 32` off
     `RoleGranted` events, no labels pass needed.
+  - Platform roles, the factory `OWNER`, `VERSION_MANAGER` and `ASSET_DEPLOYER`, are the
+    `RolesLib.PlatformRole` enum in the reserved `PLATFORM_NAMESPACE` (`type(uint32).max`),
+    derived with `RolesLib.platform(role)`. They are governance roles, not issuer roles, so
+    `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
+    take no namespace.
   - A namespace is an issuer, or a fund: one team across every token in it. Two tokens in one
     namespace share their agents; two namespaces are isolated from each other.
+  - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
+    gated by `IRS_WRITER`, which only registries hold. Agents edit investor records through a registry,
+    never directly, so a storage shared across namespaces gives the other namespace's agents nothing.
+    Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's namespace: whoever owns the
+    storage's namespace owns its bindings.
   - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createNamespace(name)` returns
     the next id, `assign(namespaceId, target)` records the namespace of a token or a storage,
     `namespaceOf(target)`, `namespaceName(id)` and `namespaceCount()` read it back. Both writers are
-    gated by a plain `ADMIN_ROLE` check; `_getAdminRestrictions` is not overridden, so the two
-    functions are immediate and not schedulable through `execute`. Events `NamespaceCreated` and
+    gated by a plain `ADMIN_ROLE` check that also requires a zero execution delay, so an admin whose
+    calls are meant to wait cannot assign instantly; `_getAdminRestrictions` is not overridden, so the
+    two functions are immediate and not schedulable through `execute`. Events `NamespaceCreated` and
     `NamespaceAssigned`.
   - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `namespaceOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
     the token's namespace on first use and keeps a storage already assigned where it is, so a storage
     reused across namespaces keeps one owner and every registry bound to it writes with that
-    namespace's `AGENT`. `commissionSuite(manager, token, namespaceId)` is the pure form and works on
-    any `IAccessManager`, storage included in the given namespace. Every other `setup*` function takes
-    a `namespaceId` and is pure. Commissioning is idempotent: re-running re-applies the standard
-    tables. Commissioning a second suite into a namespace already administered needs `AGENT_ADMIN`
+    namespace's `IRS_WRITER`. `commissionSuite(manager, token, namespaceId, storageNamespaceId)` is
+    the pure form and works on any `IAccessManager`: the storage's namespace is explicit, so a storage
+    already shared with another namespace is passed with the namespace it lives in and is not
+    remapped. Every other suite `setup*` function takes a `namespaceId` and is pure. Commissioning is
+    idempotent: re-running re-applies the standard tables. Commissioning a second suite into a namespace already administered needs `AGENT_ADMIN`
     there; binding to a mapped storage needs `IRS_BINDER` in the storage's namespace.
   - The library keeps no state of its own and validates no preconditions: no markers, no
     "already configured" checks, no migration preflight. Which suites were configured alike is the

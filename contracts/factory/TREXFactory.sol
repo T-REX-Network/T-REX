@@ -413,7 +413,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// (i.e. tokenDetails.ONCHAINID == address(0)):
     ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, assetDeployer, false, true)`
     ///   2. `accessManager.grantRole(assetDeployer, address(this), 0)`
-    ///   with `assetDeployer = RolesLib.forNamespace(namespaceId, RolesLib.Role.ASSET_DEPLOYER)`.
+    ///   with `assetDeployer = RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER)`.
     /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both. The ASSET module bundle is
     /// registered on the IdentityFactory itself (`setIdentityTypeModules`) as part of its deployment.
     function _deployToken(

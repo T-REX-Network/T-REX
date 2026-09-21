@@ -179,7 +179,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
         // ASSET is single-binding as in production: a token OID binds to exactly one token.
         factory.setIdentityTypePolicy(
-            IdentityTypes.ASSET, RolesLib.forNamespace(1, RolesLib.Role.ASSET_DEPLOYER), false, true
+            IdentityTypes.ASSET, RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), false, true
         );
         factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
@@ -380,7 +380,7 @@ contract TREXSuiteTest is AccessManagerHelper {
         IERC3643IdentityRegistry ir = _token.identityRegistry();
         _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
         _grantAgentRole(address(_token));
-        _grantAgentRole(address(ir));
+        _grantStorageWriterRole(address(ir));
         _grantAgentRole(agent);
     }
 
@@ -397,7 +397,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(accessManager), noModules, noSettings))
         );
         ModularCompliance freshCompliance = ModularCompliance(address(proxy));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance), 1);
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance), NS);
         freshCompliance.unbindToken(sentinel);
         return freshCompliance;
     }
