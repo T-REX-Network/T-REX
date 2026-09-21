@@ -123,17 +123,22 @@ library RolesLib {
         return bytes32(uint256(uint160(target)));
     }
 
-    function forSuite(uint64 role, bytes32 namespace) internal pure returns (uint64) {
+    function forSuite(uint64 role, bytes32 namespace) internal pure returns (uint64 id) {
         if (namespace == SHARED) {
             return role;
         }
-        uint64 id;
-        uint256 attempt;
-        do {
-            id = uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace, attempt))));
-            attempt++;
-        } while (id == 0 || id == type(uint64).max || (id >> 16) == (ROLE_PREFIX >> 16));
-        return id;
+        id = _derive(role, namespace, 0);
+        for (uint256 attempt = 1; _isReserved(id); attempt++) {
+            id = _derive(role, namespace, attempt);
+        }
+    }
+
+    function _derive(uint64 role, bytes32 namespace, uint256 attempt) private pure returns (uint64) {
+        return uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace, attempt))));
+    }
+
+    function _isReserved(uint64 id) private pure returns (bool) {
+        return id == 0 || id == type(uint64).max || (id >> 16) == (ROLE_PREFIX >> 16);
     }
 
 }
