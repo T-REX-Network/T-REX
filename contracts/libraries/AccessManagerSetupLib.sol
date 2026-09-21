@@ -95,6 +95,11 @@ library AccessManagerSetupLib {
         uint64 admin;
     }
 
+    struct RoleLabel {
+        uint64 role;
+        string label;
+    }
+
     struct RoleAssignment {
         address account;
         uint64 role;
@@ -205,14 +210,32 @@ library AccessManagerSetupLib {
         table[13] = RoleAdmin(RolesLib.IRS_BINDER, RolesLib.AGENT_ADMIN);
     }
 
+    function labelTable() internal pure returns (RoleLabel[] memory table) {
+        table = new RoleLabel[](14);
+        table[0] = RoleLabel(RolesLib.OWNER, "TREX-Suite Owner");
+        table[1] = RoleLabel(RolesLib.AGENT, "TREX-Suite Agent");
+        table[2] = RoleLabel(RolesLib.AGENT_MINTER, "TREX-Suite Agent: Minter");
+        table[3] = RoleLabel(RolesLib.AGENT_BURNER, "TREX-Suite Agent: Burner");
+        table[4] = RoleLabel(RolesLib.AGENT_PARTIAL_FREEZER, "TREX-Suite Agent: Partial Freezer");
+        table[5] = RoleLabel(RolesLib.AGENT_ADDRESS_FREEZER, "TREX-Suite Agent: Address Freezer");
+        table[6] = RoleLabel(RolesLib.AGENT_RECOVERY_ADDRESS, "TREX-Suite Agent: Recovery Address");
+        table[7] = RoleLabel(RolesLib.AGENT_FORCED_TRANSFER, "TREX-Suite Agent: Forced Transfer");
+        table[8] = RoleLabel(RolesLib.AGENT_PAUSER, "TREX-Suite Agent: Pauser");
+        table[9] = RoleLabel(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
+        table[10] = RoleLabel(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
+        table[11] = RoleLabel(RolesLib.AGENT_ADMIN, "TREX-Suite Admin: Agent");
+        table[12] = RoleLabel(RolesLib.SUITE_ADMIN, "TREX-Suite Admin: Suite");
+        table[13] = RoleLabel(RolesLib.IRS_BINDER, "TREX-Suite IRS Binder");
+    }
+
     function commissionSuite(IAccessManager accessManager, address token) internal {
         commissionSuite(accessManager, token, RolesLib.namespaceOf(token));
     }
 
     function commissionSuite(IAccessManager accessManager, address token, bytes32 namespace) internal {
         require(_markOf(accessManager, token) == 0, ErrorsLib.AlreadyCommissioned(token));
-        address registry = address(IERC3643(token).identityRegistry());
-        address identityRegistryStorage = address(IERC3643IdentityRegistry(registry).identityStorage());
+        address registry = _registryOf(token);
+        address identityRegistryStorage = _storageOf(registry);
         require(namespace != RolesLib.namespaceOf(identityRegistryStorage), ErrorsLib.InvalidRoleNamespace());
         (bytes32 storageNamespace, bool storageCommissioned) =
             _storagePolicy(accessManager, identityRegistryStorage, namespace);
@@ -222,7 +245,7 @@ library AccessManagerSetupLib {
 
         setupTokenRoles(accessManager, token, namespace);
         setupTREXRegistryRoles(accessManager, registry, namespace);
-        setupModularComplianceRoles(accessManager, address(IERC3643(token).compliance()), namespace);
+        setupModularComplianceRoles(accessManager, _complianceOf(token), namespace);
         _administer(accessManager, namespace);
         if (!_isBound(identityRegistryStorage, registry)) {
             IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
@@ -242,70 +265,14 @@ library AccessManagerSetupLib {
     ) internal {
         require(tokens.length == namespaces.length, ErrorsLib.ArrayLengthMismatch());
         _requireStandardAdministration(accessManager);
-        address[] memory registries = new address[](tokens.length);
-        bytes32[] memory storageNamespaces = new bytes32[](tokens.length);
-        for (uint256 i = 0; i < tokens.length; i++) {
-            require(namespaces[i] != RolesLib.SHARED, ErrorsLib.InvalidRoleNamespace());
-            for (uint256 j = 0; j < i; j++) {
-                require(tokens[j] != tokens[i] && namespaces[j] != namespaces[i], ErrorsLib.DuplicateMigrationEntry());
-            }
-            registries[i] = address(IERC3643(tokens[i]).identityRegistry());
-            address identityRegistryStorage = address(IERC3643IdentityRegistry(registries[i]).identityStorage());
-            storageNamespaces[i] = RolesLib.namespaceOf(identityRegistryStorage);
-            _requireStandardSource(accessManager, tokens[i], registries[i], identityRegistryStorage);
-            _requireUnusedDestination(accessManager, namespaces[i]);
-            _requireGrantDelaysPrepared(accessManager, namespaces[i], false);
-            _requireGrantDelaysPrepared(accessManager, storageNamespaces[i], true);
-        }
-        for (uint256 i = 0; i < tokens.length; i++) {
-            for (uint256 j = 0; j < tokens.length; j++) {
-                require(namespaces[i] != storageNamespaces[j], ErrorsLib.InvalidRoleNamespace());
-            }
-            address identityRegistryStorage = address(IERC3643IdentityRegistry(registries[i]).identityStorage());
-            require(
-                _allBound(
-                    IERC3643IdentityRegistryStorage(identityRegistryStorage).linkedIdentityRegistries(), registries
-                ),
-                ErrorsLib.StorageSharedOutsideBatch(identityRegistryStorage)
-            );
-            _requireUnusedDestination(accessManager, storageNamespaces[i]);
-        }
+        (address[] memory registries, bytes32[] memory storageNamespaces) =
+            _validateBatch(accessManager, tokens, namespaces);
         _validateAssignments(accessManager, assignments, namespaces, storageNamespaces);
         _validateRevocations(accessManager, revocations);
 
-        for (uint256 i = 0; i < assignments.length; i++) {
-            _grantFromGlobal(accessManager, assignments[i].role, assignments[i].namespace, assignments[i].account);
-        }
-        for (uint256 i = 0; i < tokens.length; i++) {
-            _grantFromGlobal(accessManager, RolesLib.AGENT, namespaces[i], tokens[i]);
-            _grantFromGlobal(accessManager, RolesLib.AGENT, storageNamespaces[i], registries[i]);
-        }
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            setupTokenRoles(accessManager, tokens[i], namespaces[i]);
-            setupTREXRegistryRoles(accessManager, registries[i], namespaces[i]);
-            setupModularComplianceRoles(accessManager, address(IERC3643(tokens[i]).compliance()), namespaces[i]);
-            _administer(accessManager, namespaces[i]);
-            setupIdentityRegistryStorageRoles(
-                accessManager, address(IERC3643IdentityRegistry(registries[i]).identityStorage()), storageNamespaces[i]
-            );
-            _administer(accessManager, storageNamespaces[i]);
-        }
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            accessManager.revokeRole(RolesLib.AGENT, tokens[i]);
-            accessManager.revokeRole(RolesLib.AGENT, registries[i]);
-        }
-        for (uint256 i = 0; i < revocations.length; i++) {
-            if (!_isAdministrative(revocations[i].role)) {
-                accessManager.revokeRole(revocations[i].role, revocations[i].account);
-            }
-        }
-        for (uint256 i = 0; i < revocations.length; i++) {
-            if (_isAdministrative(revocations[i].role)) {
-                accessManager.revokeRole(revocations[i].role, revocations[i].account);
-            }
-        }
+        _grantNamespacedRoles(accessManager, tokens, registries, namespaces, storageNamespaces, assignments);
+        _mapNamespaces(accessManager, tokens, registries, namespaces, storageNamespaces);
+        _revokeGlobalRoles(accessManager, tokens, registries, revocations);
     }
 
     function remainingGlobalHolders(IAccessManager accessManager, address[] memory accounts)
@@ -313,16 +280,12 @@ library AccessManagerSetupLib {
         view
         returns (address[] memory holders)
     {
-        uint64[14] memory roles = _suiteRoles();
+        uint64[] memory roles = _suiteRoles();
         address[] memory found = new address[](accounts.length);
         uint256 count;
         for (uint256 i = 0; i < accounts.length; i++) {
-            for (uint256 j = 0; j < roles.length; j++) {
-                (uint48 since,,,) = accessManager.getAccess(roles[j], accounts[i]);
-                if (since != 0) {
-                    found[count++] = accounts[i];
-                    break;
-                }
+            if (_holdsAny(accessManager, roles, accounts[i])) {
+                found[count++] = accounts[i];
             }
         }
         holders = new address[](count);
@@ -385,63 +348,61 @@ library AccessManagerSetupLib {
     function setupRoleAdmins(IAccessManager accessManager, bytes32 namespace) internal {
         RoleAdmin[] memory table = roleAdminTable();
         for (uint256 i = 0; i < table.length; i++) {
-            if (table[i].admin != ADMIN_ROLE) {
-                accessManager.setRoleAdmin(
-                    RolesLib.forSuite(table[i].role, namespace), RolesLib.forSuite(table[i].admin, namespace)
-                );
+            if (table[i].admin == ADMIN_ROLE) {
+                continue;
             }
+            accessManager.setRoleAdmin(
+                RolesLib.forSuite(table[i].role, namespace), RolesLib.forSuite(table[i].admin, namespace)
+            );
         }
         _mark(accessManager, _namespaceTarget(namespace), namespace);
     }
 
     function setupLabels(IAccessManager accessManager, bytes32 namespace) internal {
-        accessManager.labelRole(RolesLib.forSuite(RolesLib.OWNER, namespace), _label("TREX-Suite Owner", namespace));
-        accessManager.labelRole(RolesLib.forSuite(RolesLib.AGENT, namespace), _label("TREX-Suite Agent", namespace));
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_MINTER, namespace), _label("TREX-Suite Agent: Minter", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_BURNER, namespace), _label("TREX-Suite Agent: Burner", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_PARTIAL_FREEZER, namespace),
-            _label("TREX-Suite Agent: Partial Freezer", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_ADDRESS_FREEZER, namespace),
-            _label("TREX-Suite Agent: Address Freezer", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_RECOVERY_ADDRESS, namespace),
-            _label("TREX-Suite Agent: Recovery Address", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_FORCED_TRANSFER, namespace),
-            _label("TREX-Suite Agent: Forced Transfer", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_PAUSER, namespace), _label("TREX-Suite Agent: Pauser", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.TOKEN_MANAGER, namespace), _label("TREX-Suite Manager: Token", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.IDENTITY_MANAGER, namespace), _label("TREX-Suite Manager: Identity", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.AGENT_ADMIN, namespace), _label("TREX-Suite Admin: Agent", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.SUITE_ADMIN, namespace), _label("TREX-Suite Admin: Suite", namespace)
-        );
-        accessManager.labelRole(
-            RolesLib.forSuite(RolesLib.IRS_BINDER, namespace), _label("TREX-Suite IRS Binder", namespace)
-        );
+        RoleLabel[] memory table = labelTable();
+        for (uint256 i = 0; i < table.length; i++) {
+            accessManager.labelRole(RolesLib.forSuite(table[i].role, namespace), _label(table[i].label, namespace));
+        }
     }
 
     function setupGlobalLabels(IAccessManager accessManager) internal {
         accessManager.labelRole(RolesLib.VERSION_MANAGER, "TREX-Suite Manager: Version");
         accessManager.labelRole(RolesLib.ASSET_DEPLOYER, "TREX-Suite Asset Deployer");
+    }
+
+    function markerTarget(address target) internal pure returns (address) {
+        return address(uint160(uint256(keccak256(abi.encode("TREX-Suite.target", target)))));
+    }
+
+    function _validateBatch(IAccessManager accessManager, address[] memory tokens, bytes32[] memory namespaces)
+        private
+        view
+        returns (address[] memory registries, bytes32[] memory storageNamespaces)
+    {
+        registries = new address[](tokens.length);
+        storageNamespaces = new bytes32[](tokens.length);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(namespaces[i] != RolesLib.SHARED, ErrorsLib.InvalidRoleNamespace());
+            for (uint256 j = 0; j < i; j++) {
+                require(tokens[j] != tokens[i] && namespaces[j] != namespaces[i], ErrorsLib.DuplicateMigrationEntry());
+            }
+            registries[i] = _registryOf(tokens[i]);
+            address identityRegistryStorage = _storageOf(registries[i]);
+            storageNamespaces[i] = RolesLib.namespaceOf(identityRegistryStorage);
+            _requireStandardSource(accessManager, tokens[i], registries[i], identityRegistryStorage);
+            _requireUnusedDestination(accessManager, namespaces[i]);
+            _requireGrantDelaysPrepared(accessManager, _suiteRoles(), namespaces[i]);
+            _requireGrantDelaysPrepared(accessManager, _storageRoles(), storageNamespaces[i]);
+        }
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(!_contains(storageNamespaces, namespaces[i]), ErrorsLib.InvalidRoleNamespace());
+            address identityRegistryStorage = _storageOf(registries[i]);
+            require(
+                _allBound(_linkedRegistries(identityRegistryStorage), registries),
+                ErrorsLib.StorageSharedOutsideBatch(identityRegistryStorage)
+            );
+            _requireUnusedDestination(accessManager, storageNamespaces[i]);
+        }
     }
 
     function _validateAssignments(
@@ -453,53 +414,116 @@ library AccessManagerSetupLib {
         for (uint256 i = 0; i < assignments.length; i++) {
             RoleAssignment memory assignment = assignments[i];
             for (uint256 j = 0; j < i; j++) {
-                require(
-                    assignments[j].account != assignment.account || assignments[j].role != assignment.role
-                        || assignments[j].namespace != assignment.namespace,
-                    ErrorsLib.DuplicateMigrationEntry()
-                );
+                require(!_sameAssignment(assignments[j], assignment), ErrorsLib.DuplicateMigrationEntry());
             }
-            bool suite = _contains(namespaces, assignment.namespace);
-            bool storageNamespace = _contains(storageNamespaces, assignment.namespace);
-            require(suite || storageNamespace, ErrorsLib.AssignmentNamespaceNotMigrated(assignment.namespace));
-            require(
-                suite ? _isSuiteRole(assignment.role) : _isStorageRole(assignment.role),
-                ErrorsLib.InvalidRoleForNamespace(assignment.role, assignment.namespace)
-            );
+            bool inSuite = _contains(namespaces, assignment.namespace);
+            bool inStorage = _contains(storageNamespaces, assignment.namespace);
+            require(inSuite || inStorage, ErrorsLib.AssignmentNamespaceNotMigrated(assignment.namespace));
+            bool allowed = inSuite ? _isSuiteRole(assignment.role) : _isStorageRole(assignment.role);
+            require(allowed, ErrorsLib.InvalidRoleForNamespace(assignment.role, assignment.namespace));
             _requireActiveGlobal(accessManager, assignment.role, assignment.account);
         }
     }
 
     function _validateRevocations(IAccessManager accessManager, GlobalRevocation[] memory revocations) private view {
         for (uint256 i = 0; i < revocations.length; i++) {
+            GlobalRevocation memory revocation = revocations[i];
             for (uint256 j = 0; j < i; j++) {
-                require(
-                    revocations[j].account != revocations[i].account || revocations[j].role != revocations[i].role,
-                    ErrorsLib.DuplicateMigrationEntry()
-                );
+                require(!_sameRevocation(revocations[j], revocation), ErrorsLib.DuplicateMigrationEntry());
             }
             require(
-                _isSuiteRole(revocations[i].role) || revocations[i].role == RolesLib.IRS_BINDER,
-                ErrorsLib.InvalidRoleForNamespace(revocations[i].role, RolesLib.SHARED)
+                _containsRole(_suiteRoles(), revocation.role),
+                ErrorsLib.InvalidRoleForNamespace(revocation.role, RolesLib.SHARED)
             );
-            _requireActiveGlobal(accessManager, revocations[i].role, revocations[i].account);
+            _requireActiveGlobal(accessManager, revocation.role, revocation.account);
         }
     }
 
-    function _requireActiveGlobal(IAccessManager accessManager, uint64 role, address account) private view {
-        (uint48 since,,, uint48 effect) = accessManager.getAccess(role, account);
+    function _grantNamespacedRoles(
+        IAccessManager accessManager,
+        address[] memory tokens,
+        address[] memory registries,
+        bytes32[] memory namespaces,
+        bytes32[] memory storageNamespaces,
+        RoleAssignment[] memory assignments
+    ) private {
+        for (uint256 i = 0; i < assignments.length; i++) {
+            _grantFromGlobal(accessManager, assignments[i].role, assignments[i].namespace, assignments[i].account);
+        }
+        for (uint256 i = 0; i < tokens.length; i++) {
+            _grantFromGlobal(accessManager, RolesLib.AGENT, namespaces[i], tokens[i]);
+            _grantFromGlobal(accessManager, RolesLib.AGENT, storageNamespaces[i], registries[i]);
+        }
+    }
+
+    function _mapNamespaces(
+        IAccessManager accessManager,
+        address[] memory tokens,
+        address[] memory registries,
+        bytes32[] memory namespaces,
+        bytes32[] memory storageNamespaces
+    ) private {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            setupTokenRoles(accessManager, tokens[i], namespaces[i]);
+            setupTREXRegistryRoles(accessManager, registries[i], namespaces[i]);
+            setupModularComplianceRoles(accessManager, _complianceOf(tokens[i]), namespaces[i]);
+            _administer(accessManager, namespaces[i]);
+            setupIdentityRegistryStorageRoles(accessManager, _storageOf(registries[i]), storageNamespaces[i]);
+            _administer(accessManager, storageNamespaces[i]);
+        }
+    }
+
+    function _revokeGlobalRoles(
+        IAccessManager accessManager,
+        address[] memory tokens,
+        address[] memory registries,
+        GlobalRevocation[] memory revocations
+    ) private {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            accessManager.revokeRole(RolesLib.AGENT, tokens[i]);
+            accessManager.revokeRole(RolesLib.AGENT, registries[i]);
+        }
+        for (uint256 i = 0; i < revocations.length; i++) {
+            if (!_isAdministrative(revocations[i].role)) {
+                accessManager.revokeRole(revocations[i].role, revocations[i].account);
+            }
+        }
+        for (uint256 i = 0; i < revocations.length; i++) {
+            if (_isAdministrative(revocations[i].role)) {
+                accessManager.revokeRole(revocations[i].role, revocations[i].account);
+            }
+        }
+    }
+
+    function _requireActiveGlobal(IAccessManager accessManager, uint64 role, address account)
+        private
+        view
+        returns (uint32 executionDelay)
+    {
+        (uint48 since, uint32 currentDelay,, uint48 effect) = accessManager.getAccess(role, account);
         require(since != 0, ErrorsLib.RoleNotHeld(account, role));
         require(since <= block.timestamp, ErrorsLib.PendingRoleGrant(account, role));
         require(effect <= block.timestamp, ErrorsLib.PendingDelayChange(account, role));
+        return currentDelay;
     }
 
     function _grantFromGlobal(IAccessManager accessManager, uint64 role, bytes32 namespace, address account) private {
-        (uint48 since, uint32 currentDelay, uint32 pendingDelay, uint48 effect) = accessManager.getAccess(role, account);
-        require(since != 0, ErrorsLib.RoleNotHeld(account, role));
-        require(since <= block.timestamp, ErrorsLib.PendingRoleGrant(account, role));
-        require(effect <= block.timestamp, ErrorsLib.PendingDelayChange(account, role));
-        uint32 executionDelay = effect != 0 ? pendingDelay : currentDelay;
+        uint32 executionDelay = _requireActiveGlobal(accessManager, role, account);
         accessManager.grantRole(RolesLib.forSuite(role, namespace), account, executionDelay);
+    }
+
+    function _holdsAny(IAccessManager accessManager, uint64[] memory roles, address account)
+        private
+        view
+        returns (bool)
+    {
+        for (uint256 i = 0; i < roles.length; i++) {
+            (uint48 since,,,) = accessManager.getAccess(roles[i], account);
+            if (since != 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function _isAdministrative(uint64 role) private pure returns (bool) {
@@ -507,32 +531,22 @@ library AccessManagerSetupLib {
     }
 
     function _isSuiteRole(uint64 role) private pure returns (bool) {
-        uint64[14] memory roles = _suiteRoles();
-        for (uint256 i = 0; i < roles.length; i++) {
-            if (roles[i] == role) {
-                return role != RolesLib.IRS_BINDER;
-            }
+        if (role == RolesLib.IRS_BINDER) {
+            return false;
         }
-        return false;
+        return _containsRole(_suiteRoles(), role);
     }
 
     function _isStorageRole(uint64 role) private pure returns (bool) {
-        uint64[4] memory roles = _storageRoles();
-        for (uint256 i = 0; i < roles.length; i++) {
-            if (roles[i] == role) {
-                return true;
-            }
-        }
-        return false;
+        return _containsRole(_storageRoles(), role);
     }
 
-    function _contains(bytes32[] memory list, bytes32 item) private pure returns (bool) {
-        for (uint256 i = 0; i < list.length; i++) {
-            if (list[i] == item) {
-                return true;
-            }
-        }
-        return false;
+    function _sameAssignment(RoleAssignment memory a, RoleAssignment memory b) private pure returns (bool) {
+        return a.account == b.account && a.role == b.role && a.namespace == b.namespace;
+    }
+
+    function _sameRevocation(GlobalRevocation memory a, GlobalRevocation memory b) private pure returns (bool) {
+        return a.account == b.account && a.role == b.role;
     }
 
     function _administer(IAccessManager accessManager, bytes32 namespace) private {
@@ -546,30 +560,36 @@ library AccessManagerSetupLib {
         private
     {
         for (uint256 i = 0; i < table.length; i++) {
-            bool seen;
-            for (uint256 j = 0; j < i; j++) {
-                if (table[j].role == table[i].role) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (seen) {
+            if (_seenBefore(table, i)) {
                 continue;
             }
-            uint256 count;
-            for (uint256 j = i; j < table.length; j++) {
-                if (table[j].role == table[i].role) {
-                    count++;
-                }
+            uint64 role = table[i].role;
+            accessManager.setTargetFunctionRole(target, _selectorsFor(table, role), RolesLib.forSuite(role, namespace));
+        }
+    }
+
+    function _seenBefore(SelectorRole[] memory table, uint256 index) private pure returns (bool) {
+        for (uint256 j = 0; j < index; j++) {
+            if (table[j].role == table[index].role) {
+                return true;
             }
-            bytes4[] memory selectors = new bytes4[](count);
-            uint256 k;
-            for (uint256 j = i; j < table.length; j++) {
-                if (table[j].role == table[i].role) {
-                    selectors[k++] = table[j].selector;
-                }
+        }
+        return false;
+    }
+
+    function _selectorsFor(SelectorRole[] memory table, uint64 role) private pure returns (bytes4[] memory selectors) {
+        uint256 count;
+        for (uint256 i = 0; i < table.length; i++) {
+            if (table[i].role == role) {
+                count++;
             }
-            accessManager.setTargetFunctionRole(target, selectors, RolesLib.forSuite(table[i].role, namespace));
+        }
+        selectors = new bytes4[](count);
+        uint256 next;
+        for (uint256 i = 0; i < table.length; i++) {
+            if (table[i].role == role) {
+                selectors[next++] = table[i].selector;
+            }
         }
     }
 
@@ -587,7 +607,7 @@ library AccessManagerSetupLib {
         _requireStandardMappings(accessManager, token, tokenTable());
         _requireStandardMappings(accessManager, registry, registryTable());
         _requireStandardMappings(accessManager, identityRegistryStorage, storageTable());
-        _requireStandardMappings(accessManager, address(IERC3643(token).compliance()), complianceTable());
+        _requireStandardMappings(accessManager, _complianceOf(token), complianceTable());
     }
 
     function _requireStandardMappings(IAccessManager accessManager, address target, SelectorRole[] memory table)
@@ -605,11 +625,9 @@ library AccessManagerSetupLib {
     function _requireStandardAdministration(IAccessManager accessManager) private view {
         RoleAdmin[] memory table = roleAdminTable();
         for (uint256 i = 0; i < table.length; i++) {
-            require(
-                accessManager.getRoleAdmin(table[i].role) == table[i].admin
-                    && accessManager.getRoleGuardian(table[i].role) == ADMIN_ROLE,
-                ErrorsLib.NonStandardAdministration(table[i].role)
-            );
+            bool standardAdmin = accessManager.getRoleAdmin(table[i].role) == table[i].admin;
+            bool standardGuardian = accessManager.getRoleGuardian(table[i].role) == ADMIN_ROLE;
+            require(standardAdmin && standardGuardian, ErrorsLib.NonStandardAdministration(table[i].role));
         }
     }
 
@@ -617,30 +635,23 @@ library AccessManagerSetupLib {
         require(
             _markOf(accessManager, _namespaceTarget(namespace)) == 0, ErrorsLib.DestinationNamespaceInUse(namespace)
         );
-        uint64[14] memory roles = _suiteRoles();
+        uint64[] memory roles = _suiteRoles();
         for (uint256 i = 0; i < roles.length; i++) {
-            uint64 target = RolesLib.forSuite(roles[i], namespace);
-            require(
-                accessManager.getRoleAdmin(target) == ADMIN_ROLE && accessManager.getRoleGuardian(target) == ADMIN_ROLE,
-                ErrorsLib.DestinationNamespaceInUse(namespace)
-            );
+            uint64 role = RolesLib.forSuite(roles[i], namespace);
+            bool untouchedAdmin = accessManager.getRoleAdmin(role) == ADMIN_ROLE;
+            bool untouchedGuardian = accessManager.getRoleGuardian(role) == ADMIN_ROLE;
+            require(untouchedAdmin && untouchedGuardian, ErrorsLib.DestinationNamespaceInUse(namespace));
         }
     }
 
-    function _requireGrantDelaysPrepared(IAccessManager accessManager, bytes32 namespace, bool storageOnly)
+    function _requireGrantDelaysPrepared(IAccessManager accessManager, uint64[] memory roles, bytes32 namespace)
         private
         view
     {
-        uint64[14] memory suiteRoles = _suiteRoles();
-        uint64[4] memory storageRoles = _storageRoles();
-        uint256 count = storageOnly ? storageRoles.length : suiteRoles.length;
-        for (uint256 i = 0; i < count; i++) {
-            uint64 role = storageOnly ? storageRoles[i] : suiteRoles[i];
-            require(
-                accessManager.getRoleGrantDelay(RolesLib.forSuite(role, namespace))
-                    == accessManager.getRoleGrantDelay(role),
-                ErrorsLib.GrantDelayNotPrepared(role, namespace)
-            );
+        for (uint256 i = 0; i < roles.length; i++) {
+            uint32 globalDelay = accessManager.getRoleGrantDelay(roles[i]);
+            uint32 namespacedDelay = accessManager.getRoleGrantDelay(RolesLib.forSuite(roles[i], namespace));
+            require(namespacedDelay == globalDelay, ErrorsLib.GrantDelayNotPrepared(roles[i], namespace));
         }
     }
 
@@ -656,15 +667,11 @@ library AccessManagerSetupLib {
         return accessManager.getTargetFunctionRole(markerTarget(target), RolesLib.COMMISSIONED);
     }
 
-    function markerTarget(address target) internal pure returns (address) {
-        return address(uint160(uint256(keccak256(abi.encode("TREX-Suite.target", target)))));
-    }
-
     function _namespaceTarget(bytes32 namespace) private pure returns (address) {
         return address(uint160(uint256(keccak256(abi.encode("TREX-Suite.namespace", namespace)))));
     }
 
-    function _storagePolicy(IAccessManager accessManager, address identityRegistryStorage, bytes32 namespace)
+    function _storagePolicy(IAccessManager accessManager, address identityRegistryStorage, bytes32 suiteNamespace)
         private
         view
         returns (bytes32 storageNamespace, bool commissioned)
@@ -672,7 +679,10 @@ library AccessManagerSetupLib {
         uint64 mark = _markOf(accessManager, identityRegistryStorage);
         bytes32 own = RolesLib.namespaceOf(identityRegistryStorage);
         if (mark == 0) {
-            return (namespace == RolesLib.SHARED ? RolesLib.SHARED : own, false);
+            if (suiteNamespace == RolesLib.SHARED) {
+                return (RolesLib.SHARED, false);
+            }
+            return (own, false);
         }
         if (mark == RolesLib.forSuite(RolesLib.OWNER, own)) {
             return (own, true);
@@ -683,66 +693,76 @@ library AccessManagerSetupLib {
         revert ErrorsLib.UnknownStoragePolicy(identityRegistryStorage);
     }
 
+    function _registryOf(address token) private view returns (address) {
+        return address(IERC3643(token).identityRegistry());
+    }
+
+    function _storageOf(address registry) private view returns (address) {
+        return address(IERC3643IdentityRegistry(registry).identityStorage());
+    }
+
+    function _complianceOf(address token) private view returns (address) {
+        return address(IERC3643(token).compliance());
+    }
+
+    function _linkedRegistries(address identityRegistryStorage) private view returns (address[] memory) {
+        return IERC3643IdentityRegistryStorage(identityRegistryStorage).linkedIdentityRegistries();
+    }
+
     function _isBound(address identityRegistryStorage, address registry) private view returns (bool) {
-        address[] memory linked = IERC3643IdentityRegistryStorage(identityRegistryStorage).linkedIdentityRegistries();
-        for (uint256 i = 0; i < linked.length; i++) {
-            if (linked[i] == registry) {
-                return true;
-            }
-        }
-        return false;
+        return _containsAddress(_linkedRegistries(identityRegistryStorage), registry);
     }
 
     function _allBound(address[] memory linked, address[] memory registries) private pure returns (bool) {
         for (uint256 i = 0; i < linked.length; i++) {
-            bool found;
-            for (uint256 j = 0; j < registries.length; j++) {
-                if (registries[j] == linked[i]) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
+            if (!_containsAddress(registries, linked[i])) {
                 return false;
             }
         }
         return true;
     }
 
-    function _storageRoles() private pure returns (uint64[4] memory) {
-        return [RolesLib.AGENT, RolesLib.OWNER, RolesLib.AGENT_ADMIN, RolesLib.IRS_BINDER];
+    function _contains(bytes32[] memory list, bytes32 item) private pure returns (bool) {
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i] == item) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    function _agentRoles() private pure returns (uint64[8] memory) {
-        return [
-            RolesLib.AGENT,
-            RolesLib.AGENT_MINTER,
-            RolesLib.AGENT_BURNER,
-            RolesLib.AGENT_PARTIAL_FREEZER,
-            RolesLib.AGENT_ADDRESS_FREEZER,
-            RolesLib.AGENT_RECOVERY_ADDRESS,
-            RolesLib.AGENT_FORCED_TRANSFER,
-            RolesLib.AGENT_PAUSER
-        ];
+    function _containsAddress(address[] memory list, address item) private pure returns (bool) {
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i] == item) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    function _suiteRoles() private pure returns (uint64[14] memory) {
-        return [
-            RolesLib.AGENT,
-            RolesLib.AGENT_MINTER,
-            RolesLib.AGENT_BURNER,
-            RolesLib.AGENT_PARTIAL_FREEZER,
-            RolesLib.AGENT_ADDRESS_FREEZER,
-            RolesLib.AGENT_RECOVERY_ADDRESS,
-            RolesLib.AGENT_FORCED_TRANSFER,
-            RolesLib.AGENT_PAUSER,
-            RolesLib.OWNER,
-            RolesLib.TOKEN_MANAGER,
-            RolesLib.IDENTITY_MANAGER,
-            RolesLib.AGENT_ADMIN,
-            RolesLib.SUITE_ADMIN,
-            RolesLib.IRS_BINDER
-        ];
+    function _containsRole(uint64[] memory list, uint64 item) private pure returns (bool) {
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i] == item) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _suiteRoles() private pure returns (uint64[] memory roles) {
+        RoleAdmin[] memory table = roleAdminTable();
+        roles = new uint64[](table.length);
+        for (uint256 i = 0; i < table.length; i++) {
+            roles[i] = table[i].role;
+        }
+    }
+
+    function _storageRoles() private pure returns (uint64[] memory roles) {
+        roles = new uint64[](4);
+        roles[0] = RolesLib.AGENT;
+        roles[1] = RolesLib.OWNER;
+        roles[2] = RolesLib.AGENT_ADMIN;
+        roles[3] = RolesLib.IRS_BINDER;
     }
 
     function _label(string memory base, bytes32 namespace) private pure returns (string memory) {
