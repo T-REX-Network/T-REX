@@ -105,9 +105,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
 
         // Wire AccessManager roles for the new contracts (this contract is the AccessManager admin).
         _setupTREXRegistryRoles(address(registry));
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(
-            accessManager, address(identityRegistryStorage), RolesLib.SHARED
-        );
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(identityRegistryStorage), 1);
 
         // Grant standard owner/agent roles to deployer/agent so they can drive the registry.
         _grantOwnerRole(deployer);
@@ -165,7 +163,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
         factory.setIdentityTypePolicy(
-            IdentityTypes.ASSET, RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), false, true
+            IdentityTypes.ASSET, RolesLib.forNamespace(1, RolesLib.Role.ASSET_DEPLOYER), false, true
         );
         factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
@@ -225,7 +223,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         ownerFunctions[10] = TREXRegistry.addClaimTopicForIdentityType.selector;
         ownerFunctions[11] = TREXRegistry.removeClaimTopicForIdentityType.selector;
         IAccessManager(accessManager)
-            .setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.role(RolesLib.SHARED, RolesLib.OWNER));
+            .setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.forNamespace(1, RolesLib.Role.OWNER));
 
         // ------ AGENT role ------
         bytes4[] memory agentFunctions = new bytes4[](3);
@@ -233,7 +231,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         agentFunctions[1] = IERC3643IdentityRegistry.deleteIdentity.selector;
         agentFunctions[2] = IERC3643IdentityRegistry.registerIdentity.selector;
         IAccessManager(accessManager)
-            .setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.role(RolesLib.SHARED, RolesLib.AGENT));
+            .setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.forNamespace(1, RolesLib.Role.AGENT));
     }
 
     /// @notice Creates a claim signed now with no expiry and adds it to `_identity`.

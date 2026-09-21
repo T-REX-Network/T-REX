@@ -32,7 +32,7 @@ contract TokenBurnUnitTest is TokenBaseUnitTest {
 
     function testTokenBurnRevertsWhenCallerOnlyMinter() public {
         address minter = makeAddr("Minter");
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_MINTER), minter, 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT_MINTER), minter, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
         vm.prank(minter);

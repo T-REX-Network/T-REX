@@ -115,6 +115,11 @@ library EventsLib {
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
     event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);
 
+    // TREXAccessManager Events
+
+    event NamespaceCreated(uint32 indexed namespaceId, string name);
+    event NamespaceAssigned(uint32 indexed namespaceId, address indexed target);
+
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

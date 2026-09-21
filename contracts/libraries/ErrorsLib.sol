@@ -142,9 +142,16 @@ library ErrorsLib {
     error MaxIRByIRSReached(uint256 max);
 
     // AccessManagerSetupLib Errors
+    error NotAssigned(address target);
     error PendingDelayChange(address account, uint64 role);
     error PendingRoleGrant(address account, uint64 role);
     error RoleNotHeld(address account, uint64 role);
+
+    // RolesLib Errors
+    error InvalidNamespace();
+
+    // TREXAccessManager Errors
+    error NamespaceNotFound(uint32 namespaceId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

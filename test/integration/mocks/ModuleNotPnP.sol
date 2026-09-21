@@ -92,7 +92,7 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
 
     function setModuleReady(address compliance, bool ready) external {
         (bool isOwner,) = IAccessManager(IAccessManaged(compliance).authority())
-            .hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.OWNER), msg.sender);
+            .hasRole(RolesLib.forNamespace(1, RolesLib.Role.OWNER), msg.sender);
         require(isOwner, "only compliance owner can call");
         _moduleReady[compliance] = ready;
     }

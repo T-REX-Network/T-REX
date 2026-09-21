@@ -63,65 +63,53 @@
 
 pragma solidity ^0.8.30;
 
+import { ErrorsLib } from "./ErrorsLib.sol";
+
 library RolesLib {
 
     bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
 
-    // ---- Scopes: every role id is derived from a scope and a role name ----
+    // ---- Standard roles. A role id is a namespace id in the upper 32 bits and a role number below ----
 
-    // The explicit opt-in to one set of agents across every suite of a manager.
-    bytes32 constant SHARED = keccak256("TREX-Suite.scope.shared");
-
-    // ---- Operational roles (gate contract functions: "what you can do") ----
-
-    bytes32 constant OWNER = keccak256("TREX-Suite.role.OWNER");
-
-    bytes32 constant AGENT = keccak256("TREX-Suite.role.AGENT");
-    bytes32 constant AGENT_MINTER = keccak256("TREX-Suite.role.AGENT_MINTER");
-    bytes32 constant AGENT_BURNER = keccak256("TREX-Suite.role.AGENT_BURNER");
-    bytes32 constant AGENT_PARTIAL_FREEZER = keccak256("TREX-Suite.role.AGENT_PARTIAL_FREEZER");
-    bytes32 constant AGENT_ADDRESS_FREEZER = keccak256("TREX-Suite.role.AGENT_ADDRESS_FREEZER");
-    bytes32 constant AGENT_RECOVERY_ADDRESS = keccak256("TREX-Suite.role.AGENT_RECOVERY_ADDRESS");
-    bytes32 constant AGENT_FORCED_TRANSFER = keccak256("TREX-Suite.role.AGENT_FORCED_TRANSFER");
-    bytes32 constant AGENT_PAUSER = keccak256("TREX-Suite.role.AGENT_PAUSER");
-
-    bytes32 constant TOKEN_MANAGER = keccak256("TREX-Suite.role.TOKEN_MANAGER");
-    bytes32 constant IDENTITY_MANAGER = keccak256("TREX-Suite.role.IDENTITY_MANAGER");
-
-    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
-    bytes32 constant VERSION_MANAGER = keccak256("TREX-Suite.role.VERSION_MANAGER");
-
-    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
-    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
-    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
-    // handing out the AccessManager ADMIN_ROLE (0).
-
-    // Admin of AGENT and every granular AGENT_* role.
-    bytes32 constant AGENT_ADMIN = keccak256("TREX-Suite.role.AGENT_ADMIN");
-
-    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
-    bytes32 constant SUITE_ADMIN = keccak256("TREX-Suite.role.SUITE_ADMIN");
-
-    // ---- Storage binding ----
-
-    // Gates IdentityRegistryStorage.bindIdentityRegistry, so an issuer can bind a new IR onto a reused
-    // IRS without standing OWNER. The factory never holds it: it deploys against a reused IRS without
-    // binding, and the issuer binds afterwards.
-    bytes32 constant IRS_BINDER = keccak256("TREX-Suite.role.IRS_BINDER");
-
-    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
-
-    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
-    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
-    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    bytes32 constant ASSET_DEPLOYER = keccak256("TREX-Suite.role.ASSET_DEPLOYER");
-
-    function scopeOf(address target) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(target)));
+    enum Role {
+        OWNER,
+        AGENT,
+        AGENT_MINTER,
+        AGENT_BURNER,
+        AGENT_PARTIAL_FREEZER,
+        AGENT_ADDRESS_FREEZER,
+        AGENT_RECOVERY_ADDRESS,
+        AGENT_FORCED_TRANSFER,
+        AGENT_PAUSER,
+        TOKEN_MANAGER,
+        IDENTITY_MANAGER,
+        AGENT_ADMIN,
+        SUITE_ADMIN,
+        IRS_BINDER,
+        VERSION_MANAGER,
+        ASSET_DEPLOYER
     }
 
-    function role(bytes32 scope, bytes32 name) internal pure returns (uint64) {
-        return uint64(uint256(keccak256(abi.encode("TREX-Suite", scope, name))));
+    // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
+    uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
+
+    function forNamespace(uint32 namespaceId, Role role) internal pure returns (uint64) {
+        return _pack(namespaceId, uint32(role) + 1);
+    }
+
+    function forNamespace(uint32 namespaceId, bytes32 customName) internal pure returns (uint64) {
+        return _pack(namespaceId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
+    }
+
+    function decode(uint64 roleId) internal pure returns (uint32 namespaceId, uint32 role, bool custom) {
+        namespaceId = uint32(roleId >> 32);
+        role = uint32(roleId);
+        custom = role & CUSTOM_ROLE_FLAG != 0;
+    }
+
+    function _pack(uint32 namespaceId, uint32 role) private pure returns (uint64) {
+        require(namespaceId != 0, ErrorsLib.InvalidNamespace());
+        return (uint64(namespaceId) << 32) | role;
     }
 
 }

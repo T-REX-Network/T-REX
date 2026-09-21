@@ -23,9 +23,9 @@ contract IdentityRegistryStorageInitUnitTest is Test {
     function setUp() public {
         irsImplementation = new IdentityRegistryStorage();
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.OWNER), address(this), 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.OWNER), address(this), 0);
         // bindIdentityRegistry is gated by IRS_BINDER (not OWNER); the test acts as the binder here.
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(this), 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_BINDER), address(this), 0);
         irsBeacon = BeaconProxyDeployer.newBeacon(address(irsImplementation));
     }
 
@@ -77,7 +77,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         // AccessManager as its authority.
         vm.mockCall(ir, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager)));
         storageContract.bindIdentityRegistry(ir);
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), ir, 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), ir, 0);
 
         assertTrue(_hasAgentRole(ir));
     }
@@ -101,12 +101,12 @@ contract IdentityRegistryStorageInitUnitTest is Test {
                 irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), _initialIR))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), RolesLib.SHARED);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
         return irs;
     }
 
     function _hasAgentRole(address account) private view returns (bool) {
-        (bool isMember,) = accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), account);
+        (bool isMember,) = accessManager.hasRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), account);
         return isMember;
     }
 

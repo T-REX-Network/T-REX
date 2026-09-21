@@ -36,8 +36,8 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
 
     function setUp() public virtual {
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(this), 0);
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), address(this), 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(
@@ -45,7 +45,7 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
                 beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), RolesLib.SHARED);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
 
         vm.mockCall(
             registry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))

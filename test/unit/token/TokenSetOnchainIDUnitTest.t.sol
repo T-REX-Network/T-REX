@@ -15,7 +15,7 @@ contract TokenSetOnchainIDUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.IDENTITY_MANAGER), address(this), 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
     }
 
     function testTokenSetOnchainIDRevertsWhenUnauthorized(address caller) public {

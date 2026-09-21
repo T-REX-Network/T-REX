@@ -66,7 +66,6 @@ pragma solidity 0.8.30;
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
-import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
@@ -78,6 +77,7 @@ import { ITREXFactory } from "../factory/ITREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
+import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ErrorsLib } from "./ErrorsLib.sol";
 import { RolesLib } from "./RolesLib.sol";
 
@@ -87,216 +87,193 @@ library AccessManagerSetupLib {
 
     struct SelectorRole {
         bytes4 selector;
-        bytes32 name;
+        RolesLib.Role role;
     }
 
     struct RoleAdmin {
-        bytes32 name;
-        bytes32 admin;
-    }
-
-    struct RoleLabel {
-        bytes32 name;
-        string label;
+        RolesLib.Role role;
+        RolesLib.Role admin;
     }
 
     struct RoleAssignment {
         address account;
-        bytes32 name;
-        bytes32 scope;
+        RolesLib.Role role;
+        uint32 namespaceId;
     }
 
-    struct SharedRevocation {
+    struct RoleRevocation {
         address account;
-        bytes32 name;
+        RolesLib.Role role;
     }
 
     uint64 internal constant ADMIN_ROLE = 0;
 
-    function setupTokenRoles(IAccessManager accessManager, address token, bytes32 scope) internal {
-        _apply(accessManager, token, tokenTable(), scope);
+    function setupTokenRoles(IAccessManager accessManager, address token, uint32 namespaceId) internal {
+        _apply(accessManager, token, tokenTable(), namespaceId);
     }
 
     function setupIdentityRegistryStorageRoles(
         IAccessManager accessManager,
         address identityRegistryStorage,
-        bytes32 scope
+        uint32 namespaceId
     ) internal {
-        _apply(accessManager, identityRegistryStorage, storageTable(), scope);
+        _apply(accessManager, identityRegistryStorage, storageTable(), namespaceId);
     }
 
-    function setupTREXRegistryRoles(IAccessManager accessManager, address registry, bytes32 scope) internal {
-        _apply(accessManager, registry, registryTable(), scope);
+    function setupTREXRegistryRoles(IAccessManager accessManager, address registry, uint32 namespaceId) internal {
+        _apply(accessManager, registry, registryTable(), namespaceId);
     }
 
-    function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance, bytes32 scope)
+    function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance, uint32 namespaceId)
         internal
     {
-        _apply(accessManager, modularCompliance, complianceTable(), scope);
+        _apply(accessManager, modularCompliance, complianceTable(), namespaceId);
     }
 
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
         table = new SelectorRole[](14);
-        table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.TOKEN_MANAGER);
-        table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.TOKEN_MANAGER);
-        table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.IDENTITY_MANAGER);
-        table[3] = SelectorRole(IERC3643.setIdentityRegistry.selector, RolesLib.IDENTITY_MANAGER);
-        table[4] = SelectorRole(IERC3643.setCompliance.selector, RolesLib.IDENTITY_MANAGER);
-        table[5] = SelectorRole(IERC3643.mint.selector, RolesLib.AGENT_MINTER);
-        table[6] = SelectorRole(IERC3643.burn.selector, RolesLib.AGENT_BURNER);
-        table[7] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.AGENT_PARTIAL_FREEZER);
-        table[8] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.AGENT_PARTIAL_FREEZER);
-        table[9] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.AGENT_ADDRESS_FREEZER);
-        table[10] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.AGENT_RECOVERY_ADDRESS);
-        table[11] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.AGENT_FORCED_TRANSFER);
-        table[12] = SelectorRole(IERC3643.pause.selector, RolesLib.AGENT_PAUSER);
-        table[13] = SelectorRole(IERC3643.unpause.selector, RolesLib.AGENT_PAUSER);
+        table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.Role.TOKEN_MANAGER);
+        table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.Role.TOKEN_MANAGER);
+        table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.Role.IDENTITY_MANAGER);
+        table[3] = SelectorRole(IERC3643.setIdentityRegistry.selector, RolesLib.Role.IDENTITY_MANAGER);
+        table[4] = SelectorRole(IERC3643.setCompliance.selector, RolesLib.Role.IDENTITY_MANAGER);
+        table[5] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
+        table[6] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
+        table[7] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[8] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[9] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[10] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
+        table[11] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[12] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[13] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {
         table = new SelectorRole[](14);
-        table[0] = SelectorRole(IERC3643IdentityRegistry.setIdentityRegistryStorage.selector, RolesLib.OWNER);
-        table[1] = SelectorRole(TREXRegistry.disableEligibilityChecks.selector, RolesLib.OWNER);
-        table[2] = SelectorRole(TREXRegistry.enableEligibilityChecks.selector, RolesLib.OWNER);
-        table[3] = SelectorRole(IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector, RolesLib.OWNER);
-        table[4] = SelectorRole(IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector, RolesLib.OWNER);
-        table[5] = SelectorRole(IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector, RolesLib.OWNER);
-        table[6] = SelectorRole(IERC3643ClaimTopicsRegistry.addClaimTopic.selector, RolesLib.OWNER);
-        table[7] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.OWNER);
-        table[8] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.OWNER);
-        table[9] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.OWNER);
-        table[10] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.AGENT);
-        table[11] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.AGENT);
-        table[12] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.AGENT);
-        table[13] = SelectorRole(IERC3643IdentityRegistry.deleteIdentity.selector, RolesLib.AGENT);
+        table[0] = SelectorRole(IERC3643IdentityRegistry.setIdentityRegistryStorage.selector, RolesLib.Role.OWNER);
+        table[1] = SelectorRole(TREXRegistry.disableEligibilityChecks.selector, RolesLib.Role.OWNER);
+        table[2] = SelectorRole(TREXRegistry.enableEligibilityChecks.selector, RolesLib.Role.OWNER);
+        table[3] = SelectorRole(IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector, RolesLib.Role.OWNER);
+        table[4] = SelectorRole(IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector, RolesLib.Role.OWNER);
+        table[5] = SelectorRole(IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector, RolesLib.Role.OWNER);
+        table[6] = SelectorRole(IERC3643ClaimTopicsRegistry.addClaimTopic.selector, RolesLib.Role.OWNER);
+        table[7] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.Role.OWNER);
+        table[8] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        table[9] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        table[10] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.Role.AGENT);
+        table[11] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.Role.AGENT);
+        table[12] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.Role.AGENT);
+        table[13] = SelectorRole(IERC3643IdentityRegistry.deleteIdentity.selector, RolesLib.Role.AGENT);
     }
 
     function storageTable() internal pure returns (SelectorRole[] memory table) {
         table = new SelectorRole[](5);
-        table[0] = SelectorRole(IdentityRegistryStorage.bindIdentityRegistry.selector, RolesLib.IRS_BINDER);
-        table[1] = SelectorRole(IdentityRegistryStorage.unbindIdentityRegistry.selector, RolesLib.OWNER);
-        table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.AGENT);
-        table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.AGENT);
-        table[4] = SelectorRole(IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector, RolesLib.AGENT);
+        table[0] = SelectorRole(IdentityRegistryStorage.bindIdentityRegistry.selector, RolesLib.Role.IRS_BINDER);
+        table[1] = SelectorRole(IdentityRegistryStorage.unbindIdentityRegistry.selector, RolesLib.Role.OWNER);
+        table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.Role.AGENT);
+        table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.AGENT);
+        table[4] = SelectorRole(IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector, RolesLib.Role.AGENT);
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
         table = new SelectorRole[](6);
-        table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.OWNER);
-        table[1] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.OWNER);
-        table[2] = SelectorRole(ModularCompliance.addModule.selector, RolesLib.OWNER);
-        table[3] = SelectorRole(ModularCompliance.callModuleFunction.selector, RolesLib.OWNER);
-        table[4] = SelectorRole(RolesLib.BIND_UNBIND_TOKEN, RolesLib.OWNER);
-        table[5] = SelectorRole(ModularCompliance.refreshModuleCapabilities.selector, RolesLib.OWNER);
+        table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
+        table[1] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
+        table[2] = SelectorRole(ModularCompliance.addModule.selector, RolesLib.Role.OWNER);
+        table[3] = SelectorRole(ModularCompliance.callModuleFunction.selector, RolesLib.Role.OWNER);
+        table[4] = SelectorRole(RolesLib.BIND_UNBIND_TOKEN, RolesLib.Role.OWNER);
+        table[5] = SelectorRole(ModularCompliance.refreshModuleCapabilities.selector, RolesLib.Role.OWNER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {
         table = new RoleAdmin[](11);
-        table[0] = RoleAdmin(RolesLib.AGENT, RolesLib.AGENT_ADMIN);
-        table[1] = RoleAdmin(RolesLib.AGENT_MINTER, RolesLib.AGENT_ADMIN);
-        table[2] = RoleAdmin(RolesLib.AGENT_BURNER, RolesLib.AGENT_ADMIN);
-        table[3] = RoleAdmin(RolesLib.AGENT_PARTIAL_FREEZER, RolesLib.AGENT_ADMIN);
-        table[4] = RoleAdmin(RolesLib.AGENT_ADDRESS_FREEZER, RolesLib.AGENT_ADMIN);
-        table[5] = RoleAdmin(RolesLib.AGENT_RECOVERY_ADDRESS, RolesLib.AGENT_ADMIN);
-        table[6] = RoleAdmin(RolesLib.AGENT_FORCED_TRANSFER, RolesLib.AGENT_ADMIN);
-        table[7] = RoleAdmin(RolesLib.AGENT_PAUSER, RolesLib.AGENT_ADMIN);
-        table[8] = RoleAdmin(RolesLib.IRS_BINDER, RolesLib.AGENT_ADMIN);
-        table[9] = RoleAdmin(RolesLib.TOKEN_MANAGER, RolesLib.SUITE_ADMIN);
-        table[10] = RoleAdmin(RolesLib.IDENTITY_MANAGER, RolesLib.SUITE_ADMIN);
+        table[0] = RoleAdmin(RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
+        table[1] = RoleAdmin(RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);
+        table[2] = RoleAdmin(RolesLib.Role.AGENT_BURNER, RolesLib.Role.AGENT_ADMIN);
+        table[3] = RoleAdmin(RolesLib.Role.AGENT_PARTIAL_FREEZER, RolesLib.Role.AGENT_ADMIN);
+        table[4] = RoleAdmin(RolesLib.Role.AGENT_ADDRESS_FREEZER, RolesLib.Role.AGENT_ADMIN);
+        table[5] = RoleAdmin(RolesLib.Role.AGENT_RECOVERY_ADDRESS, RolesLib.Role.AGENT_ADMIN);
+        table[6] = RoleAdmin(RolesLib.Role.AGENT_FORCED_TRANSFER, RolesLib.Role.AGENT_ADMIN);
+        table[7] = RoleAdmin(RolesLib.Role.AGENT_PAUSER, RolesLib.Role.AGENT_ADMIN);
+        table[8] = RoleAdmin(RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
+        table[9] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[10] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
     }
 
-    function labelTable() internal pure returns (RoleLabel[] memory table) {
-        table = new RoleLabel[](16);
-        table[0] = RoleLabel(RolesLib.OWNER, "TREX-Suite Owner");
-        table[1] = RoleLabel(RolesLib.AGENT, "TREX-Suite Agent");
-        table[2] = RoleLabel(RolesLib.AGENT_MINTER, "TREX-Suite Agent: Minter");
-        table[3] = RoleLabel(RolesLib.AGENT_BURNER, "TREX-Suite Agent: Burner");
-        table[4] = RoleLabel(RolesLib.AGENT_PARTIAL_FREEZER, "TREX-Suite Agent: Partial Freezer");
-        table[5] = RoleLabel(RolesLib.AGENT_ADDRESS_FREEZER, "TREX-Suite Agent: Address Freezer");
-        table[6] = RoleLabel(RolesLib.AGENT_RECOVERY_ADDRESS, "TREX-Suite Agent: Recovery Address");
-        table[7] = RoleLabel(RolesLib.AGENT_FORCED_TRANSFER, "TREX-Suite Agent: Forced Transfer");
-        table[8] = RoleLabel(RolesLib.AGENT_PAUSER, "TREX-Suite Agent: Pauser");
-        table[9] = RoleLabel(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
-        table[10] = RoleLabel(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
-        table[11] = RoleLabel(RolesLib.AGENT_ADMIN, "TREX-Suite Admin: Agent");
-        table[12] = RoleLabel(RolesLib.SUITE_ADMIN, "TREX-Suite Admin: Suite");
-        table[13] = RoleLabel(RolesLib.IRS_BINDER, "TREX-Suite IRS Binder");
-        table[14] = RoleLabel(RolesLib.VERSION_MANAGER, "TREX-Suite Manager: Version");
-        table[15] = RoleLabel(RolesLib.ASSET_DEPLOYER, "TREX-Suite Asset Deployer");
-    }
-
-    function commissionSuite(IAccessManager accessManager, address token) internal {
-        commissionSuite(accessManager, token, RolesLib.scopeOf(token));
-    }
-
-    function commissionSuite(IAccessManager accessManager, address token, bytes32 scope) internal {
-        address registry = _registryOf(token);
-        address identityRegistryStorage = _storageOf(registry);
-        bytes32 storageScope = RolesLib.scopeOf(identityRegistryStorage);
-
-        accessManager.grantRole(RolesLib.role(scope, RolesLib.AGENT), token, 0);
-        accessManager.grantRole(RolesLib.role(storageScope, RolesLib.AGENT), registry, 0);
-
-        setupTokenRoles(accessManager, token, scope);
-        setupTREXRegistryRoles(accessManager, registry, scope);
-        setupModularComplianceRoles(accessManager, _complianceOf(token), scope);
-        setupRoleAdmins(accessManager, scope);
-        if (!_isBound(identityRegistryStorage, registry)) {
-            IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
+    function commissionSuite(TREXAccessManager accessManager, address token) internal {
+        uint32 namespaceId = accessManager.namespaceOf(token);
+        require(namespaceId != 0, ErrorsLib.NotAssigned(token));
+        address identityRegistryStorage = _storageOf(_registryOf(token));
+        uint32 storageNamespaceId = accessManager.namespaceOf(identityRegistryStorage);
+        if (storageNamespaceId == 0) {
+            accessManager.assign(namespaceId, identityRegistryStorage);
+            storageNamespaceId = namespaceId;
         }
-        setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, storageScope);
-        setupRoleAdmins(accessManager, storageScope);
+        _commission(accessManager, token, namespaceId, storageNamespaceId);
     }
 
-    function migrateSuitesToScopes(
+    function commissionSuite(IAccessManager accessManager, address token, uint32 namespaceId) internal {
+        _commission(accessManager, token, namespaceId, namespaceId);
+    }
+
+    function migrateSuitesToNamespaces(
         IAccessManager accessManager,
         address[] memory tokens,
-        bytes32[] memory scopes,
+        uint32 fromNamespaceId,
+        uint32[] memory toNamespaceIds,
         RoleAssignment[] memory assignments,
-        SharedRevocation[] memory revocations
+        RoleRevocation[] memory revocations
     ) internal {
-        require(tokens.length == scopes.length, ErrorsLib.ArrayLengthMismatch());
+        require(tokens.length == toNamespaceIds.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < assignments.length; i++) {
-            _grantFromShared(accessManager, assignments[i].name, assignments[i].scope, assignments[i].account);
+            _grantFrom(
+                accessManager, fromNamespaceId, assignments[i].role, assignments[i].namespaceId, assignments[i].account
+            );
         }
         for (uint256 i = 0; i < tokens.length; i++) {
-            _grantFromShared(accessManager, RolesLib.AGENT, scopes[i], tokens[i]);
+            _grantFrom(accessManager, fromNamespaceId, RolesLib.Role.AGENT, toNamespaceIds[i], tokens[i]);
         }
         for (uint256 i = 0; i < tokens.length; i++) {
-            setupTokenRoles(accessManager, tokens[i], scopes[i]);
-            setupTREXRegistryRoles(accessManager, _registryOf(tokens[i]), scopes[i]);
-            setupModularComplianceRoles(accessManager, _complianceOf(tokens[i]), scopes[i]);
-            setupRoleAdmins(accessManager, scopes[i]);
+            setupTokenRoles(accessManager, tokens[i], toNamespaceIds[i]);
+            setupTREXRegistryRoles(accessManager, _registryOf(tokens[i]), toNamespaceIds[i]);
+            setupModularComplianceRoles(accessManager, _complianceOf(tokens[i]), toNamespaceIds[i]);
+            setupRoleAdmins(accessManager, toNamespaceIds[i]);
         }
         for (uint256 i = 0; i < tokens.length; i++) {
-            accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), tokens[i]);
+            accessManager.revokeRole(RolesLib.forNamespace(fromNamespaceId, RolesLib.Role.AGENT), tokens[i]);
         }
         for (uint256 i = 0; i < revocations.length; i++) {
-            if (!_isAdministrative(revocations[i].name)) {
-                accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, revocations[i].name), revocations[i].account);
+            if (!_isAdministrative(revocations[i].role)) {
+                accessManager.revokeRole(
+                    RolesLib.forNamespace(fromNamespaceId, revocations[i].role), revocations[i].account
+                );
             }
         }
         for (uint256 i = 0; i < revocations.length; i++) {
-            if (_isAdministrative(revocations[i].name)) {
-                accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, revocations[i].name), revocations[i].account);
+            if (_isAdministrative(revocations[i].role)) {
+                accessManager.revokeRole(
+                    RolesLib.forNamespace(fromNamespaceId, revocations[i].role), revocations[i].account
+                );
             }
         }
     }
 
-    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory, bytes32 scope) internal {
+    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory, uint32 namespaceId) internal {
         bytes4[] memory functions = new bytes4[](4);
         functions[0] = ITREXFactory.setImplementationAuthority.selector;
         functions[1] = ITREXFactory.setIdFactory.selector;
         functions[2] = ITREXFactory.deployTREXSuite.selector;
         functions[3] = ITREXFactory.deployTREXSuiteIsolated.selector;
-        accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.role(scope, RolesLib.OWNER));
+        accessManager.setTargetFunctionRole(
+            trexFactory, functions, RolesLib.forNamespace(namespaceId, RolesLib.Role.OWNER)
+        );
     }
 
     /// @notice Wires the two prerequisites the {TREXFactory} auto-mint path needs, so a deployer does
     ///         not have to rediscover them. Without both, `deployTREXSuite` reverts with
     ///         `NotAuthorizedForIdentityType` whenever `TokenDetails.ONCHAINID` is left at zero.
     /// @dev Call order does not matter, but both must land before the first auto-mint deploy.
-    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind the scoped ASSET_DEPLOYER
+    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind the namespaced ASSET_DEPLOYER
     ///         role and with self-deploy off: only a registered factory mints token OIDs, and a token
     ///         must not be able to sign one for itself.
     ///      2. Grant that role to the TREX factory.
@@ -312,14 +289,14 @@ library AccessManagerSetupLib {
     /// @param accessManager The IdentityFactory's authority, where the role is resolved
     /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
     /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
-    /// @param scope The scope the ASSET_DEPLOYER role is derived in
+    /// @param namespaceId The namespace the ASSET_DEPLOYER role is derived in
     function setupIdentityFactoryPolicy(
         IAccessManager accessManager,
         IIdentityFactory identityFactory,
         address trexFactory,
-        bytes32 scope
+        uint32 namespaceId
     ) internal {
-        uint64 assetDeployer = RolesLib.role(scope, RolesLib.ASSET_DEPLOYER);
+        uint64 assetDeployer = RolesLib.forNamespace(namespaceId, RolesLib.Role.ASSET_DEPLOYER);
         // ASSET is single-binding: a token OID binds to exactly one token and cannot be re-linked.
         identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, assetDeployer, false, true);
         accessManager.grantRole(assetDeployer, trexFactory, 0);
@@ -328,74 +305,105 @@ library AccessManagerSetupLib {
     function setupTREXImplementationAuthorityRoles(
         IAccessManager accessManager,
         address trexImplementationAuthority,
-        bytes32 scope
+        uint32 namespaceId
     ) internal {
         bytes4[] memory functions = new bytes4[](3);
         functions[0] = TREXImplementationAuthority.publish.selector;
         functions[1] = TREXImplementationAuthority.upgrade.selector;
         functions[2] = TREXImplementationAuthority.publishAndUpgrade.selector;
         accessManager.setTargetFunctionRole(
-            trexImplementationAuthority, functions, RolesLib.role(scope, RolesLib.VERSION_MANAGER)
+            trexImplementationAuthority, functions, RolesLib.forNamespace(namespaceId, RolesLib.Role.VERSION_MANAGER)
         );
     }
 
-    function setupRoleAdmins(IAccessManager accessManager, bytes32 scope) internal {
+    function setupRoleAdmins(IAccessManager accessManager, uint32 namespaceId) internal {
         RoleAdmin[] memory table = roleAdminTable();
         for (uint256 i = 0; i < table.length; i++) {
-            accessManager.setRoleAdmin(RolesLib.role(scope, table[i].name), RolesLib.role(scope, table[i].admin));
+            accessManager.setRoleAdmin(
+                RolesLib.forNamespace(namespaceId, table[i].role), RolesLib.forNamespace(namespaceId, table[i].admin)
+            );
         }
     }
 
-    function setupLabels(IAccessManager accessManager, bytes32 scope) internal {
-        RoleLabel[] memory table = labelTable();
-        for (uint256 i = 0; i < table.length; i++) {
-            accessManager.labelRole(RolesLib.role(scope, table[i].name), _label(table[i].label, scope));
+    function _commission(IAccessManager accessManager, address token, uint32 namespaceId, uint32 storageNamespaceId)
+        private
+    {
+        address registry = _registryOf(token);
+        address identityRegistryStorage = _storageOf(registry);
+
+        accessManager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.AGENT), token, 0);
+        accessManager.grantRole(RolesLib.forNamespace(storageNamespaceId, RolesLib.Role.AGENT), registry, 0);
+
+        setupTokenRoles(accessManager, token, namespaceId);
+        setupTREXRegistryRoles(accessManager, registry, namespaceId);
+        setupModularComplianceRoles(accessManager, _complianceOf(token), namespaceId);
+        setupRoleAdmins(accessManager, namespaceId);
+        if (!_isBound(identityRegistryStorage, registry)) {
+            IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
+        }
+        setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, storageNamespaceId);
+        if (storageNamespaceId != namespaceId) {
+            setupRoleAdmins(accessManager, storageNamespaceId);
         }
     }
 
-    function _grantFromShared(IAccessManager accessManager, bytes32 name, bytes32 scope, address account) private {
-        uint64 sharedRole = RolesLib.role(RolesLib.SHARED, name);
-        (uint48 since, uint32 executionDelay,, uint48 effect) = accessManager.getAccess(sharedRole, account);
-        require(since != 0, ErrorsLib.RoleNotHeld(account, sharedRole));
-        require(since <= block.timestamp, ErrorsLib.PendingRoleGrant(account, sharedRole));
-        require(effect <= block.timestamp, ErrorsLib.PendingDelayChange(account, sharedRole));
-        accessManager.grantRole(RolesLib.role(scope, name), account, executionDelay);
+    function _grantFrom(
+        IAccessManager accessManager,
+        uint32 fromNamespaceId,
+        RolesLib.Role role,
+        uint32 toNamespaceId,
+        address account
+    ) private {
+        uint64 sourceRole = RolesLib.forNamespace(fromNamespaceId, role);
+        (uint48 since, uint32 executionDelay,, uint48 effect) = accessManager.getAccess(sourceRole, account);
+        require(since != 0, ErrorsLib.RoleNotHeld(account, sourceRole));
+        require(since <= block.timestamp, ErrorsLib.PendingRoleGrant(account, sourceRole));
+        require(effect <= block.timestamp, ErrorsLib.PendingDelayChange(account, sourceRole));
+        accessManager.grantRole(RolesLib.forNamespace(toNamespaceId, role), account, executionDelay);
     }
 
-    function _isAdministrative(bytes32 name) private pure returns (bool) {
-        return name == RolesLib.AGENT_ADMIN || name == RolesLib.SUITE_ADMIN;
+    function _isAdministrative(RolesLib.Role role) private pure returns (bool) {
+        return role == RolesLib.Role.AGENT_ADMIN || role == RolesLib.Role.SUITE_ADMIN;
     }
 
-    function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, bytes32 scope) private {
+    function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, uint32 namespaceId)
+        private
+    {
         for (uint256 i = 0; i < table.length; i++) {
             if (_seenBefore(table, i)) {
                 continue;
             }
-            bytes32 name = table[i].name;
-            accessManager.setTargetFunctionRole(target, _selectorsFor(table, name), RolesLib.role(scope, name));
+            RolesLib.Role role = table[i].role;
+            accessManager.setTargetFunctionRole(
+                target, _selectorsFor(table, role), RolesLib.forNamespace(namespaceId, role)
+            );
         }
     }
 
     function _seenBefore(SelectorRole[] memory table, uint256 index) private pure returns (bool) {
         for (uint256 j = 0; j < index; j++) {
-            if (table[j].name == table[index].name) {
+            if (table[j].role == table[index].role) {
                 return true;
             }
         }
         return false;
     }
 
-    function _selectorsFor(SelectorRole[] memory table, bytes32 name) private pure returns (bytes4[] memory selectors) {
+    function _selectorsFor(SelectorRole[] memory table, RolesLib.Role role)
+        private
+        pure
+        returns (bytes4[] memory selectors)
+    {
         uint256 count;
         for (uint256 i = 0; i < table.length; i++) {
-            if (table[i].name == name) {
+            if (table[i].role == role) {
                 count++;
             }
         }
         selectors = new bytes4[](count);
         uint256 next;
         for (uint256 i = 0; i < table.length; i++) {
-            if (table[i].name == name) {
+            if (table[i].role == role) {
                 selectors[next++] = table[i].selector;
             }
         }
@@ -421,13 +429,6 @@ library AccessManagerSetupLib {
             }
         }
         return false;
-    }
-
-    function _label(string memory base, bytes32 scope) private pure returns (string memory) {
-        if (scope == RolesLib.SHARED) {
-            return base;
-        }
-        return string.concat(base, " @ ", Strings.toHexString(uint256(scope) >> 96, 8));
     }
 
 }

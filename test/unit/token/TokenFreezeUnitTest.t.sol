@@ -35,7 +35,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
     function testTokenFreezePartialTokensRevertsWhenCallerOnlyAddressFreezer() public {
         address addressFreezer = makeAddr("AddressFreezer");
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_ADDRESS_FREEZER), addressFreezer, 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT_ADDRESS_FREEZER), addressFreezer, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, addressFreezer));
         vm.prank(addressFreezer);
@@ -114,7 +114,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
     function testTokenSetAddressFrozenRevertsWhenCallerOnlyPartialFreezer() public {
         address partialFreezer = makeAddr("PartialFreezer");
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_PARTIAL_FREEZER), partialFreezer, 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.AGENT_PARTIAL_FREEZER), partialFreezer, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, partialFreezer));
         vm.prank(partialFreezer);

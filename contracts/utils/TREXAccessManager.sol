@@ -66,11 +66,64 @@ pragma solidity 0.8.30;
 import {
     AccessManagerUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
 
 contract TREXAccessManager is AccessManagerUpgradeable {
 
+    /// @custom:storage-location erc7201:erc3643.storage.TREXAccessManager
+    struct NamespaceStorage {
+        uint32 count;
+        mapping(uint32 namespaceId => string name) names;
+        mapping(address target => uint32 namespaceId) namespaceOf;
+    }
+
+    bytes32 private constant NAMESPACE_STORAGE_LOCATION =
+        0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00;
+
+    modifier onlyAdmin() {
+        (bool isAdmin,) = hasRole(ADMIN_ROLE, _msgSender());
+        require(isAdmin, IAccessManager.AccessManagerUnauthorizedAccount(_msgSender(), ADMIN_ROLE));
+        _;
+    }
+
     constructor() {
         _disableInitializers();
+    }
+
+    function createNamespace(string calldata name) external onlyAdmin returns (uint32 namespaceId) {
+        NamespaceStorage storage $ = _getNamespaceStorage();
+        namespaceId = ++$.count;
+        $.names[namespaceId] = name;
+        emit EventsLib.NamespaceCreated(namespaceId, name);
+    }
+
+    function assign(uint32 namespaceId, address target) external onlyAdmin {
+        NamespaceStorage storage $ = _getNamespaceStorage();
+        require(namespaceId != 0 && namespaceId <= $.count, ErrorsLib.NamespaceNotFound(namespaceId));
+        require(target != address(0), ErrorsLib.ZeroAddress());
+        $.namespaceOf[target] = namespaceId;
+        emit EventsLib.NamespaceAssigned(namespaceId, target);
+    }
+
+    function namespaceOf(address target) external view returns (uint32) {
+        return _getNamespaceStorage().namespaceOf[target];
+    }
+
+    function namespaceName(uint32 namespaceId) external view returns (string memory) {
+        return _getNamespaceStorage().names[namespaceId];
+    }
+
+    function namespaceCount() external view returns (uint32) {
+        return _getNamespaceStorage().count;
+    }
+
+    function _getNamespaceStorage() private pure returns (NamespaceStorage storage $) {
+        assembly ("memory-safe") {
+            $.slot := NAMESPACE_STORAGE_LOCATION
+        }
     }
 
 }

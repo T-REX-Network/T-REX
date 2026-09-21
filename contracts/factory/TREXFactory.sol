@@ -86,6 +86,7 @@ import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegi
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { Token } from "../token/Token.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
+import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
@@ -213,7 +214,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
         if (tokenDetails.accessManager == address(0)) {
-            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token);
+            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token, tokenDetails.name);
         }
 
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
@@ -327,8 +328,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         );
     }
 
-    function _handOverAccessManager(address manager, address admin, address token) private {
-        IAccessManager accessManager = IAccessManager(manager);
+    function _handOverAccessManager(address manager, address admin, address token, string memory name) private {
+        TREXAccessManager accessManager = TREXAccessManager(manager);
+        uint32 namespaceId = accessManager.createNamespace(name);
+        accessManager.assign(namespaceId, token);
         AccessManagerSetupLib.commissionSuite(accessManager, token);
         accessManager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, admin, 0);
         accessManager.renounceRole(AccessManagerSetupLib.ADMIN_ROLE, address(this));
@@ -408,8 +411,9 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
     /// against its own authority, so this factory must hold that role there for the auto-mint path
     /// (i.e. tokenDetails.ONCHAINID == address(0)):
-    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.role(scope, RolesLib.ASSET_DEPLOYER), false, true)`
-    ///   2. `accessManager.grantRole(RolesLib.role(scope, RolesLib.ASSET_DEPLOYER), address(this), 0)`
+    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, assetDeployer, false, true)`
+    ///   2. `accessManager.grantRole(assetDeployer, address(this), 0)`
+    ///   with `assetDeployer = RolesLib.forNamespace(namespaceId, RolesLib.Role.ASSET_DEPLOYER)`.
     /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both. The ASSET module bundle is
     /// registered on the IdentityFactory itself (`setIdentityTypeModules`) as part of its deployment.
     function _deployToken(

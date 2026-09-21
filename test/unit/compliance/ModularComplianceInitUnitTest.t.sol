@@ -27,7 +27,7 @@ contract ModularComplianceInitUnitTest is Test {
     function setUp() public {
         mcImplementation = new ModularCompliance();
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.OWNER), address(this), 0);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.OWNER), address(this), 0);
         mcBeacon = BeaconProxyDeployer.newBeacon(address(mcImplementation));
     }
 
@@ -168,7 +168,7 @@ contract ModularComplianceInitUnitTest is Test {
         returns (ModularCompliance)
     {
         ModularCompliance mc = ModularCompliance(_newMcProxy(_token, address(accessManager), _modules, _moduleSettings));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc), RolesLib.SHARED);
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc), 1);
         return mc;
     }
 

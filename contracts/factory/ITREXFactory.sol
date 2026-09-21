@@ -133,6 +133,11 @@ interface ITREXFactory {
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
      *  TIR : deploy TIR contract (proxy), set trusted issuers, set owner
      *  Compliance: deploy modular compliance, bind with token, add modules, set modules parameters, set owner
+     *  AccessManager : when `_tokenDetails.accessManager` is zero, deploy a `TREXAccessManager` (proxy),
+     *  create a namespace named after the token, assign the token and its storage to it, commission the
+     *  suite and hand `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the
+     *  issuer commissions it (`AccessManagerSetupLib.commissionSuite`).
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain

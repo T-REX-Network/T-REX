@@ -55,45 +55,44 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
-- **Scoped roles** (OZ H-02, #55): role ids on a shared AccessManager were one set for every suite,
-  so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
-  - Every role id is now derived from a scope and a role name: `RolesLib.role(scope, name)` is
-    `uint64(keccak256(abi.encode("TREX-Suite", scope, name)))`. The plain `uint64` constants are gone;
-    `RolesLib.OWNER`, `RolesLib.AGENT_MINTER` and the others are `bytes32` names and cannot be granted
-    without a scope. `RolesLib.scopeOf(address)` is the conventional scope of a token or a storage.
-    `RolesLib.SHARED` is an ordinary scope constant, the explicit opt-in to one agent set across a
-    manager. Nothing is reachable by omission. A derived id equal to `ADMIN_ROLE` (0) or `PUBLIC_ROLE`
-    (`type(uint64).max`) has probability 2^-63 per id and is not guarded against.
-  - The library keeps no state and asks the manager nothing. No commissioning markers, no "already
-    configured" checks, no migration preflight: the scope is a pure input, written where the caller
-    says. Which scope a token is in, and whether two suites were scoped alike, is the operator's
-    record, read off chain from `RoleGranted` and `RoleLabel` events.
-  - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins`, `setupLabels`,
-    `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
-    takes a `scope`. `setupLabels` labels all sixteen roles of a scope for indexers; commissioning does
-    not label.
-  - Storage roles always live in the storage's own scope, `scopeOf(storage)`, in every mode including
-    `SHARED`, since one storage can serve several suites. Suites sharing a storage share its identity
-    data by construction. Agents never call the storage. Binding or unbinding a registry needs
-    `IRS_BINDER` or `OWNER` in the storage's scope.
-  - `AccessManagerSetupLib.commissionSuite(manager, token[, scope])`, default scope the token's own,
-    does the whole commissioning in one call and is idempotent: maps token, registry and compliance in
-    the scope, sets the scope's role admins, grants `AGENT` to the token and `AGENT` in the storage's
-    scope to the registry, binds the registry if not bound, maps the storage in its own scope and sets
-    those role admins. Re-running it re-applies the standard tables, so run it on a customised suite
-    only on purpose. Commissioning a second suite onto a storage or into a scope already administered
-    needs `AGENT_ADMIN` there; binding to a mapped storage needs `IRS_BINDER` there.
-  - A manager the factory deploys is commissioned by the factory in the token's scope before handover.
-    A supplied manager is never touched; its issuer commissions the suite.
-  - `AccessManagerSetupLib.migrateSuitesToScopes(manager, tokens, scopes, assignments, revocations)`
-    moves suites commissioned `SHARED` into scopes in one call: grant the scoped roles, map the
-    scopes, revoke the shared ones. The plan is explicit: `RoleAssignment(account, name, scope)`
-    grants the scoped role to an account that holds the shared one, same execution delay
-    (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `SharedRevocation(account,
-    name)` revokes the shared role, administrative roles last. Nothing is inferred, so a sibling that
-    stays `SHARED` keeps working, and storages are not touched. A nonzero grant delay leaves the
-    account without either role for that delay. Atomicity is the caller's: run it from one
-    transaction, a script broadcasts it as many.
+- **Role namespaces** (OZ H-02, #55): role ids on a shared AccessManager were one set for every
+  suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
+  - A role id is a namespace id in the upper 32 bits and a role number below:
+    `RolesLib.forNamespace(namespaceId, role)`. The standard roles are the `RolesLib.Role` enum; the
+    plain `uint64` constants are gone and an enum value cannot be passed to `grantRole` by accident, so
+    no unscoped role is reachable by omission. `forNamespace(namespaceId, bytes32 customName)` derives
+    a custom role by hashing the name into the upper half of the role number, so `RolesLib.decode`
+    tells standard from custom without a lookup. Namespace 0 is rejected (`InvalidNamespace`), so no
+    id is ever `ADMIN_ROLE`. Ids are reversible: tooling reads `namespaceId = id >> 32` off
+    `RoleGranted` events, no labels pass needed.
+  - A namespace is an issuer, or a fund: one team across every token in it. Two tokens in one
+    namespace share their agents; two namespaces are isolated from each other.
+  - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createNamespace(name)` returns
+    the next id, `assign(namespaceId, target)` records the namespace of a token or a storage,
+    `namespaceOf(target)`, `namespaceName(id)` and `namespaceCount()` read it back. Both writers are
+    gated by a plain `ADMIN_ROLE` check; `_getAdminRestrictions` is not overridden, so the two
+    functions are immediate and not schedulable through `execute`. Events `NamespaceCreated` and
+    `NamespaceAssigned`.
+  - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `namespaceOf(token)` and
+    needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
+    the token's namespace on first use and keeps a storage already assigned where it is, so a storage
+    reused across namespaces keeps one owner and every registry bound to it writes with that
+    namespace's `AGENT`. `commissionSuite(manager, token, namespaceId)` is the pure form and works on
+    any `IAccessManager`, storage included in the given namespace. Every other `setup*` function takes
+    a `namespaceId` and is pure. Commissioning is idempotent: re-running re-applies the standard
+    tables. Commissioning a second suite into a namespace already administered needs `AGENT_ADMIN`
+    there; binding to a mapped storage needs `IRS_BINDER` in the storage's namespace.
+  - The library keeps no state of its own and validates no preconditions: no markers, no
+    "already configured" checks, no migration preflight. Which suites were configured alike is the
+    operator's record.
+  - `migrateSuitesToNamespaces(manager, tokens, fromNamespaceId, toNamespaceIds, assignments,
+    revocations)` moves suites from one namespace into others in one call: grant the new roles, map
+    the namespaces, revoke the old ones. `RoleAssignment(account, role, namespaceId)` grants the role
+    in the new namespace to an account that holds it in the source one, same execution delay
+    (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `RoleRevocation(account,
+    role)` revokes it in the source namespace, administrative roles last. Storages are not touched. On
+    a `TREXAccessManager`, `assign` the tokens to their new namespaces as well. Atomicity is the
+    caller's: run it from one transaction, a script broadcasts it as many.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
@@ -101,8 +100,9 @@ All notable changes to this project will be documented in this file.
   Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
   ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
-    suite salt, commissions the suite on it, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin`
-    and renounces its own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
+    suite salt, creates a namespace named after the token, assigns the token and its storage to it,
+    commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
+    own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
     supplied manager must have code (`AccessManagerNotAContract`); a reused storage must already
     report the suite manager as its authority (`StorageAuthorityMismatch`).
   - `deployTREXSuiteIsolated` clones the manager beacon too, owned by `accessManagerAdmin` so a broken

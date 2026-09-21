@@ -49,8 +49,8 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
         ia = new TREXImplementationAuthority(address(accessManager), v0, _baseImpls());
 
         vm.startPrank(accessManagerAdmin);
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(ia), RolesLib.SHARED);
-        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.VERSION_MANAGER), deployer, 0);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(ia), 1);
+        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.VERSION_MANAGER), deployer, 0);
         vm.stopPrank();
     }
 

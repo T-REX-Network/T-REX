@@ -51,7 +51,7 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
             )
         );
 
-        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token), RolesLib.SHARED);
+        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token), 1);
         _grantAllAgentRoles(agent);
     }
 

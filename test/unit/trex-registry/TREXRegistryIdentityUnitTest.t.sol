@@ -122,7 +122,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), RolesLib.SHARED);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), 1);
 
         address second = makeAddr("secondBatchUser");
 
