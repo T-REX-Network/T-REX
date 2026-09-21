@@ -640,7 +640,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///      `_deployFactories`, so the test has to revoke it first.
     function test_deployTREXSuite_RevertWhen_FactoryLacksTokenOidMinter() public {
         // Revoked as the test contract, which is the AccessManager admin (see AccessManagerHelper).
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
 
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         assertEq(tokenDetails.ONCHAINID, address(0), "Test only covers the auto-mint path");
@@ -650,7 +650,7 @@ contract TREXFactoryTest is TREXSuiteTest {
                 Errors.NotAuthorizedForIdentityType.selector,
                 address(trexFactory),
                 IdentityTypes.ASSET,
-                RolesLib.ASSET_DEPLOYER
+                RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER)
             )
         );
         _deploySuite("no-oid-minter-salt", tokenDetails, _createEmptyClaimDetails());
@@ -659,7 +659,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     /// @notice The ASSET_DEPLOYER gate covers minting only. With the role revoked, a caller-supplied
     ///         ONCHAINID must still deploy, since that path never calls `createIdentityFor`.
     function test_deployTREXSuite_Succeeds_WithoutTokenOidMinter_WhenONCHAINIDSupplied() public {
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
 
         address suppliedOID = makeAddr("SuppliedOID");
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
@@ -735,15 +735,22 @@ contract TREXFactoryTest is TREXSuiteTest {
         // `_deployFactories`. Removing the policy unregisters the type, so even a role holder is
         // rejected.
         idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
 
-        AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            accessManager, idFactory, address(trexFactory), RolesLib.SHARED
+        );
 
         (uint64 roleId, bool selfDeployable,,) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
-        assertEq(roleId, RolesLib.ASSET_DEPLOYER, "ASSET minting must be gated behind ASSET_DEPLOYER");
+        assertEq(
+            roleId,
+            RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER),
+            "ASSET minting must be gated behind ASSET_DEPLOYER"
+        );
         assertFalse(selfDeployable, "A token must not be able to self-deploy its own OID");
 
-        (bool isMember, uint32 executionDelay) = accessManager.hasRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        (bool isMember, uint32 executionDelay) =
+            accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
         assertTrue(isMember, "TREX factory must hold ASSET_DEPLOYER after the helper call");
         // Auto-mint is a direct call from inside deployTREXSuite; a delay would make it unschedulable.
         assertEq(executionDelay, NO_EXECUTION_DELAY, "ASSET_DEPLOYER must be granted without execution delay");
@@ -767,16 +774,20 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///         manager grants the role somewhere the check never looks and auto-mint still reverts.
     function test_setupIdentityFactoryPolicy_RevertWhen_RoleGrantedOnForeignAuthority() public {
         idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
 
         // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
         // factory's real authority), but the grant is stranded on this manager.
         AccessManager foreignManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupIdentityFactoryPolicy(foreignManager, idFactory, address(trexFactory));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            foreignManager, idFactory, address(trexFactory), RolesLib.SHARED
+        );
 
-        (bool isMemberOnForeign,) = foreignManager.hasRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        (bool isMemberOnForeign,) =
+            foreignManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
         assertTrue(isMemberOnForeign, "Grant must have landed on the foreign manager");
-        (bool isMemberOnAuthority,) = accessManager.hasRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        (bool isMemberOnAuthority,) =
+            accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), address(trexFactory));
         assertFalse(isMemberOnAuthority, "Grant must be absent from the authority the factory actually checks");
 
         vm.expectRevert(
@@ -784,7 +795,7 @@ contract TREXFactoryTest is TREXSuiteTest {
                 Errors.NotAuthorizedForIdentityType.selector,
                 address(trexFactory),
                 IdentityTypes.ASSET,
-                RolesLib.ASSET_DEPLOYER
+                RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER)
             )
         );
         _deploySuite("foreign-authority-salt", _createEmptyTokenDetails(), _createEmptyClaimDetails());
@@ -1097,8 +1108,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, RolesLib.SHARED);
 
         // Sanity: the factory holds neither OWNER nor IRS_BINDER going into the reused-IRS deploy.
-        (bool hasOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
-        (bool hasBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        (bool hasOwner,) = accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.OWNER), address(trexFactory));
+        (bool hasBinder,) =
+            accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(trexFactory));
         assertFalse(hasOwner, "Factory must not hold standing OWNER");
         assertFalse(hasBinder, "Factory must not hold standing IRS_BINDER before deploy");
 
@@ -1149,9 +1161,10 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertTrue(sawNew, "Reused IRS should have the new IR bound");
 
         // The factory holds no privilege over the IRS at any point: it never granted itself IRS_BINDER.
-        (bool stillBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        (bool stillBinder,) =
+            accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(trexFactory));
         assertFalse(stillBinder, "Factory must not retain IRS_BINDER after deploy");
-        (bool stillOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
+        (bool stillOwner,) = accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.OWNER), address(trexFactory));
         assertFalse(stillOwner, "Factory must not hold standing OWNER on the IRS");
     }
 
@@ -1161,21 +1174,21 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_setupTREXImplementationAuthorityRoles_MapsSelectorsToVersionManager() public {
         address authority = address(trexImplementationAuthority);
 
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority, RolesLib.SHARED);
 
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector),
-            RolesLib.VERSION_MANAGER,
+            RolesLib.role(RolesLib.SHARED, RolesLib.VERSION_MANAGER),
             "publish must be mapped to VERSION_MANAGER"
         );
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.upgrade.selector),
-            RolesLib.VERSION_MANAGER,
+            RolesLib.role(RolesLib.SHARED, RolesLib.VERSION_MANAGER),
             "upgrade must be mapped to VERSION_MANAGER"
         );
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publishAndUpgrade.selector),
-            RolesLib.VERSION_MANAGER,
+            RolesLib.role(RolesLib.SHARED, RolesLib.VERSION_MANAGER),
             "publishAndUpgrade must be mapped to VERSION_MANAGER"
         );
     }
@@ -1223,7 +1236,8 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         assertEq(trexFactory.getToken("salt-authority-mismatch"), address(0));
         assertEq(IdentityRegistryStorage(foreignIRS).linkedIdentityRegistries().length, 0);
-        (bool binder,) = otherAccessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        (bool binder,) =
+            otherAccessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(trexFactory));
         assertFalse(binder);
     }
 

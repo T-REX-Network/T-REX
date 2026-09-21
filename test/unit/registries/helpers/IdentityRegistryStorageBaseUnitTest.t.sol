@@ -36,8 +36,8 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
 
     function setUp() public virtual {
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.IRS_BINDER, address(this), 0);
-        accessManager.grantRole(RolesLib.AGENT, address(this), 0);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(this), 0);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(

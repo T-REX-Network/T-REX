@@ -19,7 +19,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.IDENTITY_MANAGER, address(this), 0);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.IDENTITY_MANAGER), address(this), 0);
     }
 
     function testTokenSetIdentityRegistryRevertsWhenUnauthorized(address caller) public {
@@ -73,7 +73,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, newIdentityRegistry, RolesLib.SHARED);
-        accessManager.grantRole(RolesLib.AGENT, address(token), 0);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), address(token), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
         emit IERC3643.IdentityRegistryAdded(newIdentityRegistry);

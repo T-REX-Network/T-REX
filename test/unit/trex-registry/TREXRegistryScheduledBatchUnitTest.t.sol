@@ -15,7 +15,7 @@ contract TREXRegistryScheduledBatchUnitTest is TREXRegistryBaseUnitTest {
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), RolesLib.SHARED);
 
         address delayed = makeAddr("delayedAgent");
-        accessManager.grantRole(RolesLib.AGENT, delayed, 1 days);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), delayed, 1 days);
 
         IIdentity id = _deployIdentity(another, "another");
         address[] memory addrs = new address[](1);

@@ -41,7 +41,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
 
     function testTokenRecoveryAddressRevertsWhenCallerOnlyMinter() public {
         address minter = makeAddr("Minter");
-        accessManager.grantRole(RolesLib.AGENT_MINTER, minter, 0);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_MINTER), minter, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
         vm.prank(minter);

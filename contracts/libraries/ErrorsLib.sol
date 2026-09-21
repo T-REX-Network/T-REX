@@ -142,20 +142,9 @@ library ErrorsLib {
     error MaxIRByIRSReached(uint256 max);
 
     // AccessManagerSetupLib Errors
-    error AssignmentNamespaceNotMigrated(bytes32 namespace);
-    error InvalidRoleForNamespace(uint64 role, bytes32 namespace);
-    error RoleNotHeld(address account, uint64 role);
-    error AlreadyCommissioned(address token);
-    error DestinationNamespaceInUse(bytes32 namespace);
-    error DuplicateMigrationEntry();
-    error GrantDelayNotPrepared(uint64 role, bytes32 namespace);
-    error InvalidRoleNamespace();
-    error NonStandardAdministration(uint64 role);
-    error NonStandardPolicy(address target, bytes4 selector);
-    error NotCommissionedShared(address token);
     error PendingDelayChange(address account, uint64 role);
     error PendingRoleGrant(address account, uint64 role);
-    error StorageOutsideItsNamespace(address identityRegistryStorage);
+    error RoleNotHeld(address account, uint64 role);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

@@ -67,27 +67,29 @@ library RolesLib {
 
     bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
 
-    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
+    // ---- Scopes: every role id is derived from a scope and a role name ----
+
+    // The explicit opt-in to one set of agents across every suite of a manager.
+    bytes32 constant SHARED = keccak256("TREX-Suite.scope.shared");
 
     // ---- Operational roles (gate contract functions: "what you can do") ----
 
-    uint64 constant OWNER = ROLE_PREFIX + 1;
+    bytes32 constant OWNER = keccak256("TREX-Suite.role.OWNER");
 
-    uint64 constant AGENT = ROLE_PREFIX + 2;
-    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
-    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
-    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
-    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
-    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
-    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
-    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
+    bytes32 constant AGENT = keccak256("TREX-Suite.role.AGENT");
+    bytes32 constant AGENT_MINTER = keccak256("TREX-Suite.role.AGENT_MINTER");
+    bytes32 constant AGENT_BURNER = keccak256("TREX-Suite.role.AGENT_BURNER");
+    bytes32 constant AGENT_PARTIAL_FREEZER = keccak256("TREX-Suite.role.AGENT_PARTIAL_FREEZER");
+    bytes32 constant AGENT_ADDRESS_FREEZER = keccak256("TREX-Suite.role.AGENT_ADDRESS_FREEZER");
+    bytes32 constant AGENT_RECOVERY_ADDRESS = keccak256("TREX-Suite.role.AGENT_RECOVERY_ADDRESS");
+    bytes32 constant AGENT_FORCED_TRANSFER = keccak256("TREX-Suite.role.AGENT_FORCED_TRANSFER");
+    bytes32 constant AGENT_PAUSER = keccak256("TREX-Suite.role.AGENT_PAUSER");
 
-    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
-    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
+    bytes32 constant TOKEN_MANAGER = keccak256("TREX-Suite.role.TOKEN_MANAGER");
+    bytes32 constant IDENTITY_MANAGER = keccak256("TREX-Suite.role.IDENTITY_MANAGER");
 
     // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
-    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
-    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
+    bytes32 constant VERSION_MANAGER = keccak256("TREX-Suite.role.VERSION_MANAGER");
 
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
@@ -95,50 +97,31 @@ library RolesLib {
     // handing out the AccessManager ADMIN_ROLE (0).
 
     // Admin of AGENT and every granular AGENT_* role.
-    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
+    bytes32 constant AGENT_ADMIN = keccak256("TREX-Suite.role.AGENT_ADMIN");
 
     // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
-    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
+    bytes32 constant SUITE_ADMIN = keccak256("TREX-Suite.role.SUITE_ADMIN");
 
     // ---- Storage binding ----
 
     // Gates IdentityRegistryStorage.bindIdentityRegistry, so an issuer can bind a new IR onto a reused
     // IRS without standing OWNER. The factory never holds it: it deploys against a reused IRS without
     // binding, and the issuer binds afterwards.
-    uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
+    bytes32 constant IRS_BINDER = keccak256("TREX-Suite.role.IRS_BINDER");
 
     // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
 
     // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
     // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
     // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
-    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
+    bytes32 constant ASSET_DEPLOYER = keccak256("TREX-Suite.role.ASSET_DEPLOYER");
 
-    bytes32 constant SHARED = bytes32(0);
-
-    bytes4 constant COMMISSIONED = bytes4(keccak256("TREX-Suite.commissioned"));
-
-    function namespaceOf(address target) internal pure returns (bytes32) {
+    function scopeOf(address target) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(target)));
     }
 
-    function forSuite(uint64 role, bytes32 namespace) internal pure returns (uint64 id) {
-        if (namespace == SHARED) {
-            return role;
-        }
-        id = _derive(role, namespace, 0);
-        for (uint256 attempt = 1; _isReserved(id); attempt++) {
-            id = _derive(role, namespace, attempt);
-        }
-    }
-
-    function _derive(uint64 role, bytes32 namespace, uint256 attempt) private pure returns (uint64) {
-        return uint64(uint256(keccak256(abi.encode("TREX-Suite", role, namespace, attempt))));
-    }
-
-    function _isReserved(uint64 id) private pure returns (bool) {
-        return id == 0 || id == type(uint64).max || (id >> 16) == (ROLE_PREFIX >> 16);
+    function role(bytes32 scope, bytes32 name) internal pure returns (uint64) {
+        return uint64(uint256(keccak256(abi.encode("TREX-Suite", scope, name))));
     }
 
 }

@@ -178,7 +178,9 @@ contract TREXSuiteTest is AccessManagerHelper {
         factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
         // ASSET is single-binding as in production: a token OID binds to exactly one token.
-        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true);
+        factory.setIdentityTypePolicy(
+            IdentityTypes.ASSET, RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), false, true
+        );
         factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
 

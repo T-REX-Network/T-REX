@@ -31,7 +31,7 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
 
     function testTokenMintRevertsWhenCallerOnlyBurner() public {
         address burner = makeAddr("Burner");
-        accessManager.grantRole(RolesLib.AGENT_BURNER, burner, 0);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_BURNER), burner, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, burner));
         vm.prank(burner);

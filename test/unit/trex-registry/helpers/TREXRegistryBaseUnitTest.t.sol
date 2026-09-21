@@ -164,7 +164,9 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         factory.setIdentityTypeModules(IdentityTypes.INDIVIDUAL, standardModules);
         factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
-        factory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true);
+        factory.setIdentityTypePolicy(
+            IdentityTypes.ASSET, RolesLib.role(RolesLib.SHARED, RolesLib.ASSET_DEPLOYER), false, true
+        );
         factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
     }
 
@@ -222,14 +224,16 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         ownerFunctions[9] = IERC3643ClaimTopicsRegistry.removeClaimTopic.selector;
         ownerFunctions[10] = TREXRegistry.addClaimTopicForIdentityType.selector;
         ownerFunctions[11] = TREXRegistry.removeClaimTopicForIdentityType.selector;
-        IAccessManager(accessManager).setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.OWNER);
+        IAccessManager(accessManager)
+            .setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.role(RolesLib.SHARED, RolesLib.OWNER));
 
         // ------ AGENT role ------
         bytes4[] memory agentFunctions = new bytes4[](3);
         agentFunctions[0] = IERC3643IdentityRegistry.updateIdentity.selector;
         agentFunctions[1] = IERC3643IdentityRegistry.deleteIdentity.selector;
         agentFunctions[2] = IERC3643IdentityRegistry.registerIdentity.selector;
-        IAccessManager(accessManager).setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.AGENT);
+        IAccessManager(accessManager)
+            .setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.role(RolesLib.SHARED, RolesLib.AGENT));
     }
 
     /// @notice Creates a claim signed now with no expiry and adds it to `_identity`.

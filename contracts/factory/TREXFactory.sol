@@ -408,8 +408,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
     /// against its own authority, so this factory must hold that role there for the auto-mint path
     /// (i.e. tokenDetails.ONCHAINID == address(0)):
-    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.ASSET_DEPLOYER, false, true)`
-    ///   2. `accessManager.grantRole(RolesLib.ASSET_DEPLOYER, address(this), 0)`
+    ///   1. `identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, RolesLib.role(scope, RolesLib.ASSET_DEPLOYER), false, true)`
+    ///   2. `accessManager.grantRole(RolesLib.role(scope, RolesLib.ASSET_DEPLOYER), address(this), 0)`
     /// `AccessManagerSetupLib.setupIdentityFactoryPolicy` bundles both. The ASSET module bundle is
     /// registered on the IdentityFactory itself (`setIdentityTypeModules`) as part of its deployment.
     function _deployToken(

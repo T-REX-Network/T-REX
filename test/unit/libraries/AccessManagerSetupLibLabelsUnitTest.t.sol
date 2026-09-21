@@ -20,7 +20,7 @@ contract AccessManagerSetupLibLabelsUnitTest is Test {
 
         // The first label set is the OWNER role.
         vm.expectEmit(true, false, false, true, address(accessManager));
-        emit IAccessManager.RoleLabel(RolesLib.OWNER, "TREX-Suite Owner");
+        emit IAccessManager.RoleLabel(RolesLib.role(RolesLib.SHARED, RolesLib.OWNER), "TREX-Suite Owner");
         AccessManagerSetupLib.setupLabels(accessManager, RolesLib.SHARED);
     }
 

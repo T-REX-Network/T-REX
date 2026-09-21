@@ -55,47 +55,45 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
-- **Per-suite role namespaces** (OZ H-02, #55): role ids on a shared AccessManager were one set for
-  every suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
-  - `RolesLib.forSuite(role, namespace)` derives a suite-specific role id by hashing the role with
-    the namespace, re-hashing whenever the result would be `ADMIN_ROLE`, `PUBLIC_ROLE` or a global id.
-    `RolesLib.namespaceOf(address)` is the conventional namespace of a token or a storage.
-    `RolesLib.SHARED` (zero) returns the global ids unchanged and is the explicit opt-in to one agent
-    set across a manager. There is no silent default.
-  - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins` and `setupLabels` takes a
-    `namespace`. Labels are presentation only: neither commissioning nor migration sets them, call
-    `setupLabels` and `setupGlobalLabels` explicitly.
-  - Storage roles always live in the storage's own namespace, in every mode including `SHARED`, since
-    one storage can serve several suites. Suites sharing a storage share its identity data by
-    construction. Agents never call the storage, so they are unaffected. Binding or unbinding a
-    registry needs `IRS_BINDER` or `OWNER` in the storage's namespace.
-  - `AccessManagerSetupLib.commissionSuite(manager, token[, namespace])` does the whole commissioning
-    in one call, default namespace the token's own: maps token, registry and compliance, sets the
-    namespace's role admins, grants `AGENT` to the token and `AGENT` in the storage's namespace to
-    the registry, binds the registry if not bound, and maps the storage the first time it is seen.
-    Guards: `AlreadyCommissioned`, `InvalidRoleNamespace` (suite namespace equal to the storage's),
-    `StorageOutsideItsNamespace` (storage configured elsewhere by hand). Anything already configured
-    is left alone, tracked by a reserved pseudo-selector `RolesLib.COMMISSIONED` mapped on a synthetic
-    address per token, storage and namespace (`markerTarget`), so a customised storage or role admin
-    survives a later commissioning. Commissioning a second suite onto a configured storage or into a
-    used namespace needs `AGENT_ADMIN` there; binding to a configured storage needs `IRS_BINDER` there.
-  - A manager the factory deploys is commissioned by the factory in the token's namespace before
-    handover. A supplied manager is never touched; its issuer commissions the suite.
-  - `AccessManagerSetupLib.migrateSuitesToNamespaces(manager, tokens, namespaces, assignments,
-    revocations)` moves suites commissioned `SHARED` into namespaces atomically or reverts before the
-    first mutation. The plan is explicit: `RoleAssignment(account, role, namespace)` grants the
-    namespaced version of a global role the account holds, same execution delay;
-    `GlobalRevocation(account, role)` removes a global role. Nothing is inferred, so a partial
-    migration leaves a sibling that stays `SHARED` working. Storages are not migrated, their
-    namespace never changes. Source must be exactly what the library set up (`NotCommissionedShared`,
-    `NonStandardPolicy`, `NonStandardAdministration`, `StorageOutsideItsNamespace`), destinations
-    unused (`DestinationNamespaceInUse`), grant delays already equal on the namespaced ids and settled
-    (`GrantDelayNotPrepared`; a pending `setGrantDelay` is invisible to the check, migrate only when
-    none is pending), every plan entry held and not pending (`RoleNotHeld`, `PendingRoleGrant`,
-    `PendingDelayChange`, `InvalidRoleForNamespace`, `AssignmentNamespaceNotMigrated`). Order: validate
-    all, grant assignments, grant `AGENT` to tokens, map the namespaces, revoke the tokens' global
-    `AGENT`, apply revocations with administrative roles last. A nonzero grant delay leaves the account
-    without either role for that delay.
+- **Scoped roles** (OZ H-02, #55): role ids on a shared AccessManager were one set for every suite,
+  so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
+  - Every role id is now derived from a scope and a role name: `RolesLib.role(scope, name)` is
+    `uint64(keccak256(abi.encode("TREX-Suite", scope, name)))`. The plain `uint64` constants are gone;
+    `RolesLib.OWNER`, `RolesLib.AGENT_MINTER` and the others are `bytes32` names and cannot be granted
+    without a scope. `RolesLib.scopeOf(address)` is the conventional scope of a token or a storage.
+    `RolesLib.SHARED` is an ordinary scope constant, the explicit opt-in to one agent set across a
+    manager. Nothing is reachable by omission. A derived id equal to `ADMIN_ROLE` (0) or `PUBLIC_ROLE`
+    (`type(uint64).max`) has probability 2^-63 per id and is not guarded against.
+  - The library keeps no state and asks the manager nothing. No commissioning markers, no "already
+    configured" checks, no migration preflight: the scope is a pure input, written where the caller
+    says. Which scope a token is in, and whether two suites were scoped alike, is the operator's
+    record, read off chain from `RoleGranted` and `RoleLabel` events.
+  - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins`, `setupLabels`,
+    `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
+    takes a `scope`. `setupLabels` labels all sixteen roles of a scope for indexers; commissioning does
+    not label.
+  - Storage roles always live in the storage's own scope, `scopeOf(storage)`, in every mode including
+    `SHARED`, since one storage can serve several suites. Suites sharing a storage share its identity
+    data by construction. Agents never call the storage. Binding or unbinding a registry needs
+    `IRS_BINDER` or `OWNER` in the storage's scope.
+  - `AccessManagerSetupLib.commissionSuite(manager, token[, scope])`, default scope the token's own,
+    does the whole commissioning in one call and is idempotent: maps token, registry and compliance in
+    the scope, sets the scope's role admins, grants `AGENT` to the token and `AGENT` in the storage's
+    scope to the registry, binds the registry if not bound, maps the storage in its own scope and sets
+    those role admins. Re-running it re-applies the standard tables, so run it on a customised suite
+    only on purpose. Commissioning a second suite onto a storage or into a scope already administered
+    needs `AGENT_ADMIN` there; binding to a mapped storage needs `IRS_BINDER` there.
+  - A manager the factory deploys is commissioned by the factory in the token's scope before handover.
+    A supplied manager is never touched; its issuer commissions the suite.
+  - `AccessManagerSetupLib.migrateSuitesToScopes(manager, tokens, scopes, assignments, revocations)`
+    moves suites commissioned `SHARED` into scopes in one call: grant the scoped roles, map the
+    scopes, revoke the shared ones. The plan is explicit: `RoleAssignment(account, name, scope)`
+    grants the scoped role to an account that holds the shared one, same execution delay
+    (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `SharedRevocation(account,
+    name)` revokes the shared role, administrative roles last. Nothing is inferred, so a sibling that
+    stays `SHARED` keeps working, and storages are not touched. A nonzero grant delay leaves the
+    account without either role for that delay. Atomicity is the caller's: run it from one
+    transaction, a script broadcasts it as many.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,

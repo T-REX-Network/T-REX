@@ -51,35 +51,29 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());
         address irs = address(deployed.identityRegistry().identityStorage());
-        bytes32 ns = RolesLib.namespaceOf(address(deployed));
+        bytes32 ns = RolesLib.scopeOf(address(deployed));
 
         assertEq(
             manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector),
-            RolesLib.forSuite(RolesLib.AGENT_MINTER, ns)
+            RolesLib.role(ns, RolesLib.AGENT_MINTER)
         );
         assertEq(
             manager.getTargetFunctionRole(registry, IERC3643IdentityRegistry.registerIdentity.selector),
-            RolesLib.forSuite(RolesLib.AGENT, ns)
+            RolesLib.role(ns, RolesLib.AGENT)
         );
-        (bool tokenIsAgent,) = manager.hasRole(RolesLib.forSuite(RolesLib.AGENT, ns), address(deployed));
-        (bool registryWrites,) = manager.hasRole(RolesLib.forSuite(RolesLib.AGENT, RolesLib.namespaceOf(irs)), registry);
+        (bool tokenIsAgent,) = manager.hasRole(RolesLib.role(ns, RolesLib.AGENT), address(deployed));
+        (bool registryWrites,) = manager.hasRole(RolesLib.role(RolesLib.scopeOf(irs), RolesLib.AGENT), registry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
-        assertEq(
-            manager.getRoleAdmin(RolesLib.forSuite(RolesLib.AGENT, ns)), RolesLib.forSuite(RolesLib.AGENT_ADMIN, ns)
-        );
+        assertEq(manager.getRoleAdmin(RolesLib.role(ns, RolesLib.AGENT)), RolesLib.role(ns, RolesLib.AGENT_ADMIN));
         (bool factoryIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), address(trexFactory));
         assertFalse(factoryIsAdmin);
 
-        vm.prank(issuerAdmin);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AlreadyCommissioned.selector, address(deployed)));
-        this.commissionExternally(manager, address(deployed));
-
         vm.startPrank(issuerAdmin);
-        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_ADMIN, ns), issuerAdmin, 0);
-        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT, ns), agent, 0);
-        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_PAUSER, ns), agent, 0);
-        manager.grantRole(RolesLib.forSuite(RolesLib.AGENT_MINTER, ns), agent, 0);
+        manager.grantRole(RolesLib.role(ns, RolesLib.AGENT_ADMIN), issuerAdmin, 0);
+        manager.grantRole(RolesLib.role(ns, RolesLib.AGENT), agent, 0);
+        manager.grantRole(RolesLib.role(ns, RolesLib.AGENT_PAUSER), agent, 0);
+        manager.grantRole(RolesLib.role(ns, RolesLib.AGENT_MINTER), agent, 0);
         vm.stopPrank();
         vm.startPrank(agent);
         IERC3643IdentityRegistry(registry).registerIdentity(alice, aliceIdentity, 0);
@@ -87,10 +81,6 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         deployed.mint(alice, 100);
         vm.stopPrank();
         assertEq(deployed.balanceOf(alice), 100);
-    }
-
-    function commissionExternally(TREXAccessManager manager, address token) external {
-        AccessManagerSetupLib.commissionSuite(manager, token);
     }
 
     function test_deployTREXSuite_RevertWhen_AccessManagerAdminIsTheFactory() public {
@@ -165,13 +155,16 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         bytes32 beaconBefore = vm.load(address(manager), BEACON_SLOT);
         bytes4[] memory mint = new bytes4[](1);
         mint[0] = IERC3643.mint.selector;
+        uint64 minter = RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_MINTER);
+        uint64 agentAdmin = RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_ADMIN);
+        uint64 suiteAdmin = RolesLib.role(RolesLib.SHARED, RolesLib.SUITE_ADMIN);
         vm.startPrank(issuerAdmin);
-        manager.grantRole(RolesLib.AGENT_ADMIN, issuerAdmin, 0);
-        manager.setTargetFunctionRole(address(deployed), mint, RolesLib.AGENT_MINTER);
-        manager.setRoleAdmin(RolesLib.AGENT_MINTER, RolesLib.AGENT_ADMIN);
-        manager.setRoleGuardian(RolesLib.AGENT_MINTER, RolesLib.SUITE_ADMIN);
-        manager.setGrantDelay(RolesLib.AGENT_MINTER, 2 hours);
-        manager.grantRole(RolesLib.AGENT_MINTER, agent, 1 hours);
+        manager.grantRole(agentAdmin, issuerAdmin, 0);
+        manager.setTargetFunctionRole(address(deployed), mint, minter);
+        manager.setRoleAdmin(minter, agentAdmin);
+        manager.setRoleGuardian(minter, suiteAdmin);
+        manager.setGrantDelay(minter, 2 hours);
+        manager.grantRole(minter, agent, 1 hours);
         vm.stopPrank();
         vm.warp(block.timestamp + 6 days);
 
@@ -189,13 +182,13 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertEq(MockTREXAccessManagerV2(address(manager)).version(), 2);
         (bool issuerIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), issuerAdmin);
         assertTrue(issuerIsAdmin);
-        (bool agentIsMinter, uint32 executionDelay) = manager.hasRole(RolesLib.AGENT_MINTER, agent);
+        (bool agentIsMinter, uint32 executionDelay) = manager.hasRole(minter, agent);
         assertTrue(agentIsMinter);
         assertEq(executionDelay, 1 hours);
-        assertEq(manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector), RolesLib.AGENT_MINTER);
-        assertEq(manager.getRoleAdmin(RolesLib.AGENT_MINTER), RolesLib.AGENT_ADMIN);
-        assertEq(manager.getRoleGuardian(RolesLib.AGENT_MINTER), RolesLib.SUITE_ADMIN);
-        assertEq(manager.getRoleGrantDelay(RolesLib.AGENT_MINTER), 2 hours);
+        assertEq(manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector), minter);
+        assertEq(manager.getRoleAdmin(minter), agentAdmin);
+        assertEq(manager.getRoleGuardian(minter), suiteAdmin);
+        assertEq(manager.getRoleGrantDelay(minter), 2 hours);
         address oid = deployed.onchainID();
         assertTrue(_isManager(oid, address(manager)));
         vm.prank(issuerAdmin);

@@ -53,8 +53,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
         authority = new TREXImplementationAuthority(address(accessManager), v0, _v0Impls());
 
         // publish / upgrade / publishAndUpgrade are gated by VERSION_MANAGER
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(authority));
-        accessManager.grantRole(RolesLib.VERSION_MANAGER, versionManager, 0);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(authority), RolesLib.SHARED);
+        accessManager.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.VERSION_MANAGER), versionManager, 0);
     }
 
     // ---------- constructor ----------

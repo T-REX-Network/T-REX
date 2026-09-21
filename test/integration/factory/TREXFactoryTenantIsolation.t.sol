@@ -41,9 +41,10 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         _assertNoAccessTo(address(victim), vm.stopAndReturnStateDiff());
 
         Token deployed = Token(trexFactory.getToken("foreign"));
-        (bool tokenIsAgent,) = victim.hasRole(RolesLib.AGENT, address(deployed));
-        (bool registryIsAgent,) = victim.hasRole(RolesLib.AGENT, address(deployed.identityRegistry()));
-        (bool deployerIsAgent,) = victim.hasRole(RolesLib.AGENT, deployer);
+        (bool tokenIsAgent,) = victim.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), address(deployed));
+        (bool registryIsAgent,) =
+            victim.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), address(deployed.identityRegistry()));
+        (bool deployerIsAgent,) = victim.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT), deployer);
         assertFalse(tokenIsAgent);
         assertFalse(registryIsAgent);
         assertFalse(deployerIsAgent);
@@ -71,7 +72,8 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         Token sibling = Token(trexFactory.getToken("sibling"));
         assertEq(address(sibling.identityRegistry().identityStorage()), address(irs));
         assertEq(irs.linkedIdentityRegistries().length, 1);
-        (bool binder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        (bool binder,) =
+            accessManager.hasRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(trexFactory));
         assertFalse(binder);
 
         address siblingRegistry = address(sibling.identityRegistry());
@@ -90,8 +92,8 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
     }
 
     function _grantLegacyFactoryPrivilege() private {
-        victim.grantRole(RolesLib.AGENT_ADMIN, address(trexFactory), 0);
-        victim.grantRole(RolesLib.IRS_BINDER, address(trexFactory), 0);
+        victim.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.AGENT_ADMIN), address(trexFactory), 0);
+        victim.grantRole(RolesLib.role(RolesLib.SHARED, RolesLib.IRS_BINDER), address(trexFactory), 0);
         AccessManagerSetupLib.setupRoleAdmins(victim, RolesLib.SHARED);
     }
 
