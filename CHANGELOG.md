@@ -57,142 +57,76 @@ All notable changes to this project will be documented in this file.
     empty set.
 - **Per-suite role namespaces** (OZ H-02, #55): role ids on a shared AccessManager were one set for
   every suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
-  - `RolesLib.forSuite(role, namespace)` derives a suite-specific role id
-    (`uint64(keccak256(abi.encode("TREX-Suite", role, namespace, attempt)))`, re-derived with the next
-    attempt whenever the result is `ADMIN_ROLE`, `PUBLIC_ROLE` or inside the `ROLE_PREFIX` band of the
-    global ids, so a namespaced id can never merge with a global one); `RolesLib.namespaceOf(address)` is the conventional namespace of a suite (its token)
-    or of a storage (its own address); `RolesLib.SHARED` (zero) returns the global ids unchanged.
-  - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins` and `setupLabels` takes a `namespace`.
-    Selector mappings, role admins and labels land in that namespace. Labels are presentation, not
-    permission: neither commissioning nor migration sets them. Call `setupLabels(manager, namespace)`
-    and `setupGlobalLabels(manager)` explicitly when an explorer should show role names. Keeping the
-    strings out of commissioning is also what keeps the factory, which inlines the library, well under
-    the bytecode limit. Passing `SHARED` is the explicit opt-in to one set of agents across the
-    manager's suites. There is no silent default.
-  - Storage roles always live in the storage's own namespace, `namespaceOf(storage)`, in every mode
-    including `SHARED`. One storage can serve several suites, so its roles cannot belong to one token,
-    and a fixed rule means nothing about the storage has to be remembered or detected. Suites sharing
-    a storage share its identity data by construction; per-suite isolation applies to token
-    operations and registry writes, not to the records themselves. Agents are unaffected, they never
-    call the storage. Binding or unbinding a registry needs `IRS_BINDER` or `OWNER` in the storage's
-    namespace, also for issuers running `SHARED`.
-  - `AccessManagerSetupLib.commissionSuite(manager, token)` commissions a suite in its own namespace,
-    the per-suite default; `commissionSuite(manager, token, namespace)` takes an explicit namespace,
-    `RolesLib.SHARED` being the opt-in to one agent set across the manager. Either does the whole
-    commissioning in one call: maps the token, registry and compliance in the suite namespace, sets
-    that namespace's role admins, grants `AGENT` to the token (it writes to the registry) and `AGENT`
-    in the storage's namespace to the registry (it writes to the storage), binds the registry to the
-    storage when it is not bound yet, and, the first time a storage is seen, maps the storage in its
-    own namespace and sets that namespace's role admins. It runs once per suite (`AlreadyCommissioned`),
-    rejects the storage's namespace as a suite namespace (`InvalidRoleNamespace`), and rejects a
-    storage that was configured in any other namespace through the individual setup functions
-    (`StorageOutsideItsNamespace`). A storage already configured is never rewritten: the new registry
-    only receives the storage's write role, which needs `AGENT_ADMIN` in the storage's namespace, and
-    the binding needs `IRS_BINDER` there. Commissioning into a namespace another suite already uses is
-    allowed and merges the two suites' agents, which needs `AGENT_ADMIN` in that namespace.
-    "Already configured" is tracked in the manager itself: the reserved pseudo-selector
-    `RolesLib.COMMISSIONED` is mapped on a synthetic address derived from the token, the storage or
-    the namespace (`AccessManagerSetupLib.markerTarget`), never on the contract itself, so no function
-    selector can collide with it. `setupTokenRoles`, `setupIdentityRegistryStorageRoles` and
-    `setupRoleAdmins` write the marker themselves. A target configured with raw
-    `setTargetFunctionRole` calls carries no marker and is treated as never configured. Role admins of
-    a namespace are set only the first time that namespace is seen, so a second suite in `SHARED`
-    mode leaves administrators the issuer set on the global roles untouched, including ones set to
-    `ADMIN_ROLE`, and a storage the issuer restricted to `ADMIN_ROLE` stays restricted.
-  - A manager the factory deploys is commissioned by the factory, in the token's namespace, while it
-    still holds `ADMIN_ROLE`, and only then handed over. A supplied manager is never touched; its issuer
-    commissions the suite.
+  - `RolesLib.forSuite(role, namespace)` derives a suite-specific role id by hashing the role with
+    the namespace, re-hashing whenever the result would be `ADMIN_ROLE`, `PUBLIC_ROLE` or a global id.
+    `RolesLib.namespaceOf(address)` is the conventional namespace of a token or a storage.
+    `RolesLib.SHARED` (zero) returns the global ids unchanged and is the explicit opt-in to one agent
+    set across a manager. There is no silent default.
+  - Every `AccessManagerSetupLib.setup*Roles`, `setupRoleAdmins` and `setupLabels` takes a
+    `namespace`. Labels are presentation only: neither commissioning nor migration sets them, call
+    `setupLabels` and `setupGlobalLabels` explicitly.
+  - Storage roles always live in the storage's own namespace, in every mode including `SHARED`, since
+    one storage can serve several suites. Suites sharing a storage share its identity data by
+    construction. Agents never call the storage, so they are unaffected. Binding or unbinding a
+    registry needs `IRS_BINDER` or `OWNER` in the storage's namespace.
+  - `AccessManagerSetupLib.commissionSuite(manager, token[, namespace])` does the whole commissioning
+    in one call, default namespace the token's own: maps token, registry and compliance, sets the
+    namespace's role admins, grants `AGENT` to the token and `AGENT` in the storage's namespace to
+    the registry, binds the registry if not bound, and maps the storage the first time it is seen.
+    Guards: `AlreadyCommissioned`, `InvalidRoleNamespace` (suite namespace equal to the storage's),
+    `StorageOutsideItsNamespace` (storage configured elsewhere by hand). Anything already configured
+    is left alone, tracked by a reserved pseudo-selector `RolesLib.COMMISSIONED` mapped on a synthetic
+    address per token, storage and namespace (`markerTarget`), so a customised storage or role admin
+    survives a later commissioning. Commissioning a second suite onto a configured storage or into a
+    used namespace needs `AGENT_ADMIN` there; binding to a configured storage needs `IRS_BINDER` there.
+  - A manager the factory deploys is commissioned by the factory in the token's namespace before
+    handover. A supplied manager is never touched; its issuer commissions the suite.
   - `AccessManagerSetupLib.migrateSuitesToNamespaces(manager, tokens, namespaces, assignments,
-    revocations)` atomically migrates the supported shared configuration into namespaces, or reverts
-    without changing anything. The plan is explicit: a `RoleAssignment(account, role, namespace)` grants
-    the account, in a migrated suite namespace, the namespaced version of a global suite role it
-    currently holds, with the same execution delay; a `GlobalRevocation(account, role)` removes a
-    global role the account currently holds. Nothing is inferred: an account listed for suite A keeps
-    every global role that is not explicitly revoked, so a sibling suite that stays shared keeps working
-    for it, while the remapped selectors of A no longer accept the global role. Storages are not
-    migrated: their roles already live in the storage's own namespace, so a storage shared with a
-    suite outside the batch keeps working for both.
-  - Supported source means exactly what the library sets up: every suite commissioned `SHARED` (token
-    marker present and the storage in its own namespace, `StorageOutsideItsNamespace` otherwise),
-    every selector of the token, registry and compliance mapped to its standard global role, the
-    fourteen roles administered as `setupRoleAdmins` sets them
-    with guardians at the `ADMIN_ROLE` default, destination namespaces unused (no marker, no
-    administrator or guardian set on any of their roles), grant delays either zero or already set to
-    the same value on the namespaced ids and settled. The manager exposes only the effective grant
-    delay, so a scheduled `setGrantDelay` on a global or namespaced id is invisible to the preflight
-    and would leave the two ids apart once it takes effect: migrate only when no grant-delay change is
-    pending on either side. Anything else reverts before the first mutation:
-    `NotCommissionedShared`, `NonStandardPolicy(target, selector)`, `NonStandardAdministration(role)`,
-    `DestinationNamespaceInUse(namespace)`, `GrantDelayNotPrepared(role, namespace)` for the thirteen
-    suite roles (`IRS_BINDER` is a storage role and is not checked),
-    `AssignmentNamespaceNotMigrated(namespace)`, `InvalidRoleForNamespace(role, namespace)`,
-    `RoleNotHeld(account, role)`, `DuplicateMigrationEntry`, `PendingRoleGrant`, `PendingDelayChange`.
-    A manager customised by hand is migrated by a separately reviewed plan, not by this helper.
-  - Order inside the call: validate the whole plan, grant every assignment, grant `AGENT` in the new
-    namespace to each migrated token, apply the standard setup in the namespaces, revoke the tokens'
-    global `AGENT`, apply the requested revocations, administrative roles last. Operational
-    interruption to expect: when a role
-    carries a nonzero grant delay, the migrated membership is pending for that delay while the global
-    one is already revoked, so the account holds neither role for that window. Scheduled operations are
-    left in place: `AccessManager` re-checks authorisation at execution.
-  - `AccessManager` cannot enumerate members or suites. `remainingGlobalHolders(manager, candidates)`
-    is an audit aid over a caller-supplied candidate set; it does not prove every global holder was
-    found.
+    revocations)` moves suites commissioned `SHARED` into namespaces atomically or reverts before the
+    first mutation. The plan is explicit: `RoleAssignment(account, role, namespace)` grants the
+    namespaced version of a global role the account holds, same execution delay;
+    `GlobalRevocation(account, role)` removes a global role. Nothing is inferred, so a partial
+    migration leaves a sibling that stays `SHARED` working. Storages are not migrated, their
+    namespace never changes. Source must be exactly what the library set up (`NotCommissionedShared`,
+    `NonStandardPolicy`, `NonStandardAdministration`, `StorageOutsideItsNamespace`), destinations
+    unused (`DestinationNamespaceInUse`), grant delays already equal on the namespaced ids and settled
+    (`GrantDelayNotPrepared`; a pending `setGrantDelay` is invisible to the check, migrate only when
+    none is pending), every plan entry held and not pending (`RoleNotHeld`, `PendingRoleGrant`,
+    `PendingDelayChange`, `InvalidRoleForNamespace`, `AssignmentNamespaceNotMigrated`). Order: validate
+    all, grant assignments, grant `AGENT` to tokens, map the namespaces, revoke the tokens' global
+    `AGENT`, apply revocations with administrative roles last. A nonzero grant delay leaves the account
+    without either role for that delay.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
-  `TREXImplementationAuthority` like the four suite contracts (`SuiteImplementations.accessManagerImplementation`,
-  `SuiteBeacons.accessManagerBeacon`). `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys
-  one under the suite salt, commissions the suite on it in the token's namespace, hands `ADMIN_ROLE` to
-  the new `TokenDetails.accessManagerAdmin` and renounces its own. `accessManagerAdmin` must be a real
-  external administrator: zero, the factory and the predicted manager address are rejected
-  (`InvalidAccessManagerAdmin`). A supplied `accessManager` must have code
-  (`AccessManagerNotAContract`), since the suite initialisers do not check it. `deployTREXSuiteIsolated` clones the manager beacon too, owned by `accessManagerAdmin` rather
-  than by the manager, so a manager upgraded to a broken implementation can still be repaired from
-  outside it; the price is that isolated-manager upgrades sit outside the manager's own delays and
-  guardians, and that rotating the administrator of an isolated suite is two steps: the `ADMIN_ROLE`
-  rotation inside the manager and `transferOwnership` on the manager beacon, which the manager's
-  roles do not govern. A supplied manager is used as is and gets no beacon.
-  - The manager's address never changes across versions, so the token identity's MANAGEMENT key, every
-    suite contract's `authority()` and all role state survive an upgrade. Key rotation is role rotation
-    inside the manager. Replacing the manager contract is not a supported operation; the ERC-173
-    `transferOwnership` shim on suite contracts still forwards to `setAuthority` for the manager only and
-    does not move the token identity's key.
-  - Trust statement: the shared manager beacon is owned by `TREXImplementationAuthority`, so whoever
-    holds `VERSION_MANAGER` there can replace the code behind every factory-deployed manager on the
-    shared beacon, and with it the code at each token identity's MANAGEMENT-key address. Issuers who do
-    not accept that use `deployTREXSuiteIsolated`, whose manager beacon is owned by
-    `accessManagerAdmin`, or supply their own manager.
-  - A fresh manager cannot be combined with a reused registry storage: the storage's authority must
-    equal the suite manager (`StorageAuthorityMismatch(storage, expected, actual)`), and a manager that
-    does not exist yet cannot be.
-  - Breaking: `TokenDetails` gains `accessManagerAdmin`, `SuiteImplementations` and `SuiteBeacons` gain
-    a fifth entry, and `TREXImplementationAuthority` requires a manager implementation at construction.
-    The struct changes alter the ABI of `deployTREXSuite`, `deployTREXSuiteIsolated`, `publish`,
-    `publishAndUpgrade`, `beacons`, `implementations`, `implementationsFor` and the signatures of the
-    `BeaconsDeployed`, `VersionPublished`, `SuiteUpgraded` and `IsolatedSuiteDeployed` events. SDKs,
-    deployment scripts and indexers decoding them need updating.
-- **The factory no longer writes into a supplied AccessManager**: `TokenDetails.irAgents` and
-  `TokenDetails.tokenAgents` are gone, a deploy against a supplied manager makes no call into it, and a
-  suite deployed against a reused registry storage is no longer bound to it by the factory. The factory
-  therefore needs no role on any issuer manager. A deploy that names a manager the caller does not
-  control is not rejected: it creates contracts nobody uses and changes nothing on that manager. On a
-  manager it deploys itself it commissions the suite and grants `ADMIN_ROLE` to `accessManagerAdmin`,
-  before renouncing its own. Before, any holder of the factory OWNER role could name another issuer's
-  manager, list their own addresses as agents and receive the shared `AGENT` role there through the
-  factory's `AGENT_ADMIN` grant: identity registration and deletion on every registry of every suite
-  under that manager. Now the issuer grants the roles the suite needs on their own manager after
-  deployment, in the same transaction through a batching wallet if desired: `AGENT` to the registry (it
-  writes to the storage), `AGENT` to the token (it moves identities during `recoveryAddress`), the
-  operational agent roles to their agents. `AccessManagerSetupLib.commissionSuite` on the issuer's
-  manager does the structural part in one call, including, for a reused storage, binding the new
-  registry (which needs `IRS_BINDER` in the storage's namespace) and granting it `AGENT` there, since
-  binding alone grants no write permission. The reused
-  storage must already report the suite's manager as its authority; a storage under another manager is
-  rejected with `StorageAuthorityMismatch`, because `bindIdentityRegistry` requires matching authorities
-  and the suite could never be completed. `MaxAgentsReached` is removed.
-  - Rollout: this stops new grants. It does not revoke the `AGENT_ADMIN` that issuers granted to
-    previously deployed factories on their managers. Revoke it on every manager that holds it; until
-    then the old grant path stays open through the old factory code.
+  `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
+  so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
+  Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
+  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
+    suite salt, commissions the suite on it, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin`
+    and renounces its own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
+    supplied manager must have code (`AccessManagerNotAContract`); a reused storage must already
+    report the suite manager as its authority (`StorageAuthorityMismatch`).
+  - `deployTREXSuiteIsolated` clones the manager beacon too, owned by `accessManagerAdmin` so a broken
+    manager can be repaired from outside. Rotating that administrator is two steps: `ADMIN_ROLE` in
+    the manager and `transferOwnership` on the beacon.
+  - Trust statement: the shared manager beacon is owned by `TREXImplementationAuthority`, so
+    `VERSION_MANAGER` can replace the code behind every factory-deployed manager on it. Issuers who do
+    not accept that use `deployTREXSuiteIsolated` or supply their own manager.
+  - Breaking: `TokenDetails` gains `accessManagerAdmin`, `SuiteImplementations` and `SuiteBeacons`
+    gain a fifth entry, `TREXImplementationAuthority` requires a manager implementation. ABI changes
+    on `deployTREXSuite`, `deployTREXSuiteIsolated`, `publish`, `publishAndUpgrade`, `beacons`,
+    `implementations`, `implementationsFor` and the `BeaconsDeployed`, `VersionPublished`,
+    `SuiteUpgraded`, `IsolatedSuiteDeployed` events.
+- **The factory no longer writes into a supplied AccessManager** (OZ Critical, #77; closes M-05):
+  `TokenDetails.irAgents` and `tokenAgents` are gone, a deploy against a supplied manager makes no
+  call into it, and a reused storage is no longer bound by the factory. Before, any factory `OWNER`
+  could name another issuer's manager and receive `AGENT` there through the factory's `AGENT_ADMIN`
+  grant. Now the issuer commissions the suite on their own manager with `commissionSuite` and grants
+  agent roles themselves. A deploy naming a foreign manager is not rejected: it changes nothing on that
+  manager. `MaxAgentsReached` is removed.
+  - Rollout: this stops new grants. It does not revoke `AGENT_ADMIN` that issuers granted to earlier
+    factories on their managers; revoke it on every manager that holds it.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance

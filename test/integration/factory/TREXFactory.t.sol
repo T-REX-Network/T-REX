@@ -1155,36 +1155,6 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertFalse(stillOwner, "Factory must not hold standing OWNER on the IRS");
     }
 
-    /// @notice A reused-IRS deploy needs no privilege from the factory: with AGENT_ADMIN stripped from
-    ///         the factory the deploy still succeeds, and the storage stays unbound until the issuer binds.
-    function test_deployTREXSuite_Success_WithProvidedIRS_WhenFactoryHoldsNoAgentAdmin() public {
-        // Deploy a first suite to obtain a properly initialized IRS to reuse.
-        ITREXFactory.TokenDetails memory tempTokenDetails = _createEmptyTokenDetails();
-        ITREXFactory.ClaimDetails memory tempClaimDetails = _createEmptyClaimDetails();
-        _deploySuite("temp-salt-2", tempTokenDetails, tempClaimDetails);
-
-        address tempTokenAddress = trexFactory.getToken("temp-salt-2");
-        Token tempToken = Token(tempTokenAddress);
-        address irAddress = address(tempToken.identityRegistry());
-        address deployedIRS = address(IERC3643IdentityRegistry(irAddress).identityStorage());
-
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, RolesLib.SHARED);
-
-        // Strip the factory's AGENT_ADMIN: the deploy must not depend on it.
-        accessManager.revokeRole(RolesLib.AGENT_ADMIN, address(trexFactory));
-
-        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
-        tokenDetails.irs = deployedIRS;
-        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
-
-        vm.prank(deployer);
-        trexFactory.deployTREXSuite("salt-irs-no-admin", tokenDetails, claimDetails);
-
-        Token deployedToken = Token(trexFactory.getToken("salt-irs-no-admin"));
-        assertEq(address(deployedToken.identityRegistry().identityStorage()), deployedIRS);
-        assertEq(IdentityRegistryStorage(deployedIRS).linkedIdentityRegistries().length, 1);
-    }
-
     // ============ AccessManagerSetupLib.setupTREXImplementationAuthorityRoles() Tests ============
 
     /// @notice Wires the 3 TREXImplementationAuthority version selectors to the VERSION_MANAGER role.

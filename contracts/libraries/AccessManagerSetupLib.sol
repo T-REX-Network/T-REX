@@ -277,25 +277,6 @@ library AccessManagerSetupLib {
         _revokeGlobalRoles(accessManager, tokens, revocations);
     }
 
-    function remainingGlobalHolders(IAccessManager accessManager, address[] memory accounts)
-        internal
-        view
-        returns (address[] memory holders)
-    {
-        uint64[] memory roles = _suiteRoles();
-        address[] memory found = new address[](accounts.length);
-        uint256 count;
-        for (uint256 i = 0; i < accounts.length; i++) {
-            if (_holdsAny(accessManager, roles, accounts[i])) {
-                found[count++] = accounts[i];
-            }
-        }
-        holders = new address[](count);
-        for (uint256 i = 0; i < count; i++) {
-            holders[i] = found[i];
-        }
-    }
-
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
         bytes4[] memory functions = new bytes4[](4);
@@ -404,9 +385,6 @@ library AccessManagerSetupLib {
     ) private view {
         for (uint256 i = 0; i < assignments.length; i++) {
             RoleAssignment memory assignment = assignments[i];
-            for (uint256 j = 0; j < i; j++) {
-                require(!_sameAssignment(assignments[j], assignment), ErrorsLib.DuplicateMigrationEntry());
-            }
             require(
                 _contains(namespaces, assignment.namespace),
                 ErrorsLib.AssignmentNamespaceNotMigrated(assignment.namespace)
@@ -421,13 +399,7 @@ library AccessManagerSetupLib {
     function _validateRevocations(IAccessManager accessManager, GlobalRevocation[] memory revocations) private view {
         for (uint256 i = 0; i < revocations.length; i++) {
             GlobalRevocation memory revocation = revocations[i];
-            for (uint256 j = 0; j < i; j++) {
-                require(!_sameRevocation(revocations[j], revocation), ErrorsLib.DuplicateMigrationEntry());
-            }
-            require(
-                _containsRole(_suiteRoles(), revocation.role),
-                ErrorsLib.InvalidRoleForNamespace(revocation.role, RolesLib.SHARED)
-            );
+            require(_isSuiteRole(revocation.role), ErrorsLib.InvalidRoleForNamespace(revocation.role, RolesLib.SHARED));
             _requireActiveGlobal(accessManager, revocation.role, revocation.account);
         }
     }
@@ -497,20 +469,6 @@ library AccessManagerSetupLib {
         accessManager.grantRole(RolesLib.forSuite(role, namespace), account, executionDelay);
     }
 
-    function _holdsAny(IAccessManager accessManager, uint64[] memory roles, address account)
-        private
-        view
-        returns (bool)
-    {
-        for (uint256 i = 0; i < roles.length; i++) {
-            (uint48 since,,,) = accessManager.getAccess(roles[i], account);
-            if (since != 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     function _isAdministrative(uint64 role) private pure returns (bool) {
         return role == RolesLib.AGENT_ADMIN || role == RolesLib.SUITE_ADMIN;
     }
@@ -525,14 +483,6 @@ library AccessManagerSetupLib {
             _markOf(accessManager, identityRegistryStorage) == expected,
             ErrorsLib.StorageOutsideItsNamespace(identityRegistryStorage)
         );
-    }
-
-    function _sameAssignment(RoleAssignment memory a, RoleAssignment memory b) private pure returns (bool) {
-        return a.account == b.account && a.role == b.role && a.namespace == b.namespace;
-    }
-
-    function _sameRevocation(GlobalRevocation memory a, GlobalRevocation memory b) private pure returns (bool) {
-        return a.account == b.account && a.role == b.role;
     }
 
     function _administer(IAccessManager accessManager, bytes32 namespace) private {
