@@ -187,7 +187,7 @@ library AccessManagerSetupLib {
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {
-        table = new RoleAdmin[](12);
+        table = new RoleAdmin[](11);
         table[0] = RoleAdmin(RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
         table[1] = RoleAdmin(RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);
         table[2] = RoleAdmin(RolesLib.Role.AGENT_BURNER, RolesLib.Role.AGENT_ADMIN);
@@ -197,9 +197,8 @@ library AccessManagerSetupLib {
         table[6] = RoleAdmin(RolesLib.Role.AGENT_FORCED_TRANSFER, RolesLib.Role.AGENT_ADMIN);
         table[7] = RoleAdmin(RolesLib.Role.AGENT_PAUSER, RolesLib.Role.AGENT_ADMIN);
         table[8] = RoleAdmin(RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
-        table[9] = RoleAdmin(RolesLib.Role.IRS_WRITER, RolesLib.Role.AGENT_ADMIN);
-        table[10] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
-        table[11] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[9] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[10] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
     }
 
     function commissionSuite(TREXAccessManager accessManager, address token) internal {

@@ -106,10 +106,12 @@ library RolesLib {
     uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
 
     function forNamespace(uint32 namespaceId, Role role) internal pure returns (uint64) {
+        require(namespaceId != PLATFORM_NAMESPACE, ErrorsLib.InvalidNamespace());
         return _pack(namespaceId, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
     function forNamespace(uint32 namespaceId, bytes32 customName) internal pure returns (uint64) {
+        require(namespaceId != PLATFORM_NAMESPACE, ErrorsLib.InvalidNamespace());
         return _pack(namespaceId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
     }
 
@@ -123,10 +125,9 @@ library RolesLib {
         custom = roleNumber & CUSTOM_ROLE_FLAG != 0;
     }
 
-    function _pack(uint32 namespaceId, uint32 roleNumber) private pure returns (uint64 roleId) {
+    function _pack(uint32 namespaceId, uint32 roleNumber) private pure returns (uint64) {
         require(namespaceId != 0, ErrorsLib.InvalidNamespace());
-        roleId = (uint64(namespaceId) << 32) | roleNumber;
-        require(roleId != type(uint64).max, ErrorsLib.InvalidNamespace());
+        return (uint64(namespaceId) << 32) | roleNumber;
     }
 
 }

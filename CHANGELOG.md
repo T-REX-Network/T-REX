@@ -63,19 +63,22 @@ All notable changes to this project will be documented in this file.
     no unscoped role is reachable by omission. `forNamespace(namespaceId, bytes32 customName)` derives
     a custom role by hashing the name into the upper half of the role number, so `RolesLib.decode`
     tells standard from custom without a lookup. Role numbers start at `ROLE_NUMBER_OFFSET` (1).
-    Namespace 0 is rejected and so is an id equal to `PUBLIC_ROLE` (`InvalidNamespace`), so neither
-    OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `namespaceId = id >> 32` off
+    Namespace 0 is rejected (`InvalidNamespace`) and the platform namespace holds three roles only,
+    so neither OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `namespaceId = id >> 32` off
     `RoleGranted` events, no labels pass needed.
   - Platform roles, the factory `OWNER`, `VERSION_MANAGER` and `ASSET_DEPLOYER`, are the
     `RolesLib.PlatformRole` enum in the reserved `PLATFORM_NAMESPACE` (`type(uint32).max`),
-    derived with `RolesLib.platform(role)`. They are governance roles, not issuer roles, so
+    derived with `RolesLib.platform(role)`. `forNamespace` rejects that namespace, so no suite role
+    can land on a platform id. They are governance roles, not issuer roles, so
     `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
     take no namespace.
   - A namespace is an issuer, or a fund: one team across every token in it. Two tokens in one
     namespace share their agents; two namespaces are isolated from each other.
   - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
-    gated by `IRS_WRITER`, which only registries hold. Agents edit investor records through a registry,
-    never directly, so a storage shared across namespaces gives the other namespace's agents nothing.
+    gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
+    namespace administrator can hand it out, so this holds by construction. Agents edit investor
+    records through a registry, never directly, and a storage shared across namespaces gives the other
+    namespace's agents nothing.
     Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's namespace: whoever owns the
     storage's namespace owns its bindings.
   - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createNamespace(name)` returns
@@ -93,8 +96,11 @@ All notable changes to this project will be documented in this file.
     the pure form and works on any `IAccessManager`: the storage's namespace is explicit, so a storage
     already shared with another namespace is passed with the namespace it lives in and is not
     remapped. Every other suite `setup*` function takes a `namespaceId` and is pure. Commissioning is
-    idempotent: re-running re-applies the standard tables. Commissioning a second suite into a namespace already administered needs `AGENT_ADMIN`
-    there; binding to a mapped storage needs `IRS_BINDER` in the storage's namespace.
+    idempotent: re-running re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps
+    selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
+    governance act. A second suite into a namespace already administered also needs `AGENT_ADMIN` there
+    for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
+    namespace.
   - The library keeps no state of its own and validates no preconditions: no markers, no
     "already configured" checks, no migration preflight. Which suites were configured alike is the
     operator's record.

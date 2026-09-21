@@ -49,7 +49,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
     }
 
     function testFuzz_forNamespace_PacksAndDecodes(uint32 namespaceId, uint8 roleIndex) public pure {
-        vm.assume(namespaceId != 0);
+        vm.assume(namespaceId != 0 && namespaceId != RolesLib.PLATFORM_NAMESPACE);
         RolesLib.Role role = RolesLib.Role(roleIndex % (uint8(type(RolesLib.Role).max) + 1));
         uint64 id = RolesLib.forNamespace(namespaceId, role);
         (uint32 decodedNamespace, uint32 decodedRole, bool custom) = RolesLib.decode(id);
@@ -88,8 +88,28 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         this.packExternally(0, RolesLib.Role.AGENT);
     }
 
+    function testFuzz_forNamespace_RevertWhen_NamespaceIsThePlatformNamespace(uint8 roleIndex, bytes32 customName)
+        public
+    {
+        RolesLib.Role role = RolesLib.Role(roleIndex % (uint8(type(RolesLib.Role).max) + 1));
+        vm.expectRevert(ErrorsLib.InvalidNamespace.selector);
+        this.packExternally(RolesLib.PLATFORM_NAMESPACE, role);
+        vm.expectRevert(ErrorsLib.InvalidNamespace.selector);
+        this.packCustomExternally(RolesLib.PLATFORM_NAMESPACE, customName);
+    }
+
+    function test_platform_RolesLiveInTheReservedNamespaceOnly() public pure {
+        (uint32 namespaceId,,) = RolesLib.decode(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER));
+        assertEq(namespaceId, RolesLib.PLATFORM_NAMESPACE);
+        assertNotEq(RolesLib.platform(RolesLib.PlatformRole.OWNER), RolesLib.forNamespace(NS_A, RolesLib.Role.OWNER));
+    }
+
     function packExternally(uint32 namespaceId, RolesLib.Role role) external pure returns (uint64) {
         return RolesLib.forNamespace(namespaceId, role);
+    }
+
+    function packCustomExternally(uint32 namespaceId, bytes32 customName) external pure returns (uint64) {
+        return RolesLib.forNamespace(namespaceId, customName);
     }
 
     function test_explicitNamespace_AgentOfAOperatesAOnly() public {
@@ -196,6 +216,20 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertTrue(registryWrites);
     }
 
+    function test_explicitNamespace_StorageWriterStaysUnderAdminRole() public {
+        _commission(tokenA, NS_A);
+        uint64 writer = RolesLib.forNamespace(NS_A, RolesLib.Role.IRS_WRITER);
+        uint64 agentAdmin = RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_ADMIN);
+        accessManager.grantRole(agentAdmin, agentA, 0);
+
+        assertEq(accessManager.getRoleAdmin(writer), 0);
+        vm.prank(agentA);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, agentA, uint64(0))
+        );
+        accessManager.grantRole(writer, agentB, 0);
+    }
+
     function test_registry_CommissionUsesTheAssignedNamespace() public {
         Token fundToken = _deployBare("fund-a", address(0), address(registry));
         uint32 fund = registry.createNamespace("Fund A");
@@ -242,7 +276,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         registry.assign(fund, address(classA));
         registry.assign(fund, address(classB));
         AccessManagerSetupLib.commissionSuite(registry, address(classA));
-        _grantStorageAdmin(registry, fund);
+        _grantStorageBinder(registry, fund);
         AccessManagerSetupLib.commissionSuite(registry, address(classB));
         _grantAllAgentRoles(registry, agentA, fund);
 
@@ -271,7 +305,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         registry.assign(fundX, address(tokenX));
         registry.assign(fundY, address(tokenY));
         AccessManagerSetupLib.commissionSuite(registry, address(tokenX));
-        _grantStorageAdmin(registry, fundX);
+        _grantStorageBinder(registry, fundX);
         AccessManagerSetupLib.commissionSuite(registry, address(tokenY));
 
         assertEq(registry.namespaceOf(address(irs)), fundX);
@@ -479,7 +513,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         Token tokenC = _deployBare("batch-c", address(irs), address(accessManager));
         _commissionIntoTeam(tokenA);
-        _grantStorageAdmin(accessManager, TEAM);
+        _grantStorageBinder(accessManager, TEAM);
         _commissionIntoTeam(tokenC);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
@@ -748,7 +782,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         accessManager.grantRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_ADMIN), address(this), 0);
     }
 
-    function _grantStorageAdmin(IAccessManager manager, uint32 namespaceId) private {
+    function _grantStorageBinder(IAccessManager manager, uint32 namespaceId) private {
         manager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.AGENT_ADMIN), address(this), 0);
         manager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.IRS_BINDER), address(this), 0);
     }
