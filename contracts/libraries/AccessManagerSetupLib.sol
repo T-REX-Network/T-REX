@@ -77,6 +77,7 @@ import { ITREXFactory } from "../factory/ITREXFactory.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
+import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ErrorsLib } from "./ErrorsLib.sol";
 import { RolesLib } from "./RolesLib.sol";
@@ -352,7 +353,7 @@ library AccessManagerSetupLib {
         setupTREXRegistryRoles(accessManager, registry, domainId);
         setupModularComplianceRoles(accessManager, _complianceOf(token), domainId);
         setupRoleAdmins(accessManager, domainId);
-        if (!_isBound(identityRegistryStorage, registry)) {
+        if (!IIdentityRegistryStorage(identityRegistryStorage).isIdentityRegistryBound(registry)) {
             IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
         }
         setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, storageDomainId);
@@ -415,16 +416,6 @@ library AccessManagerSetupLib {
 
     function _complianceOf(address token) private view returns (address) {
         return address(IERC3643(token).compliance());
-    }
-
-    function _isBound(address identityRegistryStorage, address registry) private view returns (bool) {
-        address[] memory linked = IERC3643IdentityRegistryStorage(identityRegistryStorage).linkedIdentityRegistries();
-        for (uint256 i = 0; i < linked.length; i++) {
-            if (linked[i] == registry) {
-                return true;
-            }
-        }
-        return false;
     }
 
 }

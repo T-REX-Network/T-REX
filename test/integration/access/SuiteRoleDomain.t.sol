@@ -346,7 +346,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(classB.balanceOf(bob), 2);
         assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
         assertEq(address(irs.storedIdentity(bob)), address(bobIdentity));
-        assertTrue(_isBound(irs, address(classB.identityRegistry())));
+        assertTrue(irs.isIdentityRegistryBound(address(classB.identityRegistry())));
         _assertCannotTouchStorage(agentA, irs);
     }
 
@@ -397,7 +397,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         registry.assign(fundY, address(tokenY));
         AccessManagerSetupLib.commissionSuite(registry, address(tokenX));
         registry.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.AGENT_ADMIN), address(this), 0);
-        assertFalse(_isBound(irs, address(tokenY.identityRegistry())));
+        assertFalse(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
         this.commissionExternally(address(tokenY));
@@ -405,7 +405,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
 
         registry.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.IRS_BINDER), address(this), 0);
         AccessManagerSetupLib.commissionSuite(registry, address(tokenY));
-        assertTrue(_isBound(irs, address(tokenY.identityRegistry())));
+        assertTrue(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
     }
 
     function test_migrate_Success_LocksAgentsOfAOutOfBOnASharedTeam() public {
@@ -850,16 +850,6 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         for (uint256 i = 0; i < roles.length; i++) {
             manager.grantRole(RolesLib.forDomain(domainId, roles[i]), account, 0);
         }
-    }
-
-    function _isBound(IdentityRegistryStorage irs, address suiteRegistry) private view returns (bool) {
-        address[] memory linked = irs.linkedIdentityRegistries();
-        for (uint256 i = 0; i < linked.length; i++) {
-            if (linked[i] == suiteRegistry) {
-                return true;
-            }
-        }
-        return false;
     }
 
     function _deployBare(string memory salt, address irs, address manager) private returns (Token) {

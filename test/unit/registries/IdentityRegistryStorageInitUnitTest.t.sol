@@ -67,6 +67,9 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         address[] memory linked = storageContract.linkedIdentityRegistries();
         assertEq(linked.length, 2);
         assertFalse(_hasWriterRole(ir2));
+        assertTrue(storageContract.isIdentityRegistryBound(ir1));
+        assertTrue(storageContract.isIdentityRegistryBound(ir2));
+        assertFalse(storageContract.isIdentityRegistryBound(makeAddr("ir3")));
     }
 
     function test_bindIdentityRegistry_AdminGrantsWriterRoleExplicitly() public {

@@ -89,6 +89,8 @@ All notable changes to this project will be documented in this file.
     `schedule` and `execute`, show up in `getTargetFunctionRole(manager, selector)`, and can be
     delegated to another role with `setTargetFunctionRole` on the manager itself. No OpenZeppelin
     internal is overridden. Events `DomainCreated` and
+    `DomainAssigned`. `IdentityRegistryStorage.isIdentityRegistryBound(registry)` is a new O(1) view
+    on the T-REX storage, used by commissioning to skip an already bound registry.
     `DomainAssigned`. `domainOf` is a registry, not the authorization boundary: authorization is the
     role id on each selector and the grants behind it, and the manager never consults `domainOf`.
     Commissioning and migration keep the two in step; `assign` alone records the domain, rewrites no
