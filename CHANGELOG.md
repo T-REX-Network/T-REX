@@ -63,9 +63,9 @@ All notable changes to this project will be documented in this file.
     make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
     healthy module's unbind at will.
   - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
-    module and emits the standard `ModuleRemoved` followed by `ModuleForceRemoved(address indexed
-    module)`, so tooling that only knows the standard event still sees the removal. The module keeps its own binding
-    record, so the same proxy address cannot be re-added afterwards; a fresh deployment can.
+    module and emits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
+    can tell a forced removal from a regular one. The module keeps its own binding record, so the same
+    proxy address cannot be re-added afterwards; a fresh deployment can.
   - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
     compliance still lists the module, so an unbind forwarded through `callModuleFunction`, directly
     or nested in `multicall`, cannot leave the compliance routing to a module that considers itself

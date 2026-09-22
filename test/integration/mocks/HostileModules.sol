@@ -30,6 +30,25 @@ contract UnbindRevertingModule is IModule {
         return true;
     }
 
+    function validationBounds(
+        bytes calldata,
+        bytes calldata,
+        bytes calldata,
+        uint256 currentMin,
+        uint256 currentMax,
+        address
+    ) external pure returns (uint256, uint256) {
+        return (currentMin, currentMax);
+    }
+
+    function reserveSlot(uint256, bytes calldata, bytes calldata, uint256) external { }
+
+    function commitSlot(uint256, uint256) external pure returns (bool) {
+        return false;
+    }
+
+    function releaseSlot(uint256) external { }
+
     function moduleCapabilities() external pure returns (uint256) {
         return ModuleCapabilitiesLib.ALL;
     }

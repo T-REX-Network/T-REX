@@ -96,13 +96,13 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     function test_forceRemoveModule_Success_WhenModuleRevertsEverywhere() public {
         address module = _bindHostage(address(new AllCapabilitiesModule()));
 
-        vm.expectEmit(true, false, false, false, address(mc));
-        emit EventsLib.ModuleRemoved(module);
+        vm.recordLogs();
         vm.expectEmit(true, false, false, false, address(mc));
         emit EventsLib.ModuleForceRemoved(module);
         vm.prank(deployer);
         mc.forceRemoveModule(module);
 
+        assertFalse(_logged(EventsLib.ModuleRemoved.selector));
         assertFalse(mc.isModuleBound(module));
         assertEq(mc.getModules().length, 0);
         _assertNoRouting(module);
@@ -330,6 +330,16 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
                 assertNotEq(routed[j], module);
             }
         }
+    }
+
+    function _logged(bytes32 topic) private returns (bool) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == topic) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function _bind(address module) private {

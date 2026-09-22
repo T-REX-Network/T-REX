@@ -102,7 +102,8 @@ interface IModularCompliance is IERC3643Compliance {
      *  address cannot be added again; a fresh deployment can.
      *  @param _module address of the module to remove
      *  Restricted to the configured AccessManager role (OWNER).
-     *  Emits a ModuleRemoved event followed by a ModuleForceRemoved event
+     *  Emits a ModuleForceRemoved event and no ModuleRemoved, so indexers can tell a forced removal
+     *  from a regular one
      */
     function forceRemoveModule(address _module) external;
 

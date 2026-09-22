@@ -136,6 +136,14 @@ contract ModularCompliance is
 
     /**
      *  @dev See {IModularCompliance-removeModule}.
+     *  Deletes the module from the routing set, then calls `unbindCompliance` on it directly so the module
+     *  drops its own binding record. The call is not best effort on purpose: if the module reverts, or a
+     *  caller supplies only enough gas for the outer call so the subcall runs out under the 63/64 rule, the
+     *  whole removal reverts and the module stays bound on both sides. A module that reverts on
+     *  `unbindCompliance` is removed with {forceRemoveModule}.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleRemoved event.
+     *  @param _module address of the module to remove
      */
     function removeModule(address _module) external restricted {
         _removeModule(_module);
@@ -145,10 +153,16 @@ contract ModularCompliance is
 
     /**
      *  @dev See {IModularCompliance-forceRemoveModule}.
+     *  Deletes the module from the routing set without any call into it, so a module that reverts on
+     *  `unbindCompliance` or everywhere cannot hold the token hostage. The module keeps its own binding
+     *  record, so the same address cannot be added to this compliance again; a fresh deployment can.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleForceRemoved event and no ModuleRemoved, so indexers can tell a forced removal
+     *  from a regular one.
+     *  @param _module address of the module to remove
      */
     function forceRemoveModule(address _module) external restricted {
         _removeModule(_module);
-        emit EventsLib.ModuleRemoved(_module);
         emit EventsLib.ModuleForceRemoved(_module);
     }
 
