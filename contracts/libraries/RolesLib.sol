@@ -121,8 +121,8 @@ library RolesLib {
 
     function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
         domainId = uint32(roleId >> 32);
-        roleNumber = uint32(roleId);
-        custom = roleNumber & CUSTOM_ROLE_FLAG != 0;
+        custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;
+        roleNumber = uint32(roleId) & ~CUSTOM_ROLE_FLAG;
     }
 
     function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {

@@ -75,7 +75,10 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         (uint32 domainId, uint32 role, bool isCustom) = RolesLib.decode(custom);
         assertEq(domainId, DOMAIN_A);
         assertTrue(isCustom);
-        assertTrue(role & RolesLib.CUSTOM_ROLE_FLAG != 0);
+        assertEq(role & RolesLib.CUSTOM_ROLE_FLAG, 0);
+        assertEq(
+            role, uint32(uint256(keccak256(abi.encode(bytes32("COMPLIANCE_OFFICER"))))) & ~RolesLib.CUSTOM_ROLE_FLAG
+        );
         for (uint8 i = 0; i <= uint8(type(RolesLib.Role).max); i++) {
             assertNotEq(custom, RolesLib.forDomain(DOMAIN_A, RolesLib.Role(i)));
         }
