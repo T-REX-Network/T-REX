@@ -137,6 +137,21 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     }
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
+    function isLinkedIdentityRegistry(address _identityRegistry) external view virtual returns (bool) {
+        return _isLinkedIdentityRegistry(_identityRegistry);
+    }
+
+    /// @inheritdoc IERC3643IdentityRegistryStorage
+    function linkedIdentityRegistryCount() external view virtual returns (uint256) {
+        return _linkedIdentityRegistryCount();
+    }
+
+    /// @inheritdoc IERC3643IdentityRegistryStorage
+    function linkedIdentityRegistries(uint256 _start, uint256 _end) external view virtual returns (address[] memory) {
+        return _linkedIdentityRegistries(_start, _end);
+    }
+
+    /// @inheritdoc IERC3643IdentityRegistryStorage
     function storedIdentity(address _userAddress) external view virtual returns (IIdentity) {
         return _storedIdentity(_userAddress);
     }
@@ -233,6 +248,26 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     ///  consult them without an external call.
     function _linkedIdentityRegistries() internal view virtual returns (address[] memory) {
         return _erc3643IdentityRegistryStorageStorage().identityRegistries.values();
+    }
+
+    /// @dev Reads a slice of the bound registries, separate from the external getter so derived contracts
+    ///  can consult them without an external call. Bounds are clamped by the underlying set, so an
+    ///  out-of-range page yields an empty array.
+    function _linkedIdentityRegistries(uint256 start, uint256 end) internal view virtual returns (address[] memory) {
+        return _erc3643IdentityRegistryStorageStorage().identityRegistries.values(start, end);
+    }
+
+    /// @dev Tests membership in the bound set, separate from the external getter so derived contracts
+    ///  can consult it without an external call. Enumeration only, never an authorization check —
+    ///  see {IERC3643IdentityRegistryStorage-isLinkedIdentityRegistry}.
+    function _isLinkedIdentityRegistry(address identityRegistry) internal view virtual returns (bool) {
+        return _erc3643IdentityRegistryStorageStorage().identityRegistries.contains(identityRegistry);
+    }
+
+    /// @dev Reads the size of the bound set without copying it, separate from the external getter so
+    ///  derived contracts can consult it without an external call.
+    function _linkedIdentityRegistryCount() internal view virtual returns (uint256) {
+        return _erc3643IdentityRegistryStorageStorage().identityRegistries.length();
     }
 
     /// @dev Reads the stored identity of a wallet, separate from the external getter so derived

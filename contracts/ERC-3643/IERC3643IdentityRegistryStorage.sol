@@ -141,6 +141,35 @@ interface IERC3643IdentityRegistryStorage {
     function linkedIdentityRegistries() external view returns (address[] memory);
 
     /**
+     *  @notice Returns whether an identity registry is in the bound set.
+     *  @dev See {bindIdentityRegistry} — the bound set is enumeration only, NOT authorization. A true
+     *  result does not mean the registry may write to the storage, and a false result does not mean it
+     *  may not: write access is gated solely by the AGENT role on the AccessManager. Do not use this as
+     *  an access check.
+     *  @param _identityRegistry The identity registry address to test.
+     */
+    function isLinkedIdentityRegistry(address _identityRegistry) external view returns (bool);
+
+    /**
+     *  @dev Returns the number of identity registries linked to the storage contract, without copying
+     *  the set. Equivalent to `linkedIdentityRegistries().length`.
+     */
+    function linkedIdentityRegistryCount() external view returns (uint256);
+
+    /**
+     *  @notice Returns a slice of the bound set, for reading it in pages instead of in one copy.
+     *  @dev Both bounds are clamped to the set size and `_start` is clamped to `_end`, so an out-of-range
+     *  page returns an empty array rather than reverting. Paginate against `linkedIdentityRegistryCount`.
+     *
+     *  Set order is NOT stable: removing a registry moves the last element into the freed slot. A caller
+     *  paging across several calls may therefore miss or repeat an entry if a bind or unbind lands between
+     *  them. Read the whole set in one call where a consistent snapshot matters.
+     *  @param _start Index of the first entry to return, inclusive.
+     *  @param _end Index to stop at, exclusive.
+     */
+    function linkedIdentityRegistries(uint256 _start, uint256 _end) external view returns (address[] memory);
+
+    /**
      *  @dev Returns the onchainID of an investor.
      *  @param _userAddress The wallet of the investor
      */

@@ -341,6 +341,9 @@ contract TREXRegistry is
     ///  suite mutate every other suite's resolution set. Binding stays with the IRS admin; this only
     ///  makes a forgotten pre-bind revert now instead of silently breaking `_globalIdentity` later.
     ///  Unbinding the old storage stays the IRS admin's job for the same reason.
+    ///  Membership is asked for directly rather than enumerated: `isLinkedIdentityRegistry` is part of
+    ///  `IERC3643IdentityRegistryStorage`, whose support the check above already requires, and it reads
+    ///  one slot instead of copying the whole bound set.
     function _authorizeRegistryUpdate(address newRegistry) internal override {
         _checkCanCall(_msgSender(), _msgData());
         _checkSharedAuthority(newRegistry);
@@ -348,18 +351,10 @@ contract TREXRegistry is
             ERC165Checker.supportsInterface(newRegistry, type(IERC3643IdentityRegistryStorage).interfaceId),
             ErrorsLib.InvalidIdentityRegistryStorage()
         );
-        require(_isBoundTo(newRegistry), ErrorsLib.RegistryNotBoundToStorage());
-    }
-
-    /// @dev Whether the storage already lists this registry as bound. Enumerates rather than asking
-    ///  for a membership test: `linkedIdentityRegistries` is plain ERC-3643, so this keeps the check
-    ///  working against any ERC-3643 storage. The set is capped and this runs once per swap.
-    function _isBoundTo(address identityRegistryStorage) private view returns (bool) {
-        address[] memory bound = IERC3643IdentityRegistryStorage(identityRegistryStorage).linkedIdentityRegistries();
-        for (uint256 i = 0; i < bound.length; i++) {
-            if (bound[i] == address(this)) return true;
-        }
-        return false;
+        require(
+            IERC3643IdentityRegistryStorage(newRegistry).isLinkedIdentityRegistry(address(this)),
+            ErrorsLib.RegistryNotBoundToStorage()
+        );
     }
 
     /// @dev T-REX authorization for the trusted-issuer functions.
