@@ -67,6 +67,7 @@ import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC2
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643 } from "../IERC3643.sol";
@@ -77,7 +78,7 @@ import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 /// @dev The ERC-3643 token surface and nothing else, over its own ERC-7201 namespace. Extend through
 /// the internal hooks; hook names match openzeppelin-contracts#5838 so a swap renames nothing.
 /// Storage shape and the deliberate divergences from that PR: see docs/erc3643-oz-swap.md.
-abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC3643 {
+abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, ReentrancyGuardTransient, IERC3643 {
 
     /// @custom:storage-location erc7201:erc3643.storage.ERC3643Token
     struct ERC3643TokenStorage {
@@ -397,7 +398,10 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
 
     /// @dev Moves tokens irrespective of freezes, unfreezing just enough to cover the amount, then tells
     ///  compliance the move happened. Recipient identity is still verified.
-    function _forcedTransfer(address from, address to, uint256 amount) internal virtual returns (bool) {
+    /// @dev Guarded like {_update}: this path reaches compliance through `_forceUpdate`, which bypasses
+    ///  {_update}, so it needs its own guard to cover the `transferred` hook. An override that does not
+    ///  call `super` must carry `nonReentrant` itself.
+    function _forcedTransfer(address from, address to, uint256 amount) internal virtual nonReentrant returns (bool) {
         require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         _getCompliance().transferred(from, to, amount);
@@ -405,9 +409,13 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
     }
 
     /// @dev Moves a lost wallet's balance, freezes and identity onto a new wallet.
+    /// @dev Guarded like {_update}: this path reaches compliance through `_forceUpdate`, which bypasses
+    ///  {_update}, so it needs its own guard to cover the `transferred` hook. An override that does not
+    ///  call `super` must carry `nonReentrant` itself.
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainID)
         internal
         virtual
+        nonReentrant
         returns (bool)
     {
         ERC3643TokenStorage storage s = _erc3643TokenStorage();
@@ -464,7 +472,12 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
     ///  from or to a frozen wallet, and beyond the free balance. Mints and burns are allowed while
     ///  paused, and a burn auto-unfreezes just enough to cover itself. Identity and compliance are
     ///  checked for mints and transfers but not burns.
-    function _update(address from, address to, uint256 value) internal virtual override {
+    /// @dev `nonReentrant` spans the whole operation: the compliance check, the balance move and the
+    ///  post-move compliance hook. A module hook is an unguarded call into arbitrary code, so without
+    ///  the guard an early module could reenter and have a later stateful module evaluate both the outer
+    ///  and the nested operation against accounting that records neither yet. Batch entry points call
+    ///  this in a loop rather than nested, and the guard clears on return, so they are unaffected.
+    function _update(address from, address to, uint256 value) internal virtual override nonReentrant {
         ERC3643TokenStorage storage s = _erc3643TokenStorage();
         bool isMint = from == address(0);
         bool isBurn = to == address(0);

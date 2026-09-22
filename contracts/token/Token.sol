@@ -292,7 +292,10 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @dev Adds the T-REX `ForcedTransfer` event to the standard forced transfer. It is emitted before
     ///  the compliance hook so that no module log can land between `Transfer` and this event.
-    function _forcedTransfer(address from, address to, uint256 amount) internal override returns (bool) {
+    /// @dev Carries its own `nonReentrant` because it reimplements the base body instead of calling
+    ///  `super`, so the base guard never runs on this path. {_recoveryAddress} does call `super` and
+    ///  inherits the base guard, which is why it is not marked here.
+    function _forcedTransfer(address from, address to, uint256 amount) internal override nonReentrant returns (bool) {
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
