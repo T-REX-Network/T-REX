@@ -16,8 +16,10 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
+import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import {
@@ -87,6 +89,11 @@ contract TREXFactoryTest is TREXSuiteTest {
             "Factory should reference IA"
         );
         assertEq(trexFactory.getIdFactory(), address(idFactory), "Factory should reference IdentityFactory");
+        assertEq(
+            trexFactory.getTrustedGatewayRegistry(),
+            address(trustedGatewayRegistry),
+            "Factory should reference the network gateway registry"
+        );
     }
 
     // ============ deployTREXSuite() Tests ============
@@ -1061,7 +1068,14 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_constructor_RevertWhen_AccessManagerZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(0));
+        new TREXFactory(
+            address(trexImplementationAuthority), address(idFactory), address(trustedGatewayRegistry), address(0)
+        );
+    }
+
+    function test_constructor_RevertWhen_TrustedGatewayRegistryZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(0), address(accessManager));
     }
 
     // ============ setImplementationAuthority() Tests ============
@@ -1094,8 +1108,12 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_deployTREXSuite_RevertWhen_CREATE2Fails() public {
         // Deploy test factory that invoke the internal functon _deploy
-        TestTREXFactory testFactory =
-            new TestTREXFactory(address(trexImplementationAuthority), address(idFactory), address(accessManager));
+        TestTREXFactory testFactory = new TestTREXFactory(
+            address(trexImplementationAuthority),
+            address(idFactory),
+            address(trustedGatewayRegistry),
+            address(accessManager)
+        );
 
         // Use empty bytecode so the CREATE2 will return address(0)
         bytes memory emptyBytecode = new bytes(0);
@@ -1119,6 +1137,51 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.setIdFactory(address(newIdFactory));
 
         assertEq(trexFactory.getIdFactory(), address(newIdFactory), "IdentityFactory should be updated");
+    }
+
+    // ============ setTrustedGatewayRegistry() Tests ============
+
+    function test_setTrustedGatewayRegistry_RevertWhen_ZeroAddress() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        trexFactory.setTrustedGatewayRegistry(address(0));
+    }
+
+    function test_setTrustedGatewayRegistry_RevertWhen_NotOwner() public {
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
+        vm.prank(alice);
+        trexFactory.setTrustedGatewayRegistry(makeAddr("OtherRegistry"));
+    }
+
+    function test_setTrustedGatewayRegistry_Success() public {
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(accessManager));
+
+        vm.expectEmit(false, false, false, true, address(trexFactory));
+        emit EventsLib.TrustedGatewayRegistrySet(address(newRegistry));
+        vm.prank(deployer);
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+
+        assertEq(trexFactory.getTrustedGatewayRegistry(), address(newRegistry), "Registry should be updated");
+    }
+
+    /// @dev The registry a token resolves gateway trust against is the factory's at deployment time. A
+    ///      later move on the factory reaches new tokens only: an already deployed token keeps its own.
+    function test_deployTREXSuite_WiresTheFactoryRegistryIntoTheToken() public {
+        Token earlier = _deploySuiteAndGetToken("registry-before");
+        assertEq(earlier.trustedGatewayRegistry(), address(trustedGatewayRegistry));
+
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(accessManager));
+        vm.prank(deployer);
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+
+        Token later = _deploySuiteAndGetToken("registry-after");
+        assertEq(later.trustedGatewayRegistry(), address(newRegistry));
+        assertEq(earlier.trustedGatewayRegistry(), address(trustedGatewayRegistry));
+    }
+
+    function _deploySuiteAndGetToken(string memory salt) private returns (Token) {
+        _deploySuite(salt, _createEmptyTokenDetails(), _createEmptyClaimDetails());
+        return Token(trexFactory.getToken(salt));
     }
 
     /// @notice Should revert when the CREATE3 target address already contains code

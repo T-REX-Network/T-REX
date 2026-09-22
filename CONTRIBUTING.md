@@ -25,9 +25,9 @@ Pull requests are the best way to propose changes to the codebase. We actively w
 
 In short, when you submit code changes, your submissions are understood to be under the same [GNU General Public License v3.0](http://www.gnu.org/licenses/gpl-3.0.html) that covers the project. Feel free to contact the maintainers if that's a concern.
 
-## Report bugs using Github's [issues](https://github.com/TokenySolutions/T-REX/issues)
+## Report bugs using Github's [issues](https://github.com/T-REX-Network/T-REX/issues)
 
-We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/TokenySolutions/T-REX/issues/new); it's that easy!
+We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/T-REX-Network/T-REX/issues/new); it's that easy!
 
 ## Write bug reports with detail, background, and sample code
 
@@ -46,7 +46,24 @@ We use Foundry's built-in linting and formatting tools for Solidity code. Lintin
 
 ## Commit Messages
 
-We encourage the use of [Gitmoji](https://gitmoji.dev/) for commit messages. It's a fun and easy way to identify the purpose or intent of a commit with a simple emoji.
+We use [Gitmoji](https://gitmoji.dev/) for commit messages: the emoji identifies the purpose of a
+commit at a glance, in place of a `feat:` / `fix:` keyword.
+
+```
+<emoji> [scope?][:?] <message>
+```
+
+```
+♻️ Reuse the publish helper when seeding the initial version
+📝 (compliance): Explain how the bind nonce wipes module storage
+🐛 Fix the domain separator after a rename
+```
+
+Keep it to a single line, in an informal tone. Say what the change does, not which files it touches.
+
+This is enforced by [commitlint](https://commitlint.js.org/) through the `commit-msg` git hook, using
+the rules in `commitlint.config.js`. Run `npm install` once after cloning to activate the hooks —
+that also installs the `pre-commit` hook running `forge fmt --check`. Set `HUSKY=0` to skip them.
 
 ## License
 
