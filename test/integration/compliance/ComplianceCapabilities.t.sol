@@ -8,6 +8,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { ModuleCapabilitiesLib as Caps } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import {
     AllCapabilitiesModule,
     BurnOnlyModule,
@@ -19,6 +20,7 @@ import {
     UndefinedBitModule,
     ZeroCapabilityModule
 } from "test/integration/mocks/CapabilityModules.sol";
+import { SlotsModule, SlotsOnlyModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev Binding lifecycle for capability-declaring modules: what a compliance records, what it
 ///      refuses, and what survives a removal from the middle of the bound set.
@@ -65,6 +67,53 @@ contract ComplianceCapabilitiesTest is TREXSuiteTest {
         assertEq(modules[0], mintOnly);
         assertEq(modules[1], burnOnly);
         assertEq(modules[2], everything);
+    }
+
+    /// @notice A module declaring only the bounds hook binds and is recorded with that flag alone.
+    function test_addModule_Success_WhenModuleDeclaresOnlyBounds() public {
+        address module =
+            address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())));
+
+        vm.expectEmit(true, false, false, true);
+        emit EventsLib.ModuleCapabilitiesRecorded(module, Caps.BOUNDS);
+        vm.prank(deployer);
+        mc.addModule(module);
+
+        assertEq(mc.getModuleCapabilities(module), Caps.BOUNDS);
+        address[] memory bounded = mc.getModulesByCapability(Caps.BOUNDS);
+        assertEq(bounded.length, 1);
+        assertEq(bounded[0], module);
+        assertEq(mc.getModulesByCapability(Caps.CHECK_TRANSFER).length, 0);
+    }
+
+    /// @notice A module declaring only the slot hooks binds and is recorded with that flag alone.
+    function test_addModule_Success_WhenModuleDeclaresOnlySlots() public {
+        address module =
+            address(new ModuleProxy(address(new SlotsOnlyModule()), abi.encodeCall(SlotsOnlyModule.initialize, ())));
+
+        vm.expectEmit(true, false, false, true);
+        emit EventsLib.ModuleCapabilitiesRecorded(module, Caps.SLOTS);
+        vm.prank(deployer);
+        mc.addModule(module);
+
+        assertEq(mc.getModuleCapabilities(module), Caps.SLOTS);
+        address[] memory slotted = mc.getModulesByCapability(Caps.SLOTS);
+        assertEq(slotted.length, 1);
+        assertEq(slotted[0], module);
+        assertEq(mc.getModulesByCapability(Caps.BOUNDS).length, 0);
+    }
+
+    /// @notice A module declaring the bounds hook and the slot hooks is recorded with both.
+    function test_addModule_Success_WhenModuleDeclaresBoundsAndSlots() public {
+        address module =
+            address(new ModuleProxy(address(new SlotsModule()), abi.encodeCall(SlotsModule.initialize, ())));
+
+        vm.prank(deployer);
+        mc.addModule(module);
+
+        assertEq(mc.getModuleCapabilities(module), Caps.BOUNDS | Caps.SLOTS);
+        assertEq(mc.getModulesByCapability(Caps.SLOTS).length, 1);
+        assertEq(mc.getModulesByCapability(Caps.BOUNDS).length, 1);
     }
 
     /// @notice A module declaring nothing cannot be bound.

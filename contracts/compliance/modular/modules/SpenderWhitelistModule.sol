@@ -88,7 +88,7 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     /// @param _spender address no longer allowed to call `transferFrom`
     event SpenderDisallowed(address indexed _compliance, address indexed _spender);
 
-    /// @custom:storage-location erc7201:ERC3643.storage.SpenderWhitelist
+    /// @custom:storage-location erc7201:erc3643.storage.SpenderWhitelistModule
     struct SpenderWhitelistStorage {
         /// allowlist per compliance, scoped by the bind nonce so an unbind invalidates every entry at
         /// once, without iterating storage.
@@ -99,9 +99,9 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
         mapping(address compliance => mapping(uint256 nonce => mapping(address spender => bool))) allowedSpenders;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.SpenderWhitelist")) - 1)) & ~bytes32(uint256(0xff))
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.SpenderWhitelistModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant _SPENDER_WHITELIST_STORAGE_LOCATION =
-        0x5812fc22578328f47b9e6cc9cd4b23cdee5afcb5c752c16bb48975c028b9ff00;
+        0xfd2d203b3dd7adef79609cdeecae9ddae59cd1de33749d6e90506f35a42dea00;
 
     constructor() {
         _disableInitializers();
