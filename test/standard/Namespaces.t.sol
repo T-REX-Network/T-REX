@@ -77,6 +77,22 @@ contract NamespacesTest is Test {
         );
     }
 
+    /// @dev The namespaces the cross-chain layer adds on top of the suite. Both follow the same
+    ///  lowercase `erc3643.storage.` rule as everything above.
+    function test_transferValidationNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TransferValidation"),
+            0x518dcda4927033bd42da8dd6047b92b4a950cebbc5bdd8461a5e9bb9c0545400
+        );
+    }
+
+    function test_trexMessagingNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TREXMessaging"),
+            0x2b7785d97e35cf618b41c256efdda42212baf2d424180e7d549907f2f911e900
+        );
+    }
+
     /// @dev The ERC-20 slot the token base reaches into for name and symbol. Declared by
     ///  `ERC20Upgradeable`, which keeps its own accessor private.
     function test_erc20NamespaceReachedByTokenBase() public pure {

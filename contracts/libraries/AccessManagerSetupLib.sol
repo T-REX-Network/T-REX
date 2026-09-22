@@ -72,11 +72,14 @@ import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegi
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { ITransferValidation } from "../compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "../factory/TREXFactory.sol";
+import { TrustedGatewayRegistry } from "../interop/TrustedGatewayRegistry.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
+import { Token } from "../token/Token.sol";
 import { RolesLib } from "./RolesLib.sol";
 
 /// @title AccessManagerSetupLib
@@ -91,11 +94,23 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(token, functions, RolesLib.TOKEN_MANAGER);
 
         // ------ IDENTITY_MANAGER role ------
-        functions = new bytes4[](3);
+        // Also owns the issuer's side of the interop wiring: which gateway and peer each chain uses.
+        functions = new bytes4[](5);
         functions[0] = IERC3643.setOnchainID.selector;
         functions[1] = IERC3643.setIdentityRegistry.selector;
         functions[2] = IERC3643.setCompliance.selector;
+        functions[3] = Token.setRoute.selector;
+        functions[4] = Token.setPeer.selector;
         accessManager.setTargetFunctionRole(token, functions, RolesLib.IDENTITY_MANAGER);
+
+        // ------ AGENT role ------
+        // Outbound interop dispatch is an operation, not configuration: it sends, it does not rewire.
+        // Only the two instructions an operator genuinely issues; a compliance validation is dispatched
+        // by the bound compliance itself and is deliberately unreachable from any role.
+        functions = new bytes4[](2);
+        functions[0] = Token.dispatchMintInstruction.selector;
+        functions[1] = Token.dispatchRecallInstruction.selector;
+        accessManager.setTargetFunctionRole(token, functions, RolesLib.AGENT);
 
         // ------ AGENT_MINTER role ------
         functions = new bytes4[](1);
@@ -188,15 +203,38 @@ library AccessManagerSetupLib {
         functions[4] = RolesLib.BIND_UNBIND_TOKEN;
         functions[5] = ModularCompliance.refreshModuleCapabilities.selector;
         accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.OWNER);
+
+        // ------ COMPLIANCE_MANAGER role ------
+        // The issuer's validation policy: windows, clamp and the per-chain issuance pause.
+        functions = new bytes4[](5);
+        functions[0] = ModularCompliance.setDefaultValidityWindow.selector;
+        functions[1] = ModularCompliance.setReconciliationWindow.selector;
+        functions[2] = ModularCompliance.setValidationClamp.selector;
+        functions[3] = ModularCompliance.pauseValidationIssuance.selector;
+        functions[4] = ModularCompliance.unpauseValidationIssuance.selector;
+        accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.COMPLIANCE_MANAGER);
+
+        // ------ AGENT role ------
+        // The role path of issuance: an agent may request a validation for any wallet. The holder of a native
+        // wallet and the identity a wallet is linked to need no role; the compliance checks those two itself.
+        functions = new bytes4[](1);
+        functions[0] = ITransferValidation.requestTransferValidation.selector;
+        accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.AGENT);
+
+        // ------ VALIDATION_KEEPER role ------
+        // The garbage collector: releases the slots of validations a satellite never consumed, in batches.
+        functions[0] = ModularCompliance.discardExpiredValidations.selector;
+        accessManager.setTargetFunctionRole(modularCompliance, functions, RolesLib.VALIDATION_KEEPER);
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
         // ------ OWNER role ------
-        bytes4[] memory functions = new bytes4[](4);
+        bytes4[] memory functions = new bytes4[](5);
         functions[0] = TREXFactory.setImplementationAuthority.selector;
         functions[1] = TREXFactory.setIdFactory.selector;
-        functions[2] = TREXFactory.deployTREXSuite.selector;
-        functions[3] = TREXFactory.deployTREXSuiteIsolated.selector;
+        functions[2] = TREXFactory.setTrustedGatewayRegistry.selector;
+        functions[3] = TREXFactory.deployTREXSuite.selector;
+        functions[4] = TREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.OWNER);
     }
 
@@ -230,6 +268,13 @@ library AccessManagerSetupLib {
         accessManager.grantRole(RolesLib.ASSET_DEPLOYER, trexFactory, 0);
     }
 
+    function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {
+        // ------ INTEROP_MANAGER role ------
+        bytes4[] memory functions = new bytes4[](1);
+        functions[0] = TrustedGatewayRegistry.setTrustedGateway.selector;
+        accessManager.setTargetFunctionRole(trustedGatewayRegistry, functions, RolesLib.INTEROP_MANAGER);
+    }
+
     function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
         internal
     {
@@ -242,8 +287,8 @@ library AccessManagerSetupLib {
     }
 
     /// @notice Wires the role-giver hierarchy. Call once, before any operational grant.
-    ///         AGENT_ADMIN administers AGENT and every granular AGENT_* role; SUITE_ADMIN
-    ///         administers TOKEN_MANAGER and IDENTITY_MANAGER. OWNER is intentionally left
+    ///         AGENT_ADMIN administers AGENT, every granular AGENT_* role and VALIDATION_KEEPER; SUITE_ADMIN
+    ///         administers TOKEN_MANAGER, IDENTITY_MANAGER and COMPLIANCE_MANAGER. OWNER is intentionally left
     ///         under ADMIN_ROLE (0) so only the governance multisig can grant it.
     function setupRoleAdmins(IAccessManager accessManager) internal {
         // ------ AGENT_ADMIN administers the AGENT family ------
@@ -255,10 +300,12 @@ library AccessManagerSetupLib {
         accessManager.setRoleAdmin(RolesLib.AGENT_RECOVERY_ADDRESS, RolesLib.AGENT_ADMIN);
         accessManager.setRoleAdmin(RolesLib.AGENT_FORCED_TRANSFER, RolesLib.AGENT_ADMIN);
         accessManager.setRoleAdmin(RolesLib.AGENT_PAUSER, RolesLib.AGENT_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.VALIDATION_KEEPER, RolesLib.AGENT_ADMIN);
 
         // ------ SUITE_ADMIN administers the token-config roles ------
         accessManager.setRoleAdmin(RolesLib.TOKEN_MANAGER, RolesLib.SUITE_ADMIN);
         accessManager.setRoleAdmin(RolesLib.IDENTITY_MANAGER, RolesLib.SUITE_ADMIN);
+        accessManager.setRoleAdmin(RolesLib.COMPLIANCE_MANAGER, RolesLib.SUITE_ADMIN);
 
         // ------ AGENT_ADMIN administers the transient IRS_BINDER role ------
         accessManager.setRoleAdmin(RolesLib.IRS_BINDER, RolesLib.AGENT_ADMIN);
@@ -275,9 +322,11 @@ library AccessManagerSetupLib {
         accessManager.labelRole(RolesLib.AGENT_RECOVERY_ADDRESS, "TREX-Suite Agent: Recovery Address");
         accessManager.labelRole(RolesLib.AGENT_FORCED_TRANSFER, "TREX-Suite Agent: Forced Transfer");
         accessManager.labelRole(RolesLib.AGENT_PAUSER, "TREX-Suite Agent: Pauser");
+        accessManager.labelRole(RolesLib.VALIDATION_KEEPER, "TREX-Suite Validation Keeper");
 
         accessManager.labelRole(RolesLib.TOKEN_MANAGER, "TREX-Suite Manager: Token");
         accessManager.labelRole(RolesLib.IDENTITY_MANAGER, "TREX-Suite Manager: Identity");
+        accessManager.labelRole(RolesLib.COMPLIANCE_MANAGER, "TREX-Suite Manager: Compliance");
         accessManager.labelRole(RolesLib.VERSION_MANAGER, "TREX-Suite Manager: Version");
 
         // Role-givers

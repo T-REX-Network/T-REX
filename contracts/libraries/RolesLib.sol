@@ -89,6 +89,21 @@ library RolesLib {
     // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
     uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
 
+    // Gates the network-level set of vetted ERC-7786 gateways on TrustedGatewayRegistry. Held by network
+    // governance, not by an issuer: a gateway in that set attests the authorship of every message a token
+    // routed through it acts on, so adding one is deliberate and removing one is an emergency lever.
+    uint64 constant INTEROP_MANAGER = ROLE_PREFIX + 17;
+    // Gates the issuer's validation policy on ModularCompliance: the validity window, the per-chain reconciliation
+    // windows, the global clamp and the per-chain issuance pause. Administered by SUITE_ADMIN like the other
+    // manager roles.
+    uint64 constant COMPLIANCE_MANAGER = ROLE_PREFIX + 18;
+    // Gates the discard of expired validations on ModularCompliance: the garbage collector that releases the
+    // compliance slots a satellite never consumed. An operator role, administered by AGENT_ADMIN like the agents.
+    // Restricted by design: a permissionless discard could front-run a late settlement, forcing the late
+    // reconciliation and the per-chain pause it triggers. The price is a liveness dependency: a keeper that
+    // misses its discards keeps capacity reserved. Opening the role later must weigh both, not liveness alone.
+    uint64 constant VALIDATION_KEEPER = ROLE_PREFIX + 19;
+
     // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
     // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
     // AccessManager's setRoleAdmin semantics. They let grants be delegated without

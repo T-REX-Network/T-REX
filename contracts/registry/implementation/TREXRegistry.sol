@@ -77,6 +77,7 @@ import { ERC3643IdentityRegistry } from "../../ERC-3643/base/ERC3643IdentityRegi
 import { ERC3643TrustedIssuersRegistry } from "../../ERC-3643/base/ERC3643TrustedIssuersRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
@@ -216,6 +217,28 @@ contract TREXRegistry is
     }
 
     /// @inheritdoc ITREXRegistry
+    /// @dev Attribution lookup. A wallet on this chain is what the storage binds it to; every other wallet is known
+    ///  to the IdentityFactory only, and a revoked binding still answers so a position never loses its owner.
+    function resolveIdentity(bytes calldata wallet) external view override returns (IIdentity) {
+        (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
+        if (onReferenceChain) return _identityOf(userAddress);
+        (address resolved,) = _IDENTITY_FACTORY.getIdentityIncludingRevoked(wallet);
+        return IIdentity(resolved);
+    }
+
+    /// @inheritdoc ITREXRegistry
+    /// @dev Admission lookup. Same claim check as {isVerified}, over the active binding only: a revoked satellite
+    ///  wallet keeps its position but is not eligible for new activity.
+    function isWalletVerified(bytes calldata wallet) external view override returns (bool) {
+        if (_getStorage().checksDisabled) return true;
+
+        (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
+        IIdentity userIdentity =
+            onReferenceChain ? _identityOf(userAddress) : IIdentity(_IDENTITY_FACTORY.getIdentity(wallet));
+        return _identityIsVerified(userIdentity);
+    }
+
+    /// @inheritdoc ITREXRegistry
     function disableEligibilityChecks() external override restricted {
         Storage storage s = _getStorage();
         require(!s.checksDisabled, ErrorsLib.EligibilityChecksDisabledAlready());
@@ -307,6 +330,19 @@ contract TREXRegistry is
             }
         }
         return _getClaimTopics();
+    }
+
+    /// @dev The claim check of {_isVerified}, keyed by identity rather than by address, for a wallet this
+    ///  registry cannot resolve through its own storage. A zero identity never passes; an identity whose
+    ///  type requires no topic always does.
+    function _identityIsVerified(IIdentity userIdentity) private view returns (bool) {
+        if (address(userIdentity) == address(0)) return false;
+
+        uint256[] memory requiredClaimTopics = _requiredClaimTopics(userIdentity);
+        for (uint256 i = 0; i < requiredClaimTopics.length; i++) {
+            if (!_hasValidClaimForTopic(userIdentity, requiredClaimTopics[i])) return false;
+        }
+        return true;
     }
 
     /// @dev The eligibility kill switch short-circuits verification for every address, including one

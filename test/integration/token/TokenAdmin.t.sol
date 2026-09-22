@@ -424,7 +424,14 @@ contract TokenAdminTest is TREXSuiteTest {
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         tokenImplementation.init(
-            "Test Token", "TEST", 18, address(identityRegistry), address(complianceProxy), address(0), deployer
+            "Test Token",
+            "TEST",
+            18,
+            address(identityRegistry),
+            address(complianceProxy),
+            address(trustedGatewayRegistry),
+            address(0),
+            deployer
         );
     }
 
@@ -503,9 +510,19 @@ contract TokenAdminTest is TREXSuiteTest {
         uint8 decimals,
         address onchainId,
         address accessManager_
-    ) private pure returns (bytes memory) {
+    ) private view returns (bytes memory) {
         return abi.encodeCall(
-            Token.init, (name, symbol, decimals, identityRegistry_, compliance, onchainId, accessManager_)
+            Token.init,
+            (
+                name,
+                symbol,
+                decimals,
+                identityRegistry_,
+                compliance,
+                address(trustedGatewayRegistry),
+                onchainId,
+                accessManager_
+            )
         );
     }
 
@@ -543,6 +560,7 @@ contract TokenAdminTest is TREXSuiteTest {
                 18,
                 address(0), // Zero address for Identity Registry
                 address(complianceProxy),
+                address(trustedGatewayRegistry),
                 address(0),
                 deployer
             )
@@ -564,6 +582,7 @@ contract TokenAdminTest is TREXSuiteTest {
                 18,
                 randomAddress,
                 address(0), // Zero address for Compliance
+                address(trustedGatewayRegistry),
                 address(0),
                 deployer
             )
@@ -586,6 +605,7 @@ contract TokenAdminTest is TREXSuiteTest {
                 18,
                 randomAddress,
                 address(complianceProxy),
+                address(trustedGatewayRegistry),
                 address(0),
                 deployer
             )
@@ -608,6 +628,7 @@ contract TokenAdminTest is TREXSuiteTest {
                 18,
                 randomAddress,
                 address(complianceProxy),
+                address(trustedGatewayRegistry),
                 address(0),
                 deployer
             )
@@ -630,6 +651,7 @@ contract TokenAdminTest is TREXSuiteTest {
                 19, // Decimals > 18
                 randomAddress,
                 address(complianceProxy),
+                address(trustedGatewayRegistry),
                 address(0),
                 deployer
             )
