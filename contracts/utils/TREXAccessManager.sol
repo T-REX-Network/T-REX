@@ -80,6 +80,7 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         mapping(address target => uint32 domainId) domainOf;
     }
 
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXAccessManager")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant DOMAIN_STORAGE_LOCATION =
         0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00;
 
