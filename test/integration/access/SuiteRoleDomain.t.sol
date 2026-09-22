@@ -255,6 +255,43 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(fundToken.balanceOf(alice), 3);
     }
 
+    function test_registry_MovingATokenBetweenDomainsIsAssignThenMigrate() public {
+        Token fundToken = _deployBare("move", address(0), address(registry));
+        uint32 oldFund = registry.createDomain("Old fund");
+        uint32 newFund = registry.createDomain("New fund");
+        registry.assign(oldFund, address(fundToken));
+        AccessManagerSetupLib.commissionSuite(registry, address(fundToken));
+        _grantAllAgentRoles(registry, agentA, oldFund);
+
+        registry.assign(newFund, address(fundToken));
+        assertEq(
+            registry.getTargetFunctionRole(address(fundToken), IERC3643.mint.selector),
+            RolesLib.forDomain(oldFund, RolesLib.Role.AGENT_MINTER)
+        );
+
+        AccessManagerSetupLib.migrateSuitesToDomains(
+            registry, _only(fundToken), oldFund, _domains(newFund), _noAssignments(), _noRevocations()
+        );
+
+        assertEq(registry.domainOf(address(fundToken)), newFund);
+        assertEq(
+            registry.getTargetFunctionRole(address(fundToken), IERC3643.mint.selector),
+            RolesLib.forDomain(newFund, RolesLib.Role.AGENT_MINTER)
+        );
+        (bool inNewDomain,) = registry.hasRole(RolesLib.forDomain(newFund, RolesLib.Role.AGENT), address(fundToken));
+        (bool inOldDomain,) = registry.hasRole(RolesLib.forDomain(oldFund, RolesLib.Role.AGENT), address(fundToken));
+        assertTrue(inNewDomain);
+        assertFalse(inOldDomain);
+        _assertLockedOut(agentA, fundToken);
+        _grantAllAgentRoles(registry, agentB, newFund);
+        vm.startPrank(agentB);
+        fundToken.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
+        fundToken.unpause();
+        fundToken.mint(alice, 1);
+        vm.stopPrank();
+        assertEq(fundToken.balanceOf(alice), 1);
+    }
+
     function test_registry_RevertWhen_TokenIsNotAssigned() public {
         Token fundToken = _deployBare("fund-x", address(0), address(registry));
 

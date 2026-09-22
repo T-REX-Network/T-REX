@@ -87,7 +87,11 @@ All notable changes to this project will be documented in this file.
     gated by a plain `ADMIN_ROLE` check that also requires a zero execution delay, so an admin whose
     calls are meant to wait cannot assign instantly; `_getAdminRestrictions` is not overridden, so the
     two functions are immediate and not schedulable through `execute`. Events `DomainCreated` and
-    `DomainAssigned`.
+    `DomainAssigned`. `assign` only records the domain: it rewrites no selector mapping and revokes
+    nothing. Moving a commissioned token to another domain is `assign` followed by
+    `migrateSuitesToDomains`, which remaps the suite, grants the new domain's roles and revokes the old
+    domain's `AGENT` on the token. Re-running `commissionSuite` after a reassignment remaps but leaves
+    the old grant in place.
   - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
     the token's domain on first use and keeps a storage already assigned where it is, so a storage
