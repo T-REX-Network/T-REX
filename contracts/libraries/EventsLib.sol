@@ -105,7 +105,6 @@ library EventsLib {
     event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
     event ModuleRemoved(address indexed module);
     event ModuleForceRemoved(address indexed module);
-    event ModuleUnbindingFailed(address indexed module);
 
     // AbstractModule / AbstractModuleUpgradeable Events
 

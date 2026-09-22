@@ -41,62 +41,68 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
-    function test_removeModule_Success_WhenModuleRevertsFromUnbindCompliance() public {
+    function test_removeModule_RevertWhen_ModuleRevertsFromUnbindCompliance_ForceRemovalStillWorks() public {
         address module = address(new UnbindRevertingModule());
         _bind(module);
 
-        vm.expectEmit(true, false, false, false, address(mc));
-        emit EventsLib.ModuleUnbindingFailed(module);
-        vm.expectEmit(true, false, false, false, address(mc));
-        emit EventsLib.ModuleRemoved(module);
         vm.prank(deployer);
+        vm.expectRevert(UnbindRevertingModule.UnbindRefused.selector);
         mc.removeModule(module);
+        assertTrue(mc.isModuleBound(module));
 
+        vm.prank(deployer);
+        mc.forceRemoveModule(module);
         assertFalse(mc.isModuleBound(module));
         assertEq(mc.getModules().length, 0);
         _assertNoRouting(module);
     }
 
-    function test_removeModule_Success_WhenModuleRevertsEverywhere() public {
+    function test_removeModule_RevertWhen_ModuleRevertsEverywhere() public {
         address module = _bindHostage(address(new AllCapabilitiesModule()));
 
         vm.prank(alice);
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.transfer(bob, 100);
 
-        vm.expectEmit(true, false, false, false, address(mc));
-        emit EventsLib.ModuleUnbindingFailed(module);
         vm.prank(deployer);
+        vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         mc.removeModule(module);
+        assertTrue(mc.isModuleBound(module));
+    }
 
-        assertFalse(mc.isModuleBound(module));
-        vm.prank(alice);
-        token.transfer(bob, 100);
-        assertEq(token.balanceOf(bob), 600);
+    function testFuzz_removeModule_NeverRemovesWithoutUnbinding(uint64 gasLimit) public {
+        gasLimit = uint64(bound(gasLimit, 30_000, 400_000));
+        address module = _deploy(address(new AllCapabilitiesModule()));
+        _bind(module);
+
+        vm.prank(deployer);
+        (bool removed,) = address(mc).call{ gas: gasLimit }(abi.encodeCall(ModularCompliance.removeModule, (module)));
+
+        assertEq(mc.isModuleBound(module), !removed);
+        assertEq(IModule(module).isComplianceBound(address(mc)), !removed);
     }
 
     function test_removeModule_Success_WhenModuleIsHealthy_UnbindsIt() public {
         address module = _deploy(address(new AllCapabilitiesModule()));
         _bind(module);
 
-        vm.recordLogs();
         vm.prank(deployer);
         mc.removeModule(module);
 
+        assertFalse(mc.isModuleBound(module));
         assertFalse(IModule(module).isComplianceBound(address(mc)));
-        assertFalse(_logged(EventsLib.ModuleUnbindingFailed.selector));
     }
 
     function test_forceRemoveModule_Success_WhenModuleRevertsEverywhere() public {
         address module = _bindHostage(address(new AllCapabilitiesModule()));
 
-        vm.recordLogs();
+        vm.expectEmit(true, false, false, false, address(mc));
+        emit EventsLib.ModuleRemoved(module);
         vm.expectEmit(true, false, false, false, address(mc));
         emit EventsLib.ModuleForceRemoved(module);
         vm.prank(deployer);
         mc.forceRemoveModule(module);
 
-        assertFalse(_logged(EventsLib.ModuleRemoved.selector));
         assertFalse(mc.isModuleBound(module));
         assertEq(mc.getModules().length, 0);
         _assertNoRouting(module);
@@ -238,16 +244,20 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         _assertTokenOperationsWork();
     }
 
-    function test_removeModule_Success_WhenModuleHasNoCode() public {
+    function test_removeModule_RevertWhen_ModuleHasNoCode_ForceRemovalStillWorks() public {
         address module = _deploy(address(new AllCapabilitiesModule()));
         _bind(module);
         vm.etch(module, "");
 
-        vm.expectEmit(true, false, false, false, address(mc));
-        emit EventsLib.ModuleRemoved(module);
         vm.prank(deployer);
+        vm.expectRevert();
         mc.removeModule(module);
+        assertTrue(mc.isModuleBound(module));
 
+        vm.expectEmit(true, false, false, false, address(mc));
+        emit EventsLib.ModuleForceRemoved(module);
+        vm.prank(deployer);
+        mc.forceRemoveModule(module);
         assertFalse(mc.isModuleBound(module));
     }
 
@@ -320,14 +330,6 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
                 assertNotEq(routed[j], module);
             }
         }
-    }
-
-    function _logged(bytes32 topic) private view returns (bool) {
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == topic) return true;
-        }
-        return false;
     }
 
     function _bind(address module) private {

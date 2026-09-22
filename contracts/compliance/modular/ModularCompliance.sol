@@ -139,14 +139,16 @@ contract ModularCompliance is
      */
     function removeModule(address _module) external restricted {
         _removeModule(_module);
-        if (!LowLevelCall.callNoReturn(_module, abi.encodeCall(IModule.unbindCompliance, (address(this))))) {
-            emit EventsLib.ModuleUnbindingFailed(_module);
-        }
+        IModule(_module).unbindCompliance(address(this));
         emit EventsLib.ModuleRemoved(_module);
     }
 
+    /**
+     *  @dev See {IModularCompliance-forceRemoveModule}.
+     */
     function forceRemoveModule(address _module) external restricted {
         _removeModule(_module);
+        emit EventsLib.ModuleRemoved(_module);
         emit EventsLib.ModuleForceRemoved(_module);
     }
 

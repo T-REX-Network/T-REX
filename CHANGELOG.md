@@ -57,10 +57,14 @@ All notable changes to this project will be documented in this file.
     empty set.
 - **Module removal never depends on the module** (OZ M-11, L-13): a module upgraded to revert
   everywhere can no longer hold the token hostage.
-  - `removeModule` deletes the entry first and calls `unbindCompliance` best effort; a failing call
-    emits `ModuleUnbindingFailed(address indexed module)` instead of rolling the removal back.
+  - `removeModule` is unchanged and strict: it deletes the entry, then calls `unbindCompliance` and
+    reverts if that call fails for any reason, a module revert or a caller who starved the subcall of
+    gas alike. A best-effort call was considered and rejected: with the 63/64 gas rule any caller can
+    make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
+    healthy module's unbind at will.
   - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
-    module and emits `ModuleForceRemoved(address indexed module)`. The module keeps its own binding
+    module and emits the standard `ModuleRemoved` followed by `ModuleForceRemoved(address indexed
+    module)`, so tooling that only knows the standard event still sees the removal. The module keeps its own binding
     record, so the same proxy address cannot be re-added afterwards; a fresh deployment can.
   - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
     compliance still lists the module, so an unbind forwarded through `callModuleFunction`, directly
