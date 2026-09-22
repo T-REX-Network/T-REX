@@ -189,7 +189,7 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     /// @notice The namespace sits where its derivation says, apart from the compliance's own storage.
     function test_storageLocation_Success_WhenDerivedFromTheNamespace() public {
-        bytes32 slot = keccak256(abi.encode(uint256(keccak256("ERC3643.storage.TransferValidation")) - 1))
+        bytes32 slot = keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1))
             & ~bytes32(uint256(0xff));
 
         mc.setDefaultValidityWindow(1 hours);

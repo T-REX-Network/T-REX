@@ -91,7 +91,7 @@ import { ITransferValidation } from "./ITransferValidation.sol";
  */
 abstract contract TransferValidation is ITransferValidation {
 
-    /// @custom:storage-location erc7201:ERC3643.storage.TransferValidation
+    /// @custom:storage-location erc7201:erc3643.storage.TransferValidation
     struct ValidationStorage {
         /// Added to the issuance timestamp to compute `expiry`. Zero blocks issuance.
         uint64 defaultValidityWindow;
@@ -118,9 +118,9 @@ abstract contract TransferValidation is ITransferValidation {
         bytes32 toChainKey;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.TransferValidation")) - 1)) & ~bytes32(uint256(0xff));
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant VALIDATION_STORAGE_LOCATION =
-        0x65d3fdec06a1cc4685fac228d4975c3a0d37585c7963e3bcb1a5339b37cb1200;
+        0x518dcda4927033bd42da8dd6047b92b4a950cebbc5bdd8461a5e9bb9c0545400;
 
     /// @inheritdoc ITransferValidation
     function requestTransferValidation(
