@@ -83,10 +83,12 @@ All notable changes to this project will be documented in this file.
     storage's domain owns its bindings.
   - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns
     the next id, `assign(domainId, target)` records the domain of a token or a storage,
-    `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers are
-    gated by a plain `ADMIN_ROLE` check that also requires a zero execution delay, so an admin whose
-    calls are meant to wait cannot assign instantly; `_getAdminRestrictions` is not overridden, so the
-    two functions are immediate and not schedulable through `execute`. Events `DomainCreated` and
+    `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers use
+    OpenZeppelin's `onlyAuthorized`: on the manager itself an unmapped selector resolves to
+    `ADMIN_ROLE`, so they are admin-only by default, honour the admin's execution delay, compose with
+    `schedule` and `execute`, show up in `getTargetFunctionRole(manager, selector)`, and can be
+    delegated to another role with `setTargetFunctionRole` on the manager itself. No OpenZeppelin
+    internal is overridden. Events `DomainCreated` and
     `DomainAssigned`. `assign` only records the domain: it rewrites no selector mapping and revokes
     nothing. Moving a commissioned token to another domain is `assign` followed by
     `migrateSuitesToDomains`, which remaps the suite, grants the new domain's roles and revokes the old

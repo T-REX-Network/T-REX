@@ -87,21 +87,48 @@ contract TREXAccessManagerUnitTest is Test {
         manager.assign(first, token);
     }
 
-    function test_createDomainAndAssign_RevertWhen_AdminHasAnExecutionDelay() public {
+    function test_createDomainAndAssign_RevertWhen_ADelayedAdminCallsDirectly() public {
         address delayedAdmin = makeAddr("delayedAdmin");
         manager.grantRole(manager.ADMIN_ROLE(), delayedAdmin, 1 hours);
         uint32 first = manager.createDomain("Fund A");
+        bytes memory create = abi.encodeCall(TREXAccessManager.createDomain, ("Fund B"));
+        bytes memory assignCall = abi.encodeCall(TREXAccessManager.assign, (first, token));
+        bytes32 createId = manager.hashOperation(delayedAdmin, address(manager), create);
+        bytes32 assignId = manager.hashOperation(delayedAdmin, address(manager), assignCall);
 
         vm.prank(delayedAdmin);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, uint64(0))
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, createId));
         manager.createDomain("Fund B");
         vm.prank(delayedAdmin);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, uint64(0))
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, assignId));
         manager.assign(first, token);
+    }
+
+    function test_createDomainAndAssign_Success_WhenADelayedAdminSchedulesAndExecutes() public {
+        address delayedAdmin = makeAddr("delayedAdmin");
+        manager.grantRole(manager.ADMIN_ROLE(), delayedAdmin, 1 hours);
+        bytes memory create = abi.encodeCall(TREXAccessManager.createDomain, ("Fund A"));
+
+        vm.prank(delayedAdmin);
+        manager.schedule(address(manager), create, 0);
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(delayedAdmin);
+        manager.execute(address(manager), create);
+
+        assertEq(manager.domainCount(), 1);
+        assertEq(manager.domainName(1), "Fund A");
+        bytes memory assignCall = abi.encodeCall(TREXAccessManager.assign, (1, token));
+        vm.prank(delayedAdmin);
+        manager.schedule(address(manager), assignCall, 0);
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(delayedAdmin);
+        manager.execute(address(manager), assignCall);
+        assertEq(manager.domainOf(token), 1);
+    }
+
+    function test_createDomainAndAssign_AreAdminOnlyByDefaultAndVisible() public view {
+        assertEq(manager.getTargetFunctionRole(address(manager), TREXAccessManager.createDomain.selector), 0);
+        assertEq(manager.getTargetFunctionRole(address(manager), TREXAccessManager.assign.selector), 0);
     }
 
     function test_domainOf_IsZeroForUnassignedTargets() public view {

@@ -84,26 +84,18 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     bytes32 private constant DOMAIN_STORAGE_LOCATION =
         0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00;
 
-    modifier onlyAdmin() {
-        (bool isAdmin, uint32 executionDelay) = hasRole(ADMIN_ROLE, _msgSender());
-        require(
-            isAdmin && executionDelay == 0, IAccessManager.AccessManagerUnauthorizedAccount(_msgSender(), ADMIN_ROLE)
-        );
-        _;
-    }
-
     constructor() {
         _disableInitializers();
     }
 
-    function createDomain(string calldata name) external onlyAdmin returns (uint32 domainId) {
+    function createDomain(string calldata name) external onlyAuthorized returns (uint32 domainId) {
         DomainStorage storage $ = _getDomainStorage();
         domainId = ++$.count;
         $.names[domainId] = name;
         emit EventsLib.DomainCreated(domainId, name);
     }
 
-    function assign(uint32 domainId, address target) external onlyAdmin {
+    function assign(uint32 domainId, address target) external onlyAuthorized {
         DomainStorage storage $ = _getDomainStorage();
         require(domainId != 0 && domainId <= $.count, ErrorsLib.DomainNotFound(domainId));
         require(target != address(0), ErrorsLib.ZeroAddress());
