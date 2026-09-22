@@ -40,6 +40,14 @@ pragma solidity 0.8.30;
 
 interface IERC3643ClaimTopicsRegistry {
 
+    /// @dev Emitted when a claim topic has been added to the requirement list.
+    /// @param _claimTopic The claim topic that has been added.
+    event ClaimTopicAdded(uint256 indexed _claimTopic);
+
+    /// @dev Emitted when a claim topic has been removed from the requirement list.
+    /// @param _claimTopic The claim topic that has been removed.
+    event ClaimTopicRemoved(uint256 indexed _claimTopic);
+
     /**
      * @dev Add a trusted claim topic (For example: KYC=1, AML=2).
      * Restricted to the configured AccessManager role (OWNER).

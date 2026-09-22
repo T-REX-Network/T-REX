@@ -2,8 +2,7 @@
 pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
+import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import {
@@ -17,7 +16,7 @@ contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorag
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
 
         vm.expectEmit(address(irs));
-        emit ERC3643EventsLib.IdentityUnstored(wallet, IIdentity(localIdentity));
+        emit IERC3643IdentityRegistryStorage.IdentityUnstored(wallet, IIdentity(localIdentity));
         vm.expectEmit(address(irs));
         emit EventsLib.IdentityOverrideReleased(wallet, IIdentity(localIdentity), IIdentity(globalIdentity));
         irs.removeIdentityFromStorage(wallet);
@@ -67,7 +66,7 @@ contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorag
 
     function _assertOnlyIdentityUnstored() private {
         bytes32[] memory selectors = new bytes32[](1);
-        selectors[0] = ERC3643EventsLib.IdentityUnstored.selector;
+        selectors[0] = IERC3643IdentityRegistryStorage.IdentityUnstored.selector;
         _assertLogSelectors(vm.getRecordedLogs(), selectors);
     }
 

@@ -20,6 +20,9 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { IdentityModulesHelper } from "test/helpers/IdentityModulesHelper.sol";
 
+import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
+import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 
 /// @notice Base test harness for TREXRegistry unit tests.
@@ -203,27 +206,27 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         // ------ OWNER role ------
         // Identity registry owner-restricted functions
         bytes4[] memory ownerFunctions = new bytes4[](12);
-        ownerFunctions[0] = TREXRegistry.setIdentityRegistryStorage.selector;
-        ownerFunctions[1] = TREXRegistry.setClaimTopicsRegistry.selector;
-        ownerFunctions[2] = TREXRegistry.setTrustedIssuersRegistry.selector;
+        ownerFunctions[0] = IERC3643IdentityRegistry.setIdentityRegistryStorage.selector;
+        ownerFunctions[1] = IERC3643IdentityRegistry.setClaimTopicsRegistry.selector;
+        ownerFunctions[2] = IERC3643IdentityRegistry.setTrustedIssuersRegistry.selector;
         ownerFunctions[3] = TREXRegistry.disableEligibilityChecks.selector;
         ownerFunctions[4] = TREXRegistry.enableEligibilityChecks.selector;
         // Trusted issuers registry owner-restricted functions
-        ownerFunctions[5] = TREXRegistry.addTrustedIssuer.selector;
-        ownerFunctions[6] = TREXRegistry.removeTrustedIssuer.selector;
-        ownerFunctions[7] = TREXRegistry.updateIssuerClaimTopics.selector;
+        ownerFunctions[5] = IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector;
+        ownerFunctions[6] = IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector;
+        ownerFunctions[7] = IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector;
         // Claim topics registry owner-restricted functions
-        ownerFunctions[8] = TREXRegistry.addClaimTopic.selector;
-        ownerFunctions[9] = TREXRegistry.removeClaimTopic.selector;
+        ownerFunctions[8] = IERC3643ClaimTopicsRegistry.addClaimTopic.selector;
+        ownerFunctions[9] = IERC3643ClaimTopicsRegistry.removeClaimTopic.selector;
         ownerFunctions[10] = TREXRegistry.addClaimTopicForIdentityType.selector;
         ownerFunctions[11] = TREXRegistry.removeClaimTopicForIdentityType.selector;
         IAccessManager(accessManager).setTargetFunctionRole(registryAddress, ownerFunctions, RolesLib.OWNER);
 
         // ------ AGENT role ------
         bytes4[] memory agentFunctions = new bytes4[](3);
-        agentFunctions[0] = TREXRegistry.updateIdentity.selector;
-        agentFunctions[1] = TREXRegistry.deleteIdentity.selector;
-        agentFunctions[2] = TREXRegistry.registerIdentity.selector;
+        agentFunctions[0] = IERC3643IdentityRegistry.updateIdentity.selector;
+        agentFunctions[1] = IERC3643IdentityRegistry.deleteIdentity.selector;
+        agentFunctions[2] = IERC3643IdentityRegistry.registerIdentity.selector;
         IAccessManager(accessManager).setTargetFunctionRole(registryAddress, agentFunctions, RolesLib.AGENT);
     }
 

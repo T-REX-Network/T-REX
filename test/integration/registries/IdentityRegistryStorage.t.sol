@@ -9,7 +9,6 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import {
     IERC3643IdentityRegistryStorage,
@@ -19,6 +18,7 @@ import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -90,7 +90,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
+        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityStored.selector);
         assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
     }
 
@@ -99,7 +99,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice `InvestorIdentityChanged` names the wallet the standard `IdentityModified` omits.
     function test_modifyStoredIdentity_EmitsInvestorIdentityChanged() public {
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityModified(bobIdentity, charlieIdentity);
+        emit IERC3643IdentityRegistryStorage.IdentityModified(bobIdentity, charlieIdentity);
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.InvestorIdentityChanged(bob);
         vm.prank(agent);
@@ -294,7 +294,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         address identityRegistry = address(token.identityRegistry());
 
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.IdentityRegistryUnbound(identityRegistry);
+        emit IERC3643IdentityRegistryStorage.IdentityRegistryUnbound(identityRegistry);
         vm.prank(deployer);
         identityRegistryStorage.unbindIdentityRegistry(identityRegistry);
     }
@@ -394,7 +394,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         IIdentity globalIdentity = _deployIdentity(another, "another");
 
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityStored(another, charlieIdentity);
+        emit IERC3643IdentityRegistryStorage.IdentityStored(another, charlieIdentity);
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.IdentityOverridden(another, globalIdentity, charlieIdentity);
         vm.prank(agent);
@@ -412,7 +412,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.IdentityOverridden(globalOnly, globalIdentity, charlieIdentity);
         vm.expectEmit(address(registry));
-        emit ERC3643EventsLib.IdentityRegistered(globalOnly, charlieIdentity);
+        emit IERC3643IdentityRegistry.IdentityRegistered(globalOnly, charlieIdentity);
         vm.prank(agent);
         registry.registerIdentity(globalOnly, charlieIdentity, 0);
     }
@@ -429,7 +429,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityStored.selector);
+        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityStored.selector);
     }
 
     // ============ modifyStoredIdentity() / removeIdentityFromStorage() override signal ============
@@ -442,7 +442,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
 
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityModified(charlieIdentity, bobIdentity);
+        emit IERC3643IdentityRegistryStorage.IdentityModified(charlieIdentity, bobIdentity);
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.InvestorIdentityChanged(another);
         vm.expectEmit(address(identityRegistryStorage));
@@ -475,7 +475,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.IdentityOverridden(another, globalIdentity, bobIdentity);
         vm.expectEmit(address(registry));
-        emit ERC3643EventsLib.IdentityUpdated(charlieIdentity, bobIdentity);
+        emit IERC3643IdentityRegistry.IdentityUpdated(charlieIdentity, bobIdentity);
         vm.prank(agent);
         registry.updateIdentity(another, bobIdentity);
     }
@@ -487,7 +487,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
 
         vm.expectEmit(address(identityRegistryStorage));
-        emit ERC3643EventsLib.IdentityUnstored(another, charlieIdentity);
+        emit IERC3643IdentityRegistryStorage.IdentityUnstored(another, charlieIdentity);
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
         vm.prank(agent);
@@ -507,7 +507,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         vm.expectEmit(address(identityRegistryStorage));
         emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
         vm.expectEmit(address(registry));
-        emit ERC3643EventsLib.IdentityRemoved(another, charlieIdentity);
+        emit IERC3643IdentityRegistry.IdentityRemoved(another, charlieIdentity);
         vm.prank(agent);
         registry.deleteIdentity(another);
     }
@@ -523,7 +523,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], ERC3643EventsLib.IdentityUnstored.selector);
+        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityUnstored.selector);
     }
 
     // ============ supportsInterface() Tests ============

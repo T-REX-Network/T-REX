@@ -69,7 +69,6 @@ import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable
 
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
@@ -134,7 +133,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         assertEq(address(oldIdentity), address(bobIdentity));
 
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityUpdated(oldIdentity, charlieIdentity);
+        emit IERC3643IdentityRegistry.IdentityUpdated(oldIdentity, charlieIdentity);
         vm.prank(agent);
         registry.updateIdentity(bob, charlieIdentity);
 
@@ -156,7 +155,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.IdentityStorageSet(irs);
+        emit IERC3643IdentityRegistry.IdentityStorageSet(irs);
         registry.setIdentityRegistryStorage(irs);
 
         assertEq(address(registry.identityStorage()), irs);
@@ -516,7 +515,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.TrustedIssuerRemoved(address(anotherClaimIssuer));
+        emit IERC3643TrustedIssuersRegistry.TrustedIssuerRemoved(address(anotherClaimIssuer));
         registry.removeTrustedIssuer(address(anotherClaimIssuer));
 
         assertFalse(registry.isTrustedIssuer(address(anotherClaimIssuer)));
@@ -593,7 +592,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.ClaimTopicsUpdated(address(claimIssuer), newTopics);
+        emit IERC3643TrustedIssuersRegistry.ClaimTopicsUpdated(address(claimIssuer), newTopics);
         registry.updateIssuerClaimTopics(address(claimIssuer), newTopics);
 
         assertTrue(registry.hasClaimTopic(address(claimIssuer), CLAIM_TOPIC_3));
@@ -625,7 +624,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.ClaimTopicsUpdated(address(secondIssuer), newTopics);
+        emit IERC3643TrustedIssuersRegistry.ClaimTopicsUpdated(address(secondIssuer), newTopics);
         registry.updateIssuerClaimTopics(address(secondIssuer), newTopics);
 
         assertFalse(registry.hasClaimTopic(address(secondIssuer), CLAIM_TOPIC_1));
@@ -693,7 +692,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false);
-        emit ERC3643EventsLib.ClaimTopicRemoved(2);
+        emit IERC3643ClaimTopicsRegistry.ClaimTopicRemoved(2);
         registry.removeClaimTopic(2);
     }
 

@@ -8,7 +8,6 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import {
     IERC3643Compliance,
     IModularCompliance,
@@ -24,6 +23,7 @@ import { IERC173 } from "contracts/vendor/IERC173.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { ModuleNotPnP } from "../mocks/ModuleNotPnP.sol";
 import { TestModule } from "../mocks/TestModule.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract ComplianceTest is TREXSuiteTest {
@@ -143,10 +143,10 @@ contract ComplianceTest is TREXSuiteTest {
         // Token sets new compliance (this should bind it)
         // Event order: TokenBound (new), then the second event ComplianceAdded (token)
         vm.expectEmit(true, false, false, false, address(newCompliance));
-        emit ERC3643EventsLib.TokenBound(address(testToken));
+        emit IERC3643Compliance.TokenBound(address(testToken));
 
         vm.expectEmit(true, false, false, false, address(testToken));
-        emit ERC3643EventsLib.ComplianceAdded(address(newCompliance));
+        emit IERC3643.ComplianceAdded(address(newCompliance));
 
         vm.prank(deployer);
         testToken.setCompliance(address(newCompliance));
@@ -197,13 +197,13 @@ contract ComplianceTest is TREXSuiteTest {
         // Set new compliance (this triggers unbind on old compliance)
         // Event order: TokenUnbound (old) -> TokenBound (new) -> ComplianceAdded (token)
         vm.expectEmit(true, false, false, false, address(compliance));
-        emit ERC3643EventsLib.TokenUnbound(address(token));
+        emit IERC3643Compliance.TokenUnbound(address(token));
 
         vm.expectEmit(true, false, false, false, address(complianceBeta));
-        emit ERC3643EventsLib.TokenBound(address(token));
+        emit IERC3643Compliance.TokenBound(address(token));
 
         vm.expectEmit(true, false, false, false, address(token));
-        emit ERC3643EventsLib.ComplianceAdded(address(complianceBeta));
+        emit IERC3643.ComplianceAdded(address(complianceBeta));
 
         vm.prank(deployer);
         token.setCompliance(address(complianceBeta));

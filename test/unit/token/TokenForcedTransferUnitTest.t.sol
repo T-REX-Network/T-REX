@@ -6,12 +6,12 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 contract TokenTransferUnitTest is TokenBaseUnitTest {
@@ -57,7 +57,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         token.freezePartialTokens(from, frozenAmount);
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.TokensUnfrozen(from, forcedAmount - (mintAmount - frozenAmount));
+        emit IERC3643.TokensUnfrozen(from, forcedAmount - (mintAmount - frozenAmount));
 
         vm.prank(agent);
         token.forcedTransfer(from, to, forcedAmount);

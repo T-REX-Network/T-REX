@@ -40,6 +40,14 @@ pragma solidity 0.8.30;
 
 interface IERC3643Compliance {
 
+    /// @dev Emitted when a token is bound to the compliance contract.
+    /// @param _token The address of the bound token.
+    event TokenBound(address _token);
+
+    /// @dev Emitted when a token is unbound from the compliance contract.
+    /// @param _token The address of the unbound token.
+    event TokenUnbound(address _token);
+
     /// Functions
     /// initialization of the compliance contract
     /**

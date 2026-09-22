@@ -3,11 +3,11 @@ pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 
 contract TokenSetNameUnitTest is TokenBaseUnitTest {
 
@@ -43,7 +43,7 @@ contract TokenSetNameUnitTest is TokenBaseUnitTest {
         string memory newName = "New Name";
 
         vm.expectEmit(true, true, true, true, address(token));
-        emit ERC3643EventsLib.UpdatedTokenInformation(
+        emit IERC3643.UpdatedTokenInformation(
             newName, token.symbol(), token.decimals(), token.version(), token.onchainID()
         );
         token.setName(newName);

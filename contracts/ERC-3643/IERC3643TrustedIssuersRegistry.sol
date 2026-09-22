@@ -40,6 +40,20 @@ pragma solidity 0.8.30;
 
 interface IERC3643TrustedIssuersRegistry {
 
+    /// @dev Emitted when a trusted issuer is registered, together with the claim topics it is trusted for.
+    /// @param _trustedIssuer The address of the trusted issuer's ClaimIssuer contract.
+    /// @param _claimTopics The claim topics the issuer is trusted for.
+    event TrustedIssuerAdded(address indexed _trustedIssuer, uint256[] _claimTopics);
+
+    /// @dev Emitted when a trusted issuer is removed from the registry.
+    /// @param _trustedIssuer The address of the trusted issuer's ClaimIssuer contract.
+    event TrustedIssuerRemoved(address indexed _trustedIssuer);
+
+    /// @dev Emitted when the set of claim topics a trusted issuer is trusted for changes.
+    /// @param _trustedIssuer The address of the trusted issuer's ClaimIssuer contract.
+    /// @param _claimTopics The new claim topics the issuer is trusted for.
+    event ClaimTopicsUpdated(address indexed _trustedIssuer, uint256[] _claimTopics);
+
     // Functions
 
     // Setters

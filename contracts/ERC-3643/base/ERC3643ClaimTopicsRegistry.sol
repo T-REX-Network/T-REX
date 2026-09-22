@@ -36,7 +36,6 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-
 /**
  *     NOTICE
  *
@@ -60,95 +59,81 @@
  *     You should have received a copy of the GNU General Public License
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 pragma solidity 0.8.30;
 
-import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-library ERC3643EventsLib {
+import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
+import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
 
-    // ============================================
-    // IERC3643 Events
-    // ============================================
+/// @title ERC3643ClaimTopicsRegistry
+/// @dev The ERC-3643 Claim Topics Registry surface and nothing else, over its own ERC-7201 namespace.
+/// Extend through the internal hooks. Authorization is left abstract: the standard specifies none.
+abstract contract ERC3643ClaimTopicsRegistry is IERC3643ClaimTopicsRegistry {
 
-    event UpdatedTokenInformation(
-        string _newName, string _newSymbol, uint8 _newDecimals, string _newVersion, address indexed _newOnchainID
-    );
+    using EnumerableSet for EnumerableSet.UintSet;
 
-    event IdentityRegistryAdded(address indexed _identityRegistry);
+    /// @custom:storage-location erc7201:erc3643.storage.ClaimTopicsRegistry
+    struct ERC3643ClaimTopicsRegistryStorage {
+        EnumerableSet.UintSet claimTopics;
+    }
 
-    event ComplianceAdded(address indexed _compliance);
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ClaimTopicsRegistry")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant CLAIM_TOPICS_REGISTRY_STORAGE_LOCATION =
+        0xf733c3a0e1c477ac68147f80e659cc05e7e57f7c461b47d14f8d9811f4c72700;
 
-    event RecoverySuccess(address indexed _lostWallet, address indexed _newWallet, address indexed _investorOnchainID);
+    /// @inheritdoc IERC3643ClaimTopicsRegistry
+    function addClaimTopic(uint256 _claimTopic) external virtual {
+        _authorizeClaimTopicsUpdate();
+        _addClaimTopic(_claimTopic);
+    }
 
-    /// @dev `_owner` records the actor that set the frozen status (`_msgSender()`). When the call is
-    /// routed through `AccessManager.execute`, `_msgSender()` is the AccessManager, so this field
-    /// reflects the executing contract rather than the originator address (the EOA or contract behind
-    /// the role). Consumers that need the originator address must read it from the AccessManager
-    /// execution context, not here.
-    event AddressFrozen(address indexed _userAddress, bool indexed _isFrozen, address indexed _owner);
+    /// @inheritdoc IERC3643ClaimTopicsRegistry
+    function removeClaimTopic(uint256 _claimTopic) external virtual {
+        _authorizeClaimTopicsUpdate();
+        _removeClaimTopic(_claimTopic);
+    }
 
-    event TokensFrozen(address indexed _userAddress, uint256 _amount);
+    /// @inheritdoc IERC3643ClaimTopicsRegistry
+    function getClaimTopics() external view virtual returns (uint256[] memory) {
+        return _getClaimTopics();
+    }
 
-    event TokensUnfrozen(address indexed _userAddress, uint256 _amount);
+    /// @dev Authorization hook for every state-changing function of this base.
+    ///  Left abstract: the standard defines no access model.
+    function _authorizeClaimTopicsUpdate() internal virtual;
 
-    // ============================================
-    // IERC3643Compliance Events
-    // ============================================
+    /// @dev Cap on required claim topics. The standard sets none; override to bound `isVerified`.
+    function _maxClaimTopics() internal view virtual returns (uint256) {
+        return type(uint256).max;
+    }
 
-    event TokenBound(address _token);
+    /// @dev Adds a required claim topic. Reverts on duplicates and past the cap.
+    function _addClaimTopic(uint256 claimTopic) internal virtual {
+        EnumerableSet.UintSet storage topics = _erc3643ClaimTopicsRegistryStorage().claimTopics;
+        uint256 max = _maxClaimTopics();
+        require(topics.length() < max, ERC3643ErrorsLib.MaxClaimTopicsReached(max));
+        require(topics.add(claimTopic), ERC3643ErrorsLib.ClaimTopicAlreadyExists());
+        emit ClaimTopicAdded(claimTopic);
+    }
 
-    event TokenUnbound(address _token);
+    /// @dev Removes a required claim topic. Removing an absent topic is a silent no-op.
+    function _removeClaimTopic(uint256 claimTopic) internal virtual {
+        if (_erc3643ClaimTopicsRegistryStorage().claimTopics.remove(claimTopic)) {
+            emit ClaimTopicRemoved(claimTopic);
+        }
+    }
 
-    // ============================================
-    // IERC3643IdentityRegistry Events
-    // ============================================
+    /// @dev Required claim topics.
+    function _getClaimTopics() internal view virtual returns (uint256[] memory) {
+        return _erc3643ClaimTopicsRegistryStorage().claimTopics.values();
+    }
 
-    event ClaimTopicsRegistrySet(address indexed _claimTopicsRegistry);
-
-    event IdentityStorageSet(address indexed _identityStorage);
-
-    event TrustedIssuersRegistrySet(address indexed _trustedIssuersRegistry);
-
-    event IdentityRegistered(address indexed _investorAddress, IIdentity indexed _identity);
-
-    event IdentityRemoved(address indexed _investorAddress, IIdentity indexed _identity);
-
-    event IdentityUpdated(IIdentity indexed _oldIdentity, IIdentity indexed _newIdentity);
-
-    event CountryUpdated(address indexed _investorAddress, uint16 indexed _country);
-
-    // ============================================
-    // IERC3643IdentityRegistryStorage Events
-    // ============================================
-
-    event IdentityStored(address indexed _investorAddress, IIdentity indexed _identity);
-
-    event IdentityUnstored(address indexed _investorAddress, IIdentity indexed _identity);
-
-    event IdentityModified(IIdentity indexed _oldIdentity, IIdentity indexed _newIdentity);
-
-    event CountryModified(address indexed _investorAddress, uint16 indexed _country);
-
-    event IdentityRegistryBound(address indexed _identityRegistry);
-
-    event IdentityRegistryUnbound(address indexed _identityRegistry);
-
-    // ============================================
-    // IERC3643ClaimTopicsRegistry Events
-    // ============================================
-
-    event ClaimTopicAdded(uint256 indexed _claimTopic);
-
-    event ClaimTopicRemoved(uint256 indexed _claimTopic);
-
-    // ============================================
-    // IERC3643TrustedIssuersRegistry Events
-    // ============================================
-
-    event TrustedIssuerAdded(address indexed _trustedIssuer, uint256[] _claimTopics);
-
-    event TrustedIssuerRemoved(address indexed _trustedIssuer);
-
-    event ClaimTopicsUpdated(address indexed _trustedIssuer, uint256[] _claimTopics);
+    function _erc3643ClaimTopicsRegistryStorage() internal pure returns (ERC3643ClaimTopicsRegistryStorage storage s) {
+        assembly ("memory-safe") {
+            s.slot := CLAIM_TOPICS_REGISTRY_STORAGE_LOCATION
+        }
+    }
 
 }

@@ -5,11 +5,11 @@ import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract TokenRecoveryTest is TREXSuiteTest {
@@ -64,7 +64,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertTrue(identityRegistry.isLocallyRegistered(another));
@@ -86,7 +86,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertFalse(identityRegistry.isLocallyRegistered(another));
@@ -118,7 +118,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
     function test_recoveryAddress_Success_WithIdentityTransfer() public {
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertFalse(identityRegistry.isLocallyRegistered(bob));
@@ -155,7 +155,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertFalse(identityRegistry.isLocallyRegistered(bob));
@@ -191,7 +191,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertFalse(identityRegistry.isLocallyRegistered(bob));
@@ -208,7 +208,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, false, false, false, address(token));
-        emit ERC3643EventsLib.TokensFrozen(another, 50);
+        emit IERC3643.TokensFrozen(another, 50);
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertTrue(token.isFrozen(another));
@@ -227,7 +227,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         vm.prank(agent);
         vm.expectEmit(true, false, false, false, address(token));
-        emit ERC3643EventsLib.TokensFrozen(another, 30);
+        emit IERC3643.TokensFrozen(another, 30);
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertTrue(token.isFrozen(another));
@@ -238,7 +238,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
     function test_recoveryAddress_Success_NoFrozenTokens() public {
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertEq(token.getFrozenTokens(another), 0);
@@ -255,9 +255,9 @@ contract TokenRecoveryTest is TREXSuiteTest {
         // Recovery should not emit AddressFrozen for new wallet since it's already frozen
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.AddressFrozen(bob, false, address(token));
+        emit IERC3643.AddressFrozen(bob, false, address(token));
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertTrue(token.isFrozen(another));
@@ -276,7 +276,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
         // Recovery should work because new wallet is in registry
         vm.prank(agent);
         vm.expectEmit(true, true, true, false, address(token));
-        emit ERC3643EventsLib.RecoverySuccess(bob, another, address(bobIdentity));
+        emit IERC3643.RecoverySuccess(bob, another, address(bobIdentity));
         token.recoveryAddress(bob, another, address(bobIdentity));
 
         assertEq(token.balanceOf(another), 500);

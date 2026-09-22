@@ -8,6 +8,13 @@ import { Token } from "contracts/token/Token.sol";
 ///         them. Every entry point authorizes against the mint role, so the existing agent drives them all.
 contract TokenLedgerHarness is Token {
 
+    /// @dev The batch-authorization shape the ERC-3643 base reaches through `_checkTokenAdmin`, restated
+    ///  here as a modifier so each entry point authorizes against the mint role rather than its own selector.
+    modifier restrictedFor(bytes4 selector) {
+        _checkCanCallSelector(selector);
+        _;
+    }
+
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount)
         external
         restrictedFor(this.mint.selector)

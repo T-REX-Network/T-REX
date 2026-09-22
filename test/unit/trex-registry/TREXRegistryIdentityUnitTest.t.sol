@@ -5,12 +5,12 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import { ERC3643EventsLib } from "contracts/ERC-3643/ERC3643EventsLib.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 
 contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
@@ -31,7 +31,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         IIdentity newIdentity = _deployIdentity(another, "another");
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityRegistered(another, newIdentity);
+        emit IERC3643IdentityRegistry.IdentityRegistered(another, newIdentity);
         registry.registerIdentity(another, newIdentity, 1);
 
         assertTrue(registry.contains(another));
@@ -54,7 +54,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityUpdated(old, charlieIdentity);
+        emit IERC3643IdentityRegistry.IdentityUpdated(old, charlieIdentity);
         registry.updateIdentity(bob, charlieIdentity);
 
         assertEq(address(registry.identity(bob)), address(charlieIdentity));
@@ -88,7 +88,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityRemoved(bob, old);
+        emit IERC3643IdentityRegistry.IdentityRemoved(bob, old);
         registry.deleteIdentity(bob);
 
         // The local entry is gone; `contains` still resolves bob through the global IdFactory
@@ -99,10 +99,9 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
     // ============ batchRegisterIdentity() ============
 
-    /// @notice `batchRegisterIdentity` is not `restricted`, it just iterates `registerIdentity`.
-    ///         When only `registerIdentity.selector` is granted to AGENT, the inner `restricted`
-    ///         check reads `batchRegisterIdentity.selector` from calldata and reverts.
-    function test_batchRegisterIdentity_RevertWhen_SelectorNotGrantedToAgent() public {
+    /// @notice A batch needs whatever the single call needs: granting `registerIdentity` to AGENT is
+    ///         enough, because `batchRegisterIdentity` authorizes against `registerIdentity.selector`.
+    function test_batchRegisterIdentity_Success_WhenSingleSelectorGrantedToAgent() public {
         IIdentity i1 = _deployIdentity(another, "another");
 
         address[] memory addrs = new address[](1);
@@ -113,13 +112,13 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         countries[0] = 1;
 
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
         registry.batchRegisterIdentity(addrs, ids, countries);
+
+        assertTrue(registry.contains(another));
     }
 
-    /// @notice With the production wiring from `AccessManagerSetupLib`, which binds
-    ///         `batchRegisterIdentity.selector` to AGENT precisely because the inner `restricted`
-    ///         check reads the outer selector, an agent can batch-register.
+    /// @notice The production wiring from `AccessManagerSetupLib` grants AGENT only the single-item
+    ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry));
@@ -164,7 +163,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, false, address(registry));
-        emit ERC3643EventsLib.IdentityStorageSet(address(replacement));
+        emit IERC3643IdentityRegistry.IdentityStorageSet(address(replacement));
         registry.setIdentityRegistryStorage(address(replacement));
 
         assertEq(address(registry.identityStorage()), address(replacement));
