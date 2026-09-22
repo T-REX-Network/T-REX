@@ -6,9 +6,12 @@ import { TREXFactory } from "contracts/factory/TREXFactory.sol";
 /// @notice Test contract that inherits from TREXFactory to expose _deploy for testing
 contract TestTREXFactory is TREXFactory {
 
-    constructor(address implementationAuthority_, address idFactory_, address accessManager_)
-        TREXFactory(implementationAuthority_, idFactory_, accessManager_)
-    { }
+    constructor(
+        address implementationAuthority_,
+        address idFactory_,
+        address trustedGatewayRegistry_,
+        address accessManager_
+    ) TREXFactory(implementationAuthority_, idFactory_, trustedGatewayRegistry_, accessManager_) { }
 
     /// @notice Exposes _deploy for testing
     /// Note: _deploy is private in TREXFactory, so we can't expose it directly

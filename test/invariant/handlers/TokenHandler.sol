@@ -3,25 +3,31 @@ pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
 
-import { Token } from "contracts/token/Token.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 
 /// @title TokenHandler
 /// @notice Bounded action driver for the Token invariant suite. Every public function here is a "transition"
 ///         the invariant fuzzer may call in any order. All token holders are restricted to a fixed actor set
-///         (passed in at construction) so the invariant checker can enumerate every balance holder.
+///         (passed in at construction) so the invariant checker can enumerate every balance holder; each actor
+///         also owns a fixed set of satellite wallets that hold its bridged positions.
 ///
-///         Ghost variables track supply movements (mint/burn) independently of the token so the invariants can
-///         assert the token's own accounting matches an external model.
+///         Ghost variables track supply movements (mint/burn) and the bridged total independently of the token
+///         so the invariants can assert the token's own accounting matches an external model.
 contract TokenHandler is Test {
 
-    Token public immutable token;
+    TokenLedgerHarness public immutable token;
     address public immutable agent;
+    /// @dev The only caller the token accepts a hold from.
+    address public immutable compliance;
 
     address[] public actors;
+    bytes[][] internal satellites;
 
     // ----- ghost state -----
     uint256 public ghostMinted; // total ever minted via this handler
     uint256 public ghostBurned; // total ever burned via this handler
+    uint256 public ghostBridgedTotal; // every transition that moves a position across the native boundary
+    uint256 public ghostInTransit; // held minus settled from a hold
     bool public pausedTransferLeak; // set true if a transfer ever succeeded while paused (must stay false)
     bool public unverifiedRecipientLeak; // set true if a successful transfer landed on an unverified recipient
 
@@ -33,24 +39,46 @@ contract TokenHandler is Test {
     uint256 public callsFreeze;
     uint256 public callsUnfreeze;
     uint256 public callsPauseToggle;
+    uint256 public callsDelegateOut;
+    uint256 public callsRecall;
+    uint256 public callsBridgedTransfer;
+    uint256 public callsSettleToNative;
+    uint256 public callsHoldInTransit;
+    uint256 public callsSettleHeld;
 
-    constructor(Token token_, address agent_, address[] memory actors_) {
-        token = token_;
-        agent = agent_;
-        actors = actors_;
+    struct Hold {
+        uint256 validationId;
+        bytes from;
+        uint256 amount;
     }
 
-    function _actor(uint256 seed) internal view returns (address) {
-        return actors[seed % actors.length];
+    /// @dev Live holds, so a settlement can pick one; ids are never reused.
+    Hold[] internal holds;
+    uint256 internal nextValidationId = 1;
+
+    constructor(TokenLedgerHarness token_, address agent_, address[] memory actors_, bytes[][] memory satellites_) {
+        token = token_;
+        agent = agent_;
+        compliance = address(token_.compliance());
+        actors = actors_;
+        satellites = satellites_;
+    }
+
+    function _actor(uint256 seed) internal view returns (uint256) {
+        return seed % actors.length;
+    }
+
+    function _satellite(uint256 actor, uint256 seed) internal view returns (bytes memory) {
+        return satellites[actor][seed % satellites[actor].length];
     }
 
     // ------------------------------------------------------------------
-    // Transitions
+    // Native transitions
     // ------------------------------------------------------------------
 
     function mint(uint256 actorSeed, uint256 amount) external {
         callsMint++;
-        address to = _actor(actorSeed);
+        address to = actors[_actor(actorSeed)];
         amount = bound(amount, 0, 1e24);
         vm.prank(agent);
         try token.mint(to, amount) {
@@ -60,7 +88,7 @@ contract TokenHandler is Test {
 
     function burn(uint256 actorSeed, uint256 amount) external {
         callsBurn++;
-        address from = _actor(actorSeed);
+        address from = actors[_actor(actorSeed)];
         uint256 bal = token.balanceOf(from);
         amount = bound(amount, 0, bal);
         vm.prank(agent);
@@ -71,8 +99,8 @@ contract TokenHandler is Test {
 
     function transfer(uint256 fromSeed, uint256 toSeed, uint256 amount) external {
         callsTransfer++;
-        address from = _actor(fromSeed);
-        address to = _actor(toSeed);
+        address from = actors[_actor(fromSeed)];
+        address to = actors[_actor(toSeed)];
         uint256 bal = token.balanceOf(from);
         amount = bound(amount, 0, bal);
         bool wasPaused = token.paused();
@@ -87,8 +115,8 @@ contract TokenHandler is Test {
 
     function forcedTransfer(uint256 fromSeed, uint256 toSeed, uint256 amount) external {
         callsForcedTransfer++;
-        address from = _actor(fromSeed);
-        address to = _actor(toSeed);
+        address from = actors[_actor(fromSeed)];
+        address to = actors[_actor(toSeed)];
         uint256 bal = token.balanceOf(from);
         amount = bound(amount, 0, bal);
         vm.prank(agent);
@@ -97,7 +125,7 @@ contract TokenHandler is Test {
 
     function freezePartial(uint256 actorSeed, uint256 amount) external {
         callsFreeze++;
-        address user = _actor(actorSeed);
+        address user = actors[_actor(actorSeed)];
         amount = bound(amount, 0, 1e24);
         vm.prank(agent);
         try token.freezePartialTokens(user, amount) { } catch { }
@@ -105,14 +133,14 @@ contract TokenHandler is Test {
 
     function unfreezePartial(uint256 actorSeed, uint256 amount) external {
         callsUnfreeze++;
-        address user = _actor(actorSeed);
+        address user = actors[_actor(actorSeed)];
         amount = bound(amount, 0, 1e24);
         vm.prank(agent);
         try token.unfreezePartialTokens(user, amount) { } catch { }
     }
 
     function setAddressFrozen(uint256 actorSeed, bool freeze) external {
-        address user = _actor(actorSeed);
+        address user = actors[_actor(actorSeed)];
         vm.prank(agent);
         try token.setAddressFrozen(user, freeze) { } catch { }
     }
@@ -129,6 +157,93 @@ contract TokenHandler is Test {
     }
 
     // ------------------------------------------------------------------
+    // Bridged transitions
+    // ------------------------------------------------------------------
+
+    function delegateOut(uint256 actorSeed, uint256 walletSeed, uint256 amount) external {
+        callsDelegateOut++;
+        uint256 actor = _actor(actorSeed);
+        address holder = actors[actor];
+        bytes memory to = _satellite(actor, walletSeed);
+        amount = bound(amount, 0, token.freeBalanceOf(holder));
+        vm.prank(agent);
+        try token.delegateOut(holder, to, amount) {
+            ghostBridgedTotal += amount;
+        } catch { }
+    }
+
+    function recall(uint256 actorSeed, uint256 walletSeed, uint256 amount) external {
+        callsRecall++;
+        uint256 actor = _actor(actorSeed);
+        address holder = actors[actor];
+        bytes memory from = _satellite(actor, walletSeed);
+        amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        vm.prank(agent);
+        try token.recall(from, holder, amount) {
+            ghostBridgedTotal -= amount;
+        } catch { }
+    }
+
+    /// @dev Same-chain and cross-chain settlements alike: the wallets carry the chains.
+    function bridgedTransfer(
+        uint256 fromActorSeed,
+        uint256 fromWalletSeed,
+        uint256 toActorSeed,
+        uint256 toWalletSeed,
+        uint256 amount,
+        uint256 validationId
+    ) external {
+        callsBridgedTransfer++;
+        bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
+        bytes memory to = _satellite(_actor(toActorSeed), toWalletSeed);
+        amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        vm.prank(agent);
+        try token.bridgedTransfer(from, to, amount, validationId) { } catch { }
+    }
+
+    /// @dev A satellite position lands on another identity's native wallet: the seeds are independent, so the
+    ///  leg crosses identities.
+    function settleToNative(uint256 walletActorSeed, uint256 walletSeed, uint256 nativeSeed, uint256 amount) external {
+        callsSettleToNative++;
+        bytes memory from = _satellite(_actor(walletActorSeed), walletSeed);
+        address to = actors[_actor(nativeSeed)];
+        amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        vm.prank(agent);
+        try token.settleToNative(from, to, amount, nativeSeed) {
+            ghostBridgedTotal -= amount;
+        } catch { }
+    }
+
+    /// @dev The burn leg of a cross-chain validation: the amount leaves the wallet and waits under a fresh id.
+    function holdInTransit(uint256 fromActorSeed, uint256 fromWalletSeed, uint256 amount) external {
+        callsHoldInTransit++;
+        bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
+        amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        uint256 validationId = nextValidationId++;
+        vm.prank(compliance);
+        try token.holdInTransit(from, amount, validationId) {
+            holds.push(Hold({ validationId: validationId, from: from, amount: amount }));
+            ghostInTransit += amount;
+        } catch { }
+    }
+
+    /// @dev The mint leg: a live hold is credited to some wallet, at its amount or at a wrong one.
+    function settleHeld(uint256 holdSeed, uint256 toActorSeed, uint256 toWalletSeed, bool exact) external {
+        callsSettleHeld++;
+        if (holds.length == 0) return;
+        uint256 i = holdSeed % holds.length;
+        Hold memory hold = holds[i];
+        bytes memory to = _satellite(_actor(toActorSeed), toWalletSeed);
+        uint256 amount = exact ? hold.amount : hold.amount + 1;
+        vm.prank(agent);
+        try token.bridgedTransfer(hold.from, to, amount, hold.validationId) {
+            ghostInTransit -= hold.amount;
+            holds[i] = holds[holds.length - 1];
+            holds.pop();
+        } catch { }
+    }
+
+    // ------------------------------------------------------------------
     // Views used by the invariant contract
     // ------------------------------------------------------------------
 
@@ -138,6 +253,10 @@ contract TokenHandler is Test {
 
     function actorAt(uint256 i) external view returns (address) {
         return actors[i];
+    }
+
+    function satellitesOf(uint256 i) external view returns (bytes[] memory) {
+        return satellites[i];
     }
 
 }
