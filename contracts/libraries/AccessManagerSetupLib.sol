@@ -360,41 +360,19 @@ library AccessManagerSetupLib {
     function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, uint32 domainId)
         private
     {
-        for (uint256 i = 0; i < table.length; i++) {
-            if (_seenBefore(table, i)) {
-                continue;
+        uint256 start;
+        while (start < table.length) {
+            RolesLib.Role role = table[start].role;
+            uint256 end = start;
+            while (end < table.length && table[end].role == role) {
+                end++;
             }
-            RolesLib.Role role = table[i].role;
-            accessManager.setTargetFunctionRole(target, _selectorsFor(table, role), RolesLib.forDomain(domainId, role));
-        }
-    }
-
-    function _seenBefore(SelectorRole[] memory table, uint256 index) private pure returns (bool) {
-        for (uint256 j = 0; j < index; j++) {
-            if (table[j].role == table[index].role) {
-                return true;
+            bytes4[] memory selectors = new bytes4[](end - start);
+            for (uint256 i = start; i < end; i++) {
+                selectors[i - start] = table[i].selector;
             }
-        }
-        return false;
-    }
-
-    function _selectorsFor(SelectorRole[] memory table, RolesLib.Role role)
-        private
-        pure
-        returns (bytes4[] memory selectors)
-    {
-        uint256 count;
-        for (uint256 i = 0; i < table.length; i++) {
-            if (table[i].role == role) {
-                count++;
-            }
-        }
-        selectors = new bytes4[](count);
-        uint256 next;
-        for (uint256 i = 0; i < table.length; i++) {
-            if (table[i].role == role) {
-                selectors[next++] = table[i].selector;
-            }
+            accessManager.setTargetFunctionRole(target, selectors, RolesLib.forDomain(domainId, role));
+            start = end;
         }
     }
 
