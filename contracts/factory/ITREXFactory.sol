@@ -167,6 +167,11 @@ interface ITREXFactory {
      *  which the manager's roles do not govern.
      *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always
      *  deploys its own identity storage through the cloned IRS beacon.
+     *  When `_tokenDetails.accessManager` is zero the factory deploys a `TREXAccessManager` behind the cloned
+     *  beacon, creates a domain named after the token, assigns the token and its storage, commissions the
+     *  suite and hands `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
+     *  commissions it (`AccessManagerSetupLib.commissionSuite`).
      *  Restricted to the configured AccessManager role (OWNER).
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events
      *  @param _salt the salt used to make the contracts deployments with CREATE3
