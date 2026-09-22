@@ -217,6 +217,28 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertTrue(registryWrites);
     }
 
+    function test_explicitDomain_MapsEveryTableEntry() public {
+        _commission(tokenA, DOMAIN_A);
+        _assertTableMapped(address(tokenA), AccessManagerSetupLib.tokenTable(), DOMAIN_A);
+        _assertTableMapped(address(tokenA.identityRegistry()), AccessManagerSetupLib.registryTable(), DOMAIN_A);
+        _assertTableMapped(
+            address(tokenA.identityRegistry().identityStorage()), AccessManagerSetupLib.storageTable(), DOMAIN_A
+        );
+        _assertTableMapped(address(tokenA.compliance()), AccessManagerSetupLib.complianceTable(), DOMAIN_A);
+    }
+
+    function _assertTableMapped(address target, AccessManagerSetupLib.SelectorRole[] memory table, uint32 domainId)
+        private
+        view
+    {
+        for (uint256 i = 0; i < table.length; i++) {
+            assertEq(
+                accessManager.getTargetFunctionRole(target, table[i].selector),
+                RolesLib.forDomain(domainId, table[i].role)
+            );
+        }
+    }
+
     function test_explicitDomain_StorageWriterStaysUnderAdminRole() public {
         _commission(tokenA, DOMAIN_A);
         uint64 writer = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER);
