@@ -105,7 +105,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
 
         // Wire AccessManager roles for the new contracts (this contract is the AccessManager admin).
         _setupTREXRegistryRoles(address(registry));
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(identityRegistryStorage), NS);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(identityRegistryStorage), DOMAIN);
 
         // Grant standard owner/agent roles to deployer/agent so they can drive the registry.
         _grantOwnerRole(deployer);

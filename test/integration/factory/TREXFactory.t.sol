@@ -1101,7 +1101,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory never binds: the
         // issuer binds the new registry after the deploy with IRS_BINDER of its own.
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, NS);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, DOMAIN);
 
         // Sanity: the factory holds neither OWNER nor IRS_BINDER going into the reused-IRS deploy.
         (bool hasOwner,) = accessManager.hasRole(_role(RolesLib.Role.OWNER), address(trexFactory));

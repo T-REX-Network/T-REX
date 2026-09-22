@@ -51,35 +51,35 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());
         address irs = address(deployed.identityRegistry().identityStorage());
-        uint32 ns = manager.namespaceOf(address(deployed));
+        uint32 ns = manager.domainOf(address(deployed));
         assertEq(ns, 1);
-        assertEq(manager.namespaceCount(), 1);
-        assertEq(manager.namespaceOf(irs), ns);
+        assertEq(manager.domainCount(), 1);
+        assertEq(manager.domainOf(irs), ns);
 
         assertEq(
             manager.getTargetFunctionRole(address(deployed), IERC3643.mint.selector),
-            RolesLib.forNamespace(ns, RolesLib.Role.AGENT_MINTER)
+            RolesLib.forDomain(ns, RolesLib.Role.AGENT_MINTER)
         );
         assertEq(
             manager.getTargetFunctionRole(registry, IERC3643IdentityRegistry.registerIdentity.selector),
-            RolesLib.forNamespace(ns, RolesLib.Role.AGENT)
+            RolesLib.forDomain(ns, RolesLib.Role.AGENT)
         );
-        (bool tokenIsAgent,) = manager.hasRole(RolesLib.forNamespace(ns, RolesLib.Role.AGENT), address(deployed));
-        (bool registryWrites,) = manager.hasRole(RolesLib.forNamespace(ns, RolesLib.Role.IRS_WRITER), registry);
+        (bool tokenIsAgent,) = manager.hasRole(RolesLib.forDomain(ns, RolesLib.Role.AGENT), address(deployed));
+        (bool registryWrites,) = manager.hasRole(RolesLib.forDomain(ns, RolesLib.Role.IRS_WRITER), registry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
         assertEq(
-            manager.getRoleAdmin(RolesLib.forNamespace(ns, RolesLib.Role.AGENT)),
-            RolesLib.forNamespace(ns, RolesLib.Role.AGENT_ADMIN)
+            manager.getRoleAdmin(RolesLib.forDomain(ns, RolesLib.Role.AGENT)),
+            RolesLib.forDomain(ns, RolesLib.Role.AGENT_ADMIN)
         );
         (bool factoryIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), address(trexFactory));
         assertFalse(factoryIsAdmin);
 
         vm.startPrank(issuerAdmin);
-        manager.grantRole(RolesLib.forNamespace(ns, RolesLib.Role.AGENT_ADMIN), issuerAdmin, 0);
-        manager.grantRole(RolesLib.forNamespace(ns, RolesLib.Role.AGENT), agent, 0);
-        manager.grantRole(RolesLib.forNamespace(ns, RolesLib.Role.AGENT_PAUSER), agent, 0);
-        manager.grantRole(RolesLib.forNamespace(ns, RolesLib.Role.AGENT_MINTER), agent, 0);
+        manager.grantRole(RolesLib.forDomain(ns, RolesLib.Role.AGENT_ADMIN), issuerAdmin, 0);
+        manager.grantRole(RolesLib.forDomain(ns, RolesLib.Role.AGENT), agent, 0);
+        manager.grantRole(RolesLib.forDomain(ns, RolesLib.Role.AGENT_PAUSER), agent, 0);
+        manager.grantRole(RolesLib.forDomain(ns, RolesLib.Role.AGENT_MINTER), agent, 0);
         vm.stopPrank();
         vm.startPrank(agent);
         IERC3643IdentityRegistry(registry).registerIdentity(alice, aliceIdentity, 0);

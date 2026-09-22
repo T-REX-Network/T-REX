@@ -74,13 +74,13 @@ import { EventsLib } from "../libraries/EventsLib.sol";
 contract TREXAccessManager is AccessManagerUpgradeable {
 
     /// @custom:storage-location erc7201:erc3643.storage.TREXAccessManager
-    struct NamespaceStorage {
+    struct DomainStorage {
         uint32 count;
-        mapping(uint32 namespaceId => string name) names;
-        mapping(address target => uint32 namespaceId) namespaceOf;
+        mapping(uint32 domainId => string name) names;
+        mapping(address target => uint32 domainId) domainOf;
     }
 
-    bytes32 private constant NAMESPACE_STORAGE_LOCATION =
+    bytes32 private constant DOMAIN_STORAGE_LOCATION =
         0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00;
 
     modifier onlyAdmin() {
@@ -95,36 +95,36 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _disableInitializers();
     }
 
-    function createNamespace(string calldata name) external onlyAdmin returns (uint32 namespaceId) {
-        NamespaceStorage storage $ = _getNamespaceStorage();
-        namespaceId = ++$.count;
-        $.names[namespaceId] = name;
-        emit EventsLib.NamespaceCreated(namespaceId, name);
+    function createDomain(string calldata name) external onlyAdmin returns (uint32 domainId) {
+        DomainStorage storage $ = _getDomainStorage();
+        domainId = ++$.count;
+        $.names[domainId] = name;
+        emit EventsLib.DomainCreated(domainId, name);
     }
 
-    function assign(uint32 namespaceId, address target) external onlyAdmin {
-        NamespaceStorage storage $ = _getNamespaceStorage();
-        require(namespaceId != 0 && namespaceId <= $.count, ErrorsLib.NamespaceNotFound(namespaceId));
+    function assign(uint32 domainId, address target) external onlyAdmin {
+        DomainStorage storage $ = _getDomainStorage();
+        require(domainId != 0 && domainId <= $.count, ErrorsLib.DomainNotFound(domainId));
         require(target != address(0), ErrorsLib.ZeroAddress());
-        $.namespaceOf[target] = namespaceId;
-        emit EventsLib.NamespaceAssigned(namespaceId, target);
+        $.domainOf[target] = domainId;
+        emit EventsLib.DomainAssigned(domainId, target);
     }
 
-    function namespaceOf(address target) external view returns (uint32) {
-        return _getNamespaceStorage().namespaceOf[target];
+    function domainOf(address target) external view returns (uint32) {
+        return _getDomainStorage().domainOf[target];
     }
 
-    function namespaceName(uint32 namespaceId) external view returns (string memory) {
-        return _getNamespaceStorage().names[namespaceId];
+    function domainName(uint32 domainId) external view returns (string memory) {
+        return _getDomainStorage().names[domainId];
     }
 
-    function namespaceCount() external view returns (uint32) {
-        return _getNamespaceStorage().count;
+    function domainCount() external view returns (uint32) {
+        return _getDomainStorage().count;
     }
 
-    function _getNamespaceStorage() private pure returns (NamespaceStorage storage $) {
+    function _getDomainStorage() private pure returns (DomainStorage storage $) {
         assembly ("memory-safe") {
-            $.slot := NAMESPACE_STORAGE_LOCATION
+            $.slot := DOMAIN_STORAGE_LOCATION
         }
     }
 

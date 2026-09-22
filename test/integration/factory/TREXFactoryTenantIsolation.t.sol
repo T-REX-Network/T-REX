@@ -79,7 +79,7 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
         irs.bindIdentityRegistry(siblingRegistry);
         assertEq(irs.linkedIdentityRegistries().length, 2);
 
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, siblingRegistry, NS);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, siblingRegistry, DOMAIN);
         _grantStorageWriterRole(siblingRegistry);
         address newcomer = makeAddr("newcomer");
         IIdentity newcomerIdentity = _deployIdentity(newcomer, "newcomer-oid");
@@ -92,7 +92,7 @@ contract TREXFactoryTenantIsolationTest is TREXSuiteTest {
     function _grantLegacyFactoryPrivilege() private {
         victim.grantRole(_role(RolesLib.Role.AGENT_ADMIN), address(trexFactory), 0);
         victim.grantRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory), 0);
-        AccessManagerSetupLib.setupRoleAdmins(victim, NS);
+        AccessManagerSetupLib.setupRoleAdmins(victim, DOMAIN);
     }
 
     function _assertNoAccessTo(address target, Vm.AccountAccess[] memory accesses) private pure {

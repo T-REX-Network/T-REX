@@ -55,62 +55,62 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
-- **Role namespaces** (OZ H-02, #55): role ids on a shared AccessManager were one set for every
+- **Role domains** (OZ H-02, #55): role ids on a shared AccessManager were one set for every
   suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
-  - A role id is a namespace id in the upper 32 bits and a role number below:
-    `RolesLib.forNamespace(namespaceId, role)`. The standard roles are the `RolesLib.Role` enum; the
+  - A role id is a domain id in the upper 32 bits and a role number below:
+    `RolesLib.forDomain(domainId, role)`. The standard roles are the `RolesLib.Role` enum; the
     plain `uint64` constants are gone and an enum value cannot be passed to `grantRole` by accident, so
-    no unscoped role is reachable by omission. `forNamespace(namespaceId, bytes32 customName)` derives
+    no unscoped role is reachable by omission. `forDomain(domainId, bytes32 customName)` derives
     a custom role by hashing the name into the upper half of the role number, so `RolesLib.decode`
     tells standard from custom without a lookup. Role numbers start at `ROLE_NUMBER_OFFSET` (1).
-    Namespace 0 is rejected (`InvalidNamespace`) and the platform namespace holds three roles only,
-    so neither OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `namespaceId = id >> 32` off
+    Domain 0 is rejected (`InvalidDomain`) and the platform domain holds three roles only,
+    so neither OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `domainId = id >> 32` off
     `RoleGranted` events, no labels pass needed.
   - Platform roles, the factory `OWNER`, `VERSION_MANAGER` and `ASSET_DEPLOYER`, are the
-    `RolesLib.PlatformRole` enum in the reserved `PLATFORM_NAMESPACE` (`type(uint32).max`),
-    derived with `RolesLib.platform(role)`. `forNamespace` rejects that namespace, so no suite role
+    `RolesLib.PlatformRole` enum in the reserved `PLATFORM_DOMAIN` (`type(uint32).max`),
+    derived with `RolesLib.platform(role)`. `forDomain` rejects that domain, so no suite role
     can land on a platform id. They are governance roles, not issuer roles, so
     `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
-    take no namespace.
-  - A namespace is an issuer, or a fund: one team across every token in it. Two tokens in one
-    namespace share their agents; two namespaces are isolated from each other.
+    take no domain.
+  - A domain is an issuer, or a fund: one team across every token in it. Two tokens in one
+    domain share their agents; two domains are isolated from each other.
   - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
     gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
-    namespace administrator can hand it out, so this holds by construction. Agents edit investor
-    records through a registry, never directly, and a storage shared across namespaces gives the other
-    namespace's agents nothing.
-    Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's namespace: whoever owns the
-    storage's namespace owns its bindings.
-  - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createNamespace(name)` returns
-    the next id, `assign(namespaceId, target)` records the namespace of a token or a storage,
-    `namespaceOf(target)`, `namespaceName(id)` and `namespaceCount()` read it back. Both writers are
+    domain administrator can hand it out, so this holds by construction. Agents edit investor
+    records through a registry, never directly, and a storage shared across domains gives the other
+    domain's agents nothing.
+    Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's domain: whoever owns the
+    storage's domain owns its bindings.
+  - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns
+    the next id, `assign(domainId, target)` records the domain of a token or a storage,
+    `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers are
     gated by a plain `ADMIN_ROLE` check that also requires a zero execution delay, so an admin whose
     calls are meant to wait cannot assign instantly; `_getAdminRestrictions` is not overridden, so the
-    two functions are immediate and not schedulable through `execute`. Events `NamespaceCreated` and
-    `NamespaceAssigned`.
-  - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `namespaceOf(token)` and
+    two functions are immediate and not schedulable through `execute`. Events `DomainCreated` and
+    `DomainAssigned`.
+  - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
-    the token's namespace on first use and keeps a storage already assigned where it is, so a storage
-    reused across namespaces keeps one owner and every registry bound to it writes with that
-    namespace's `IRS_WRITER`. `commissionSuite(manager, token, namespaceId, storageNamespaceId)` is
-    the pure form and works on any `IAccessManager`: the storage's namespace is explicit, so a storage
-    already shared with another namespace is passed with the namespace it lives in and is not
-    remapped. Every other suite `setup*` function takes a `namespaceId` and is pure. Commissioning is
+    the token's domain on first use and keeps a storage already assigned where it is, so a storage
+    reused across domains keeps one owner and every registry bound to it writes with that
+    domain's `IRS_WRITER`. `commissionSuite(manager, token, domainId, storageDomainId)` is
+    the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
+    already shared with another domain is passed with the domain it lives in and is not
+    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Commissioning is
     idempotent: re-running re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps
     selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
-    governance act. A second suite into a namespace already administered also needs `AGENT_ADMIN` there
+    governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
     for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
-    namespace.
+    domain.
   - The library keeps no state of its own and validates no preconditions: no markers, no
     "already configured" checks, no migration preflight. Which suites were configured alike is the
     operator's record.
-  - `migrateSuitesToNamespaces(manager, tokens, fromNamespaceId, toNamespaceIds, assignments,
-    revocations)` moves suites from one namespace into others in one call: grant the new roles, map
-    the namespaces, revoke the old ones. `RoleAssignment(account, role, namespaceId)` grants the role
-    in the new namespace to an account that holds it in the source one, same execution delay
+  - `migrateSuitesToDomains(manager, tokens, fromDomainId, toDomainIds, assignments,
+    revocations)` moves suites from one domain into others in one call: grant the new roles, map
+    the domains, revoke the old ones. `RoleAssignment(account, role, domainId)` grants the role
+    in the new domain to an account that holds it in the source one, same execution delay
     (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `RoleRevocation(account,
-    role)` revokes it in the source namespace, administrative roles last. Storages are not touched. On
-    a `TREXAccessManager`, `assign` the tokens to their new namespaces as well. Atomicity is the
+    role)` revokes it in the source domain, administrative roles last. Storages are not touched. On
+    a `TREXAccessManager`, `assign` the tokens to their new domains as well. Atomicity is the
     caller's: run it from one transaction, a script broadcasts it as many.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
@@ -119,7 +119,7 @@ All notable changes to this project will be documented in this file.
   Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
   ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
-    suite salt, creates a namespace named after the token, assigns the token and its storage to it,
+    suite salt, creates a domain named after the token, assigns the token and its storage to it,
     commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
     own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
     supplied manager must have code (`AccessManagerNotAContract`); a reused storage must already

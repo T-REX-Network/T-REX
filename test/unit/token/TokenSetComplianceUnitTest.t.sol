@@ -27,7 +27,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
 
         // setCompliance is guarded by onlySharedAuthority(compliance): the new compliance must report the
         // same AccessManager authority as the Token, so the mock advertises the suite's AccessManager.
@@ -49,7 +49,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
 
     function testTokenSetComplianceRevertsWhenCallerOnlyTokenAdmin() public {
         address tokenAdmin = makeAddr("TokenAdmin");
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.TOKEN_MANAGER), tokenAdmin, 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.TOKEN_MANAGER), tokenAdmin, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, tokenAdmin));
         vm.prank(tokenAdmin);

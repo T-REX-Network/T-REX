@@ -27,7 +27,7 @@ contract ModularComplianceInitUnitTest is Test {
     function setUp() public {
         mcImplementation = new ModularCompliance();
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.OWNER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
         mcBeacon = BeaconProxyDeployer.newBeacon(address(mcImplementation));
     }
 
@@ -143,16 +143,16 @@ contract ModularComplianceInitUnitTest is Test {
         mc.bindToken(otherToken);
     }
 
-    /// @dev `tokenBound` moved to the standard base, so reusing the old namespace would have shifted
-    ///  `modules` by a slot. Asserts `modules` at byte 0 of the new namespace, old namespace empty.
-    function test_storageLayout_ModulesAtByteZeroAndOldNamespaceUnused() public {
+    /// @dev `tokenBound` moved to the standard base, so reusing the old domain would have shifted
+    ///  `modules` by a slot. Asserts `modules` at byte 0 of the new domain, old domain empty.
+    function test_storageLayout_ModulesAtByteZeroAndOldDomainUnused() public {
         ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
 
         bytes32 trexSlot = Utils.erc7201("erc3643.storage.TREXCompliance");
         bytes32 oldSlot = Utils.erc7201("ERC3643.storage.ModularCompliance");
 
         assertEq(uint256(vm.load(address(mc), trexSlot)), 0, "no modules bound yet");
-        assertEq(vm.load(address(mc), oldSlot), bytes32(0), "old namespace must stay empty");
+        assertEq(vm.load(address(mc), oldSlot), bytes32(0), "old domain must stay empty");
 
         address[] memory modules = new address[](1);
         modules[0] = _deployTestModuleWithProxy();

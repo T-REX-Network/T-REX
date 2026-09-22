@@ -35,8 +35,8 @@ contract IdentityRegistryStorageStoredIdentityUnitTest is Test {
 
     function setUp() public {
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_BINDER), address(this), 0);
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_WRITER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(

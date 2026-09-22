@@ -30,56 +30,56 @@ contract TREXAccessManagerUnitTest is Test {
         );
     }
 
-    function test_createNamespace_NumbersFromOneAndStoresTheName() public {
+    function test_createDomain_NumbersFromOneAndStoresTheName() public {
         vm.expectEmit(true, false, false, true, address(manager));
-        emit EventsLib.NamespaceCreated(1, "Fund A");
-        uint32 first = manager.createNamespace("Fund A");
-        uint32 second = manager.createNamespace("Fund B");
+        emit EventsLib.DomainCreated(1, "Fund A");
+        uint32 first = manager.createDomain("Fund A");
+        uint32 second = manager.createDomain("Fund B");
 
         assertEq(first, 1);
         assertEq(second, 2);
-        assertEq(manager.namespaceCount(), 2);
-        assertEq(manager.namespaceName(1), "Fund A");
-        assertEq(manager.namespaceName(2), "Fund B");
+        assertEq(manager.domainCount(), 2);
+        assertEq(manager.domainName(1), "Fund A");
+        assertEq(manager.domainName(2), "Fund B");
     }
 
-    function test_assign_RecordsTheNamespaceAndCanReassign() public {
-        uint32 first = manager.createNamespace("Fund A");
-        uint32 second = manager.createNamespace("Fund B");
+    function test_assign_RecordsTheDomainAndCanReassign() public {
+        uint32 first = manager.createDomain("Fund A");
+        uint32 second = manager.createDomain("Fund B");
 
         vm.expectEmit(true, true, false, true, address(manager));
-        emit EventsLib.NamespaceAssigned(first, token);
+        emit EventsLib.DomainAssigned(first, token);
         manager.assign(first, token);
-        assertEq(manager.namespaceOf(token), first);
+        assertEq(manager.domainOf(token), first);
 
         manager.assign(second, token);
-        assertEq(manager.namespaceOf(token), second);
+        assertEq(manager.domainOf(token), second);
     }
 
-    function test_assign_RevertWhen_NamespaceDoesNotExist() public {
-        manager.createNamespace("Fund A");
+    function test_assign_RevertWhen_DomainDoesNotExist() public {
+        manager.createDomain("Fund A");
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NamespaceNotFound.selector, 2));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DomainNotFound.selector, 2));
         manager.assign(2, token);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NamespaceNotFound.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DomainNotFound.selector, 0));
         manager.assign(0, token);
     }
 
     function test_assign_RevertWhen_TargetIsZero() public {
-        uint32 first = manager.createNamespace("Fund A");
+        uint32 first = manager.createDomain("Fund A");
 
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         manager.assign(first, address(0));
     }
 
-    function test_createNamespaceAndAssign_RevertWhen_CallerIsNotAdmin() public {
-        uint32 first = manager.createNamespace("Fund A");
+    function test_createDomainAndAssign_RevertWhen_CallerIsNotAdmin() public {
+        uint32 first = manager.createDomain("Fund A");
 
         vm.prank(outsider);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, outsider, uint64(0))
         );
-        manager.createNamespace("Fund B");
+        manager.createDomain("Fund B");
         vm.prank(outsider);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, outsider, uint64(0))
@@ -87,16 +87,16 @@ contract TREXAccessManagerUnitTest is Test {
         manager.assign(first, token);
     }
 
-    function test_createNamespaceAndAssign_RevertWhen_AdminHasAnExecutionDelay() public {
+    function test_createDomainAndAssign_RevertWhen_AdminHasAnExecutionDelay() public {
         address delayedAdmin = makeAddr("delayedAdmin");
         manager.grantRole(manager.ADMIN_ROLE(), delayedAdmin, 1 hours);
-        uint32 first = manager.createNamespace("Fund A");
+        uint32 first = manager.createDomain("Fund A");
 
         vm.prank(delayedAdmin);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, uint64(0))
         );
-        manager.createNamespace("Fund B");
+        manager.createDomain("Fund B");
         vm.prank(delayedAdmin);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, uint64(0))
@@ -104,19 +104,19 @@ contract TREXAccessManagerUnitTest is Test {
         manager.assign(first, token);
     }
 
-    function test_namespaceOf_IsZeroForUnassignedTargets() public view {
-        assertEq(manager.namespaceOf(token), 0);
-        assertEq(manager.namespaceName(0), "");
+    function test_domainOf_IsZeroForUnassignedTargets() public view {
+        assertEq(manager.domainOf(token), 0);
+        assertEq(manager.domainName(0), "");
     }
 
-    function test_storageLocation_MatchesTheERC7201Namespace() public pure {
+    function test_storageLocation_MatchesTheERC7201Location() public pure {
         bytes32 expected = Utils.erc7201("erc3643.storage.TREXAccessManager");
         assertEq(expected, 0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00);
     }
 
     function test_storageLayout_CountSitsAtOffsetZero() public {
-        manager.createNamespace("Fund A");
-        manager.createNamespace("Fund B");
+        manager.createDomain("Fund A");
+        manager.createDomain("Fund B");
         bytes32 slot = Utils.erc7201("erc3643.storage.TREXAccessManager");
         assertEq(uint32(uint256(vm.load(address(manager), slot))), 2);
     }

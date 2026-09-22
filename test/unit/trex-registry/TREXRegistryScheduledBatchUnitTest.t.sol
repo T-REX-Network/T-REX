@@ -12,7 +12,7 @@ import { RolesLib } from "contracts/libraries/RolesLib.sol";
 contract TREXRegistryScheduledBatchUnitTest is TREXRegistryBaseUnitTest {
 
     function test_batchRegisterIdentity_Success_WhenScheduledByDelayedAgent() public {
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), NS);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
 
         address delayed = makeAddr("delayedAgent");
         accessManager.grantRole(_role(RolesLib.Role.AGENT), delayed, 1 days);

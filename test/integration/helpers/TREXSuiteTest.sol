@@ -397,7 +397,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(accessManager), noModules, noSettings))
         );
         ModularCompliance freshCompliance = ModularCompliance(address(proxy));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance), NS);
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance), DOMAIN);
         freshCompliance.unbindToken(sentinel);
         return freshCompliance;
     }

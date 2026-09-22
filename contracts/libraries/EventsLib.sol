@@ -117,8 +117,8 @@ library EventsLib {
 
     // TREXAccessManager Events
 
-    event NamespaceCreated(uint32 indexed namespaceId, string name);
-    event NamespaceAssigned(uint32 indexed namespaceId, address indexed target);
+    event DomainCreated(uint32 indexed domainId, string name);
+    event DomainAssigned(uint32 indexed domainId, address indexed target);
 
     // TREXImplementationAuthority Events
 

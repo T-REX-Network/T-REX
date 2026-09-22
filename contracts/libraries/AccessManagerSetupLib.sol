@@ -98,7 +98,7 @@ library AccessManagerSetupLib {
     struct RoleAssignment {
         address account;
         RolesLib.Role role;
-        uint32 namespaceId;
+        uint32 domainId;
     }
 
     struct RoleRevocation {
@@ -108,26 +108,26 @@ library AccessManagerSetupLib {
 
     uint64 internal constant ADMIN_ROLE = 0;
 
-    function setupTokenRoles(IAccessManager accessManager, address token, uint32 namespaceId) internal {
-        _apply(accessManager, token, tokenTable(), namespaceId);
+    function setupTokenRoles(IAccessManager accessManager, address token, uint32 domainId) internal {
+        _apply(accessManager, token, tokenTable(), domainId);
     }
 
     function setupIdentityRegistryStorageRoles(
         IAccessManager accessManager,
         address identityRegistryStorage,
-        uint32 namespaceId
+        uint32 domainId
     ) internal {
-        _apply(accessManager, identityRegistryStorage, storageTable(), namespaceId);
+        _apply(accessManager, identityRegistryStorage, storageTable(), domainId);
     }
 
-    function setupTREXRegistryRoles(IAccessManager accessManager, address registry, uint32 namespaceId) internal {
-        _apply(accessManager, registry, registryTable(), namespaceId);
+    function setupTREXRegistryRoles(IAccessManager accessManager, address registry, uint32 domainId) internal {
+        _apply(accessManager, registry, registryTable(), domainId);
     }
 
-    function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance, uint32 namespaceId)
+    function setupModularComplianceRoles(IAccessManager accessManager, address modularCompliance, uint32 domainId)
         internal
     {
-        _apply(accessManager, modularCompliance, complianceTable(), namespaceId);
+        _apply(accessManager, modularCompliance, complianceTable(), domainId);
     }
 
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
@@ -202,61 +202,57 @@ library AccessManagerSetupLib {
     }
 
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
-        uint32 namespaceId = accessManager.namespaceOf(token);
-        require(namespaceId != 0, ErrorsLib.NotAssigned(token));
+        uint32 domainId = accessManager.domainOf(token);
+        require(domainId != 0, ErrorsLib.NotAssigned(token));
         address identityRegistryStorage = _storageOf(_registryOf(token));
-        uint32 storageNamespaceId = accessManager.namespaceOf(identityRegistryStorage);
-        if (storageNamespaceId == 0) {
-            accessManager.assign(namespaceId, identityRegistryStorage);
-            storageNamespaceId = namespaceId;
+        uint32 storageDomainId = accessManager.domainOf(identityRegistryStorage);
+        if (storageDomainId == 0) {
+            accessManager.assign(domainId, identityRegistryStorage);
+            storageDomainId = domainId;
         }
-        _commission(accessManager, token, namespaceId, storageNamespaceId);
+        _commission(accessManager, token, domainId, storageDomainId);
     }
 
-    function commissionSuite(IAccessManager accessManager, address token, uint32 namespaceId, uint32 storageNamespaceId)
+    function commissionSuite(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId)
         internal
     {
-        _commission(accessManager, token, namespaceId, storageNamespaceId);
+        _commission(accessManager, token, domainId, storageDomainId);
     }
 
-    function migrateSuitesToNamespaces(
+    function migrateSuitesToDomains(
         IAccessManager accessManager,
         address[] memory tokens,
-        uint32 fromNamespaceId,
-        uint32[] memory toNamespaceIds,
+        uint32 fromDomainId,
+        uint32[] memory toDomainIds,
         RoleAssignment[] memory assignments,
         RoleRevocation[] memory revocations
     ) internal {
-        require(tokens.length == toNamespaceIds.length, ErrorsLib.ArrayLengthMismatch());
+        require(tokens.length == toDomainIds.length, ErrorsLib.ArrayLengthMismatch());
         for (uint256 i = 0; i < assignments.length; i++) {
             _grantFrom(
-                accessManager, fromNamespaceId, assignments[i].role, assignments[i].namespaceId, assignments[i].account
+                accessManager, fromDomainId, assignments[i].role, assignments[i].domainId, assignments[i].account
             );
         }
         for (uint256 i = 0; i < tokens.length; i++) {
-            _grantFrom(accessManager, fromNamespaceId, RolesLib.Role.AGENT, toNamespaceIds[i], tokens[i]);
+            _grantFrom(accessManager, fromDomainId, RolesLib.Role.AGENT, toDomainIds[i], tokens[i]);
         }
         for (uint256 i = 0; i < tokens.length; i++) {
-            setupTokenRoles(accessManager, tokens[i], toNamespaceIds[i]);
-            setupTREXRegistryRoles(accessManager, _registryOf(tokens[i]), toNamespaceIds[i]);
-            setupModularComplianceRoles(accessManager, _complianceOf(tokens[i]), toNamespaceIds[i]);
-            setupRoleAdmins(accessManager, toNamespaceIds[i]);
+            setupTokenRoles(accessManager, tokens[i], toDomainIds[i]);
+            setupTREXRegistryRoles(accessManager, _registryOf(tokens[i]), toDomainIds[i]);
+            setupModularComplianceRoles(accessManager, _complianceOf(tokens[i]), toDomainIds[i]);
+            setupRoleAdmins(accessManager, toDomainIds[i]);
         }
         for (uint256 i = 0; i < tokens.length; i++) {
-            accessManager.revokeRole(RolesLib.forNamespace(fromNamespaceId, RolesLib.Role.AGENT), tokens[i]);
+            accessManager.revokeRole(RolesLib.forDomain(fromDomainId, RolesLib.Role.AGENT), tokens[i]);
         }
         for (uint256 i = 0; i < revocations.length; i++) {
             if (!_isAdministrative(revocations[i].role)) {
-                accessManager.revokeRole(
-                    RolesLib.forNamespace(fromNamespaceId, revocations[i].role), revocations[i].account
-                );
+                accessManager.revokeRole(RolesLib.forDomain(fromDomainId, revocations[i].role), revocations[i].account);
             }
         }
         for (uint256 i = 0; i < revocations.length; i++) {
             if (_isAdministrative(revocations[i].role)) {
-                accessManager.revokeRole(
-                    RolesLib.forNamespace(fromNamespaceId, revocations[i].role), revocations[i].account
-                );
+                accessManager.revokeRole(RolesLib.forDomain(fromDomainId, revocations[i].role), revocations[i].account);
             }
         }
     }
@@ -313,57 +309,55 @@ library AccessManagerSetupLib {
         );
     }
 
-    function setupRoleAdmins(IAccessManager accessManager, uint32 namespaceId) internal {
+    function setupRoleAdmins(IAccessManager accessManager, uint32 domainId) internal {
         RoleAdmin[] memory table = roleAdminTable();
         for (uint256 i = 0; i < table.length; i++) {
             accessManager.setRoleAdmin(
-                RolesLib.forNamespace(namespaceId, table[i].role), RolesLib.forNamespace(namespaceId, table[i].admin)
+                RolesLib.forDomain(domainId, table[i].role), RolesLib.forDomain(domainId, table[i].admin)
             );
         }
     }
 
-    function _commission(IAccessManager accessManager, address token, uint32 namespaceId, uint32 storageNamespaceId)
-        private
-    {
+    function _commission(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId) private {
         address registry = _registryOf(token);
         address identityRegistryStorage = _storageOf(registry);
 
-        accessManager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.AGENT), token, 0);
-        accessManager.grantRole(RolesLib.forNamespace(storageNamespaceId, RolesLib.Role.IRS_WRITER), registry, 0);
+        accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0);
+        accessManager.grantRole(RolesLib.forDomain(storageDomainId, RolesLib.Role.IRS_WRITER), registry, 0);
 
-        setupTokenRoles(accessManager, token, namespaceId);
-        setupTREXRegistryRoles(accessManager, registry, namespaceId);
-        setupModularComplianceRoles(accessManager, _complianceOf(token), namespaceId);
-        setupRoleAdmins(accessManager, namespaceId);
+        setupTokenRoles(accessManager, token, domainId);
+        setupTREXRegistryRoles(accessManager, registry, domainId);
+        setupModularComplianceRoles(accessManager, _complianceOf(token), domainId);
+        setupRoleAdmins(accessManager, domainId);
         if (!_isBound(identityRegistryStorage, registry)) {
             IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
         }
-        setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, storageNamespaceId);
-        if (storageNamespaceId != namespaceId) {
-            setupRoleAdmins(accessManager, storageNamespaceId);
+        setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, storageDomainId);
+        if (storageDomainId != domainId) {
+            setupRoleAdmins(accessManager, storageDomainId);
         }
     }
 
     function _grantFrom(
         IAccessManager accessManager,
-        uint32 fromNamespaceId,
+        uint32 fromDomainId,
         RolesLib.Role role,
-        uint32 toNamespaceId,
+        uint32 toDomainId,
         address account
     ) private {
-        uint64 sourceRole = RolesLib.forNamespace(fromNamespaceId, role);
+        uint64 sourceRole = RolesLib.forDomain(fromDomainId, role);
         (uint48 since, uint32 executionDelay,, uint48 effect) = accessManager.getAccess(sourceRole, account);
         require(since != 0, ErrorsLib.RoleNotHeld(account, sourceRole));
         require(since <= block.timestamp, ErrorsLib.PendingRoleGrant(account, sourceRole));
         require(effect <= block.timestamp, ErrorsLib.PendingDelayChange(account, sourceRole));
-        accessManager.grantRole(RolesLib.forNamespace(toNamespaceId, role), account, executionDelay);
+        accessManager.grantRole(RolesLib.forDomain(toDomainId, role), account, executionDelay);
     }
 
     function _isAdministrative(RolesLib.Role role) private pure returns (bool) {
         return role == RolesLib.Role.AGENT_ADMIN || role == RolesLib.Role.SUITE_ADMIN;
     }
 
-    function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, uint32 namespaceId)
+    function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, uint32 domainId)
         private
     {
         for (uint256 i = 0; i < table.length; i++) {
@@ -371,9 +365,7 @@ library AccessManagerSetupLib {
                 continue;
             }
             RolesLib.Role role = table[i].role;
-            accessManager.setTargetFunctionRole(
-                target, _selectorsFor(table, role), RolesLib.forNamespace(namespaceId, role)
-            );
+            accessManager.setTargetFunctionRole(target, _selectorsFor(table, role), RolesLib.forDomain(domainId, role));
         }
     }
 

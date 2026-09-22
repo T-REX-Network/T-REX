@@ -5,8 +5,8 @@ import { TREXRegistryBaseUnitTest } from "../trex-registry/helpers/TREXRegistryB
 
 import { Utils } from "../helpers/Utils.sol";
 
-/// @dev Reads TREXRegistry's real storage: `checksDisabled` must sit at byte 0 of the T-REX namespace,
-///  and the pre-split namespace must hold nothing. Reusing the old namespace would have left the low
+/// @dev Reads TREXRegistry's real storage: `checksDisabled` must sit at byte 0 of the T-REX domain,
+///  and the pre-split domain must hold nothing. Reusing the old domain would have left the low
 ///  byte of the old storage address deciding whether checks run. Why it matters: docs/erc3643-oz-swap.md.
 contract RegistryStorageLayoutTest is TREXRegistryBaseUnitTest {
 
@@ -22,10 +22,10 @@ contract RegistryStorageLayoutTest is TREXRegistryBaseUnitTest {
         assertTrue(registry.isVerified(makeAddr("anyone")), "disabled means everyone verifies");
     }
 
-    function test_storageLayout_OldNamespaceUnused() public view {
+    function test_storageLayout_OldDomainUnused() public view {
         bytes32 oldSlot = Utils.erc7201("erc3643.storage.TREXRegistry");
 
-        assertEq(vm.load(address(registry), oldSlot), bytes32(0), "old namespace must stay empty");
+        assertEq(vm.load(address(registry), oldSlot), bytes32(0), "old domain must stay empty");
     }
 
 }

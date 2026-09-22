@@ -13,7 +13,7 @@ import { RolesLib } from "contracts/libraries/RolesLib.sol";
 abstract contract AccessManagerHelper is Test {
 
     uint32 internal constant NO_EXECUTION_DELAY = 0;
-    uint32 internal constant NS = 1;
+    uint32 internal constant DOMAIN = 1;
 
     AccessManager public accessManager;
 
@@ -22,7 +22,7 @@ abstract contract AccessManagerHelper is Test {
     ///         and labels the roles.
     function _deployAccessManager() internal returns (AccessManager) {
         accessManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupRoleAdmins(accessManager, NS);
+        AccessManagerSetupLib.setupRoleAdmins(accessManager, DOMAIN);
         // Operational roles are now administered by the giver roles, not ADMIN_ROLE(0); the test
         // admin needs the givers to be able to grant AGENT/AGENT_* and TOKEN_MANAGER/IDENTITY_MANAGER.
         _grantAgentAdminRole(address(this));
@@ -43,14 +43,14 @@ abstract contract AccessManagerHelper is Test {
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
     /// @dev `registry` is the TREXRegistry, which serves as the suite's IR, CTR and TIR.
     function _setupSuiteRoles(address token, address registry, address irs, address mc) internal {
-        AccessManagerSetupLib.setupTokenRoles(accessManager, token, NS);
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry, NS);
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs, NS);
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc, NS);
+        AccessManagerSetupLib.setupTokenRoles(accessManager, token, DOMAIN);
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry, DOMAIN);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs, DOMAIN);
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc, DOMAIN);
     }
 
     function _role(RolesLib.Role role) internal pure returns (uint64) {
-        return RolesLib.forNamespace(NS, role);
+        return RolesLib.forDomain(DOMAIN, role);
     }
 
     function _grantOwnerRole(address account) internal {

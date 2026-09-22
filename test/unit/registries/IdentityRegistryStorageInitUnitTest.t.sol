@@ -23,9 +23,9 @@ contract IdentityRegistryStorageInitUnitTest is Test {
     function setUp() public {
         irsImplementation = new IdentityRegistryStorage();
         accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.OWNER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
         // bindIdentityRegistry is gated by IRS_BINDER (not OWNER); the test acts as the binder here.
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
         irsBeacon = BeaconProxyDeployer.newBeacon(address(irsImplementation));
     }
 
@@ -77,7 +77,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         // AccessManager as its authority.
         vm.mockCall(ir, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager)));
         storageContract.bindIdentityRegistry(ir);
-        accessManager.grantRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_WRITER), ir, 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), ir, 0);
 
         assertTrue(_hasWriterRole(ir));
     }
@@ -106,7 +106,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
     }
 
     function _hasWriterRole(address account) private view returns (bool) {
-        (bool isMember,) = accessManager.hasRole(RolesLib.forNamespace(1, RolesLib.Role.IRS_WRITER), account);
+        (bool isMember,) = accessManager.hasRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), account);
         return isMember;
     }
 

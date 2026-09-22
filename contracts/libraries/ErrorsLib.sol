@@ -148,10 +148,10 @@ library ErrorsLib {
     error RoleNotHeld(address account, uint64 role);
 
     // RolesLib Errors
-    error InvalidNamespace();
+    error InvalidDomain();
 
     // TREXAccessManager Errors
-    error NamespaceNotFound(uint32 namespaceId);
+    error DomainNotFound(uint32 domainId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

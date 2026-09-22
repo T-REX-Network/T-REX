@@ -69,7 +69,7 @@ library RolesLib {
 
     bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
 
-    // ---- Suite roles. A role id is a namespace id in the upper 32 bits and a role number below ----
+    // ---- Suite roles. A role id is a domain id in the upper 32 bits and a role number below ----
 
     enum Role {
         OWNER,
@@ -97,7 +97,7 @@ library RolesLib {
         ASSET_DEPLOYER
     }
 
-    uint32 constant PLATFORM_NAMESPACE = type(uint32).max;
+    uint32 constant PLATFORM_DOMAIN = type(uint32).max;
 
     // Role numbers start at 1 so no standard role packs to a zero role number.
     uint32 constant ROLE_NUMBER_OFFSET = 1;
@@ -105,29 +105,29 @@ library RolesLib {
     // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
     uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
 
-    function forNamespace(uint32 namespaceId, Role role) internal pure returns (uint64) {
-        require(namespaceId != PLATFORM_NAMESPACE, ErrorsLib.InvalidNamespace());
-        return _pack(namespaceId, uint32(role) + ROLE_NUMBER_OFFSET);
+    function forDomain(uint32 domainId, Role role) internal pure returns (uint64) {
+        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
+        return _pack(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
-    function forNamespace(uint32 namespaceId, bytes32 customName) internal pure returns (uint64) {
-        require(namespaceId != PLATFORM_NAMESPACE, ErrorsLib.InvalidNamespace());
-        return _pack(namespaceId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
+    function forDomain(uint32 domainId, bytes32 customName) internal pure returns (uint64) {
+        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
+        return _pack(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
     }
 
     function platform(PlatformRole role) internal pure returns (uint64) {
-        return _pack(PLATFORM_NAMESPACE, uint32(role) + ROLE_NUMBER_OFFSET);
+        return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
-    function decode(uint64 roleId) internal pure returns (uint32 namespaceId, uint32 roleNumber, bool custom) {
-        namespaceId = uint32(roleId >> 32);
+    function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
+        domainId = uint32(roleId >> 32);
         roleNumber = uint32(roleId);
         custom = roleNumber & CUSTOM_ROLE_FLAG != 0;
     }
 
-    function _pack(uint32 namespaceId, uint32 roleNumber) private pure returns (uint64) {
-        require(namespaceId != 0, ErrorsLib.InvalidNamespace());
-        return (uint64(namespaceId) << 32) | roleNumber;
+    function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
+        require(domainId != 0, ErrorsLib.InvalidDomain());
+        return (uint64(domainId) << 32) | roleNumber;
     }
 
 }

@@ -23,11 +23,11 @@ import { Token } from "contracts/token/Token.sol";
 import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
-contract SuiteRoleNamespaceTest is TREXSuiteTest {
+contract SuiteRoleDomainTest is TREXSuiteTest {
 
     uint32 internal constant TEAM = 5;
-    uint32 internal constant NS_A = 10;
-    uint32 internal constant NS_B = 20;
+    uint32 internal constant DOMAIN_A = 10;
+    uint32 internal constant DOMAIN_B = 20;
     Token internal tokenA;
     Token internal tokenB;
     TREXAccessManager internal registry;
@@ -48,74 +48,72 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         );
     }
 
-    function testFuzz_forNamespace_PacksAndDecodes(uint32 namespaceId, uint8 roleIndex) public pure {
-        vm.assume(namespaceId != 0 && namespaceId != RolesLib.PLATFORM_NAMESPACE);
+    function testFuzz_forDomain_PacksAndDecodes(uint32 domainId, uint8 roleIndex) public pure {
+        vm.assume(domainId != 0 && domainId != RolesLib.PLATFORM_DOMAIN);
         RolesLib.Role role = RolesLib.Role(roleIndex % (uint8(type(RolesLib.Role).max) + 1));
-        uint64 id = RolesLib.forNamespace(namespaceId, role);
-        (uint32 decodedNamespace, uint32 decodedRole, bool custom) = RolesLib.decode(id);
-        assertEq(decodedNamespace, namespaceId);
+        uint64 id = RolesLib.forDomain(domainId, role);
+        (uint32 decodedDomain, uint32 decodedRole, bool custom) = RolesLib.decode(id);
+        assertEq(decodedDomain, domainId);
         assertEq(decodedRole, uint32(role) + RolesLib.ROLE_NUMBER_OFFSET);
         assertFalse(custom);
         assertNotEq(id, 0);
     }
 
-    function test_forNamespace_DistinctAcrossNamespacesAndRoles() public pure {
+    function test_forDomain_DistinctAcrossDomainsAndRoles() public pure {
         assertNotEq(
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_MINTER),
-            RolesLib.forNamespace(NS_B, RolesLib.Role.AGENT_MINTER)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER),
+            RolesLib.forDomain(DOMAIN_B, RolesLib.Role.AGENT_MINTER)
         );
         assertNotEq(
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_MINTER),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_BURNER)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER),
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_BURNER)
         );
     }
 
-    function test_forNamespace_CustomRoleIsFlaggedAndDistinctFromStandardRoles() public pure {
-        uint64 custom = RolesLib.forNamespace(NS_A, bytes32("COMPLIANCE_OFFICER"));
-        (uint32 namespaceId, uint32 role, bool isCustom) = RolesLib.decode(custom);
-        assertEq(namespaceId, NS_A);
+    function test_forDomain_CustomRoleIsFlaggedAndDistinctFromStandardRoles() public pure {
+        uint64 custom = RolesLib.forDomain(DOMAIN_A, bytes32("COMPLIANCE_OFFICER"));
+        (uint32 domainId, uint32 role, bool isCustom) = RolesLib.decode(custom);
+        assertEq(domainId, DOMAIN_A);
         assertTrue(isCustom);
         assertTrue(role & RolesLib.CUSTOM_ROLE_FLAG != 0);
         for (uint8 i = 0; i <= uint8(type(RolesLib.Role).max); i++) {
-            assertNotEq(custom, RolesLib.forNamespace(NS_A, RolesLib.Role(i)));
+            assertNotEq(custom, RolesLib.forDomain(DOMAIN_A, RolesLib.Role(i)));
         }
-        assertEq(custom, RolesLib.forNamespace(NS_A, bytes32("COMPLIANCE_OFFICER")));
-        assertNotEq(custom, RolesLib.forNamespace(NS_A, bytes32("AUDITOR")));
+        assertEq(custom, RolesLib.forDomain(DOMAIN_A, bytes32("COMPLIANCE_OFFICER")));
+        assertNotEq(custom, RolesLib.forDomain(DOMAIN_A, bytes32("AUDITOR")));
     }
 
-    function test_forNamespace_RevertWhen_NamespaceIsZero() public {
-        vm.expectRevert(ErrorsLib.InvalidNamespace.selector);
+    function test_forDomain_RevertWhen_DomainIsZero() public {
+        vm.expectRevert(ErrorsLib.InvalidDomain.selector);
         this.packExternally(0, RolesLib.Role.AGENT);
     }
 
-    function testFuzz_forNamespace_RevertWhen_NamespaceIsThePlatformNamespace(uint8 roleIndex, bytes32 customName)
-        public
-    {
+    function testFuzz_forDomain_RevertWhen_DomainIsThePlatformDomain(uint8 roleIndex, bytes32 customName) public {
         RolesLib.Role role = RolesLib.Role(roleIndex % (uint8(type(RolesLib.Role).max) + 1));
-        vm.expectRevert(ErrorsLib.InvalidNamespace.selector);
-        this.packExternally(RolesLib.PLATFORM_NAMESPACE, role);
-        vm.expectRevert(ErrorsLib.InvalidNamespace.selector);
-        this.packCustomExternally(RolesLib.PLATFORM_NAMESPACE, customName);
+        vm.expectRevert(ErrorsLib.InvalidDomain.selector);
+        this.packExternally(RolesLib.PLATFORM_DOMAIN, role);
+        vm.expectRevert(ErrorsLib.InvalidDomain.selector);
+        this.packCustomExternally(RolesLib.PLATFORM_DOMAIN, customName);
     }
 
-    function test_platform_RolesLiveInTheReservedNamespaceOnly() public pure {
-        (uint32 namespaceId,,) = RolesLib.decode(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER));
-        assertEq(namespaceId, RolesLib.PLATFORM_NAMESPACE);
-        assertNotEq(RolesLib.platform(RolesLib.PlatformRole.OWNER), RolesLib.forNamespace(NS_A, RolesLib.Role.OWNER));
+    function test_platform_RolesLiveInTheReservedDomainOnly() public pure {
+        (uint32 domainId,,) = RolesLib.decode(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER));
+        assertEq(domainId, RolesLib.PLATFORM_DOMAIN);
+        assertNotEq(RolesLib.platform(RolesLib.PlatformRole.OWNER), RolesLib.forDomain(DOMAIN_A, RolesLib.Role.OWNER));
     }
 
-    function packExternally(uint32 namespaceId, RolesLib.Role role) external pure returns (uint64) {
-        return RolesLib.forNamespace(namespaceId, role);
+    function packExternally(uint32 domainId, RolesLib.Role role) external pure returns (uint64) {
+        return RolesLib.forDomain(domainId, role);
     }
 
-    function packCustomExternally(uint32 namespaceId, bytes32 customName) external pure returns (uint64) {
-        return RolesLib.forNamespace(namespaceId, customName);
+    function packCustomExternally(uint32 domainId, bytes32 customName) external pure returns (uint64) {
+        return RolesLib.forDomain(domainId, customName);
     }
 
-    function test_explicitNamespace_AgentOfAOperatesAOnly() public {
-        _commission(tokenA, NS_A);
-        _commission(tokenB, NS_B);
-        _grantAllAgentRoles(accessManager, agentA, NS_A);
+    function test_explicitDomain_AgentOfAOperatesAOnly() public {
+        _commission(tokenA, DOMAIN_A);
+        _commission(tokenB, DOMAIN_B);
+        _grantAllAgentRoles(accessManager, agentA, DOMAIN_A);
 
         vm.startPrank(agentA);
         tokenA.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -141,10 +139,10 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _assertLockedOut(agentA, tokenB);
     }
 
-    function test_explicitNamespace_AgentOfBOperatesBOnly() public {
-        _commission(tokenA, NS_A);
-        _commission(tokenB, NS_B);
-        _grantAllAgentRoles(accessManager, agentB, NS_B);
+    function test_explicitDomain_AgentOfBOperatesBOnly() public {
+        _commission(tokenA, DOMAIN_A);
+        _commission(tokenB, DOMAIN_B);
+        _grantAllAgentRoles(accessManager, agentB, DOMAIN_B);
 
         vm.startPrank(agentB);
         tokenB.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -156,7 +154,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _assertLockedOut(agentB, tokenA);
     }
 
-    function test_explicitNamespace_TwoTokensInOneNamespaceShareOneTeam() public {
+    function test_explicitDomain_TwoTokensInOneDomainShareOneTeam() public {
         _commissionIntoTeam(tokenA);
         _commissionIntoTeam(tokenB);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
@@ -183,43 +181,43 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         assertEq(tokenB.balanceOf(bob), 20);
     }
 
-    function test_explicitNamespace_MapsEverySuiteContractIntoTheNamespace() public {
-        _commission(tokenA, NS_A);
+    function test_explicitDomain_MapsEverySuiteContractIntoTheDomain() public {
+        _commission(tokenA, DOMAIN_A);
         address suiteRegistry = address(tokenA.identityRegistry());
         address irs = address(tokenA.identityRegistry().identityStorage());
         address mc = address(tokenA.compliance());
 
         assertEq(
             accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_MINTER)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER)
         );
         assertEq(
             accessManager.getTargetFunctionRole(suiteRegistry, IERC3643IdentityRegistry.registerIdentity.selector),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT)
         );
         assertEq(
             accessManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.IRS_WRITER)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER)
         );
         assertEq(
             accessManager.getTargetFunctionRole(mc, IModularCompliance.addModule.selector),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.OWNER)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.OWNER)
         );
         assertEq(
-            accessManager.getRoleAdmin(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT)),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_ADMIN)
+            accessManager.getRoleAdmin(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT)),
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_ADMIN)
         );
-        (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT), address(tokenA));
+        (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT), address(tokenA));
         (bool registryWrites,) =
-            accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.IRS_WRITER), suiteRegistry);
+            accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER), suiteRegistry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
     }
 
-    function test_explicitNamespace_StorageWriterStaysUnderAdminRole() public {
-        _commission(tokenA, NS_A);
-        uint64 writer = RolesLib.forNamespace(NS_A, RolesLib.Role.IRS_WRITER);
-        uint64 agentAdmin = RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_ADMIN);
+    function test_explicitDomain_StorageWriterStaysUnderAdminRole() public {
+        _commission(tokenA, DOMAIN_A);
+        uint64 writer = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER);
+        uint64 agentAdmin = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_ADMIN);
         accessManager.grantRole(agentAdmin, agentA, 0);
 
         assertEq(accessManager.getRoleAdmin(writer), 0);
@@ -230,23 +228,23 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         accessManager.grantRole(writer, agentB, 0);
     }
 
-    function test_registry_CommissionUsesTheAssignedNamespace() public {
+    function test_registry_CommissionUsesTheAssignedDomain() public {
         Token fundToken = _deployBare("fund-a", address(0), address(registry));
-        uint32 fund = registry.createNamespace("Fund A");
+        uint32 fund = registry.createDomain("Fund A");
         registry.assign(fund, address(fundToken));
         address irs = address(fundToken.identityRegistry().identityStorage());
 
         AccessManagerSetupLib.commissionSuite(registry, address(fundToken));
 
-        assertEq(registry.namespaceName(fund), "Fund A");
-        assertEq(registry.namespaceOf(irs), fund);
+        assertEq(registry.domainName(fund), "Fund A");
+        assertEq(registry.domainOf(irs), fund);
         assertEq(
             registry.getTargetFunctionRole(address(fundToken), IERC3643.mint.selector),
-            RolesLib.forNamespace(fund, RolesLib.Role.AGENT_MINTER)
+            RolesLib.forDomain(fund, RolesLib.Role.AGENT_MINTER)
         );
         assertEq(
             registry.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forNamespace(fund, RolesLib.Role.IRS_WRITER)
+            RolesLib.forDomain(fund, RolesLib.Role.IRS_WRITER)
         );
         _grantAllAgentRoles(registry, agentA, fund);
         vm.startPrank(agentA);
@@ -272,7 +270,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         Token classA = _deployBare("class-a", address(0), address(registry));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(classA.identityRegistry().identityStorage()));
         Token classB = _deployBare("class-b", address(irs), address(registry));
-        uint32 fund = registry.createNamespace("Fund");
+        uint32 fund = registry.createDomain("Fund");
         registry.assign(fund, address(classA));
         registry.assign(fund, address(classB));
         AccessManagerSetupLib.commissionSuite(registry, address(classA));
@@ -296,26 +294,25 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _assertCannotTouchStorage(agentA, irs);
     }
 
-    function test_registry_ReusedStorageKeepsItsNamespaceAcrossFunds() public {
+    function test_registry_ReusedStorageKeepsItsDomainAcrossFunds() public {
         Token tokenX = _deployBare("fund-x", address(0), address(registry));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
         Token tokenY = _deployBare("fund-y", address(irs), address(registry));
-        uint32 fundX = registry.createNamespace("Fund X");
-        uint32 fundY = registry.createNamespace("Fund Y");
+        uint32 fundX = registry.createDomain("Fund X");
+        uint32 fundY = registry.createDomain("Fund Y");
         registry.assign(fundX, address(tokenX));
         registry.assign(fundY, address(tokenY));
         AccessManagerSetupLib.commissionSuite(registry, address(tokenX));
         _grantStorageBinder(registry, fundX);
         AccessManagerSetupLib.commissionSuite(registry, address(tokenY));
 
-        assertEq(registry.namespaceOf(address(irs)), fundX);
+        assertEq(registry.domainOf(address(irs)), fundX);
         assertEq(
             registry.getTargetFunctionRole(address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forNamespace(fundX, RolesLib.Role.IRS_WRITER)
+            RolesLib.forDomain(fundX, RolesLib.Role.IRS_WRITER)
         );
-        (bool registryYWrites,) = registry.hasRole(
-            RolesLib.forNamespace(fundX, RolesLib.Role.IRS_WRITER), address(tokenY.identityRegistry())
-        );
+        (bool registryYWrites,) =
+            registry.hasRole(RolesLib.forDomain(fundX, RolesLib.Role.IRS_WRITER), address(tokenY.identityRegistry()));
         assertTrue(registryYWrites);
 
         _grantAllAgentRoles(registry, agentA, fundX);
@@ -338,19 +335,19 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         Token tokenX = _deployBare("bind-x", address(0), address(registry));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
         Token tokenY = _deployBare("bind-y", address(irs), address(registry));
-        uint32 fundX = registry.createNamespace("Fund X");
-        uint32 fundY = registry.createNamespace("Fund Y");
+        uint32 fundX = registry.createDomain("Fund X");
+        uint32 fundY = registry.createDomain("Fund Y");
         registry.assign(fundX, address(tokenX));
         registry.assign(fundY, address(tokenY));
         AccessManagerSetupLib.commissionSuite(registry, address(tokenX));
-        registry.grantRole(RolesLib.forNamespace(fundX, RolesLib.Role.AGENT_ADMIN), address(this), 0);
+        registry.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.AGENT_ADMIN), address(this), 0);
         assertFalse(_isBound(irs, address(tokenY.identityRegistry())));
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
         this.commissionExternally(address(tokenY));
         assertEq(registry.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
 
-        registry.grantRole(RolesLib.forNamespace(fundX, RolesLib.Role.IRS_BINDER), address(this), 0);
+        registry.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.IRS_BINDER), address(this), 0);
         AccessManagerSetupLib.commissionSuite(registry, address(tokenY));
         assertTrue(_isBound(irs, address(tokenY.identityRegistry())));
     }
@@ -361,21 +358,21 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
 
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
+        AccessManagerSetupLib.migrateSuitesToDomains(
             accessManager,
             _both(),
             TEAM,
-            _namespaces(NS_A, NS_B),
-            _assignAgentRoles(agentA, NS_A),
+            _domains(DOMAIN_A, DOMAIN_B),
+            _assignAgentRoles(agentA, DOMAIN_A),
             _revokeAgentRoles(agentA)
         );
-        _grantAllAgentRoles(accessManager, agentB, NS_B);
+        _grantAllAgentRoles(accessManager, agentB, DOMAIN_B);
 
-        _assertHoldsEveryAgentRole(agentA, NS_A);
+        _assertHoldsEveryAgentRole(agentA, DOMAIN_A);
         _assertHoldsNoAgentRole(agentA, TEAM);
-        _assertHoldsNoAgentRole(agentA, NS_B);
+        _assertHoldsNoAgentRole(agentA, DOMAIN_B);
         _assertHoldsEveryAgentRole(agentB, TEAM);
-        _assertHoldsNoAgentRole(agentB, NS_A);
+        _assertHoldsNoAgentRole(agentB, DOMAIN_A);
 
         IERC3643IdentityRegistry registryA = tokenA.identityRegistry();
         vm.startPrank(agentA);
@@ -395,11 +392,16 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
 
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _only(tokenA), TEAM, _namespaces(NS_A), _assignAgentRoles(agentA, NS_A), _noRevocations()
+        AccessManagerSetupLib.migrateSuitesToDomains(
+            accessManager,
+            _only(tokenA),
+            TEAM,
+            _domains(DOMAIN_A),
+            _assignAgentRoles(agentA, DOMAIN_A),
+            _noRevocations()
         );
 
-        _assertHoldsEveryAgentRole(agentA, NS_A);
+        _assertHoldsEveryAgentRole(agentA, DOMAIN_A);
         _assertHoldsEveryAgentRole(agentA, TEAM);
         _assertHoldsEveryAgentRole(agentB, TEAM);
 
@@ -424,21 +426,21 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
 
     function test_migrate_Success_ExplicitRevocationRemovesTheSourceRoleAndKeepsTheNewOne() public {
         _commissionIntoTeam(tokenA);
-        accessManager.grantRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER), agentA, 0);
-        accessManager.grantRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_BURNER), agentA, 0);
+        accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER), agentA, 0);
+        accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_BURNER), agentA, 0);
 
         AccessManagerSetupLib.RoleAssignment[] memory assignments = new AccessManagerSetupLib.RoleAssignment[](1);
-        assignments[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, NS_A);
+        assignments[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
         AccessManagerSetupLib.RoleRevocation[] memory revocations = new AccessManagerSetupLib.RoleRevocation[](1);
         revocations[0] = _revoke(agentA, RolesLib.Role.AGENT_MINTER);
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _only(tokenA), TEAM, _namespaces(NS_A), assignments, revocations
+        AccessManagerSetupLib.migrateSuitesToDomains(
+            accessManager, _only(tokenA), TEAM, _domains(DOMAIN_A), assignments, revocations
         );
 
-        (bool newMinter,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_MINTER), agentA);
-        (bool oldMinter,) = accessManager.hasRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER), agentA);
-        (bool oldBurner,) = accessManager.hasRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_BURNER), agentA);
-        (bool newBurner,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_BURNER), agentA);
+        (bool newMinter,) = accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER), agentA);
+        (bool oldMinter,) = accessManager.hasRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER), agentA);
+        (bool oldBurner,) = accessManager.hasRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_BURNER), agentA);
+        (bool newBurner,) = accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_BURNER), agentA);
         assertTrue(newMinter);
         assertFalse(oldMinter);
         assertTrue(oldBurner);
@@ -451,14 +453,14 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _grantAllAgentRoles(accessManager, agentA, TEAM);
 
         AccessManagerSetupLib.RoleAssignment[] memory assignments = new AccessManagerSetupLib.RoleAssignment[](6);
-        assignments[0] = _assign(agentA, RolesLib.Role.AGENT, NS_A);
-        assignments[1] = _assign(agentA, RolesLib.Role.AGENT_PAUSER, NS_A);
-        assignments[2] = _assign(agentA, RolesLib.Role.AGENT_MINTER, NS_A);
-        assignments[3] = _assign(agentA, RolesLib.Role.AGENT, NS_B);
-        assignments[4] = _assign(agentA, RolesLib.Role.AGENT_PAUSER, NS_B);
-        assignments[5] = _assign(agentA, RolesLib.Role.AGENT_BURNER, NS_B);
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _both(), TEAM, _namespaces(NS_A, NS_B), assignments, _revokeAgentRoles(agentA)
+        assignments[0] = _assign(agentA, RolesLib.Role.AGENT, DOMAIN_A);
+        assignments[1] = _assign(agentA, RolesLib.Role.AGENT_PAUSER, DOMAIN_A);
+        assignments[2] = _assign(agentA, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
+        assignments[3] = _assign(agentA, RolesLib.Role.AGENT, DOMAIN_B);
+        assignments[4] = _assign(agentA, RolesLib.Role.AGENT_PAUSER, DOMAIN_B);
+        assignments[5] = _assign(agentA, RolesLib.Role.AGENT_BURNER, DOMAIN_B);
+        AccessManagerSetupLib.migrateSuitesToDomains(
+            accessManager, _both(), TEAM, _domains(DOMAIN_A, DOMAIN_B), assignments, _revokeAgentRoles(agentA)
         );
 
         IERC3643IdentityRegistry registryA = tokenA.identityRegistry();
@@ -480,32 +482,31 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
 
     function test_migrate_Success_KeepsStructuralGrantsAndExecutionDelays() public {
         _commissionIntoTeam(tokenA);
-        accessManager.grantRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER), agentA, 1 hours);
+        accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER), agentA, 1 hours);
         address suiteRegistry = address(tokenA.identityRegistry());
 
         AccessManagerSetupLib.RoleAssignment[] memory assignments = new AccessManagerSetupLib.RoleAssignment[](1);
-        assignments[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, NS_A);
+        assignments[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
         AccessManagerSetupLib.RoleRevocation[] memory revocations = new AccessManagerSetupLib.RoleRevocation[](1);
         revocations[0] = _revoke(agentA, RolesLib.Role.AGENT_MINTER);
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, _only(tokenA), TEAM, _namespaces(NS_A), assignments, revocations
+        AccessManagerSetupLib.migrateSuitesToDomains(
+            accessManager, _only(tokenA), TEAM, _domains(DOMAIN_A), assignments, revocations
         );
 
         (bool isMinter, uint32 delay) =
-            accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_MINTER), agentA);
+            accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER), agentA);
         assertTrue(isMinter);
         assertEq(delay, 1 hours);
-        (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT), address(tokenA));
+        (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT), address(tokenA));
         (bool registryWrites,) =
-            accessManager.hasRole(RolesLib.forNamespace(TEAM, RolesLib.Role.IRS_WRITER), suiteRegistry);
+            accessManager.hasRole(RolesLib.forDomain(TEAM, RolesLib.Role.IRS_WRITER), suiteRegistry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
-        (bool tokenStillInTeam,) =
-            accessManager.hasRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT), address(tokenA));
+        (bool tokenStillInTeam,) = accessManager.hasRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT), address(tokenA));
         assertFalse(tokenStillInTeam);
         assertEq(
             accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
-            RolesLib.forNamespace(NS_A, RolesLib.Role.AGENT_MINTER)
+            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER)
         );
     }
 
@@ -518,12 +519,12 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
 
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
+        AccessManagerSetupLib.migrateSuitesToDomains(
             accessManager,
             _only(tokenA),
             TEAM,
-            _namespaces(NS_A),
-            _assignAgentRoles(agentA, NS_A),
+            _domains(DOMAIN_A),
+            _assignAgentRoles(agentA, DOMAIN_A),
             _revokeAgentRoles(agentA)
         );
 
@@ -531,7 +532,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
             accessManager.getTargetFunctionRole(
                 address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
             ),
-            RolesLib.forNamespace(TEAM, RolesLib.Role.IRS_WRITER)
+            RolesLib.forDomain(TEAM, RolesLib.Role.IRS_WRITER)
         );
         IERC3643IdentityRegistry registryA = tokenA.identityRegistry();
         IERC3643IdentityRegistry registryC = tokenC.identityRegistry();
@@ -547,56 +548,56 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
     function test_migrate_RevertWhen_AssignmentIsNotHeld() public {
         _commissionIntoTeam(tokenA);
         AccessManagerSetupLib.RoleAssignment[] memory one = new AccessManagerSetupLib.RoleAssignment[](1);
-        one[0] = _assign(agentB, RolesLib.Role.AGENT_MINTER, NS_A);
+        one[0] = _assign(agentB, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.RoleNotHeld.selector, agentB, RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER)
+                ErrorsLib.RoleNotHeld.selector, agentB, RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER)
             )
         );
-        this.migrateExternally(_only(tokenA), TEAM, _namespaces(NS_A), one, _noRevocations());
+        this.migrateExternally(_only(tokenA), TEAM, _domains(DOMAIN_A), one, _noRevocations());
     }
 
     function test_migrate_RevertWhen_AHolderHasAPendingGrant() public {
         _commissionIntoTeam(tokenA);
-        uint64 teamMinter = RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER);
+        uint64 teamMinter = RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER);
         accessManager.setGrantDelay(teamMinter, 1 days);
         vm.warp(block.timestamp + 6 days);
         accessManager.grantRole(teamMinter, agentA, 0);
         AccessManagerSetupLib.RoleAssignment[] memory one = new AccessManagerSetupLib.RoleAssignment[](1);
-        one[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, NS_A);
+        one[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PendingRoleGrant.selector, agentA, teamMinter));
-        this.migrateExternally(_only(tokenA), TEAM, _namespaces(NS_A), one, _noRevocations());
+        this.migrateExternally(_only(tokenA), TEAM, _domains(DOMAIN_A), one, _noRevocations());
     }
 
     function test_migrate_RevertWhen_AHolderHasAPendingDelayChange() public {
         _commissionIntoTeam(tokenA);
-        uint64 teamMinter = RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER);
+        uint64 teamMinter = RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER);
         accessManager.grantRole(teamMinter, agentA, 1 hours);
         accessManager.grantRole(teamMinter, agentA, 0);
         AccessManagerSetupLib.RoleAssignment[] memory one = new AccessManagerSetupLib.RoleAssignment[](1);
-        one[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, NS_A);
+        one[0] = _assign(agentA, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PendingDelayChange.selector, agentA, teamMinter));
-        this.migrateExternally(_only(tokenA), TEAM, _namespaces(NS_A), one, _noRevocations());
+        this.migrateExternally(_only(tokenA), TEAM, _domains(DOMAIN_A), one, _noRevocations());
     }
 
-    function test_migrate_RevertWhen_TokenHoldsNoAgentRoleInTheSourceNamespace() public {
-        _commission(tokenA, NS_A);
+    function test_migrate_RevertWhen_TokenHoldsNoAgentRoleInTheSourceDomain() public {
+        _commission(tokenA, DOMAIN_A);
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.RoleNotHeld.selector, address(tokenA), RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT)
+                ErrorsLib.RoleNotHeld.selector, address(tokenA), RolesLib.forDomain(TEAM, RolesLib.Role.AGENT)
             )
         );
-        this.migrateExternally(_only(tokenA), TEAM, _namespaces(NS_B), _noAssignments(), _noRevocations());
+        this.migrateExternally(_only(tokenA), TEAM, _domains(DOMAIN_B), _noAssignments(), _noRevocations());
     }
 
     function test_migrate_RevertWhen_ARevocationFailsLate_LeavesNothingChanged() public {
         _commissionIntoTeam(tokenA);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
-        uint64 teamAgentAdmin = RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_ADMIN);
+        uint64 teamAgentAdmin = RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_ADMIN);
         accessManager.revokeRole(teamAgentAdmin, address(this));
 
         vm.expectRevert(
@@ -605,35 +606,35 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
             )
         );
         this.migrateExternally(
-            _only(tokenA), TEAM, _namespaces(NS_A), _assignAgentRoles(agentA, NS_A), _revokeAgentRoles(agentA)
+            _only(tokenA), TEAM, _domains(DOMAIN_A), _assignAgentRoles(agentA, DOMAIN_A), _revokeAgentRoles(agentA)
         );
 
         assertEq(
             accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
-            RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_MINTER)
+            RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER)
         );
         _assertHoldsEveryAgentRole(agentA, TEAM);
-        _assertHoldsNoAgentRole(agentA, NS_A);
+        _assertHoldsNoAgentRole(agentA, DOMAIN_A);
     }
 
     function migrateExternally(
         address[] memory tokens,
-        uint32 fromNamespaceId,
-        uint32[] memory toNamespaceIds,
+        uint32 fromDomainId,
+        uint32[] memory toDomainIds,
         AccessManagerSetupLib.RoleAssignment[] memory assignments,
         AccessManagerSetupLib.RoleRevocation[] memory revocations
     ) external {
-        AccessManagerSetupLib.migrateSuitesToNamespaces(
-            accessManager, tokens, fromNamespaceId, toNamespaceIds, assignments, revocations
+        AccessManagerSetupLib.migrateSuitesToDomains(
+            accessManager, tokens, fromDomainId, toDomainIds, assignments, revocations
         );
     }
 
-    function _assign(address account, RolesLib.Role role, uint32 namespaceId)
+    function _assign(address account, RolesLib.Role role, uint32 domainId)
         private
         pure
         returns (AccessManagerSetupLib.RoleAssignment memory)
     {
-        return AccessManagerSetupLib.RoleAssignment({ account: account, role: role, namespaceId: namespaceId });
+        return AccessManagerSetupLib.RoleAssignment({ account: account, role: role, domainId: domainId });
     }
 
     function _revoke(address account, RolesLib.Role role)
@@ -644,7 +645,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         return AccessManagerSetupLib.RoleRevocation({ account: account, role: role });
     }
 
-    function _assignAgentRoles(address account, uint32 namespaceId)
+    function _assignAgentRoles(address account, uint32 domainId)
         private
         pure
         returns (AccessManagerSetupLib.RoleAssignment[] memory assignments)
@@ -652,7 +653,7 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         RolesLib.Role[8] memory roles = _agentRoles();
         assignments = new AccessManagerSetupLib.RoleAssignment[](roles.length);
         for (uint256 i = 0; i < roles.length; i++) {
-            assignments[i] = _assign(account, roles[i], namespaceId);
+            assignments[i] = _assign(account, roles[i], domainId);
         }
     }
 
@@ -687,29 +688,29 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         tokens[0] = address(target);
     }
 
-    function _namespaces(uint32 first) private pure returns (uint32[] memory namespaceIds) {
-        namespaceIds = new uint32[](1);
-        namespaceIds[0] = first;
+    function _domains(uint32 first) private pure returns (uint32[] memory domainIds) {
+        domainIds = new uint32[](1);
+        domainIds[0] = first;
     }
 
-    function _namespaces(uint32 first, uint32 second) private pure returns (uint32[] memory namespaceIds) {
-        namespaceIds = new uint32[](2);
-        namespaceIds[0] = first;
-        namespaceIds[1] = second;
+    function _domains(uint32 first, uint32 second) private pure returns (uint32[] memory domainIds) {
+        domainIds = new uint32[](2);
+        domainIds[0] = first;
+        domainIds[1] = second;
     }
 
-    function _assertHoldsEveryAgentRole(address account, uint32 namespaceId) private view {
+    function _assertHoldsEveryAgentRole(address account, uint32 domainId) private view {
         RolesLib.Role[8] memory roles = _agentRoles();
         for (uint256 i = 0; i < roles.length; i++) {
-            (bool isMember,) = accessManager.hasRole(RolesLib.forNamespace(namespaceId, roles[i]), account);
+            (bool isMember,) = accessManager.hasRole(RolesLib.forDomain(domainId, roles[i]), account);
             assertTrue(isMember);
         }
     }
 
-    function _assertHoldsNoAgentRole(address account, uint32 namespaceId) private view {
+    function _assertHoldsNoAgentRole(address account, uint32 domainId) private view {
         RolesLib.Role[8] memory roles = _agentRoles();
         for (uint256 i = 0; i < roles.length; i++) {
-            (bool isMember,) = accessManager.hasRole(RolesLib.forNamespace(namespaceId, roles[i]), account);
+            (bool isMember,) = accessManager.hasRole(RolesLib.forDomain(domainId, roles[i]), account);
             assertFalse(isMember);
         }
     }
@@ -773,25 +774,25 @@ contract SuiteRoleNamespaceTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
-    function _commission(Token target, uint32 namespaceId) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), namespaceId, namespaceId);
+    function _commission(Token target, uint32 domainId) private {
+        AccessManagerSetupLib.commissionSuite(accessManager, address(target), domainId, domainId);
     }
 
     function _commissionIntoTeam(Token target) private {
         AccessManagerSetupLib.commissionSuite(accessManager, address(target), TEAM, TEAM);
-        accessManager.grantRole(RolesLib.forNamespace(TEAM, RolesLib.Role.AGENT_ADMIN), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_ADMIN), address(this), 0);
     }
 
-    function _grantStorageBinder(IAccessManager manager, uint32 namespaceId) private {
-        manager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.AGENT_ADMIN), address(this), 0);
-        manager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.IRS_BINDER), address(this), 0);
+    function _grantStorageBinder(IAccessManager manager, uint32 domainId) private {
+        manager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADMIN), address(this), 0);
+        manager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_BINDER), address(this), 0);
     }
 
-    function _grantAllAgentRoles(IAccessManager manager, address account, uint32 namespaceId) private {
-        manager.grantRole(RolesLib.forNamespace(namespaceId, RolesLib.Role.AGENT_ADMIN), address(this), 0);
+    function _grantAllAgentRoles(IAccessManager manager, address account, uint32 domainId) private {
+        manager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADMIN), address(this), 0);
         RolesLib.Role[8] memory roles = _agentRoles();
         for (uint256 i = 0; i < roles.length; i++) {
-            manager.grantRole(RolesLib.forNamespace(namespaceId, roles[i]), account, 0);
+            manager.grantRole(RolesLib.forDomain(domainId, roles[i]), account, 0);
         }
     }
 
