@@ -106,13 +106,11 @@ library RolesLib {
     uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
 
     function forDomain(uint32 domainId, Role role) internal pure returns (uint64) {
-        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
-        return _pack(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
+        return _packSuite(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
     function forDomain(uint32 domainId, bytes32 customName) internal pure returns (uint64) {
-        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
-        return _pack(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
+        return _packSuite(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
     }
 
     function platform(PlatformRole role) internal pure returns (uint64) {
@@ -123,6 +121,11 @@ library RolesLib {
         domainId = uint32(roleId >> 32);
         custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;
         roleNumber = uint32(roleId) & ~CUSTOM_ROLE_FLAG;
+    }
+
+    function _packSuite(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
+        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
+        return _pack(domainId, roleNumber);
     }
 
     function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
