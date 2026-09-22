@@ -123,6 +123,17 @@ interface ITREXFactory {
     function setIdFactory(address _idFactory) external;
 
     /**
+     *  @dev setter for the trusted gateway registry address
+     *  the registry is the network's vetted gateway set; every token deployed by the factory is
+     *  pointed at it at deployment and carries no setter of its own, so gateway trust stays a
+     *  network-level decision. Tokens already deployed keep the registry they were deployed with.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  emits `TrustedGatewayRegistrySet` event
+     *  @param _trustedGatewayRegistry The address of the trusted gateway registry contract
+     */
+    function setTrustedGatewayRegistry(address _trustedGatewayRegistry) external;
+
+    /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
      *  this function will deploy and set the contracts as follow :
      *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner,
@@ -193,6 +204,11 @@ interface ITREXFactory {
      *  @dev getter for identity factory address
      */
     function getIdFactory() external view returns (address);
+
+    /**
+     *  @dev getter for the trusted gateway registry address wired into newly deployed tokens
+     */
+    function getTrustedGatewayRegistry() external view returns (address);
 
     /**
      *  @dev getter for token address corresponding to salt string

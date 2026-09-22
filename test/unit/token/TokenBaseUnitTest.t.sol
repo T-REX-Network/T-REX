@@ -6,6 +6,7 @@ import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -17,6 +18,10 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
     Token tokenImplementation;
     Token token;
+
+    /// @dev The network's registry every token is deployed against. Real, not mocked: it is the one
+    ///      dependency the token cannot be pointed away from, so tests exercise it as deployed.
+    TrustedGatewayRegistry trustedGatewayRegistry;
 
     address tokenBeacon;
 
@@ -41,12 +46,23 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         // the AccessManager cannot be mocked: AccessManaged calls canCall on it for every restricted function
         _deployAccessManager();
 
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
+
         token = Token(
             BeaconProxyDeployer.newProxy(
                 tokenBeacon,
                 abi.encodeCall(
                     Token.init,
-                    ("Token", "TKN", 18, identityRegistry, compliance, address(onchainId), address(accessManager))
+                    (
+                        "Token",
+                        "TKN",
+                        18,
+                        identityRegistry,
+                        compliance,
+                        address(trustedGatewayRegistry),
+                        address(onchainId),
+                        address(accessManager)
+                    )
                 )
             )
         );

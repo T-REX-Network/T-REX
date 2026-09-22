@@ -72,12 +72,15 @@ import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegi
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { ITransferValidation } from "../compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
 import { ITREXFactory } from "../factory/ITREXFactory.sol";
+import { TrustedGatewayRegistry } from "../interop/TrustedGatewayRegistry.sol";
 import { TREXImplementationAuthority } from "../proxy/beacon/TREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
+import { Token } from "../token/Token.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ErrorsLib } from "./ErrorsLib.sol";
 import { RolesLib } from "./RolesLib.sol";
@@ -132,21 +135,25 @@ library AccessManagerSetupLib {
     }
 
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](14);
+        table = new SelectorRole[](18);
         table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.Role.TOKEN_MANAGER);
         table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.Role.TOKEN_MANAGER);
         table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[3] = SelectorRole(IERC3643.setIdentityRegistry.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[4] = SelectorRole(IERC3643.setCompliance.selector, RolesLib.Role.IDENTITY_MANAGER);
-        table[5] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
-        table[6] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
-        table[7] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[8] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[9] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
-        table[10] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
-        table[11] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
-        table[12] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
-        table[13] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[5] = SelectorRole(Token.setRoute.selector, RolesLib.Role.IDENTITY_MANAGER);
+        table[6] = SelectorRole(Token.setPeer.selector, RolesLib.Role.IDENTITY_MANAGER);
+        table[7] = SelectorRole(Token.dispatchMintInstruction.selector, RolesLib.Role.AGENT);
+        table[8] = SelectorRole(Token.dispatchRecallInstruction.selector, RolesLib.Role.AGENT);
+        table[9] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
+        table[10] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
+        table[11] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[12] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[13] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[14] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
+        table[15] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[16] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[17] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {
@@ -178,17 +185,24 @@ library AccessManagerSetupLib {
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](6);
+        table = new SelectorRole[](13);
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addModule.selector, RolesLib.Role.OWNER);
         table[3] = SelectorRole(ModularCompliance.callModuleFunction.selector, RolesLib.Role.OWNER);
         table[4] = SelectorRole(RolesLib.BIND_UNBIND_TOKEN, RolesLib.Role.OWNER);
         table[5] = SelectorRole(ModularCompliance.refreshModuleCapabilities.selector, RolesLib.Role.OWNER);
+        table[6] = SelectorRole(ModularCompliance.setDefaultValidityWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[7] = SelectorRole(ModularCompliance.setReconciliationWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[8] = SelectorRole(ModularCompliance.setValidationClamp.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[9] = SelectorRole(ModularCompliance.pauseValidationIssuance.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[10] = SelectorRole(ModularCompliance.unpauseValidationIssuance.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[11] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
+        table[12] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {
-        table = new RoleAdmin[](11);
+        table = new RoleAdmin[](13);
         table[0] = RoleAdmin(RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
         table[1] = RoleAdmin(RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);
         table[2] = RoleAdmin(RolesLib.Role.AGENT_BURNER, RolesLib.Role.AGENT_ADMIN);
@@ -198,8 +212,10 @@ library AccessManagerSetupLib {
         table[6] = RoleAdmin(RolesLib.Role.AGENT_FORCED_TRANSFER, RolesLib.Role.AGENT_ADMIN);
         table[7] = RoleAdmin(RolesLib.Role.AGENT_PAUSER, RolesLib.Role.AGENT_ADMIN);
         table[8] = RoleAdmin(RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
-        table[9] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
-        table[10] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[9] = RoleAdmin(RolesLib.Role.VALIDATION_KEEPER, RolesLib.Role.AGENT_ADMIN);
+        table[10] = RoleAdmin(RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[11] = RoleAdmin(RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        table[12] = RoleAdmin(RolesLib.Role.COMPLIANCE_MANAGER, RolesLib.Role.SUITE_ADMIN);
     }
 
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
@@ -278,12 +294,21 @@ library AccessManagerSetupLib {
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
-        bytes4[] memory functions = new bytes4[](4);
+        bytes4[] memory functions = new bytes4[](5);
         functions[0] = ITREXFactory.setImplementationAuthority.selector;
         functions[1] = ITREXFactory.setIdFactory.selector;
-        functions[2] = ITREXFactory.deployTREXSuite.selector;
-        functions[3] = ITREXFactory.deployTREXSuiteIsolated.selector;
+        functions[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
+        functions[3] = ITREXFactory.deployTREXSuite.selector;
+        functions[4] = ITREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.platform(RolesLib.PlatformRole.OWNER));
+    }
+
+    function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {
+        bytes4[] memory functions = new bytes4[](1);
+        functions[0] = TrustedGatewayRegistry.setTrustedGateway.selector;
+        accessManager.setTargetFunctionRole(
+            trustedGatewayRegistry, functions, RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
+        );
     }
 
     /// @notice Wires the two prerequisites the {TREXFactory} auto-mint path needs, so a deployer does

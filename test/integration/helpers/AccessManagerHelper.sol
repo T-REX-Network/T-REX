@@ -71,6 +71,20 @@ abstract contract AccessManagerHelper is Test {
         accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), account, NO_EXECUTION_DELAY);
     }
 
+    function _grantInteropManagerRole(address account) internal {
+        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER), account, NO_EXECUTION_DELAY);
+    }
+
+    /// @notice Grants VALIDATION_KEEPER, which gates the discard of expired validations on ModularCompliance.
+    function _grantValidationKeeperRole(address account) internal {
+        accessManager.grantRole(_role(RolesLib.Role.VALIDATION_KEEPER), account, NO_EXECUTION_DELAY);
+    }
+
+    /// @notice Grants COMPLIANCE_MANAGER, which gates the validation policy setters on ModularCompliance.
+    function _grantComplianceManagerRole(address account) internal {
+        accessManager.grantRole(_role(RolesLib.Role.COMPLIANCE_MANAGER), account, NO_EXECUTION_DELAY);
+    }
+
     /// @notice Grants IRS_BINDER, which gates IdentityRegistryStorage.bindIdentityRegistry.
     function _grantIRSBinderRole(address account) internal {
         accessManager.grantRole(_role(RolesLib.Role.IRS_BINDER), account, NO_EXECUTION_DELAY);
@@ -106,6 +120,7 @@ abstract contract AccessManagerHelper is Test {
     function _grantManagerRoles(address account) internal {
         accessManager.grantRole(_role(RolesLib.Role.TOKEN_MANAGER), account, NO_EXECUTION_DELAY);
         accessManager.grantRole(_role(RolesLib.Role.IDENTITY_MANAGER), account, NO_EXECUTION_DELAY);
+        _grantComplianceManagerRole(account);
     }
 
     /// @notice Returns true when `account` holds the AGENT role on the manager.

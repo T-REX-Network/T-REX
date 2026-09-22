@@ -5,7 +5,11 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 
-import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
+
+import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
+import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import {
     BurnOnlyModule,
     CheckTransferOnlyModule,
@@ -15,10 +19,11 @@ import {
     TransferHookOnlyModule,
     UndeclaredCheckModule
 } from "test/integration/mocks/CapabilityModules.sol";
+import { SlotsOnlyModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev The point of the whole capability design: a module is reached at the dispatch points it
 ///      declared and at no other. Every test here asserts the negative as well as the positive.
-contract ComplianceDispatchTest is TREXSuiteTest {
+contract ComplianceDispatchTest is InteropSuiteTest {
 
     ModularCompliance internal mc;
 
@@ -203,8 +208,73 @@ contract ComplianceDispatchTest is TREXSuiteTest {
         token.transfer(bob, 100);
     }
 
+    // ==== .requestTransferValidation routing Tests ====
+
+    /// @notice Issuance reaches the bounds hook of the module that declared it, and no other dispatch point of
+    ///         any other module.
+    function test_requestTransferValidation_Success_WhenOnlyTheBoundsHookIsDeclared() public {
+        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        bytes memory from = _delegatedSatelliteWallet(100);
+        bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
+
+        address bounds =
+            address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())));
+        CheckTransferOnlyModule checker = CheckTransferOnlyModule(_deploy(address(new CheckTransferOnlyModule())));
+        vm.startPrank(deployer);
+        mc.addModule(bounds);
+        mc.addModule(address(checker));
+        vm.stopPrank();
+
+        vm.expectCall(bounds, abi.encodeCall(IModule.validationBounds, (from, to, "", 10, 100, address(mc))), 1);
+        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
+        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.moduleCheck.selector), 0);
+        _requestValidation(address(aliceIdentity), from, to, 10, 100);
+
+        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(transferOnly.totalHookCalls(), 0);
+    }
+
+    /// @notice Issuance reaches the slot reservation of the module that declared it, with the issued maximum, and
+    ///         touches no module that did not.
+    function test_requestTransferValidation_Success_WhenOnlyTheSlotHooksAreDeclared() public {
+        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        bytes memory from = _delegatedSatelliteWallet(100);
+        bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
+
+        SlotsOnlyModule slotsOnly = SlotsOnlyModule(
+            address(new ModuleProxy(address(new SlotsOnlyModule()), abi.encodeCall(SlotsOnlyModule.initialize, ())))
+        );
+        CheckTransferOnlyModule checker = CheckTransferOnlyModule(_deploy(address(new CheckTransferOnlyModule())));
+        vm.startPrank(deployer);
+        mc.addModule(address(slotsOnly));
+        mc.addModule(address(checker));
+        vm.stopPrank();
+
+        vm.expectCall(address(slotsOnly), abi.encodeCall(IModule.reserveSlot, (1, from, to, 100)), 1);
+        vm.expectCall(address(slotsOnly), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
+        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.reserveSlot.selector), 0);
+        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
+        _requestValidation(address(aliceIdentity), from, to, 10, 100);
+
+        assertEq(slotsOnly.reserveCalls(), 1);
+        assertEq(slotsOnly.lastValidationId(), 1);
+        assertEq(slotsOnly.lastAmountMax(), 100);
+        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(transferOnly.totalHookCalls(), 0);
+    }
+
     function _deploy(address implementation) private returns (address) {
         return address(new ModuleProxy(implementation, abi.encodeCall(RecordingModule.initialize, ())));
+    }
+
+    /// @dev A satellite wallet for alice holding `amount`, delegated out of the balance minted in `setUp` so the
+    ///  module counters stay clean.
+    function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
+        envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
+        vm.prank(agent);
+        TokenLedgerHarness(address(token)).delegateOut(alice, envelope, amount);
     }
 
 }

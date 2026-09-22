@@ -86,7 +86,9 @@ library RolesLib {
         AGENT_ADMIN,
         SUITE_ADMIN,
         IRS_BINDER,
-        IRS_WRITER
+        IRS_WRITER,
+        COMPLIANCE_MANAGER,
+        VALIDATION_KEEPER
     }
 
     // ---- Platform roles: factory, implementation authority and identity factory governance ----
@@ -94,7 +96,8 @@ library RolesLib {
     enum PlatformRole {
         OWNER,
         VERSION_MANAGER,
-        ASSET_DEPLOYER
+        ASSET_DEPLOYER,
+        INTEROP_MANAGER
     }
 
     uint32 constant PLATFORM_DOMAIN = type(uint32).max;

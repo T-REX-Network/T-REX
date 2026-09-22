@@ -96,18 +96,25 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// the address of the Identity Factory used to deploy token OIDs
     address private _idFactory;
 
+    /// the network's trusted gateway registry, wired into every token this factory deploys
+    address private _trustedGatewayRegistry;
+
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
     string private constant ACCESS_MANAGER = "AccessManager";
 
-    constructor(address implementationAuthority, address idFactory, address accessManager)
-        AccessManagedOwnable(accessManager)
-    {
+    constructor(
+        address implementationAuthority,
+        address idFactory,
+        address trustedGatewayRegistry,
+        address accessManager
+    ) AccessManagedOwnable(accessManager) {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
 
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
+        _setTrustedGatewayRegistry(trustedGatewayRegistry);
     }
 
     /**
@@ -286,6 +293,27 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         require(idFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         _idFactory = idFactoryAddress;
         emit EventsLib.IdFactorySet(idFactoryAddress);
+    }
+
+    /**
+     *  @dev See {ITREXFactory-getTrustedGatewayRegistry}.
+     */
+    function getTrustedGatewayRegistry() external view returns (address) {
+        return _trustedGatewayRegistry;
+    }
+
+    /**
+     *  @dev See {ITREXFactory-setTrustedGatewayRegistry}.
+     */
+    function setTrustedGatewayRegistry(address trustedGatewayRegistryAddress) public restricted {
+        _setTrustedGatewayRegistry(trustedGatewayRegistryAddress);
+    }
+
+    /// internal setter for the trusted gateway registry, see {ITREXFactory-setTrustedGatewayRegistry}
+    function _setTrustedGatewayRegistry(address trustedGatewayRegistryAddress) internal {
+        require(trustedGatewayRegistryAddress != address(0), ErrorsLib.ZeroAddress());
+        _trustedGatewayRegistry = trustedGatewayRegistryAddress;
+        emit EventsLib.TrustedGatewayRegistrySet(trustedGatewayRegistryAddress);
     }
 
     /**
@@ -476,7 +504,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address identityRegistry,
         address compliance,
         address oid
-    ) private pure returns (bytes memory) {
+    ) private view returns (bytes memory) {
         return _beaconProxyBytecode(
             tokenBeacon,
             abi.encodeCall(
@@ -487,6 +515,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
                     tokenDetails.decimals,
                     identityRegistry,
                     compliance,
+                    _trustedGatewayRegistry,
                     oid,
                     manager
                 )

@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
-. "$(dirname "$0")/_/h"
+# $3 is 1 for a branch checkout, 0 for a file checkout. Only the former can move package.json.
+[ "$3" = "1" ] || exit 0
 
 npm i
