@@ -301,9 +301,12 @@ contract TREXRegistry is
     function _requiredClaimTopics(IIdentity userIdentity) internal view override returns (uint256[] memory) {
         uint256 identityType = _IDENTITY_FACTORY.identityTypeOf(address(userIdentity));
         if (identityType != 0) {
-            uint256[] memory typeTopics = _getStorage().claimTopicsByIdentityType[identityType].values();
-            if (typeTopics.length > 0) {
-                return typeTopics;
+            // Emptiness decides which set applies, so it is asked before copying: this runs on every
+            // transfer through `isVerified`, and the default path would otherwise copy an override set
+            // it goes on to discard.
+            EnumerableSet.UintSet storage typeTopics = _getStorage().claimTopicsByIdentityType[identityType];
+            if (typeTopics.length() > 0) {
+                return typeTopics.values();
             }
         }
         return _getClaimTopics();
