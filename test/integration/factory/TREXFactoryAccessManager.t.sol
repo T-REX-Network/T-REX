@@ -89,6 +89,14 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertEq(deployed.balanceOf(alice), 100);
     }
 
+    function test_deployTREXSuite_RevertWhen_SuppliedManagerIsNotAContract() public {
+        address eoa = makeAddr("eoa");
+
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, eoa));
+        trexFactory.deployTREXSuite("eoa-manager", _details(eoa, address(0)), _noClaims());
+    }
+
     function test_deployTREXSuite_RevertWhen_AccessManagerAdminIsTheFactory() public {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);

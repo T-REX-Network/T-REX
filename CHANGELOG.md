@@ -89,11 +89,14 @@ All notable changes to this project will be documented in this file.
     `schedule` and `execute`, show up in `getTargetFunctionRole(manager, selector)`, and can be
     delegated to another role with `setTargetFunctionRole` on the manager itself. No OpenZeppelin
     internal is overridden. Events `DomainCreated` and
-    `DomainAssigned`. `assign` only records the domain: it rewrites no selector mapping and revokes
-    nothing. Moving a commissioned token to another domain is `assign` followed by
-    `migrateSuitesToDomains`, which remaps the suite, grants the new domain's roles and revokes the old
-    domain's `AGENT` on the token. Re-running `commissionSuite` after a reassignment remaps but leaves
-    the old grant in place.
+    `DomainAssigned`. `domainOf` is a registry, not the authorization boundary: authorization is the
+    role id on each selector and the grants behind it, and the manager never consults `domainOf`.
+    Commissioning and migration keep the two in step; `assign` alone records the domain, rewrites no
+    selector mapping and revokes nothing. Moving commissioned tokens to other domains is
+    `moveSuitesToDomains(TREXAccessManager, …)`, which assigns the tokens and then runs
+    `migrateSuitesToDomains`: remap the suites, grant the new domains' roles, revoke the old domain's
+    `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `commissionSuite` after a bare reassignment
+    remaps but leaves the old grant in place.
   - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
     the token's domain on first use and keeps a storage already assigned where it is, so a storage

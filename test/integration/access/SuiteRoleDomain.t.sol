@@ -280,7 +280,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(fundToken.balanceOf(alice), 3);
     }
 
-    function test_registry_MovingATokenBetweenDomainsIsAssignThenMigrate() public {
+    function test_registry_MigrationAssignsAndRemapsInOneCall() public {
         Token fundToken = _deployBare("move", address(0), address(registry));
         uint32 oldFund = registry.createDomain("Old fund");
         uint32 newFund = registry.createDomain("New fund");
@@ -288,13 +288,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         AccessManagerSetupLib.commissionSuite(registry, address(fundToken));
         _grantAllAgentRoles(registry, agentA, oldFund);
 
-        registry.assign(newFund, address(fundToken));
-        assertEq(
-            registry.getTargetFunctionRole(address(fundToken), IERC3643.mint.selector),
-            RolesLib.forDomain(oldFund, RolesLib.Role.AGENT_MINTER)
-        );
-
-        AccessManagerSetupLib.migrateSuitesToDomains(
+        AccessManagerSetupLib.moveSuitesToDomains(
             registry, _only(fundToken), oldFund, _domains(newFund), _noAssignments(), _noRevocations()
         );
 

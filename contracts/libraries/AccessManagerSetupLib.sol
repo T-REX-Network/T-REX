@@ -204,19 +204,38 @@ library AccessManagerSetupLib {
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
         uint32 domainId = accessManager.domainOf(token);
         require(domainId != 0, ErrorsLib.NotAssigned(token));
-        address identityRegistryStorage = _storageOf(_registryOf(token));
+        address registry = _registryOf(token);
+        address identityRegistryStorage = _storageOf(registry);
         uint32 storageDomainId = accessManager.domainOf(identityRegistryStorage);
         if (storageDomainId == 0) {
             accessManager.assign(domainId, identityRegistryStorage);
             storageDomainId = domainId;
         }
-        _commission(accessManager, token, domainId, storageDomainId);
+        _commission(accessManager, token, registry, identityRegistryStorage, domainId, storageDomainId);
     }
 
     function commissionSuite(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId)
         internal
     {
-        _commission(accessManager, token, domainId, storageDomainId);
+        address registry = _registryOf(token);
+        _commission(accessManager, token, registry, _storageOf(registry), domainId, storageDomainId);
+    }
+
+    function moveSuitesToDomains(
+        TREXAccessManager accessManager,
+        address[] memory tokens,
+        uint32 fromDomainId,
+        uint32[] memory toDomainIds,
+        RoleAssignment[] memory assignments,
+        RoleRevocation[] memory revocations
+    ) internal {
+        require(tokens.length == toDomainIds.length, ErrorsLib.ArrayLengthMismatch());
+        for (uint256 i = 0; i < tokens.length; i++) {
+            accessManager.assign(toDomainIds[i], tokens[i]);
+        }
+        migrateSuitesToDomains(
+            IAccessManager(accessManager), tokens, fromDomainId, toDomainIds, assignments, revocations
+        );
     }
 
     function migrateSuitesToDomains(
@@ -318,10 +337,14 @@ library AccessManagerSetupLib {
         }
     }
 
-    function _commission(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId) private {
-        address registry = _registryOf(token);
-        address identityRegistryStorage = _storageOf(registry);
-
+    function _commission(
+        IAccessManager accessManager,
+        address token,
+        address registry,
+        address identityRegistryStorage,
+        uint32 domainId,
+        uint32 storageDomainId
+    ) private {
         accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0);
         accessManager.grantRole(RolesLib.forDomain(storageDomainId, RolesLib.Role.IRS_WRITER), registry, 0);
 
@@ -354,7 +377,13 @@ library AccessManagerSetupLib {
     }
 
     function _isAdministrative(RolesLib.Role role) private pure returns (bool) {
-        return role == RolesLib.Role.AGENT_ADMIN || role == RolesLib.Role.SUITE_ADMIN;
+        RoleAdmin[] memory table = roleAdminTable();
+        for (uint256 i = 0; i < table.length; i++) {
+            if (table[i].admin == role) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, uint32 domainId)

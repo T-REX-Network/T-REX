@@ -71,7 +71,6 @@ import {
     AccessManagerUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
@@ -328,7 +327,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     function _deployAccessManager(string memory salt, address accessManagerBeacon) private returns (address) {
-        require(accessManagerBeacon != address(0), ErrorsLib.ZeroAddress());
         return _deploy(
             salt,
             ACCESS_MANAGER,
