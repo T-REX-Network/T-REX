@@ -81,16 +81,18 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(record.toChainKey, optimism);
     }
 
-    function test_requestTransferValidation_Success_WhenANativeHolderSendsToASatellite() public {
+    /// @notice Nothing would keep a native balance in place between issuance and settlement, so no satellite is
+    ///         ever authorized to move one: a native position goes out through delegation-out, which burns first.
+    function test_requestTransferValidation_RevertWhen_TheHolderSendsFromTheirNativeBalance() public {
         vm.prank(agent);
         token.mint(alice, 50);
 
-        uint256 id = _requestValidation(alice, nativeAlice, bobSat, 10, 200);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
+        boundCompliance.requestTransferValidation(nativeAlice, bobSat, 10, 200, "");
 
-        assertEq(polygonGateway.queueLength(), 1);
-        assertEq(optimismGateway.queueLength(), 0);
-        assertEq(token.pinnedRouteFor(id, polygon), address(polygonGateway));
-        assertEq(boundCompliance.validationOf(id).amountMax, 50);
+        assertEq(polygonGateway.queueLength(), 0);
+        assertEq(boundCompliance.lastValidationId(), 0);
     }
 
     function test_requestTransferValidation_Success_WhenTheSpenderTravelsWithTheObject() public {

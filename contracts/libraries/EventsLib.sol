@@ -80,6 +80,9 @@ library EventsLib {
     event DelegatedOut(address indexed holder, bytes32 indexed toKey, bytes toWallet, uint256 amount);
     /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
     event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
+    /// @notice Emitted when the burn leg of a cross-chain validation takes the amount out of the sender's
+    ///         position and holds it in transit until the mint leg lands.
+    event HeldInTransit(bytes32 indexed fromKey, uint256 indexed validationId, bytes fromWallet, uint256 amount);
     /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
     event BridgedTransfer(
         bytes32 indexed fromKey,
@@ -88,11 +91,6 @@ library EventsLib {
         bytes from,
         bytes to,
         uint256 amount
-    );
-    /// @notice Emitted on a settled movement leaving a native wallet for a satellite one, under the validation it
-    ///  consumed. Ownership moves between identities, unlike {DelegatedOut}.
-    event SettledFromNative(
-        address indexed from, bytes32 indexed toKey, uint256 indexed validationId, bytes toWallet, uint256 amount
     );
     /// @notice Emitted on a settled movement leaving a satellite wallet for a native one, under the validation it
     ///  consumed. Ownership moves between identities, unlike {Recalled}.
@@ -193,6 +191,17 @@ library EventsLib {
     ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
     ///         breaches a rule; otherwise this warning is the whole record.
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
+    /// @notice Emitted when the keeper discards an expired validation and its slots are released.
+    event ValidationDiscarded(uint256 indexed validationId);
+    /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
+    ///         the validation is pinned and can no longer be discarded.
+    event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    /// @notice Emitted when every expected leg of a validation was received: slots committed, ledger updated.
+    ///         `chainKey` is the chain of the leg that completed it.
+    event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    /// @notice Emergency: a trusted gateway delivered a leg already consumed, or an id never issued. Nothing is
+    ///         applied and the token pauses itself until an agent unpauses it.
+    event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

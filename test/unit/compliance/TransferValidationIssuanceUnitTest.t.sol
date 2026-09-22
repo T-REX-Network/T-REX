@@ -9,6 +9,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
 import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 
@@ -23,7 +24,6 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     uint64 internal constant POLYGON_WINDOW = 30 minutes;
     uint64 internal constant OPTIMISM_WINDOW = 45 minutes;
     uint256 internal constant BRIDGED_BALANCE = 100;
-    uint256 internal constant FREE_BALANCE = 50;
 
     bytes32 internal polygon = _evmChainKey(POLYGON);
     bytes32 internal optimism = _evmChainKey(OPTIMISM);
@@ -58,12 +58,10 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
-        vm.mockCall(token, abi.encodeWithSignature("freeBalanceOf(address)", alice), abi.encode(FREE_BALANCE));
         vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
 
         _bind(fromSat, aliceIdentity);
-        _bind(nativeAlice, aliceIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
         _bind(toArbitrum, bobIdentity);
@@ -83,13 +81,6 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         assertEq(id, 1);
         assertEq(mc.lastValidationId(), 1);
-    }
-
-    function test_requestTransferValidation_Success_WhenCalledByTheNativeHolder() public configured {
-        vm.prank(alice);
-        uint256 id = mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
-
-        assertEq(id, 1);
     }
 
     function test_requestTransferValidation_Success_WhenCalledByAnAgent() public configured {
@@ -112,12 +103,6 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
     }
 
-    function test_requestTransferValidation_RevertWhen_AnotherHolderCallsForANativeWallet() public configured {
-        vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, bob, nativeAlice));
-        mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
-    }
-
     // ==== preconditions Tests ====
 
     function test_requestTransferValidation_RevertWhen_RangeIsInverted() public configured {
@@ -126,9 +111,19 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.requestTransferValidation(fromSat, toSat, 20, 10, "");
     }
 
+    /// @notice A native position is free to leave between issuance and settlement, so no satellite can be
+    ///         authorized to move it: it reaches a satellite through delegation-out, which burns first.
+    function test_requestTransferValidation_RevertWhen_TheSenderIsNative() public configured {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
+        mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
+
+        assertEq(mc.lastValidationId(), 0);
+    }
+
     function test_requestTransferValidation_RevertWhen_BothWalletsAreNative() public configured {
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.NoSatelliteLeg.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
         mc.requestTransferValidation(nativeAlice, nativeBob, 10, 40, "");
     }
 
@@ -213,13 +208,6 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
         assertEq(record.amountMin, 90);
         assertEq(record.amountMax, BRIDGED_BALANCE);
-    }
-
-    function test_requestTransferValidation_Success_WhenCappingAtTheFreeBalance() public configured {
-        vm.prank(alice);
-        uint256 id = mc.requestTransferValidation(nativeAlice, toSat, 10, 200, "");
-
-        assertEq(mc.validationOf(id).amountMax, FREE_BALANCE);
     }
 
     function test_requestTransferValidation_Success_WhenTheRequestIsInsideTheBalance() public configured {
@@ -338,13 +326,33 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         assertEq(record.toChainKey, optimism);
     }
 
-    function test_requestTransferValidation_Success_WhenTheNativeSideKeepsTheReferenceKey() public configured {
-        vm.prank(alice);
-        uint256 id = mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
+    function test_requestTransferValidation_Success_WhenTheNativeRecipientKeepsTheReferenceKey() public configured {
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
 
         ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
-        assertEq(record.fromChainKey, referenceChain);
-        assertEq(record.toChainKey, polygon);
+        assertEq(record.fromChainKey, polygon);
+        assertEq(record.toChainKey, referenceChain);
+        assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
+        assertEq(record.toKey, WalletKeyLib.canonicalKey(nativeBob));
+        assertFalse(record.twoLegs);
+    }
+
+    function test_requestTransferValidation_Success_WhenRecordingTheWalletKeysAndTheLegCount() public configured {
+        vm.startPrank(aliceIdentity);
+        uint256 sameChain = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        uint256 crossChain = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        vm.stopPrank();
+
+        ITransferValidation.ValidationRecord memory record = mc.validationOf(sameChain);
+        assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
+        assertEq(record.toKey, WalletKeyLib.canonicalKey(toSat));
+        assertFalse(record.twoLegs);
+
+        record = mc.validationOf(crossChain);
+        assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
+        assertEq(record.toKey, WalletKeyLib.canonicalKey(toOptimism));
+        assertTrue(record.twoLegs);
     }
 
     function test_requestTransferValidation_Success_WhenTheEventAndRecordMatchTheObject() public configured {
@@ -386,8 +394,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_Success_WhenDispatchingToTheSatelliteSideOnly() public configured {
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, polygon, 1), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
-        vm.prank(alice);
-        mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
     }
 
     /// @notice A dispatch the token refuses reverts the whole request, nothing recorded.

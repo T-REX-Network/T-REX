@@ -82,11 +82,6 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
                 satellites[from], satellites[to], amount % (token.bridgedBalanceOf(satellites[from]) + 1), op
             ) { }
                 catch { }
-        } else if (kind == 8) {
-            try ledger.settleFromNative(
-                actors[from], satellites[to], amount % (token.freeBalanceOf(actors[from]) + 1), op
-            ) { }
-                catch { }
         } else {
             try ledger.settleToNative(
                 satellites[from], actors[to], amount % (token.bridgedBalanceOf(satellites[from]) + 1), op
@@ -173,7 +168,9 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
     /// @dev A settlement out and a settlement back for the same amount is the identity on every bucket, whichever
     ///      identities the two legs name: only the wallet the position sits on changed in between.
-    function testFuzz_settleOutAndBackIsTheIdentity(uint128 mintAmount, uint128 settled, uint128 frozen) public {
+    function testFuzz_delegateOutAndSettleBackIsTheIdentity(uint128 mintAmount, uint128 settled, uint128 frozen)
+        public
+    {
         mintAmount = uint128(bound(mintAmount, 1, 1e30));
         frozen = uint128(bound(frozen, 0, mintAmount));
         settled = uint128(bound(settled, 0, mintAmount - frozen));
@@ -181,12 +178,12 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         vm.startPrank(agent);
         token.mint(alice, mintAmount);
         token.freezePartialTokens(alice, frozen);
-        // the counterparty wallet is bob's, so the leg crosses identities in both directions
-        ledger.settleFromNative(alice, satellites[1], settled, 1);
+        // the counterparty wallet is bob's, so the settlement back crosses identities
+        ledger.delegateOut(alice, satellites[1], settled);
 
-        assertEq(token.balanceOf(alice), mintAmount - settled, "balance after settling out");
-        assertEq(token.bridgedBalanceOf(satellites[1]), settled, "bridged after settling out");
-        assertEq(token.totalSupply(), mintAmount, "supply after settling out");
+        assertEq(token.balanceOf(alice), mintAmount - settled, "balance after delegating out");
+        assertEq(token.bridgedBalanceOf(satellites[1]), settled, "bridged after delegating out");
+        assertEq(token.totalSupply(), mintAmount, "supply after delegating out");
 
         ledger.settleToNative(satellites[1], alice, settled, 2);
         vm.stopPrank();
@@ -215,8 +212,6 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         ledger.bridgedTransfer(padded, satellites[1], amount % 500, 1);
         vm.expectRevert(expected);
         ledger.bridgedTransfer(satellites[0], padded, amount % 500, 1);
-        vm.expectRevert(expected);
-        ledger.settleFromNative(alice, padded, amount % 500, 1);
         vm.expectRevert(expected);
         ledger.settleToNative(padded, alice, amount % 500, 1);
         vm.stopPrank();

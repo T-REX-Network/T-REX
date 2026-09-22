@@ -120,6 +120,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         mapping(bytes32 walletKey => uint256) bridgedBalance;
         /// @dev Sum of every bridged position, kept so `totalSupply` counts it in O(1).
         uint256 totalBridged;
+        /// @dev Amounts a satellite burned for a cross-chain validation whose mint leg has not landed, keyed by
+        ///  the validation. Debited from the sender's position, still counted in `totalBridged`, still owned by
+        ///  the sender the validation names.
+        mapping(uint256 validationId => uint256) inTransit;
+        /// @dev Sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
+        uint256 totalInTransit;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.Token")) - 1)) & ~bytes32(uint256(0xff));
@@ -285,6 +291,24 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         return _sendMessage(chainKey, MessageTypesLib.Message.RECALL_INSTRUCTION, body);
     }
 
+    /// @inheritdoc IToken
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
+        require(_msgSender() == address(_tokenStorage().compliance), ErrorsLib.OnlyBoundCompliance());
+
+        (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
+        if (toNative) {
+            _settleToNative(from, recipient, amount, validationId);
+            return;
+        }
+        _bridgedTransfer(from, to, amount, validationId);
+    }
+
+    /// @inheritdoc IToken
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external {
+        require(_msgSender() == address(_tokenStorage().compliance), ErrorsLib.OnlyBoundCompliance());
+        _holdInTransit(from, amount, validationId);
+    }
+
     /* ----- Ledger Views ----- */
 
     /// @inheritdoc IERC20
@@ -295,12 +319,12 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     ///  The register reports the issuance, not the native float, and the events say so at the cost of one
     ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
     ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
-    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled`,
-    ///  `SettledFromNative` and `SettledToNative` are the reconciliation for anyone deriving it that way, and
+    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled` and
+    ///  `SettledToNative` are the reconciliation for anyone deriving it that way, and
     ///  `totalSupply() - totalBridged()` is the native float. An escrow address holding the delegated float
     ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
     ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
-    ///  `totalBridged` to the positions, whichever of the four transitions moved it.
+    ///  `totalBridged` to the positions, whichever transition moved it.
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         return super.totalSupply() + _tokenStorage().totalBridged;
     }
@@ -318,6 +342,16 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /// @inheritdoc IToken
     function totalBridged() external view returns (uint256) {
         return _tokenStorage().totalBridged;
+    }
+
+    /// @inheritdoc IToken
+    function inTransitOf(uint256 validationId) external view returns (uint256) {
+        return _tokenStorage().inTransit[validationId];
+    }
+
+    /// @inheritdoc IToken
+    function totalInTransit() external view returns (uint256) {
+        return _tokenStorage().totalInTransit;
     }
 
     /// @inheritdoc IERC20Metadata
@@ -665,7 +699,7 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
     ///  Relocation of one identity's own position, so ownership does not move: the calling flow checks pause,
     ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
-    ///  the buckets and the envelope only. A settlement leg that crosses identities is {_settleFromNative}.
+    ///  the buckets and the envelope only. It is the only way a native position reaches a satellite.
     function _delegateOut(address holder, bytes memory toWallet, uint256 amount) internal {
         bytes32 toKey = _moveNativeToBridged(holder, toWallet, amount);
 
@@ -682,33 +716,50 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
         emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
     }
 
+    /// @dev Takes `amount` out of `fromWallet`'s bridged position and holds it against `validationId`: the burn
+    ///  leg of a cross-chain validation landed, the mint leg has not. The amount stays bridged and stays the
+    ///  sender's; only the wallet no longer holds it, so nothing can be issued or recalled against tokens the
+    ///  satellite already burned. One hold per validation.
+    function _holdInTransit(bytes memory fromWallet, uint256 amount, uint256 validationId) internal {
+        bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
+
+        TokenStorage storage s = _tokenStorage();
+        require(s.inTransit[validationId] == 0, ErrorsLib.TransitAlreadyHeld(validationId));
+        _debitBridged(s, fromWallet, fromKey, amount);
+        s.inTransit[validationId] = amount;
+        s.totalInTransit += amount;
+
+        emit EventsLib.HeldInTransit(fromKey, validationId, fromWallet, amount);
+    }
+
     /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
     ///  touch: `from` down, `to` up, nothing native. `validationId` is the validation the settlement consumed.
+    ///  When its burn leg already moved the amount in transit, the hold is what `to` is credited from, and it
+    ///  must be the settled amount exactly.
     function _bridgedTransfer(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal {
         bytes32 fromKey = WalletKeyLib.satelliteKey(from);
         bytes32 toKey = WalletKeyLib.satelliteKey(to);
 
         TokenStorage storage s = _tokenStorage();
-        _debitBridged(s, from, fromKey, amount);
+        uint256 held = s.inTransit[validationId];
+        if (held != 0) {
+            require(held == amount, ErrorsLib.TransitAmountMismatch(validationId, held, amount));
+            delete s.inTransit[validationId];
+            s.totalInTransit -= amount;
+        } else {
+            _debitBridged(s, from, fromKey, amount);
+        }
         s.bridgedBalance[toKey] += amount;
 
         emit EventsLib.BridgedTransfer(fromKey, toKey, validationId, from, to, amount);
     }
 
-    /// @dev Applies the settled leg of a validation whose sender is on the reference chain and whose receiver is
-    ///  on a satellite: `from`'s free balance down, the satellite position up. Same bucket arithmetic as
-    ///  {_delegateOut} and a distinct event, because ownership moves between identities here. `validationId` is
-    ///  the validation the settlement consumed. The calling flow owns the lifecycle; the ledger checks the
-    ///  buckets and the envelope only.
-    function _settleFromNative(address from, bytes memory toWallet, uint256 amount, uint256 validationId) internal {
-        bytes32 toKey = _moveNativeToBridged(from, toWallet, amount);
-
-        emit EventsLib.SettledFromNative(from, toKey, validationId, toWallet, amount);
-    }
-
     /// @dev Applies the settled leg of a validation whose sender is on a satellite and whose receiver is on the
-    ///  reference chain: the satellite position down, `to`'s free balance up. The mirror of {_settleFromNative},
-    ///  and the cross-identity counterpart of {_recall}.
+    ///  reference chain: the satellite position down, `to`'s free balance up. Same bucket arithmetic as {_recall}
+    ///  and a distinct event, because ownership moves between identities here. `validationId` is the validation
+    ///  the settlement consumed. The calling flow owns the lifecycle; the ledger checks the buckets and the
+    ///  envelope only. There is no mirror leaving a native wallet: the compliance issues no validation whose
+    ///  sender is native, so the satellite executing one always holds the position it moves.
     function _settleToNative(bytes memory fromWallet, address to, uint256 amount, uint256 validationId) internal {
         bytes32 fromKey = _moveBridgedToNative(fromWallet, to, amount);
 
@@ -821,11 +872,18 @@ contract Token is ERC20PermitUpgradeable, PausableUpgradeable, AccessManagedOwna
     /// @dev The destination is structural: the bound compliance owns the slot lifecycle, so an attributed
     ///      settlement goes there and nowhere else. It is forwarded as decoded; classifying it against
     ///      the stored validation is the compliance's business, not the token's.
+    ///
+    ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
+    ///      incident under investigation settles nothing. When the compliance reports a replayed or a never-issued
+    ///      settlement, the token halts itself through its pause: the interop layer is misbehaving and every
+    ///      notification is suspect until an agent has investigated, resolved and called `unpause`.
     function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
         internal
         override
     {
-        ISettlementHandler(address(_tokenStorage().compliance)).handleSettlement(chainKey, notification);
+        _requireNotPaused();
+        bool halt = ISettlementHandler(address(_tokenStorage().compliance)).handleSettlement(chainKey, notification);
+        if (halt) _pause();
     }
 
     /// @inheritdoc TREXMessaging
