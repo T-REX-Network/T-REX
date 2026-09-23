@@ -411,9 +411,9 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainID)
         internal
         virtual
+        whenNotPaused
         returns (bool)
     {
-        _requireNotPaused();
         ERC3643TokenStorage storage s = _erc3643TokenStorage();
         uint256 investorTokens = balanceOf(lostWallet);
         uint256 frozenTokens = s.frozenTokens[lostWallet];
