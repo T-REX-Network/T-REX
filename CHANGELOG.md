@@ -409,8 +409,15 @@ All notable changes to this project will be documented in this file.
 
 - **`recoveryAddress` now notifies compliance**: recovery moves the balance through `_forceUpdate`,
   which skips `_update` and therefore its compliance hooks, so `Token.recoveryAddress` now calls
-  `compliance.transferred(lostWallet, newWallet, investorTokens)` after the frozen / address-frozen /
-  identity migrations and before `RecoverySuccess`, the same way `forcedTransfer` does. Previously
+  `compliance.transferred(lostWallet, newWallet, investorTokens)` after the balance / frozen /
+  address-frozen migrations and before `RecoverySuccess`, the same way `forcedTransfer` does. The
+  identity migration is split around that hook: the new wallet is registered before the move and the
+  lost wallet's entry is deleted only after compliance has been notified, so that during the hook both
+  wallets still resolve to the identities that hold and receive the tokens. A module keying its state by
+  identity can therefore debit and credit through the registry; had the lost wallet been deleted first,
+  it would have resolved to the zero identity (or to a shadowed global one) and the debit would have
+  been lost (#70). In `ERC3643Token`, `_migrateIdentity` is replaced by `_registerRecoveredWallet`,
+  which performs the registration and returns whether the lost wallet must be deleted. Previously
   (v4 behaviour) a recovery was invisible to bound modules: a module tracking balances through the
   `transferred` / `created` / `destroyed` callbacks kept crediting the lost wallet, and since the lost
   wallet is removed from the identity registry by the same call, the drift could not be corrected

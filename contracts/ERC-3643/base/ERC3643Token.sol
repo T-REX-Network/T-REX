@@ -414,14 +414,18 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
         uint256 investorTokens = balanceOf(lostWallet);
         uint256 frozenTokens = s.frozenTokens[lostWallet];
 
+        // The new wallet is registered before the move and the lost wallet is deleted after the compliance
+        // hook, so that during `transferred` both wallets still resolve to the identities that hold and
+        // receive the tokens. A module keyed by identity can then debit and credit through the registry.
+        bool migrateIdentity = _registerRecoveredWallet(lostWallet, newWallet, investorOnchainID);
+
         _forceUpdate(lostWallet, newWallet, investorTokens);
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
-        _migrateIdentity(lostWallet, newWallet, investorOnchainID);
 
-        // Called after the migrations so rules see the final state, and before the event so that no
-        // downstream log can land between the recovery's own logs and `RecoverySuccess`.
         _getCompliance().transferred(lostWallet, newWallet, investorTokens);
+
+        if (migrateIdentity) _getIdentityRegistry().deleteIdentity(lostWallet);
 
         emit RecoverySuccess(lostWallet, newWallet, investorOnchainID);
         return true;
@@ -448,15 +452,18 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
         }
     }
 
-    /// @dev Moves the on-chain identity from the lost wallet to the new wallet, registering the new
-    ///  wallet only when it is not already known to the identity registry.
-    function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainID) internal virtual {
+    /// @dev First half of the identity migration: registers the new wallet under `investorOnchainID`
+    ///  when the lost wallet is known and the new one is not. Returns whether the lost wallet is known,
+    ///  i.e. whether the caller must delete it once compliance has been notified.
+    function _registerRecoveredWallet(address lostWallet, address newWallet, address investorOnchainID)
+        internal
+        virtual
+        returns (bool lostWalletRegistered)
+    {
         IERC3643IdentityRegistry registry = _getIdentityRegistry();
-        if (registry.contains(lostWallet)) {
-            if (!registry.contains(newWallet)) {
-                registry.registerIdentity(newWallet, IIdentity(investorOnchainID), registry.investorCountry(lostWallet));
-            }
-            registry.deleteIdentity(lostWallet);
+        lostWalletRegistered = registry.contains(lostWallet);
+        if (lostWalletRegistered && !registry.contains(newWallet)) {
+            registry.registerIdentity(newWallet, IIdentity(investorOnchainID), registry.investorCountry(lostWallet));
         }
     }
 
