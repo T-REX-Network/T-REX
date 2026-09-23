@@ -224,9 +224,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId)
+        external
+        whenNotPaused
+    {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        _requireNotPaused();
 
         (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
         if (toNative) {
@@ -237,9 +239,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external {
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external whenNotPaused {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        _requireNotPaused();
         _holdInTransit(from, amount, validationId);
     }
 
@@ -537,9 +538,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         internal
         override
+        whenNotPaused
         returns (bool)
     {
-        _requireNotPaused();
         require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
         require(balanceOf(lostWallet) != 0, ErrorsLib.NoTokenToRecover());
 
@@ -555,8 +556,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @dev Adds the T-REX `ForcedTransfer` event to the standard forced transfer. It is emitted before
     ///  the compliance hook so that no module log can land between `Transfer` and this event.
-    function _forcedTransfer(address from, address to, uint256 amount) internal override returns (bool) {
-        _requireNotPaused();
+    function _forcedTransfer(address from, address to, uint256 amount) internal override whenNotPaused returns (bool) {
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
@@ -591,8 +591,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
         internal
         override
+        whenNotPaused
     {
-        _requireNotPaused();
         bool halt = ISettlementHandler(address(_getCompliance())).handleSettlement(chainKey, notification);
         if (halt) _pause();
     }

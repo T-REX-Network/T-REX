@@ -398,8 +398,7 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
     /// @dev Moves tokens irrespective of freezes, unfreezing just enough to cover the amount, then tells
     ///  compliance the move happened. Recipient identity is still verified. Reverts while the token is
     ///  paused: a forced transfer is privileged, not exempt from an incident halt.
-    function _forcedTransfer(address from, address to, uint256 amount) internal virtual returns (bool) {
-        _requireNotPaused();
+    function _forcedTransfer(address from, address to, uint256 amount) internal virtual whenNotPaused returns (bool) {
         require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         _getCompliance().transferred(from, to, amount);
@@ -497,9 +496,9 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, IERC364
 
     /// @dev Moves tokens bypassing {_update}: no pause, freeze, identity or compliance check, and no
     ///  compliance notification. Pause policy: the pause halts every balance movement between wallets,
-    ///  and every caller of this function enforces it before calling, `_forcedTransfer` and
-    ///  `_recoveryAddress` both start with `_requireNotPaused`; mints and burns stay allowed while paused,
-    ///  see {_update}. Callers are also responsible for notifying compliance themselves, which is why
+    ///  and every caller of this function enforces it before calling; `_forcedTransfer` and
+    ///  `_recoveryAddress` both use `whenNotPaused`. Mints and burns stay allowed while paused, see
+    ///  {_update}. Callers are also responsible for notifying compliance themselves, which is why
     ///  `_forcedTransfer` and `_recoveryAddress` each call `transferred` explicitly.
     function _forceUpdate(address from, address to, uint256 value) internal virtual {
         _autoUnfreezeFor(from, value);

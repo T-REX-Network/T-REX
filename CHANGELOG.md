@@ -178,8 +178,8 @@ All notable changes to this project will be documented in this file.
 - **Forced transfers and recovery respect the pause** (OZ M-09): `forcedTransfer`, `batchForcedTransfer`
   and `recoveryAddress` reached `_forceUpdate` without a pause check, so a forced-transfer agent could
   move balances during an incident halt and pausing alone could not contain that agent. `_forcedTransfer`
-  and `_recoveryAddress` now start with `_requireNotPaused`, in the ERC-3643 base and in the T-REX
-  override, so single and batch forms revert with `EnforcedPause` while paused and work again after
+  and `_recoveryAddress` now use `whenNotPaused`, in the ERC-3643 base and in the T-REX override, so
+  single and batch forms revert with `EnforcedPause` while paused and work again after
   `unpause`. Recovery is not an exception: it moves a balance like any transfer and waits for the halt to
   be lifted.
   - Pause policy, written down: the pause halts every balance movement between wallets, native or
