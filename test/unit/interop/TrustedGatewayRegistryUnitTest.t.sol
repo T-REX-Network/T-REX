@@ -97,12 +97,14 @@ contract TrustedGatewayRegistryUnitTest is AccessManagerHelper {
     }
 
     function testInteropManagerRoleIdIsUnique() public pure {
-        assertTrue(RolesLib.INTEROP_MANAGER != RolesLib.VERSION_MANAGER);
-        assertTrue(RolesLib.INTEROP_MANAGER != RolesLib.ASSET_DEPLOYER);
-        assertTrue(RolesLib.INTEROP_MANAGER != RolesLib.IRS_BINDER);
-        assertTrue(RolesLib.INTEROP_MANAGER != RolesLib.OWNER);
-        assertTrue(RolesLib.INTEROP_MANAGER != RolesLib.SUITE_ADMIN);
-        assertTrue(RolesLib.INTEROP_MANAGER != RolesLib.AGENT_ADMIN);
+        uint64 interopManager = RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER);
+        assertTrue(interopManager != RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER));
+        assertTrue(interopManager != RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER));
+        assertTrue(interopManager != RolesLib.platform(RolesLib.PlatformRole.OWNER));
+        assertTrue(interopManager != _role(RolesLib.Role.IRS_BINDER));
+        assertTrue(interopManager != _role(RolesLib.Role.OWNER));
+        assertTrue(interopManager != _role(RolesLib.Role.SUITE_ADMIN));
+        assertTrue(interopManager != _role(RolesLib.Role.AGENT_ADMIN));
     }
 
 }

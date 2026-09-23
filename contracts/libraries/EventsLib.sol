@@ -104,6 +104,7 @@ library EventsLib {
     event ModuleAdded(address indexed module);
     event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
     event ModuleRemoved(address indexed module);
+    event ModuleForceRemoved(address indexed module);
 
     // AbstractModule / AbstractModuleUpgradeable Events
 
@@ -202,6 +203,11 @@ library EventsLib {
     /// @notice Emergency: a trusted gateway delivered a leg already consumed, or an id never issued. Nothing is
     ///         applied and the token pauses itself until an agent unpauses it.
     event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
+    // TREXAccessManager Events
+
+    event DomainCreated(uint32 indexed domainId, string name);
+    event DomainAssigned(uint32 indexed domainId, address indexed target);
+
     // TREXImplementationAuthority Events
 
     event BeaconsDeployed(ITREXImplementationAuthority.SuiteBeacons beacons);

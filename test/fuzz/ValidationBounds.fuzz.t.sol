@@ -40,7 +40,7 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
                 )
             )
         );
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(reversed));
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(reversed), 1);
 
         a = BoundsModule(
             address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())))

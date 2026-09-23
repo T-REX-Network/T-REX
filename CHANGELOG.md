@@ -55,6 +55,126 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
+- **Role domains** (OZ H-02, #55): role ids on a shared AccessManager were one set for every
+  suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
+  - A role id is a domain id in the upper 32 bits and a role number below:
+    `RolesLib.forDomain(domainId, role)`. The standard roles are the `RolesLib.Role` enum; the
+    plain `uint64` constants are gone and an enum value cannot be passed to `grantRole` by accident, so
+    no unscoped role is reachable by omission. `forDomain(domainId, bytes32 customName)` derives
+    a custom role by hashing the name into the upper half of the role number, so `RolesLib.decode`
+    tells standard from custom without a lookup. Role numbers start at `ROLE_NUMBER_OFFSET` (1).
+    Domain 0 is rejected (`InvalidDomain`) and the platform domain holds three roles only,
+    so neither OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `domainId = id >> 32` off
+    `RoleGranted` events, no labels pass needed.
+  - The interop roles from the ERC-7786 work map onto the same scheme: `COMPLIANCE_MANAGER` (under
+    `SUITE_ADMIN`) and `VALIDATION_KEEPER` (under `AGENT_ADMIN`) are suite roles in `RolesLib.Role`,
+    `INTEROP_MANAGER` is a platform role, and `setupTrustedGatewayRegistryRoles` takes no domain.
+  - Platform roles, the factory `OWNER`, `VERSION_MANAGER`, `ASSET_DEPLOYER` and `INTEROP_MANAGER`, are
+    the `RolesLib.PlatformRole` enum in the reserved `PLATFORM_DOMAIN` (`type(uint32).max`),
+    derived with `RolesLib.platform(role)`. `forDomain` rejects that domain, so no suite role
+    can land on a platform id. They are governance roles, not issuer roles, so
+    `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
+    take no domain.
+  - A domain is an issuer, or a fund: one team across every token in it. Two tokens in one
+    domain share their agents; two domains are isolated from each other.
+  - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
+    gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
+    domain administrator can hand it out, so this holds by construction. Agents edit investor
+    records through a registry, never directly, and a storage shared across domains gives the other
+    domain's agents nothing.
+    Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's domain: whoever owns the
+    storage's domain owns its bindings.
+  - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns
+    the next id, `assign(domainId, target)` records the domain of a token or a storage,
+    `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers use
+    OpenZeppelin's `onlyAuthorized`: on the manager itself an unmapped selector resolves to
+    `ADMIN_ROLE`, so they are admin-only by default, honour the admin's execution delay, compose with
+    `schedule` and `execute`, show up in `getTargetFunctionRole(manager, selector)`, and can be
+    delegated to another role with `setTargetFunctionRole` on the manager itself. No OpenZeppelin
+    internal is overridden. Events `DomainCreated` and
+    `DomainAssigned`. `IdentityRegistryStorage.isIdentityRegistryBound(registry)` is a new O(1) view
+    on the T-REX storage, used by commissioning to skip an already bound registry.
+     `domainOf` is a registry, not the authorization boundary: authorization is the
+    role id on each selector and the grants behind it, and the manager never consults `domainOf`.
+    Commissioning and migration keep the two in step; `assign` alone records the domain, rewrites no
+    selector mapping and revokes nothing. Moving commissioned tokens to other domains is
+    `moveSuitesToDomains(TREXAccessManager, …)`, which assigns the tokens and then runs
+    `migrateSuitesToDomains`: remap the suites, grant the new domains' roles, revoke the old domain's
+    `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `commissionSuite` after a bare reassignment
+    remaps but leaves the old grant in place.
+  - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
+    needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
+    the token's domain on first use and keeps a storage already assigned where it is, so a storage
+    reused across domains keeps one owner and every registry bound to it writes with that
+    domain's `IRS_WRITER`. `commissionSuite(manager, token, domainId, storageDomainId)` is
+    the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
+    already shared with another domain is passed with the domain it lives in and is not
+    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Commissioning is
+    idempotent: re-running re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps
+    selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
+    governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
+    for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
+    domain.
+  - The library keeps no state of its own and validates no preconditions: no markers, no
+    "already configured" checks, no migration preflight. Which suites were configured alike is the
+    operator's record.
+  - `migrateSuitesToDomains(manager, tokens, fromDomainId, toDomainIds, assignments,
+    revocations)` moves suites from one domain into others in one call: grant the new roles, map
+    the domains, revoke the old ones. `RoleAssignment(account, role, domainId)` grants the role
+    in the new domain to an account that holds it in the source one, same execution delay
+    (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `RoleRevocation(account,
+    role)` revokes it in the source domain, administrative roles last. Storages are not touched. On
+    a `TREXAccessManager`, `assign` the tokens to their new domains as well. Atomicity is the
+    caller's: run it from one transaction, a script broadcasts it as many.
+- **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
+  `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
+  `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
+  so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
+  Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
+  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
+    suite salt, creates a domain named after the token, assigns the token and its storage to it,
+    commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
+    own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
+    supplied manager must have code (`AccessManagerNotAContract`); a reused storage must already
+    report the suite manager as its authority (`StorageAuthorityMismatch`).
+  - `deployTREXSuiteIsolated` clones the manager beacon too, owned by `accessManagerAdmin` so a broken
+    manager can be repaired from outside. Rotating that administrator is two steps: `ADMIN_ROLE` in
+    the manager and `transferOwnership` on the beacon.
+  - Trust statement: the shared manager beacon is owned by `TREXImplementationAuthority`, so
+    `VERSION_MANAGER` can replace the code behind every factory-deployed manager on it. Issuers who do
+    not accept that use `deployTREXSuiteIsolated` or supply their own manager.
+  - Breaking: `TokenDetails` gains `accessManagerAdmin`, `SuiteImplementations` and `SuiteBeacons`
+    gain a fifth entry, `TREXImplementationAuthority` requires a manager implementation. ABI changes
+    on `deployTREXSuite`, `deployTREXSuiteIsolated`, `publish`, `publishAndUpgrade`, `beacons`,
+    `implementations`, `implementationsFor` and the `BeaconsDeployed`, `VersionPublished`,
+    `SuiteUpgraded`, `IsolatedSuiteDeployed` events.
+- **The factory no longer writes into a supplied AccessManager** (OZ Critical, #77; closes M-05):
+  `TokenDetails.irAgents` and `tokenAgents` are gone, a deploy against a supplied manager makes no
+  call into it, and a reused storage is no longer bound by the factory. Before, any factory `OWNER`
+  could name another issuer's manager and receive `AGENT` there through the factory's `AGENT_ADMIN`
+  grant. Now the issuer commissions the suite on their own manager with `commissionSuite` and grants
+  agent roles themselves. A deploy naming a foreign manager is not rejected: it changes nothing on that
+  manager. `MaxAgentsReached` is removed.
+  - Rollout: this stops new grants. It does not revoke `AGENT_ADMIN` that issuers granted to earlier
+    factories on their managers; revoke it on every manager that holds it.
+- **Module removal never depends on the module** (OZ M-11, L-13): a module upgraded to revert
+  everywhere can no longer hold the token hostage.
+  - `removeModule` is unchanged and strict: it deletes the entry, then calls `unbindCompliance` and
+    reverts if that call fails for any reason, a module revert or a caller who starved the subcall of
+    gas alike. A best-effort call was considered and rejected: with the 63/64 gas rule any caller can
+    make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
+    healthy module's unbind at will.
+  - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
+    module and emits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
+    can tell a forced removal from a regular one. The module keeps its own binding record, so the same
+    proxy address cannot be re-added afterwards; a fresh deployment can.
+  - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
+    compliance still lists the module, so an unbind forwarded through `callModuleFunction`, directly
+    or nested in `multicall`, cannot leave the compliance routing to a module that considers itself
+    unbound. Only the two removal paths unbind.
+  - Deployments upgrading an existing `ModularCompliance` must register the `forceRemoveModule`
+    selector for OWNER on their AccessManager; `AccessManagerSetupLib` does it for new deployments.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance

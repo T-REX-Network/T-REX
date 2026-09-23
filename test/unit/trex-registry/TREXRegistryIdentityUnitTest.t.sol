@@ -7,6 +7,7 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
@@ -121,7 +122,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry));
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
 
         address second = makeAddr("secondBatchUser");
 

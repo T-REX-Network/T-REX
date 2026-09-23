@@ -63,71 +63,77 @@
 
 pragma solidity ^0.8.30;
 
+import { ErrorsLib } from "./ErrorsLib.sol";
+
 library RolesLib {
 
     bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
 
-    uint64 constant ROLE_PREFIX = uint64(uint256(keccak256("TREX-Suite"))) << 16;
+    // ---- Suite roles. A role id is a domain id in the upper 32 bits and a role number below ----
 
-    // ---- Operational roles (gate contract functions: "what you can do") ----
+    enum Role {
+        OWNER,
+        AGENT,
+        AGENT_MINTER,
+        AGENT_BURNER,
+        AGENT_PARTIAL_FREEZER,
+        AGENT_ADDRESS_FREEZER,
+        AGENT_RECOVERY_ADDRESS,
+        AGENT_FORCED_TRANSFER,
+        AGENT_PAUSER,
+        TOKEN_MANAGER,
+        IDENTITY_MANAGER,
+        AGENT_ADMIN,
+        SUITE_ADMIN,
+        IRS_BINDER,
+        IRS_WRITER,
+        COMPLIANCE_MANAGER,
+        VALIDATION_KEEPER
+    }
 
-    uint64 constant OWNER = ROLE_PREFIX + 1;
+    // ---- Platform roles: factory, implementation authority and identity factory governance ----
 
-    uint64 constant AGENT = ROLE_PREFIX + 2;
-    uint64 constant AGENT_MINTER = ROLE_PREFIX + 3;
-    uint64 constant AGENT_BURNER = ROLE_PREFIX + 4;
-    uint64 constant AGENT_PARTIAL_FREEZER = ROLE_PREFIX + 5;
-    uint64 constant AGENT_ADDRESS_FREEZER = ROLE_PREFIX + 6;
-    uint64 constant AGENT_RECOVERY_ADDRESS = ROLE_PREFIX + 7;
-    uint64 constant AGENT_FORCED_TRANSFER = ROLE_PREFIX + 8;
-    uint64 constant AGENT_PAUSER = ROLE_PREFIX + 9;
+    enum PlatformRole {
+        OWNER,
+        VERSION_MANAGER,
+        ASSET_DEPLOYER,
+        INTEROP_MANAGER
+    }
 
-    uint64 constant TOKEN_MANAGER = ROLE_PREFIX + 10;
-    uint64 constant IDENTITY_MANAGER = ROLE_PREFIX + 11;
+    uint32 constant PLATFORM_DOMAIN = type(uint32).max;
 
-    // Gates publishing a suite version on TREXImplementationAuthority and rotating the beacons onto it.
-    // Offset 16 continues the allocation sequence; the operational roles are not contiguous.
-    uint64 constant VERSION_MANAGER = ROLE_PREFIX + 16;
+    // Role numbers start at 1 so no standard role packs to a zero role number.
+    uint32 constant ROLE_NUMBER_OFFSET = 1;
 
-    // Gates the network-level set of vetted ERC-7786 gateways on TrustedGatewayRegistry. Held by network
-    // governance, not by an issuer: a gateway in that set attests the authorship of every message a token
-    // routed through it acts on, so adding one is deliberate and removing one is an emergency lever.
-    uint64 constant INTEROP_MANAGER = ROLE_PREFIX + 17;
-    // Gates the issuer's validation policy on ModularCompliance: the validity window, the per-chain reconciliation
-    // windows, the global clamp and the per-chain issuance pause. Administered by SUITE_ADMIN like the other
-    // manager roles.
-    uint64 constant COMPLIANCE_MANAGER = ROLE_PREFIX + 18;
-    // Gates the discard of expired validations on ModularCompliance: the garbage collector that releases the
-    // compliance slots a satellite never consumed. An operator role, administered by AGENT_ADMIN like the agents.
-    // Restricted by design: a permissionless discard could front-run a late settlement, forcing the late
-    // reconciliation and the per-chain pause it triggers. The price is a liveness dependency: a keeper that
-    // misses its discards keeps capacity reserved. Opening the role later must weigh both, not liveness alone.
-    uint64 constant VALIDATION_KEEPER = ROLE_PREFIX + 19;
+    // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
+    uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
 
-    // ---- Role-giver roles (administer the operational roles via setRoleAdmin) ----
-    // `*_ADMIN` always means "grants/revokes the same-named family of roles", matching
-    // AccessManager's setRoleAdmin semantics. They let grants be delegated without
-    // handing out the AccessManager ADMIN_ROLE (0).
+    function forDomain(uint32 domainId, Role role) internal pure returns (uint64) {
+        return _packSuite(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
+    }
 
-    // Admin of AGENT and every granular AGENT_* role.
-    uint64 constant AGENT_ADMIN = ROLE_PREFIX + 12;
+    function forDomain(uint32 domainId, bytes32 customName) internal pure returns (uint64) {
+        return _packSuite(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
+    }
 
-    // Admin of the token-config roles TOKEN_MANAGER and IDENTITY_MANAGER.
-    uint64 constant SUITE_ADMIN = ROLE_PREFIX + 13;
+    function platform(PlatformRole role) internal pure returns (uint64) {
+        return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
+    }
 
-    // ---- Deploy-time transient roles (self-granted for a single call, revoked before returning) ----
+    function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
+        domainId = uint32(roleId >> 32);
+        custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;
+        roleNumber = uint32(roleId) & ~CUSTOM_ROLE_FLAG;
+    }
 
-    // Gates IdentityRegistryStorage.bindIdentityRegistry so the factory can bind a new IR onto a reused
-    // IRS during deployTREXSuite without standing OWNER. Unassigned at rest, self-granted for the bind call
-    // and revoked before returning. Not a hard boundary: the factory's AGENT_ADMIN admins it and can re-grant.
-    uint64 constant IRS_BINDER = ROLE_PREFIX + 14;
+    function _packSuite(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
+        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
+        return _pack(domainId, roleNumber);
+    }
 
-    // ---- Roles resolved against the ONCHAINID IdentityFactory's authority ----
-
-    // Gates minting of IdentityTypes.ASSET identities on the ONCHAINID IdentityFactory, which resolves
-    // the per-type role against its own authority. TREXFactory must hold this role there to auto-mint a
-    // token OID during deployTREXSuite; suites that always supply tokenDetails.ONCHAINID do not need it.
-    // Register it on the factory with `setIdentityTypePolicy(IdentityTypes.ASSET, ASSET_DEPLOYER, false)`
-    uint64 constant ASSET_DEPLOYER = ROLE_PREFIX + 15;
+    function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
+        require(domainId != 0, ErrorsLib.InvalidDomain());
+        return (uint64(domainId) << 32) | roleNumber;
+    }
 
 }

@@ -36,6 +36,7 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
+
 /**
  *     NOTICE
  *
@@ -62,92 +63,61 @@
 
 pragma solidity 0.8.30;
 
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+import {
+    AccessManagerUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 
-import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
-import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { EventsLib } from "../libraries/EventsLib.sol";
 
-// basic test contract showcasing the behavior of a module not plug & play
-contract ModuleNotPnP is AbstractModuleUpgradeable {
+contract TREXAccessManager is AccessManagerUpgradeable {
 
-    uint32 private constant DOMAIN = 1;
-
-    /// state variables
-    mapping(address => uint256) private _complianceData;
-    mapping(address => bool) private _moduleReady;
-
-    /// functions
-
-    /**
-     * @dev initializes the contract and sets the initial state.
-     * @notice This function should only be called once during the contract deployment.
-     */
-    function initialize() external initializer {
-        __AbstractModule_init();
+    /// @custom:storage-location erc7201:erc3643.storage.TREXAccessManager
+    struct DomainStorage {
+        uint32 count;
+        mapping(uint32 domainId => string name) names;
+        mapping(address target => uint32 domainId) domainOf;
     }
 
-    function doSomething(uint256 _value) external onlyComplianceCall {
-        _complianceData[msg.sender] = _value;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXAccessManager")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant DOMAIN_STORAGE_LOCATION =
+        0x9ee5333472569314e77d439560942818930bfd1bd85e664704fdf0ed68f91e00;
+
+    constructor() {
+        _disableInitializers();
     }
 
-    function setModuleReady(address compliance, bool ready) external {
-        (bool isOwner,) = IAccessManager(IAccessManaged(compliance).authority())
-            .hasRole(RolesLib.forDomain(DOMAIN, RolesLib.Role.OWNER), msg.sender);
-        require(isOwner, "only compliance owner can call");
-        _moduleReady[compliance] = ready;
+    function createDomain(string calldata name) external onlyAuthorized returns (uint32 domainId) {
+        DomainStorage storage $ = _getDomainStorage();
+        domainId = ++$.count;
+        $.names[domainId] = name;
+        emit EventsLib.DomainCreated(domainId, name);
     }
 
-    /**
-     *  @dev See {IModule-moduleCheck}.
-     *  always returns true (just a test module)
-     */
-    function moduleCheck(
-        address,
-        /*_from*/
-        address,
-        uint256,
-        address
-    )
-        external
-        pure
-        override
-        returns (bool)
-    {
-        return true;
+    function assign(uint32 domainId, address target) external onlyAuthorized {
+        DomainStorage storage $ = _getDomainStorage();
+        require(domainId != 0 && domainId <= $.count, ErrorsLib.DomainNotFound(domainId));
+        require(target != address(0), ErrorsLib.ZeroAddress());
+        $.domainOf[target] = domainId;
+        emit EventsLib.DomainAssigned(domainId, target);
     }
 
-    /**
-     *  @dev See {IModule-moduleCapabilities}.
-     *  only the transfer check is implemented, the hooks keep the base defaults
-     */
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER;
+    function domainOf(address target) external view returns (uint32) {
+        return _getDomainStorage().domainOf[target];
     }
 
-    /**
-     *  @dev See {IModule-canComplianceBind}.
-     */
-    function canComplianceBind(address _compliance) external view returns (bool) {
-        return _moduleReady[_compliance];
+    function domainName(uint32 domainId) external view returns (string memory) {
+        return _getDomainStorage().names[domainId];
     }
 
-    /**
-     *  @dev See {IModule-isPlugAndPlay}.
-     */
-    function isPlugAndPlay() external pure returns (bool) {
-        return false;
+    function domainCount() external view returns (uint32) {
+        return _getDomainStorage().count;
     }
 
-    /**
-     *  @dev See {IModule-name}.
-     */
-    function name() public pure returns (string memory _name) {
-        return "ModuleNotPnP";
+    function _getDomainStorage() private pure returns (DomainStorage storage $) {
+        assembly ("memory-safe") {
+            $.slot := DOMAIN_STORAGE_LOCATION
+        }
     }
-
-    /// @dev Upgrade guard: no-op in this test mock.
-    function _authorizeUpgrade(address) internal override { }
 
 }

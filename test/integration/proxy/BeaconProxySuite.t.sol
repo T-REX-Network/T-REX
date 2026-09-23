@@ -56,7 +56,8 @@ contract BeaconProxySuiteTest is TREXSuiteTest {
                 tokenImplementation: address(v2Implementation),
                 trexRegistryImplementation: address(trexRegistryImplementation),
                 irsImplementation: address(identityRegistryStorageImplementation),
-                mcImplementation: address(modularComplianceImplementation)
+                mcImplementation: address(modularComplianceImplementation),
+                accessManagerImplementation: address(accessManagerImplementation)
             });
 
         vm.prank(deployer);
@@ -83,7 +84,8 @@ contract BeaconProxySuiteTest is TREXSuiteTest {
                 tokenImplementation: address(v2Implementation),
                 trexRegistryImplementation: address(trexRegistryImplementation),
                 irsImplementation: address(identityRegistryStorageImplementation),
-                mcImplementation: address(modularComplianceImplementation)
+                mcImplementation: address(modularComplianceImplementation),
+                accessManagerImplementation: address(accessManagerImplementation)
             });
         vm.prank(deployer);
         trexImplementationAuthority.publishAndUpgrade(v1, impls);
