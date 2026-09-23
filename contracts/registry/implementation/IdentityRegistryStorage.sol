@@ -186,6 +186,11 @@ contract IdentityRegistryStorage is
         return address(_storedIdentity(userAddress)) != address(0);
     }
 
+    /// @inheritdoc IIdentityRegistryStorage
+    function isIdentityRegistryBound(address identityRegistry) external view override returns (bool) {
+        return _isIdentityRegistryBound(identityRegistry);
+    }
+
     /// @dev See {IERC165-supportsInterface}.
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);

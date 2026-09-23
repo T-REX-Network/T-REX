@@ -72,6 +72,8 @@ import { RolesLib } from "contracts/libraries/RolesLib.sol";
 // basic test contract showcasing the behavior of a module not plug & play
 contract ModuleNotPnP is AbstractModuleUpgradeable {
 
+    uint32 private constant DOMAIN = 1;
+
     /// state variables
     mapping(address => uint256) private _complianceData;
     mapping(address => bool) private _moduleReady;
@@ -91,7 +93,8 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
     }
 
     function setModuleReady(address compliance, bool ready) external {
-        (bool isOwner,) = IAccessManager(IAccessManaged(compliance).authority()).hasRole(RolesLib.OWNER, msg.sender);
+        (bool isOwner,) = IAccessManager(IAccessManaged(compliance).authority())
+            .hasRole(RolesLib.forDomain(DOMAIN, RolesLib.Role.OWNER), msg.sender);
         require(isOwner, "only compliance owner can call");
         _moduleReady[compliance] = ready;
     }

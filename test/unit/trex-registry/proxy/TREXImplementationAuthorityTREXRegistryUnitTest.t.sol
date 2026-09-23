@@ -50,7 +50,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
 
         vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(ia));
-        accessManager.grantRole(RolesLib.VERSION_MANAGER, deployer, 0);
+        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), deployer, 0);
         vm.stopPrank();
     }
 
@@ -59,7 +59,8 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
             tokenImplementation: address(tokenImpl),
             trexRegistryImplementation: address(trexRegistryImpl),
             irsImplementation: address(irsImpl),
-            mcImplementation: address(mcImpl)
+            mcImplementation: address(mcImpl),
+            accessManagerImplementation: address(mcImpl)
         });
     }
 

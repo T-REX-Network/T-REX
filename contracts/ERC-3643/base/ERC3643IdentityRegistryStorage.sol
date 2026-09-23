@@ -137,11 +137,6 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     }
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
-    function isLinkedIdentityRegistry(address _identityRegistry) external view virtual returns (bool) {
-        return _isLinkedIdentityRegistry(_identityRegistry);
-    }
-
-    /// @inheritdoc IERC3643IdentityRegistryStorage
     function linkedIdentityRegistryCount() external view virtual returns (uint256) {
         return _linkedIdentityRegistryCount();
     }
@@ -258,9 +253,9 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
     }
 
     /// @dev Tests membership in the bound set, separate from the external getter so derived contracts
-    ///  can consult it without an external call. Enumeration only, never an authorization check —
-    ///  see {IERC3643IdentityRegistryStorage-isLinkedIdentityRegistry}.
-    function _isLinkedIdentityRegistry(address identityRegistry) internal view virtual returns (bool) {
+    ///  can consult it without an external call. Enumeration only, never an authorization check: the
+    ///  bound set does not gate writes to this storage.
+    function _isIdentityRegistryBound(address identityRegistry) internal view virtual returns (bool) {
         return _erc3643IdentityRegistryStorageStorage().identityRegistries.contains(identityRegistry);
     }
 

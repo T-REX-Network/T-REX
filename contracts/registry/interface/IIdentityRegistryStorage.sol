@@ -70,4 +70,7 @@ interface IIdentityRegistryStorage is IERC3643IdentityRegistryStorage {
     /// ignoring the global identity registry fallback.
     function isLocallyRegistered(address userAddress) external view returns (bool);
 
+    /// @notice Returns true when `identityRegistry` is bound to this IRS.
+    function isIdentityRegistryBound(address identityRegistry) external view returns (bool);
+
 }

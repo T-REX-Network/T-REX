@@ -113,8 +113,8 @@ interface IERC3643IdentityRegistryStorage {
 
     /**
      *  @notice Adds an identity registry to the list of identityRegistries linked to the storage contract.
-     *  Gated by the IRS_BINDER role (see AccessManagerSetupLib): a transient role the TREXFactory
-     *  self-grants for the bind window when attaching an IR onto a reused IRS, and revokes immediately.
+     *  Gated by the IRS_BINDER role (see AccessManagerSetupLib), held by the issuer's accounts that attach
+     *  a registry onto a reused storage; the TREXFactory never holds it.
      *  The number of bound registries is capped (see `MAX_BOUND_REGISTRIES` on the implementation).
      *
      *  @dev The bound set (`linkedIdentityRegistries`) is enumeration only, NOT authorization. Write
@@ -139,16 +139,6 @@ interface IERC3643IdentityRegistryStorage {
      *  @dev Returns the identity registries linked to the storage contract
      */
     function linkedIdentityRegistries() external view returns (address[] memory);
-
-    /**
-     *  @notice Returns whether an identity registry is in the bound set.
-     *  @dev See {bindIdentityRegistry} — the bound set is enumeration only, NOT authorization. A true
-     *  result does not mean the registry may write to the storage, and a false result does not mean it
-     *  may not: write access is gated solely by the AGENT role on the AccessManager. Do not use this as
-     *  an access check.
-     *  @param _identityRegistry The identity registry address to test.
-     */
-    function isLinkedIdentityRegistry(address _identityRegistry) external view returns (bool);
 
     /**
      *  @dev Returns the number of identity registries linked to the storage contract, without copying

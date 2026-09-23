@@ -84,6 +84,7 @@ rule restrictedAdminRequiresAuthorisation(method f, env e, calldataarg args)
 
 definition isRestricted(method f) returns bool =
        f.selector == sig:removeModule(address).selector
+    || f.selector == sig:forceRemoveModule(address).selector
     || f.selector == sig:addAndSetModule(address,bytes[]).selector
     || f.selector == sig:addModule(address).selector
     || f.selector == sig:callModuleFunction(bytes,address).selector

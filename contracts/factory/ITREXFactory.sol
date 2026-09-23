@@ -73,21 +73,21 @@ interface ITREXFactory {
         uint8 decimals;
         // identity registry storage address
         // set it to ZERO address if you want to deploy a new storage
-        // if an address is provided, please ensure that the factory is set as owner of the contract
+        // if an address is provided, its authority must be the suite's access manager; the factory never
+        // binds the new identity registry to it, the issuer does
         address irs;
         // ONCHAINID of the token
         address ONCHAINID;
-        // list of agents of the identity registry (can be set to an AgentManager contract)
-        address[] irAgents;
-        // list of agents of the token
-        address[] tokenAgents;
         // modules to bind to the compliance, indexes are corresponding to the settings callData indexes
         // if a module doesn't require settings, it can be added at the end of the array, at index > settings.length
         address[] complianceModules;
         // settings calls for compliance modules
         bytes[] complianceSettings;
         // access manager address
+        // set it to ZERO address to have the factory deploy a TREXAccessManager for the suite
         address accessManager;
+        // account receiving ADMIN_ROLE on the deployed access manager, ignored when one is supplied
+        address accessManagerAdmin;
     }
 
     struct ClaimDetails {
@@ -123,16 +123,32 @@ interface ITREXFactory {
     function setIdFactory(address _idFactory) external;
 
     /**
+     *  @dev setter for the trusted gateway registry address
+     *  the registry is the network's vetted gateway set; every token deployed by the factory is
+     *  pointed at it at deployment and carries no setter of its own, so gateway trust stays a
+     *  network-level decision. Tokens already deployed keep the registry they were deployed with.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  emits `TrustedGatewayRegistrySet` event
+     *  @param _trustedGatewayRegistry The address of the trusted gateway registry contract
+     */
+    function setTrustedGatewayRegistry(address _trustedGatewayRegistry) external;
+
+    /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
      *  this function will deploy and set the contracts as follow :
-     *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner, agents,
+     *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner,
      *  IR address , Compliance address
-     *  Identity Registry : deploy the IR contract (proxy) and set the owner, agents,
+     *  Identity Registry : deploy the IR contract (proxy) and set the owner,
      *  IRS address, TIR address, CTR address
      *  IRS : deploy IRS contract (proxy) if required (address set as 0 in the TokenDetails, bind IRS to IR, set owner
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
      *  TIR : deploy TIR contract (proxy), set trusted issuers, set owner
      *  Compliance: deploy modular compliance, bind with token, add modules, set modules parameters, set owner
+     *  AccessManager : when `_tokenDetails.accessManager` is zero, deploy a `TREXAccessManager` (proxy),
+     *  create a domain named after the token, assign the token and its storage to it, commission the
+     *  suite and hand `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the
+     *  issuer commissions it (`AccessManagerSetupLib.commissionSuite`).
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
@@ -141,9 +157,8 @@ interface ITREXFactory {
      *  @param _salt the salt used to make the contracts deployments with CREATE2
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)
      *  @param _claimDetails The details of the claims and claim issuers (see struct ClaimDetails for more details)
-     *  cannot add more than 5 agents on IR and 5 agents on Token
      *  cannot add more than 5 claim topics required and more than 5 trusted issuers
-     *  cannot add more than 30 compliance settings transactions
+     *  cannot bind more than 25 compliance modules
      */
     function deployTREXSuite(
         string memory _salt,
@@ -153,11 +168,21 @@ interface ITREXFactory {
 
     /**
      *  @dev deploys a suite that does not follow the shared implementation authority.
-     *  Clones 4 fresh `UpgradeableBeacon`s from the authority's active implementations and points the
+     *  Clones fresh `UpgradeableBeacon`s from the authority's active implementations, one per suite contract
+     *  plus one for the access manager when the factory deploys it, and points the
      *  suite at those clones instead of the shared beacons, so later `publish` / `upgrade` calls on the
-     *  authority never reach this suite. The clones are owned by `_tokenDetails.accessManager`.
+     *  authority never reach this suite. The suite-contract clones are owned by the suite's access
+     *  manager, supplied or factory-deployed; the access-manager clone, when the factory deploys the
+     *  manager, is owned by `_tokenDetails.accessManagerAdmin`. Rotating that administrator is two steps:
+     *  the `ADMIN_ROLE` rotation inside the manager and `transferOwnership` on the access-manager clone,
+     *  which the manager's roles do not govern.
      *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always
      *  deploys its own identity storage through the cloned IRS beacon.
+     *  When `_tokenDetails.accessManager` is zero the factory deploys a `TREXAccessManager` behind the cloned
+     *  beacon, creates a domain named after the token, assigns the token and its storage, commissions the
+     *  suite and hands `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
+     *  commissions it (`AccessManagerSetupLib.commissionSuite`).
      *  Restricted to the configured AccessManager role (OWNER).
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events
      *  @param _salt the salt used to make the contracts deployments with CREATE3
@@ -179,6 +204,11 @@ interface ITREXFactory {
      *  @dev getter for identity factory address
      */
     function getIdFactory() external view returns (address);
+
+    /**
+     *  @dev getter for the trusted gateway registry address wired into newly deployed tokens
+     */
+    function getTrustedGatewayRegistry() external view returns (address);
 
     /**
      *  @dev getter for token address corresponding to salt string

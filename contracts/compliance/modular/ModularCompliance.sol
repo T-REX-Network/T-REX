@@ -68,19 +68,32 @@ import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableM
 
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Compliance } from "../../ERC-3643/base/ERC3643Compliance.sol";
+import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { ModuleCapabilitiesLib } from "../../libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
+import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
+import { IToken } from "../../token/IToken.sol";
+import { Token } from "../../token/Token.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
+import { ITransferValidation } from "./ITransferValidation.sol";
+import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
 /// @dev {ERC3643Compliance} plus the module system that supplies the rules: the bound module set, the
-/// capability-filtered dispatch implementing the base hooks, the `canSpenderCall` check and
-/// AccessManager authorization.
-contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManagedOwnableUpgradeable {
+/// capability-filtered dispatch implementing the base hooks, the `canSpenderCall` check, the
+/// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
+contract ModularCompliance is
+    IModularCompliance,
+    ISettlementHandler,
+    ERC3643Compliance,
+    TransferValidation,
+    AccessManagedOwnableUpgradeable
+{
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
 
@@ -123,13 +136,34 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
 
     /**
      *  @dev See {IModularCompliance-removeModule}.
+     *  Deletes the module from the routing set, then calls `unbindCompliance` on it directly so the module
+     *  drops its own binding record. The call is not best effort on purpose: if the module reverts, or a
+     *  caller supplies only enough gas for the outer call so the subcall runs out under the 63/64 rule, the
+     *  whole removal reverts and the module stays bound on both sides. A module that reverts on
+     *  `unbindCompliance` is removed with {forceRemoveModule}.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleRemoved event.
+     *  @param _module address of the module to remove
      */
     function removeModule(address _module) external restricted {
-        require(_module != address(0), ErrorsLib.ZeroAddress());
-
-        require(_getStorage().modules.remove(_module), ErrorsLib.ModuleNotBound());
+        _removeModule(_module);
         IModule(_module).unbindCompliance(address(this));
         emit EventsLib.ModuleRemoved(_module);
+    }
+
+    /**
+     *  @dev See {IModularCompliance-forceRemoveModule}.
+     *  Deletes the module from the routing set without any call into it, so a module that reverts on
+     *  `unbindCompliance` or everywhere cannot hold the token hostage. The module keeps its own binding
+     *  record, so the same address cannot be added to this compliance again; a fresh deployment can.
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleForceRemoved event and no ModuleRemoved, so indexers can tell a forced removal
+     *  from a regular one.
+     *  @param _module address of the module to remove
+     */
+    function forceRemoveModule(address _module) external restricted {
+        _removeModule(_module);
+        emit EventsLib.ModuleForceRemoved(_module);
     }
 
     /**
@@ -143,6 +177,18 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
         s.modules.set(_module, capabilities);
 
         emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
+    }
+
+    /// @inheritdoc ISettlementHandler
+    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+        external
+        onlyBoundToken
+        returns (bool haltToken)
+    {
+        emit EventsLib.SettlementNotified(
+            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
+        );
+        return _handleSettlement(originChainKey, notification);
     }
 
     /**
@@ -232,12 +278,46 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
         _callModuleFunction(callData, _module);
     }
 
+    /* ----- Validation settings ----- */
+
+    /// @inheritdoc ITransferValidation
+    function setDefaultValidityWindow(uint64 duration) external restricted {
+        _setDefaultValidityWindow(duration);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function setReconciliationWindow(bytes32 chainKey, uint64 duration) external restricted {
+        _setReconciliationWindow(chainKey, duration);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function setValidationClamp(uint256 maxAmount) external restricted {
+        _setValidationClamp(maxAmount);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function pauseValidationIssuance(bytes32 chainKey) external restricted {
+        _pauseIssuance(chainKey);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function unpauseValidationIssuance(bytes32 chainKey) external restricted {
+        _unpauseIssuance(chainKey);
+    }
+
+    /// @inheritdoc ITransferValidation
+    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+        _discardExpired(validationIds);
+    }
+
     /**
      *  @dev See {IERC165-supportsInterface}.
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643Compliance).interfaceId
+            || interfaceId == type(ISettlementHandler).interfaceId
+            || interfaceId == type(ITransferValidation).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
@@ -307,6 +387,106 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
         }
     }
 
+    /* ----- What the validation layer needs ----- */
+
+    /// @inheritdoc TransferValidation
+    function _boundToken() internal view override returns (IToken) {
+        return IToken(_getTokenBound());
+    }
+
+    /// @inheritdoc TransferValidation
+    function _boundRegistry() internal view override returns (ITREXRegistry) {
+        return ITREXRegistry(address(_boundToken().identityRegistry()));
+    }
+
+    /// @inheritdoc TransferValidation
+    function _canCallSelector(address caller, bytes4 selector) internal view override returns (bool) {
+        (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
+        return immediate;
+    }
+
+    /// @inheritdoc TransferValidation
+    /// @dev Each module receives the range as the ones before it left it; its answer is intersected, never trusted.
+    function _moduleBounds(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 currentMin,
+        uint256 currentMax
+    ) internal view override returns (uint256 min, uint256 max) {
+        min = currentMin;
+        max = currentMax;
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.BOUNDS == 0) continue;
+            (uint256 moduleMin, uint256 moduleMax) =
+                IModule(module).validationBounds(from, to, spender, min, max, address(this));
+            if (moduleMin > min) min = moduleMin;
+            if (moduleMax < max) max = moduleMax;
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    function _reserveSlots(uint256 validationId, bytes memory from, bytes memory to, uint256 amountMax)
+        internal
+        override
+    {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
+                IModule(module).reserveSlot(validationId, from, to, amountMax);
+            }
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    function _commitSlots(uint256 validationId, uint256 executedAmount) internal override returns (bool breachesRule) {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
+                // Every declaring module is committed; one breach is enough, but none of them may be skipped.
+                if (IModule(module).commitSlot(validationId, executedAmount)) breachesRule = true;
+            }
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    function _releaseSlots(uint256 validationId) internal override {
+        Storage storage s = _getStorage();
+        uint256 length = s.modules.length();
+        for (uint256 i = 0; i < length; i++) {
+            (address module, uint256 capabilities) = s.modules.pos(i);
+            if (capabilities & ModuleCapabilitiesLib.SLOTS != 0) {
+                IModule(module).releaseSlot(validationId);
+            }
+        }
+    }
+
+    /// @inheritdoc TransferValidation
+    /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
+    function _dispatch(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
+        Token(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId)
+        internal
+        override
+    {
+        _boundToken().settleValidation(from, to, amount, validationId);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal override {
+        _boundToken().holdInTransit(from, amount, validationId);
+    }
+
     /// @dev Binds a module with the existing validation rules (zero check, duplicate check, cap of 25,
     ///  plug-and-play / canComplianceBind requirement) and records the dispatch points it declares.
     ///  No caller check — wrappers enforce it. Everything is validated before any state is written,
@@ -329,6 +509,11 @@ contract ModularCompliance is IModularCompliance, ERC3643Compliance, AccessManag
 
         emit EventsLib.ModuleAdded(_module);
         emit EventsLib.ModuleCapabilitiesRecorded(_module, capabilities);
+    }
+
+    function _removeModule(address _module) internal {
+        require(_module != address(0), ErrorsLib.ZeroAddress());
+        require(_getStorage().modules.remove(_module), ErrorsLib.ModuleNotBound());
     }
 
     /// @dev Reads a module's declaration and rejects anything the compliance cannot route.

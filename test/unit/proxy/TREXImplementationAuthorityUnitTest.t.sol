@@ -54,7 +54,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
 
         // publish / upgrade / publishAndUpgrade are gated by VERSION_MANAGER
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, address(authority));
-        accessManager.grantRole(RolesLib.VERSION_MANAGER, versionManager, 0);
+        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), versionManager, 0);
     }
 
     // ---------- constructor ----------
@@ -471,7 +471,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
             tokenImplementation: address(tokenImplV0),
             trexRegistryImplementation: address(trexRegistryImplV0),
             irsImplementation: address(irsImplV0),
-            mcImplementation: address(mcImplV0)
+            mcImplementation: address(mcImplV0),
+            accessManagerImplementation: address(mcImplV0)
         });
     }
 
@@ -480,7 +481,8 @@ contract TREXImplementationAuthorityUnitTest is Test {
             tokenImplementation: address(tokenImplV1),
             trexRegistryImplementation: address(trexRegistryImplV1),
             irsImplementation: address(irsImplV1),
-            mcImplementation: address(mcImplV1)
+            mcImplementation: address(mcImplV1),
+            accessManagerImplementation: address(mcImplV1)
         });
     }
 

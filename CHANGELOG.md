@@ -55,6 +55,126 @@ All notable changes to this project will be documented in this file.
     permissioning is not investor-facing compliance.
   - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
     empty set.
+- **Role domains** (OZ H-02, #55): role ids on a shared AccessManager were one set for every
+  suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
+  - A role id is a domain id in the upper 32 bits and a role number below:
+    `RolesLib.forDomain(domainId, role)`. The standard roles are the `RolesLib.Role` enum; the
+    plain `uint64` constants are gone and an enum value cannot be passed to `grantRole` by accident, so
+    no unscoped role is reachable by omission. `forDomain(domainId, bytes32 customName)` derives
+    a custom role by hashing the name into the upper half of the role number, so `RolesLib.decode`
+    tells standard from custom without a lookup. Role numbers start at `ROLE_NUMBER_OFFSET` (1).
+    Domain 0 is rejected (`InvalidDomain`) and the platform domain holds three roles only,
+    so neither OpenZeppelin sentinel is reachable. Ids are reversible: tooling reads `domainId = id >> 32` off
+    `RoleGranted` events, no labels pass needed.
+  - The interop roles from the ERC-7786 work map onto the same scheme: `COMPLIANCE_MANAGER` (under
+    `SUITE_ADMIN`) and `VALIDATION_KEEPER` (under `AGENT_ADMIN`) are suite roles in `RolesLib.Role`,
+    `INTEROP_MANAGER` is a platform role, and `setupTrustedGatewayRegistryRoles` takes no domain.
+  - Platform roles, the factory `OWNER`, `VERSION_MANAGER`, `ASSET_DEPLOYER` and `INTEROP_MANAGER`, are
+    the `RolesLib.PlatformRole` enum in the reserved `PLATFORM_DOMAIN` (`type(uint32).max`),
+    derived with `RolesLib.platform(role)`. `forDomain` rejects that domain, so no suite role
+    can land on a platform id. They are governance roles, not issuer roles, so
+    `setupTREXFactoryRoles`, `setupTREXImplementationAuthorityRoles` and `setupIdentityFactoryPolicy`
+    take no domain.
+  - A domain is an issuer, or a fund: one team across every token in it. Two tokens in one
+    domain share their agents; two domains are isolated from each other.
+  - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
+    gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
+    domain administrator can hand it out, so this holds by construction. Agents edit investor
+    records through a registry, never directly, and a storage shared across domains gives the other
+    domain's agents nothing.
+    Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's domain: whoever owns the
+    storage's domain owns its bindings.
+  - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns
+    the next id, `assign(domainId, target)` records the domain of a token or a storage,
+    `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers use
+    OpenZeppelin's `onlyAuthorized`: on the manager itself an unmapped selector resolves to
+    `ADMIN_ROLE`, so they are admin-only by default, honour the admin's execution delay, compose with
+    `schedule` and `execute`, show up in `getTargetFunctionRole(manager, selector)`, and can be
+    delegated to another role with `setTargetFunctionRole` on the manager itself. No OpenZeppelin
+    internal is overridden. Events `DomainCreated` and
+    `DomainAssigned`. `IdentityRegistryStorage.isIdentityRegistryBound(registry)` is a new O(1) view
+    on the T-REX storage, used by commissioning to skip an already bound registry.
+     `domainOf` is a registry, not the authorization boundary: authorization is the
+    role id on each selector and the grants behind it, and the manager never consults `domainOf`.
+    Commissioning and migration keep the two in step; `assign` alone records the domain, rewrites no
+    selector mapping and revokes nothing. Moving commissioned tokens to other domains is
+    `moveSuitesToDomains(TREXAccessManager, …)`, which assigns the tokens and then runs
+    `migrateSuitesToDomains`: remap the suites, grant the new domains' roles, revoke the old domain's
+    `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `commissionSuite` after a bare reassignment
+    remaps but leaves the old grant in place.
+  - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
+    needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
+    the token's domain on first use and keeps a storage already assigned where it is, so a storage
+    reused across domains keeps one owner and every registry bound to it writes with that
+    domain's `IRS_WRITER`. `commissionSuite(manager, token, domainId, storageDomainId)` is
+    the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
+    already shared with another domain is passed with the domain it lives in and is not
+    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Commissioning is
+    idempotent: re-running re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps
+    selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
+    governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
+    for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
+    domain.
+  - The library keeps no state of its own and validates no preconditions: no markers, no
+    "already configured" checks, no migration preflight. Which suites were configured alike is the
+    operator's record.
+  - `migrateSuitesToDomains(manager, tokens, fromDomainId, toDomainIds, assignments,
+    revocations)` moves suites from one domain into others in one call: grant the new roles, map
+    the domains, revoke the old ones. `RoleAssignment(account, role, domainId)` grants the role
+    in the new domain to an account that holds it in the source one, same execution delay
+    (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `RoleRevocation(account,
+    role)` revokes it in the source domain, administrative roles last. Storages are not touched. On
+    a `TREXAccessManager`, `assign` the tokens to their new domains as well. Atomicity is the
+    caller's: run it from one transaction, a script broadcasts it as many.
+- **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
+  `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
+  `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
+  so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
+  Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
+  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
+    suite salt, creates a domain named after the token, assigns the token and its storage to it,
+    commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
+    own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
+    supplied manager must have code (`AccessManagerNotAContract`); a reused storage must already
+    report the suite manager as its authority (`StorageAuthorityMismatch`).
+  - `deployTREXSuiteIsolated` clones the manager beacon too, owned by `accessManagerAdmin` so a broken
+    manager can be repaired from outside. Rotating that administrator is two steps: `ADMIN_ROLE` in
+    the manager and `transferOwnership` on the beacon.
+  - Trust statement: the shared manager beacon is owned by `TREXImplementationAuthority`, so
+    `VERSION_MANAGER` can replace the code behind every factory-deployed manager on it. Issuers who do
+    not accept that use `deployTREXSuiteIsolated` or supply their own manager.
+  - Breaking: `TokenDetails` gains `accessManagerAdmin`, `SuiteImplementations` and `SuiteBeacons`
+    gain a fifth entry, `TREXImplementationAuthority` requires a manager implementation. ABI changes
+    on `deployTREXSuite`, `deployTREXSuiteIsolated`, `publish`, `publishAndUpgrade`, `beacons`,
+    `implementations`, `implementationsFor` and the `BeaconsDeployed`, `VersionPublished`,
+    `SuiteUpgraded`, `IsolatedSuiteDeployed` events.
+- **The factory no longer writes into a supplied AccessManager** (OZ Critical, #77; closes M-05):
+  `TokenDetails.irAgents` and `tokenAgents` are gone, a deploy against a supplied manager makes no
+  call into it, and a reused storage is no longer bound by the factory. Before, any factory `OWNER`
+  could name another issuer's manager and receive `AGENT` there through the factory's `AGENT_ADMIN`
+  grant. Now the issuer commissions the suite on their own manager with `commissionSuite` and grants
+  agent roles themselves. A deploy naming a foreign manager is not rejected: it changes nothing on that
+  manager. `MaxAgentsReached` is removed.
+  - Rollout: this stops new grants. It does not revoke `AGENT_ADMIN` that issuers granted to earlier
+    factories on their managers; revoke it on every manager that holds it.
+- **Module removal never depends on the module** (OZ M-11, L-13): a module upgraded to revert
+  everywhere can no longer hold the token hostage.
+  - `removeModule` is unchanged and strict: it deletes the entry, then calls `unbindCompliance` and
+    reverts if that call fails for any reason, a module revert or a caller who starved the subcall of
+    gas alike. A best-effort call was considered and rejected: with the 63/64 gas rule any caller can
+    make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
+    healthy module's unbind at will.
+  - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
+    module and emits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
+    can tell a forced removal from a regular one. The module keeps its own binding record, so the same
+    proxy address cannot be re-added afterwards; a fresh deployment can.
+  - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
+    compliance still lists the module, so an unbind forwarded through `callModuleFunction`, directly
+    or nested in `multicall`, cannot leave the compliance routing to a module that considers itself
+    unbound. Only the two removal paths unbind.
+  - Deployments upgrading an existing `ModularCompliance` must register the `forceRemoveModule`
+    selector for OWNER on their AccessManager; `AccessManagerSetupLib` does it for new deployments.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
@@ -67,6 +187,197 @@ All notable changes to this project will be documented in this file.
   bound module blocks every `transferFrom` until an operator is listed, so bind it with
   `addAndSetModule` to list several at once. Entries are scoped by the bind nonce, so an unbind
   discards the list rather than resurrecting it on rebind.
+- **ERC-7786 messaging endpoint**: the T-REX side of the interop boundary, developed and tested
+  against a mocked gateway so production adapters plug in later behind the same interface.
+  - `TrustedGatewayRegistry`: the network's vetted gateway set, a non-upgradeable singleton gated by
+    the new `INTEROP_MANAGER` role. Tokens re-read it on every send and receive, so
+    `setTrustedGateway(gateway, false)` severs every route through that gateway with no further call.
+  - `TREXMessaging`, inherited by `Token`: issuer-managed routes and peers, in their own ERC-7201
+    namespace. `setRoute(chainType, chainReference, gateway)` opens a chain through a registry-trusted
+    gateway (zero closes it) and records the ERC-7930 prefix behind `chainKey`, which is what lets
+    the peer default to the token's own address on an EVM chain; `setPeer(chainKey, peer)` registers a
+    Lite elsewhere, refusing a padded envelope or one on another chain. Both sit with the
+    `IDENTITY_MANAGER` role. `isChainOpen`, `routeFor`, `peerFor`, `chainOf` and `pinnedRouteFor`
+    expose the state.
+  - **Single author per side.** The bound compliance dispatches validations through
+    `Token.dispatchComplianceValidation(chainKey, validationId, body)` with no role of its own;
+    `dispatchMintInstruction` is the agent's fire-and-forget delegation-out. Inbound, the token proves
+    the gateway is trusted, is the one it expects for that message, and that the ERC-7930 author is its
+    peer on the origin chain, then forwards a settlement to `ISettlementHandler.handleSettlement` on
+    the compliance and a burn proof to its own recall path. `ModularCompliance` implements the handler,
+    callable by the bound token only; classifying the notification is the slot lifecycle's work.
+  - **Routes are snapshot at dispatch.** Each validation leg pins the gateway it went out through,
+    per `(validationId, chainKey)`, announced by `ValidationRoutePinned`. Its settlements from that
+    chain are accepted from the pinned gateway and no other, so a route switch affects new validations
+    only; a re-dispatch through the pinned gateway is allowed, through another one refused with
+    `ValidationAlreadyRouted`. An id the token never dispatched, and every burn proof, follows the
+    current route. Removing a pinned gateway from the registry orphans its legs, which the lifecycle
+    will then expire and discard.
+  - `MessageTypesLib`: the four message types as the enum `Message` (`COMPLIANCE_VALIDATION`,
+    `MINT_INSTRUCTION`, `SETTLEMENT_NOTIFICATION`, `BURN_PROOF`) in a versioned
+    `abi.encode(type, version, body)` envelope, plus the typed `SettlementNotification` and
+    `BurnProof` bodies with their codecs and the `chainKey` derivation. A `chainKey` is
+    `keccak256` of ERC-7930's canonical chain identifier, the interoperable address of that chain
+    with a zero-length address, so a counterpart derives the same key from the standard alone.
+    - **The ABI decoder enforces the range.** `decode` reads the type slot as a `Message`, so a value
+      above the last member is refused before the body is looked at, and `encode` cannot be handed an
+      undefined type at all. There is no `isKnownType` helper and no `UnknownMessageType` error: an
+      undefined type now reverts without data, the range being the compiler's to state. A valid but
+      outbound-only type arriving inbound is a different matter and still reverts
+      `MessageTypeNotInbound`, which names it.
+    - **Wire codes are `0..3`**, the member positions, rather than the `1..4` of the constants they
+      replace. Appending a member is the only backward-compatible way to grow the surface: reordering
+      or inserting one reassigns a code. Event topics and the `MessageTypeNotInbound` selector are
+      unchanged, an enum canonicalising to `uint8` in the ABI.
+  - Transport-level replay protection per `(gateway, receiveId)`, distinct from the semantic replay the
+    slot lifecycle detects: a fresh id carrying consumed content is passed through untouched.
+  - Events: `TrustedGatewaySet`, `TrustedGatewayRegistrySet`, `ChainRegistered`, `RouteSet`, `PeerSet`,
+    `ValidationRoutePinned`, `ProtocolMessageSent` and `ProtocolMessageReceived` carrying the type,
+    the chain key and the gateway's id, `SettlementNotified` on the compliance and `BurnProofReceived`
+    on the token.
+  - `ERC7786GatewayMock`, a test asset: a same-chain loopback that queues on send and delivers on an
+    explicit `relay`, so ordering, duplication and loss are controllable, presenting every delivery as
+    coming from its configured origin chain.
+- **Balance model: free / frozen / bridged ledger.** A holder's position has three buckets. Free and
+  frozen are native and `balanceOf` keeps its exact ERC-20 meaning over them; bridged is the part
+  delegated to satellites, accounted per ERC-7930 wallet in a ledger of its own inside the token's
+  ERC-7201 namespace, the native mapping untouched.
+  - Accessors: `freeBalanceOf(wallet)`, `bridgedBalanceOf(envelope)` and `totalBridged()` on `IToken`.
+    `totalSupply()` counts the whole issuance, native supply plus `totalBridged`, so a delegation or a
+    recall never moves it; only a mint or a burn does.
+  - **`totalSupply` reports the issuance, not the native float.** A delegation-out, a recall or a
+    native-side settlement leg leaves it unmoved while emitting a native `Transfer` to or from `0x0`, which
+    is what makes `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price: a
+    consumer deriving supply by summing `Transfer` events under-reports by `totalBridged`, and reconciles on
+    `DelegatedOut`, `Recalled` and `SettledToNative`. The native figure is
+    `totalSupply() - totalBridged()`. An escrow address holding the delegated float would have kept
+    Transfer-summing whole and was rejected: it would show the token holding its own supply. `INV-7` asserts
+    the balance at the token's own address is always zero, and sums the three buckets to `totalSupply()`.
+  - `WalletKeyLib`: canonical ERC-7930 parsing with the strict-length rule from the ONCHAINID M-08
+    finding, refusing as well a zero-led EVM chain reference (which decodes to the same chain id);
+    `canonicalKey` and `satelliteKey`, the latter refusing a wallet on this chain, which holds a native
+    balance and never a bridged one.
+  - Internal transitions, one per movement type, applied when the movement is final on the register:
+    `_delegateOut(holder, toWallet, amount)` burns natively (`Transfer(holder, 0x0)`) and credits the
+    satellite wallet; `_recall(fromWallet, holder, amount)` is its mirror; `_bridgedTransfer(from, to,
+    amount, validationId)` applies a settled satellite movement, same-chain or cross-chain, in one
+    atomic touch. They check buckets and envelopes only and fire no compliance hook: the calling flows
+    (delegation-out, recall on burn proof, settlement) own pause, freeze, eligibility, compliance and
+    the identity link, and arrive with the movement-type and settlement work.
+  - Events with the full envelopes: `DelegatedOut`, `Recalled`, `BridgedTransfer` (with the
+    `validationId`). Errors: `NotASatelliteWallet`, `InsufficientBridgedBalance`.
+  - Invariants `INV-7` (conservation across buckets) and `INV-8` (bridged total tracks the positions)
+    join the stateful suite, with `TokenLedgerHarness` exposing the transitions to tests.
+- **Compliance validation object and its issuance.** A satellite executes a transfer only against a
+  `ComplianceValidation` the reference chain issued for that exact transfer; `ModularCompliance` now
+  issues them.
+  - `MessageTypesLib.ComplianceValidation`: single-use `validationId`, ERC-7930 `from` / `to` (equal
+    chains mean a same-chain transfer, different chains a burn on `from`'s and a mint on `to`'s),
+    `spender` (empty means only `from` executes), inclusive `amountMin` / `amountMax`, the
+    reference-chain `token` address as canonical identifier, `expiry` (the satellite's hard deadline)
+    and `reconciliationWindow` (how long T-REX keeps the slot past `expiry`). With its EIP-712
+    `COMPLIANCE_VALIDATION_TYPEHASH`, `hashValidation` and the `encodeValidation` / `decodeValidation`
+    codec.
+  - `ITransferValidation.requestTransferValidation(from, to, requestedMin, requestedMax, spender)`.
+    Callable by the identity `from` is linked to, or by an `AGENT`. `from` must be a satellite wallet
+    (`SenderNotOnSatellite`): the Lite executing a validation has to physically hold the position it
+    moves, where a native balance stays free to leave between issuance and settlement; a native
+    position reaches a satellite through delegation-out, which burns before it instructs. `from` must
+    resolve to an identity (revoked included), `to` must pass `isWalletVerified`, every envelope must
+    be canonical. The range is capped at `from`'s bridged position, narrowed by intersection through
+    every module declaring
+    the new `BOUNDS` capability (skipped when both wallets belong to one identity), then by the
+    manager's clamp; an empty range reverts with `EmptyValidationRange`, a zero maximum with
+    `ZeroValue`, and nothing is written. The record (`validationOf`) is stored for the slot lifecycle,
+    `TransferValidationIssued` carries the full envelopes, and one leg per involved satellite chain
+    leaves through `Token.dispatchComplianceValidation` under the same id.
+  - `IModule.validationBounds(from, to, spender, currentMin, currentMax, compliance)` behind the
+    `ModuleCapabilitiesLib.BOUNDS` flag: a module narrows the running range or reverts to refuse.
+    The spender rides along because no module runs on the satellite, so issuance is the only place a
+    spender policy can refuse one. `AbstractModuleUpgradeable` ships a pass-through default, so
+    existing modules are unaffected.
+  - `TREXRegistry.resolveIdentity(bytes)` and `isWalletVerified(bytes)`, backed by the registry's
+    IdentityFactory: the first attributes (revoked bindings included), the second admits (active
+    binding, then the same claim check as `isVerified`).
+  - `COMPLIANCE_MANAGER`, administered by `SUITE_ADMIN`, over `setDefaultValidityWindow`,
+    `setReconciliationWindow(chainKey, duration)`, `setValidationClamp` (zero clears),
+    `pauseValidationIssuance(chainKey)` and `unpauseValidationIssuance(chainKey)`. Windows are
+    snapshot at issuance; a cross-chain validation takes the larger of its two chains' windows;
+    issuance refuses to run without them (`ValidityWindowNotSet`, `ReconciliationWindowNotSet`).
+  - Late-reconciliation surface: `LateReconciliation(validationId, chainKey)` on every late leg, and
+    an automatic pause of that chain only when the recorded state breaches a rule, lifted by the
+    manager only. Recording the late settlement and judging the breach belong to the slot lifecycle.
+  - Storage in `ERC3643.storage.TransferValidation`, a namespace of its own on the compliance. Events:
+    `TransferValidationIssued`, `DefaultValidityWindowSet`, `ReconciliationWindowSet`,
+    `ValidationClampSet`, `ValidationIssuancePaused`, `ValidationIssuanceUnpaused`,
+    `LateReconciliation`. Errors: `ZeroDuration`, `ValidationIssuancePaused`,
+    `ValidationIssuanceNotPaused`, `ValidityWindowNotSet`, `ReconciliationWindowNotSet`,
+    `InvalidRequestedRange`, `EmptyValidationRange`, `NotAuthorizedForWallet`, `UnverifiedWallet`,
+    `SenderNotOnSatellite`.
+  - Test assets: `BoundsModule`, `TransferValidationHarness`, `ModularComplianceBaseUnitTest`, and
+    the satellite-wallet fixtures on `TREXSuiteTest`.
+- **Compliance slots: reservation, settlement and discard lifecycle.** Once a validation is issued the
+  engine treats the movement as executed for every distribution-dependent rule, so concurrent
+  validations cannot jointly breach a cap; ownership hard-commits only when the settlement comes back.
+  - `IModule.reserveSlot(validationId, from, to, amountMax)`, `commitSlot(validationId, executedAmount)`
+    and `releaseSlot(validationId)` behind the new `ModuleCapabilitiesLib.SLOTS` flag; static modules
+    are untouched. A reservation counts the worst case at `amountMax`; a commit reconciles to the exact
+    amount and MUST tolerate an id the module never reserved (bound after issuance, or a late
+    reconciliation) by applying the delta anyway, returning whether the state it then holds breaches
+    its rule; a release undoes it entirely. `ModularCompliance` dispatches to declaring modules only,
+    right after the record is written, and reports a breach when any of them does.
+  - `ITransferValidation.ValidationStatus` (`Pending`, `LegConfirmed`, `Settled`, `Expired`,
+    `Discarded`, `LateReconciled`) and `ValidationState` (status, the two per-leg consumption flags,
+    the executed amount, the wallet the first of two legs carried), read through `statusOf` and
+    `stateOf`. `Expired` is derived, never written: a stored `Pending` past `releaseAt`. Records and
+    states are kept forever, since classifying an incoming notification depends on them.
+    `ValidationRecord` gained `fromKey`, `toKey` and `twoLegs`.
+  - Settlement classification in `handleSettlement`: the token and the wallets must be the issued ones,
+    the leg must come from the chain recorded for its side, and the amount must sit inside the issued
+    bounds; any mismatch reverts (`SettlementTokenMismatch`, `SettlementLegMismatch`,
+    `SettlementOutOfBounds`) and leaves the message deliverable. A same-chain movement, or one with a
+    native side, settles on one leg carrying both wallets. A cross-chain movement takes two legs under
+    one id, the burn leg with `to` empty from the sender's chain and the mint leg with `from` empty from
+    the recipient's chain: the first to arrive, whichever it is, pins the validation as `LegConfirmed`
+    (`ValidationLegConfirmed`), the second must repeat its amount (`SettlementAmountMismatch`) and
+    settles the pair. A first burn leg also takes the burned amount out of the sender's position into
+    transit on the token (`IToken.holdInTransit`, `HeldInTransit`), timely or late, so nothing can be
+    issued or recalled against tokens the satellite already burned; a first mint leg moves nothing and
+    the pair is applied atomically when the burn leg lands. A leg for a `Pending` validation settles
+    whatever the clock says.
+  - `IToken.settleValidation(from, to, amount, validationId)`: the ledger entry, callable by the bound
+    compliance only (`OnlyBoundCompliance`), routing by wallet shape to a native credit (native
+    recipient, `SettledToNative`) or a bridged transfer. Both debit a satellite position, `from` never
+    being a native wallet, and both carry the `validationId`, where `DelegatedOut` and `Recalled` move
+    one identity's own position between two locations. A bridged transfer under an id that holds an
+    amount in transit credits the recipient from the hold, which must be the settled amount exactly
+    (`TransitAmountMismatch`), instead of debiting the sender again.
+  - `IToken.holdInTransit(from, amount, validationId)`, `inTransitOf(validationId)` and
+    `totalInTransit()`: the in-transit bucket inside the bridged one. A hold debits the sender's
+    position, leaves `totalBridged` and `totalSupply` untouched, and is taken once per validation
+    (`TransitAlreadyHeld`). The sender named by the validation still owns the amount.
+  - `VALIDATION_KEEPER`, administered by `AGENT_ADMIN`, over
+    `discardExpiredValidations(uint256[])`: each id must be stored `Pending` and past `releaseAt`
+    (`UnknownValidation`, `ValidationNotDiscardable`, `ValidationNotReleasable`); the batch is atomic.
+    A discard releases the slots and emits `ValidationDiscarded`; `LegConfirmed` is never discardable.
+    The role is restricted by design: `RolesLib` names the discard front-running vector a permissionless
+    keeper would open, against the liveness dependency a restricted one carries.
+  - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the modules catch up
+    through `commitSlot` with no live reservation, the status becomes `LateReconciled` and
+    `LateReconciliation` fires. Issuance for that chain pauses only when a module reports the state it
+    then holds as breaching its rule, forcing a late delivery being cheap enough that pausing on every
+    one would be a denial of service. A late first leg of two commits no module, so it stays
+    `Discarded` with its flag set and only warns for its own chain.
+  - Emergencies: a leg already consumed, or an id never issued, applies nothing, emits
+    `ReplayedSettlement` and halts the whole token through its pause (`handleSettlement` returns
+    `haltToken`); only `AGENT_PAUSER` lifts it through `unpause`. While the token is paused every
+    settlement delivery reverts with `EnforcedPause` and stays deliverable.
+  - Events: `ValidationLegConfirmed`, `ValidationSettled`, `ValidationDiscarded`, `ReplayedSettlement`,
+    `HeldInTransit`. Errors: `OnlyBoundCompliance`, `UnknownValidation`, `ValidationNotDiscardable`,
+    `ValidationNotReleasable`, `SettlementTokenMismatch`, `SettlementLegMismatch`,
+    `SettlementOutOfBounds`, `SettlementAmountMismatch`, `TransitAlreadyHeld`, `TransitAmountMismatch`.
+  - Test assets: `SlotsModule` (a max-balance-per-recipient counter over reservations),
+    `SlotsOnlyModule`, and the settlement-leg builders on `InteropSuiteTest`.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
   and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
   single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
@@ -151,8 +462,12 @@ All notable changes to this project will be documented in this file.
   functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
   are immutable per implementation; an upgrade that changes them needs a refresh on every bound
   compliance.
-- **Breaking, interface ids**: `type(IModule).interfaceId` and `type(IModularCompliance).interfaceId`
-  both change.
+- **Breaking, interface ids**: `type(IModule).interfaceId` (capabilities, then `validationBounds`, then
+  the three slot hooks), `type(IModularCompliance).interfaceId`, `type(ITREXRegistry).interfaceId`
+  (the two wallet views), `type(ITransferValidation).interfaceId` (the lifecycle views and the keeper's
+  discard), `type(ISettlementHandler).interfaceId` (`handleSettlement` now returns `haltToken`) and
+  `type(IToken).interfaceId` (`settleValidation`, `holdInTransit` and the in-transit views) all change.
+  `ValidationRecord` gained three fields.
 - `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
   (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
   routing decision. Ordering is not preserved across a removal or a refresh.

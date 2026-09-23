@@ -63,6 +63,8 @@
 
 pragma solidity 0.8.30;
 
+import { MessageTypesLib } from "./MessageTypesLib.sol";
+
 /// @dev Errors of the ERC-3643 standard surface are declared canonically in
 ///  {ERC3643ErrorsLib}, inside the standard layer, because the standard bases may not import from the
 ///  T-REX layer (issue #65). The names below are re-declared here for the T-REX layer and for tests.
@@ -93,6 +95,16 @@ library ErrorsLib {
     error SameWalletRecovery();
     error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error UnverifiedIdentity();
+    /// @dev Only a wallet on another chain can hold a bridged position; this envelope designates this chain.
+    error NotASatelliteWallet(bytes wallet);
+    /// @dev Only the bound compliance applies a settlement to the ledger.
+    error OnlyBoundCompliance();
+    /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
+    error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
+    /// @dev The validation already holds an amount in transit; a burn leg moves it once.
+    error TransitAlreadyHeld(uint256 validationId);
+    /// @dev The amount settled under the validation is not the one its burn leg put in transit.
+    error TransitAmountMismatch(uint256 validationId, uint256 held, uint256 amount);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
@@ -108,6 +120,7 @@ library ErrorsLib {
     // Module Errors
     error ComplianceNotBound();
     error ComplianceAlreadyBound();
+    error ModuleStillBound();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(address spender);
@@ -115,10 +128,12 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error AuthorityMismatch();
+    error StorageAuthorityMismatch(address identityRegistryStorage, address expected, address actual);
+    error AccessManagerNotAContract(address accessManager);
+    error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
     /// @dev The IdentityFactory already binds the predicted token address to a different identity.
     error TokenIdentityAlreadyBound(address token, address boundIdentity);
     error TokenAlreadyDeployed();
@@ -141,6 +156,18 @@ library ErrorsLib {
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
 
+    // AccessManagerSetupLib Errors
+    error NotAssigned(address target);
+    error PendingDelayChange(address account, uint64 role);
+    error PendingRoleGrant(address account, uint64 role);
+    error RoleNotHeld(address account, uint64 role);
+
+    // RolesLib Errors
+    error InvalidDomain();
+
+    // TREXAccessManager Errors
+    error DomainNotFound(uint32 domainId);
+
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();
     error MaxClaimTopicsReached(uint256 max);
@@ -157,5 +184,55 @@ library ErrorsLib {
 
     // TREXRegistry Errors
     error Deprecated();
+
+    // TransferValidation Errors
+    /// @dev A validity or reconciliation window must be positive.
+    error ZeroDuration();
+    /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
+    error ValidationIssuancePaused(bytes32 chainKey);
+    /// @dev Unpausing a chain that is not paused.
+    error ValidationIssuanceNotPaused(bytes32 chainKey);
+    /// @dev Issuance needs a validity window; none was configured.
+    error ValidityWindowNotSet();
+    /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
+    error ReconciliationWindowNotSet(bytes32 chainKey);
+    /// @dev The requested range is inverted.
+    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
+    /// @dev The balance cap, the modules or the clamp left no amount to authorize.
+    error EmptyValidationRange(uint256 min, uint256 max);
+    /// @dev The caller is neither the identity `from` is linked to nor authorised by the AccessManager.
+    error NotAuthorizedForWallet(address caller, bytes wallet);
+    /// @dev `from` has no identity, or `to` is not eligible for new activity.
+    error UnverifiedWallet(bytes wallet);
+    /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
+    error SenderNotOnSatellite(bytes wallet);
+    /// @dev The id was never issued by this compliance.
+    error UnknownValidation(uint256 validationId);
+    /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
+    error ValidationNotDiscardable(uint256 validationId, uint8 status);
+    /// @dev The validation's release deadline has not passed yet.
+    error ValidationNotReleasable(uint256 validationId, uint64 releaseAt);
+    /// @dev The leg's wallets, their emptiness, or its origin chain do not match the issued validation.
+    error SettlementLegMismatch(uint256 validationId);
+    /// @dev The executed amount sits outside the issued `[amountMin, amountMax]`.
+    error SettlementOutOfBounds(uint256 validationId, uint256 amount);
+    /// @dev The second leg of a cross-chain validation does not repeat the first one's amount.
+    error SettlementAmountMismatch(uint256 validationId, uint256 expected, uint256 amount);
+    // Interop Errors
+    error NonCanonicalInteroperableAddress(bytes envelope);
+    error ChainNotOpen(bytes32 chainKey);
+    error ChainNotRegistered(bytes32 chainKey);
+    error GatewayNotRouted(address gateway, bytes32 chainKey);
+    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
+    error GatewayNotTrusted(address gateway);
+    error InvalidChainReference(bytes2 chainType, bytes chainReference);
+    error InvalidPeer(bytes peer);
+    error MessageAlreadyReceived(address gateway, bytes32 receiveId);
+    error MessageTypeNotInbound(MessageTypesLib.Message messageType);
+    error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
+    error SenderNotCompliance(address sender);
+    error SenderNotPeer(bytes32 chainKey, bytes sender);
+    error UnsupportedMessageVersion(uint8 messageVersion);
+    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
 
 }

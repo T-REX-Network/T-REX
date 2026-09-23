@@ -37,6 +37,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // bindIdentityRegistry is now gated by the transient IRS_BINDER role (not OWNER). deployer
         // already holds OWNER for the suite; grant it IRS_BINDER too so the bind-path tests can run.
         _grantIRSBinderRole(deployer);
+        _grantStorageWriterRole(agent);
 
         // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
         // For Foundry, we start with 0 bound registries (tests will bind as needed)
@@ -347,32 +348,32 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(updated[1], extraIR);
     }
 
-    // ============ isLinkedIdentityRegistry() / linkedIdentityRegistryCount() Tests ============
+    // ============ isIdentityRegistryBound() / linkedIdentityRegistryCount() Tests ============
 
     /// @notice Should track membership as registries are bound and unbound
-    function test_isLinkedIdentityRegistry_TracksBindAndUnbind() public {
+    function test_isIdentityRegistryBound_TracksBindAndUnbind() public {
         address existingIR = address(token.identityRegistry());
         address extraIR = makeAddr("extraIR");
 
-        assertTrue(identityRegistryStorage.isLinkedIdentityRegistry(existingIR));
-        assertFalse(identityRegistryStorage.isLinkedIdentityRegistry(extraIR));
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
+        assertFalse(identityRegistryStorage.isIdentityRegistryBound(extraIR));
 
         vm.mockCall(
             extraIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
         );
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
-        assertTrue(identityRegistryStorage.isLinkedIdentityRegistry(extraIR));
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(extraIR));
 
         vm.prank(deployer);
         identityRegistryStorage.unbindIdentityRegistry(extraIR);
-        assertFalse(identityRegistryStorage.isLinkedIdentityRegistry(extraIR));
-        assertTrue(identityRegistryStorage.isLinkedIdentityRegistry(existingIR));
+        assertFalse(identityRegistryStorage.isIdentityRegistryBound(extraIR));
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
     }
 
     /// @notice Should return false for the zero address, which is never bindable
-    function test_isLinkedIdentityRegistry_ReturnsFalse_ForZeroAddress() public view {
-        assertFalse(identityRegistryStorage.isLinkedIdentityRegistry(address(0)));
+    function test_isIdentityRegistryBound_ReturnsFalse_ForZeroAddress() public view {
+        assertFalse(identityRegistryStorage.isIdentityRegistryBound(address(0)));
     }
 
     /// @notice Should agree with the length of the enumerated set at every step
@@ -410,7 +411,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.bindIdentityRegistry(existingIR);
 
         assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), countBefore);
-        assertTrue(identityRegistryStorage.isLinkedIdentityRegistry(existingIR));
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
     }
 
     // ============ linkedIdentityRegistries(start, end) pagination Tests ============

@@ -69,13 +69,14 @@ import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/int
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../../libraries/EventsLib.sol";
+import { IModularCompliance } from "../IModularCompliance.sol";
 import { IModule } from "./IModule.sol";
 
 /**
  * @dev Base for every compliance module.
  *
- * The five dispatch points ship a default here, a no-op for the hooks and a pass for the checks, so a
- * module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
+ * The six dispatch points ship a default here, a no-op for the hooks, a pass for the checks and the
+ * untouched range for the bounds, so a module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
  * it is the one member a module MUST declare.
  *
  * An override without its flag is never called, so the rule silently stops applying.
@@ -91,7 +92,7 @@ abstract contract AbstractModuleUpgradeable is
     ERC165Upgradeable
 {
 
-    /// @custom:storage-location erc7201:ERC3643.storage.AbstractModule
+    /// @custom:storage-location erc7201:erc3643.storage.AbstractModuleUpgradeable
     struct AbstractModuleStorage {
         /// Compliance contract binding status
         mapping(address compliance => bool) complianceBound;
@@ -103,9 +104,9 @@ abstract contract AbstractModuleUpgradeable is
         mapping(address compliance => uint256) nonces;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("ERC3643.storage.AbstractModule")) - 1)) & ~bytes32(uint256(0xff))
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.AbstractModuleUpgradeable")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant _ABSTRACT_MODULE_STORAGE_LOCATION =
-        0xf6cc97de1266c180cd39f3b311632644143ce7873d2927755382ad4b39e8ae00;
+        0x444fa4c260ed0f6b1ae0af41fab4e6d2db0fa3e7e1fd34f89c069636d02e9200;
 
     /**
      * @dev Throws if `_compliance` is not a bound compliance contract address.
@@ -150,6 +151,7 @@ abstract contract AbstractModuleUpgradeable is
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         require(_compliance != address(0), ErrorsLib.ZeroAddress());
         require(msg.sender == _compliance, ErrorsLib.OnlyComplianceContractCanCall());
+        require(!IModularCompliance(_compliance).isModuleBound(address(this)), ErrorsLib.ModuleStillBound());
 
         s.complianceBound[_compliance] = false;
         s.nonces[_compliance]++;
@@ -190,6 +192,41 @@ abstract contract AbstractModuleUpgradeable is
     function moduleCheckSpender(address, address, address, uint256, address) external view virtual returns (bool) {
         return true;
     }
+
+    /**
+     *  @dev See {IModule-validationBounds}.
+     *  Default pass-through: a module overrides it only when it declares `BOUNDS`.
+     */
+    function validationBounds(
+        bytes calldata,
+        bytes calldata,
+        bytes calldata,
+        uint256 _currentMin,
+        uint256 _currentMax,
+        address
+    ) external view virtual returns (uint256 min, uint256 max) {
+        return (_currentMin, _currentMax);
+    }
+
+    /**
+     *  @dev See {IModule-reserveSlot}.
+     *  Default no-op: a module overrides it only when it declares `SLOTS`.
+     */
+    function reserveSlot(uint256, bytes calldata, bytes calldata, uint256) external virtual onlyComplianceCall { }
+
+    /**
+     *  @dev See {IModule-commitSlot}.
+     *  Default no-op: a module overrides it only when it declares `SLOTS`.
+     */
+    function commitSlot(uint256, uint256) external virtual onlyComplianceCall returns (bool) {
+        return false;
+    }
+
+    /**
+     *  @dev See {IModule-releaseSlot}.
+     *  Default no-op: a module overrides it only when it declares `SLOTS`.
+     */
+    function releaseSlot(uint256) external virtual onlyComplianceCall { }
 
     /**
      *  @dev See {IModule-isComplianceBound}.

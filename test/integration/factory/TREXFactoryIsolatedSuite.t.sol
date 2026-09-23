@@ -7,6 +7,7 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 
 import { ITREXFactory } from "contracts/factory/ITREXFactory.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 
@@ -21,8 +22,7 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
 
     /// @dev Topic-0 of `IsolatedSuiteDeployed(address indexed token, SuiteBeacons beacons)`,
     ///      used to locate the event inside `vm.getRecordedLogs()`.
-    bytes32 internal constant ISOLATED_SUITE_DEPLOYED_TOPIC =
-        keccak256("IsolatedSuiteDeployed(address,(address,address,address,address))");
+    bytes32 internal immutable ISOLATED_SUITE_DEPLOYED_TOPIC = EventsLib.IsolatedSuiteDeployed.selector;
 
     address public issuer = makeAddr("isolatedIssuer");
 
@@ -31,20 +31,16 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
         view
         returns (ITREXFactory.TokenDetails memory)
     {
-        address[] memory agents = new address[](1);
-        agents[0] = agent;
-
         return ITREXFactory.TokenDetails({
             name: name,
             symbol: symbol,
             decimals: 0,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: agents,
-            tokenAgents: agents,
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
     }
 
@@ -187,7 +183,8 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
                 tokenImplementation: address(v2Implementation),
                 trexRegistryImplementation: address(trexRegistryImplementation),
                 irsImplementation: address(identityRegistryStorageImplementation),
-                mcImplementation: address(modularComplianceImplementation)
+                mcImplementation: address(modularComplianceImplementation),
+                accessManagerImplementation: address(accessManagerImplementation)
             });
         vm.prank(deployer);
         trexImplementationAuthority.publishAndUpgrade(v1, impls);
