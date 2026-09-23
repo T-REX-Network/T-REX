@@ -76,6 +76,8 @@ interface ITREXImplementationAuthority {
         address irsImplementation;
         // address of ModularCompliance implementation contract
         address mcImplementation;
+        // address of TREXAccessManager implementation contract
+        address accessManagerImplementation;
     }
 
     struct SuiteBeacons {
@@ -87,6 +89,8 @@ interface ITREXImplementationAuthority {
         address irsBeacon;
         // address of UpgradeableBeacon for ModularCompliance
         address mcBeacon;
+        // address of UpgradeableBeacon for TREXAccessManager
+        address accessManagerBeacon;
     }
 
     /// functions
@@ -136,7 +140,7 @@ interface ITREXImplementationAuthority {
     function currentVersion() external view returns (Version);
 
     /**
-     *  @dev returns the 4 beacon addresses driving every shared-mode suite.
+     *  @dev returns the beacon addresses driving every shared-mode suite.
      *  beacon addresses never change after construction.
      */
     function beacons() external view returns (SuiteBeacons memory);

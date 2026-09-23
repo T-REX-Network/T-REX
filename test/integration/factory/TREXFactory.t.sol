@@ -38,7 +38,6 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     // Helper function to create empty TokenDetails
     function _createEmptyTokenDetails() internal view returns (ITREXFactory.TokenDetails memory) {
-        address[] memory emptyAgents;
         address[] memory emptyModules;
         bytes[] memory emptySettings;
 
@@ -48,11 +47,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: emptyAgents,
-            tokenAgents: emptyAgents,
             complianceModules: emptyModules,
             complianceSettings: emptySettings,
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
     }
 
@@ -173,32 +171,6 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.deployTREXSuite("salt2", tokenDetails, claimDetails);
     }
 
-    function test_deployTREXSuite_RevertWhen_MoreThan5Agents() public {
-        address[] memory irAgents = new address[](6); // 6 agents > 5
-        for (uint256 i = 0; i < 6; i++) {
-            irAgents[i] = address(uint160(i + 100));
-        }
-
-        ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
-            name: "Token name",
-            symbol: "SYM",
-            decimals: 8,
-            irs: address(0),
-            ONCHAINID: address(0),
-            irAgents: irAgents,
-            tokenAgents: new address[](0),
-            complianceModules: new address[](0),
-            complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
-        });
-
-        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
-
-        vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxAgentsReached.selector, 5));
-        trexFactory.deployTREXSuite("salt2", tokenDetails, claimDetails);
-    }
-
     function test_deployTREXSuite_RevertWhen_MoreThan25ComplianceModules() public {
         address[] memory complianceModules = new address[](26); // 26 modules > 25
         for (uint256 i = 0; i < 26; i++) {
@@ -221,11 +193,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: complianceModules,
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
@@ -247,11 +218,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: complianceModules,
             complianceSettings: complianceSettings,
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
@@ -306,10 +276,6 @@ contract TREXFactoryTest is TREXSuiteTest {
         TestModule testModule = TestModule(address(testModuleProxy));
 
         // Prepare TokenDetails with agents and modules
-        address[] memory irAgents = new address[](1);
-        irAgents[0] = alice;
-        address[] memory tokenAgents = new address[](1);
-        tokenAgents[0] = bob;
         address[] memory complianceModules = new address[](1);
         complianceModules[0] = address(testModule);
 
@@ -324,11 +290,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: irAgents,
-            tokenAgents: tokenAgents,
             complianceModules: complianceModules,
             complianceSettings: complianceSettings,
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         // Prepare ClaimDetails
@@ -393,14 +358,14 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(linkedIRs.length, 1, "IRS must have exactly one linked IR after deploy");
         assertEq(linkedIRs[0], irAddress, "IRS linked IR must match the deployed IR");
 
-        // Verify IR is owned by the suite AccessManager, with the Token and configured irAgents holding
+        // Verify IR is owned by the suite AccessManager, with neither the Token nor any account holding
         // the AGENT role from deploy time.
         TREXRegistry ir = TREXRegistry(irAddress);
         assertEq(
             IAccessManaged(address(ir)).authority(), address(accessManager), "IR owner must be the suite AccessManager"
         );
-        assertTrue(_hasAgentRole(tokenAddress), "Deployed Token must be agent on IR");
-        assertTrue(_hasAgentRole(alice), "Configured irAgent (alice) must be agent on IR");
+        assertFalse(_hasAgentRole(tokenAddress), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(alice), "factory must not grant AGENT");
 
         // Verify MC is owned by the suite AccessManager, bound to the deployed Token at init time, with
         // every configured complianceModule already bound.
@@ -411,7 +376,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(mc.getTokenBound(), tokenAddress, "MC must be bound to the deployed Token at init time");
 
         // Verify Token is owned by the suite AccessManager, its OID was wired in via init (the auto-OID
-        // path), the configured tokenAgents hold the AGENT role, and the factory holds no AGENT role.
+        // path), nobody holds the AGENT role, and the factory holds no AGENT role.
         assertEq(
             IAccessManaged(address(deployedToken)).authority(),
             address(accessManager),
@@ -423,7 +388,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             deployedToken.onchainID(),
             "Token OID must match the one minted by IdentityFactory for the predicted Token address"
         );
-        assertTrue(_hasAgentRole(bob), "Configured tokenAgent (bob) must be agent on Token");
+        assertFalse(_hasAgentRole(bob), "factory must not grant AGENT");
         assertFalse(_hasAgentRole(address(trexFactory)), "Factory must not be agent on Token");
     }
 
@@ -451,11 +416,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         ITREXFactory.ClaimDetails memory claimDetails =
@@ -497,11 +461,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         ITREXFactory.ClaimDetails memory claimDetails = ITREXFactory.ClaimDetails({
@@ -533,11 +496,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -580,11 +542,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: complianceModules,
             complianceSettings: complianceSettings,
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -608,25 +569,20 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
     }
 
-    /// @notice Token must be owned by the suite AccessManager, with the configured tokenAgents pre-granted
-    ///         at init time, the OID minted by IdentityFactory and wired in at init time, and the factory holding
+    /// @notice Token must be owned by the suite AccessManager, with no agent role granted by the factory,
+    ///         the OID minted by IdentityFactory and wired in at init time, and the factory holding
     ///         no role on the Token (no agent, no pending ownership)
     function test_deployTREXSuite_Token_OwnershipAgentsAndOID_SetAtInit() public {
-        address[] memory tokenAgents = new address[](2);
-        tokenAgents[0] = bob;
-        tokenAgents[1] = charlie;
-
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: "Token name",
             symbol: "SYM",
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: tokenAgents,
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -647,8 +603,8 @@ contract TREXFactoryTest is TREXSuiteTest {
             "Token OID must match the IdentityFactory-registered identity for the deployed Token address"
         );
 
-        assertTrue(_hasAgentRole(bob), "Configured tokenAgent bob must be agent on Token after init");
-        assertTrue(_hasAgentRole(charlie), "Configured tokenAgent charlie must be agent on Token after init");
+        assertFalse(_hasAgentRole(bob), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(charlie), "factory must not grant AGENT");
         assertFalse(_hasAgentRole(address(trexFactory)), "Factory must not be agent on Token");
     }
 
@@ -665,11 +621,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: address(0),
             ONCHAINID: suppliedOID,
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -692,7 +647,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///      `_deployFactories`, so the test has to revoke it first.
     function test_deployTREXSuite_RevertWhen_FactoryLacksTokenOidMinter() public {
         // Revoked as the test contract, which is the AccessManager admin (see AccessManagerHelper).
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         assertEq(tokenDetails.ONCHAINID, address(0), "Test only covers the auto-mint path");
@@ -702,7 +657,7 @@ contract TREXFactoryTest is TREXSuiteTest {
                 Errors.NotAuthorizedForIdentityType.selector,
                 address(trexFactory),
                 IdentityTypes.ASSET,
-                RolesLib.ASSET_DEPLOYER
+                RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER)
             )
         );
         _deploySuite("no-oid-minter-salt", tokenDetails, _createEmptyClaimDetails());
@@ -711,7 +666,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     /// @notice The ASSET_DEPLOYER gate covers minting only. With the role revoked, a caller-supplied
     ///         ONCHAINID must still deploy, since that path never calls `createIdentityFor`.
     function test_deployTREXSuite_Succeeds_WithoutTokenOidMinter_WhenONCHAINIDSupplied() public {
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
         address suppliedOID = makeAddr("SuppliedOID");
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
@@ -787,15 +742,20 @@ contract TREXFactoryTest is TREXSuiteTest {
         // `_deployFactories`. Removing the policy unregisters the type, so even a role holder is
         // rejected.
         idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
         AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
 
         (uint64 roleId, bool selfDeployable,,) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
-        assertEq(roleId, RolesLib.ASSET_DEPLOYER, "ASSET minting must be gated behind ASSET_DEPLOYER");
+        assertEq(
+            roleId,
+            RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER),
+            "ASSET minting must be gated behind ASSET_DEPLOYER"
+        );
         assertFalse(selfDeployable, "A token must not be able to self-deploy its own OID");
 
-        (bool isMember, uint32 executionDelay) = accessManager.hasRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        (bool isMember, uint32 executionDelay) =
+            accessManager.hasRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
         assertTrue(isMember, "TREX factory must hold ASSET_DEPLOYER after the helper call");
         // Auto-mint is a direct call from inside deployTREXSuite; a delay would make it unschedulable.
         assertEq(executionDelay, NO_EXECUTION_DELAY, "ASSET_DEPLOYER must be granted without execution delay");
@@ -819,16 +779,18 @@ contract TREXFactoryTest is TREXSuiteTest {
     ///         manager grants the role somewhere the check never looks and auto-mint still reverts.
     function test_setupIdentityFactoryPolicy_RevertWhen_RoleGrantedOnForeignAuthority() public {
         idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
-        accessManager.revokeRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
         // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
         // factory's real authority), but the grant is stranded on this manager.
         AccessManager foreignManager = new AccessManager(address(this));
         AccessManagerSetupLib.setupIdentityFactoryPolicy(foreignManager, idFactory, address(trexFactory));
 
-        (bool isMemberOnForeign,) = foreignManager.hasRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        (bool isMemberOnForeign,) =
+            foreignManager.hasRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
         assertTrue(isMemberOnForeign, "Grant must have landed on the foreign manager");
-        (bool isMemberOnAuthority,) = accessManager.hasRole(RolesLib.ASSET_DEPLOYER, address(trexFactory));
+        (bool isMemberOnAuthority,) =
+            accessManager.hasRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
         assertFalse(isMemberOnAuthority, "Grant must be absent from the authority the factory actually checks");
 
         vm.expectRevert(
@@ -836,29 +798,24 @@ contract TREXFactoryTest is TREXSuiteTest {
                 Errors.NotAuthorizedForIdentityType.selector,
                 address(trexFactory),
                 IdentityTypes.ASSET,
-                RolesLib.ASSET_DEPLOYER
+                RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER)
             )
         );
         _deploySuite("foreign-authority-salt", _createEmptyTokenDetails(), _createEmptyClaimDetails());
     }
 
-    /// @notice IR must be owned by the suite AccessManager, with the Token + irAgents pre-granted at init time
+    /// @notice IR must be owned by the suite AccessManager, with no agent role granted by the factory
     function test_deployTREXSuite_IR_OwnershipAndAgents_SetAtInit() public {
-        address[] memory irAgents = new address[](2);
-        irAgents[0] = bob;
-        irAgents[1] = charlie;
-
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: "Token name",
             symbol: "SYM",
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: irAgents,
-            tokenAgents: new address[](0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -871,13 +828,13 @@ contract TREXFactoryTest is TREXSuiteTest {
             IAccessManaged(address(ir)).authority(), address(accessManager), "IR owner must be the suite AccessManager"
         );
 
-        assertTrue(_hasAgentRole(address(deployedToken)), "Token must be agent on IR after init");
-        assertTrue(_hasAgentRole(bob), "Configured irAgent bob must be agent on IR after init");
-        assertTrue(_hasAgentRole(charlie), "Configured irAgent charlie must be agent on IR after init");
+        assertFalse(_hasAgentRole(address(deployedToken)), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(bob), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(charlie), "factory must not grant AGENT");
     }
 
-    /// @notice End-to-end guard: with a fully-populated `_claimTopics`, `_issuers`, `_irAgents`,
-    ///         `_tokenAgents`, `_complianceModules` + `_complianceSettings`, and the auto-OID path
+    /// @notice End-to-end guard: with a fully-populated `_claimTopics`, `_issuers`,
+    ///         `_complianceModules` + `_complianceSettings`, and the auto-OID path
     ///         (`ONCHAINID == address(0)`), every configuration item must land at init time, all six
     ///         suite contracts must end up owned by the suite AccessManager, and the factory must hold
     ///         no role on any suite contract.
@@ -896,11 +853,6 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // Issuer for the TIR + claim topic. The TIR only records the address.
         issuerAddr = makeAddr("tirClaimIssuer");
-
-        address[] memory irAgents = new address[](1);
-        irAgents[0] = alice;
-        address[] memory tokenAgents = new address[](1);
-        tokenAgents[0] = bob;
 
         address[] memory complianceModules = new address[](1);
         complianceModules[0] = testModuleAddr;
@@ -924,11 +876,10 @@ contract TREXFactoryTest is TREXSuiteTest {
                 decimals: 8,
                 irs: address(0),
                 ONCHAINID: address(0),
-                irAgents: irAgents,
-                tokenAgents: tokenAgents,
                 complianceModules: complianceModules,
                 complianceSettings: complianceSettings,
-                accessManager: address(accessManager)
+                accessManager: address(accessManager),
+                accessManagerAdmin: address(0)
             }),
             ITREXFactory.ClaimDetails({ claimTopics: claimTopics, issuers: issuers, issuerClaims: issuerClaims })
         );
@@ -997,8 +948,8 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(linkedIRs.length, 1, "IRS must have the deployed IR bound at init time");
         assertEq(linkedIRs[0], address(ir), "IRS.linkedIdentityRegistries[0] must match the deployed IR");
 
-        assertTrue(_hasAgentRole(address(deployedToken)), "Token must be agent on IR after init");
-        assertTrue(_hasAgentRole(alice), "Configured irAgent must be agent on IR after init");
+        assertFalse(_hasAgentRole(address(deployedToken)), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(alice), "factory must not grant AGENT");
 
         ModularCompliance mc = ModularCompliance(address(deployedToken.compliance()));
         assertEq(mc.getTokenBound(), address(deployedToken), "MC must be bound to the deployed Token at init time");
@@ -1014,28 +965,22 @@ contract TREXFactoryTest is TREXSuiteTest {
             deployedToken.onchainID(),
             "Token OID must match the IdentityFactory-registered identity for the deployed Token address"
         );
-        assertTrue(_hasAgentRole(bob), "Configured tokenAgent must be agent on Token after init");
+        assertFalse(_hasAgentRole(bob), "factory must not grant AGENT");
     }
 
-    /// @notice deployTREXSuite must grant the AGENT role to the token, the IR and every configured
-    ///         agent, with the factory holding only the AGENT_ADMIN role on the AccessManager
-    function test_deployTREXSuite_GrantsAgentRoles() public {
-        address[] memory irAgents = new address[](1);
-        irAgents[0] = alice;
-        address[] memory tokenAgents = new address[](1);
-        tokenAgents[0] = bob;
-
+    /// @notice deployTREXSuite must grant the AGENT role to nobody: not the token, not the IR, not any
+    ///         account; the issuer grants what the suite needs afterwards
+    function test_deployTREXSuite_GrantsNoAgentRole() public {
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: "Token name",
             symbol: "SYM",
             decimals: 8,
             irs: address(0),
             ONCHAINID: address(0),
-            irAgents: irAgents,
-            tokenAgents: tokenAgents,
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
 
         assertFalse(_hasAgentRole(alice), "precondition: irAgent must not hold AGENT yet");
@@ -1046,10 +991,10 @@ contract TREXFactoryTest is TREXSuiteTest {
         Token deployedToken = Token(trexFactory.getToken("agent-grant-salt"));
         address ir = address(deployedToken.identityRegistry());
 
-        assertTrue(_hasAgentRole(address(deployedToken)), "Token must hold AGENT after deployTREXSuite");
-        assertTrue(_hasAgentRole(ir), "IR must hold AGENT after deployTREXSuite");
-        assertTrue(_hasAgentRole(alice), "Configured irAgent must hold AGENT after deployTREXSuite");
-        assertTrue(_hasAgentRole(bob), "Configured tokenAgent must hold AGENT after deployTREXSuite");
+        assertFalse(_hasAgentRole(address(deployedToken)), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(ir), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(alice), "factory must not grant AGENT");
+        assertFalse(_hasAgentRole(bob), "factory must not grant AGENT");
     }
 
     // ============ getToken() Tests ============
@@ -1217,14 +1162,13 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         require(deployedIRS != address(0), "IRS should be deployed");
 
-        // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory does NOT get any
-        // standing role here: it self-grants IRS_BINDER (admin = AGENT_ADMIN, which it already holds)
-        // for the bind window during deployTREXSuite and revokes it before returning.
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS);
+        // Wire bindIdentityRegistry -> IRS_BINDER on the reused IRS. The factory never binds: the
+        // issuer binds the new registry after the deploy with IRS_BINDER of its own.
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS, DOMAIN);
 
         // Sanity: the factory holds neither OWNER nor IRS_BINDER going into the reused-IRS deploy.
-        (bool hasOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
-        (bool hasBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        (bool hasOwner,) = accessManager.hasRole(_role(RolesLib.Role.OWNER), address(trexFactory));
+        (bool hasBinder,) = accessManager.hasRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory));
         assertFalse(hasOwner, "Factory must not hold standing OWNER");
         assertFalse(hasBinder, "Factory must not hold standing IRS_BINDER before deploy");
 
@@ -1235,11 +1179,10 @@ contract TREXFactoryTest is TREXSuiteTest {
             decimals: 8,
             irs: deployedIRS, // Use provided IRS instead of address(0)
             ONCHAINID: address(0),
-            irAgents: new address[](0),
-            tokenAgents: new address[](0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager)
+            accessManager: address(accessManager),
+            accessManagerAdmin: address(0)
         });
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -1258,8 +1201,11 @@ contract TREXFactoryTest is TREXSuiteTest {
             "Both tokens should share the same identity registry storage"
         );
 
-        // Reused-IRS path must bind the new IR (regression guard for Part 3)
+        // Reused-IRS path leaves binding to the issuer (regression guard)
         IdentityRegistryStorage reusedIRS = IdentityRegistryStorage(deployedIRS);
+        assertEq(reusedIRS.linkedIdentityRegistries().length, 1, "factory must not bind the new IR");
+        _grantIRSBinderRole(address(this));
+        reusedIRS.bindIdentityRegistry(address(newIR));
         address[] memory linked = reusedIRS.linkedIdentityRegistries();
         assertEq(linked.length, 2, "Reused IRS should have both old and new IR bound");
 
@@ -1272,42 +1218,11 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertTrue(sawOld, "Reused IRS should still have the old IR bound");
         assertTrue(sawNew, "Reused IRS should have the new IR bound");
 
-        // Transient-grant invariant: the factory must hold no standing privilege over the IRS after
-        // the deploy. IRS_BINDER was self-granted only for the bind call and revoked before return.
-        (bool stillBinder,) = accessManager.hasRole(RolesLib.IRS_BINDER, address(trexFactory));
+        // The factory holds no privilege over the IRS at any point: it never granted itself IRS_BINDER.
+        (bool stillBinder,) = accessManager.hasRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory));
         assertFalse(stillBinder, "Factory must not retain IRS_BINDER after deploy");
-        (bool stillOwner,) = accessManager.hasRole(RolesLib.OWNER, address(trexFactory));
+        (bool stillOwner,) = accessManager.hasRole(_role(RolesLib.Role.OWNER), address(trexFactory));
         assertFalse(stillOwner, "Factory must not hold standing OWNER on the IRS");
-    }
-
-    /// @notice The reused-IRS bind must fail closed when the factory cannot obtain IRS_BINDER, proving
-    ///         the bind is genuinely gated and not reachable without the transient grant. Stripping the
-    ///         factory's AGENT_ADMIN removes its ability to self-grant IRS_BINDER, so deployTREXSuite
-    ///         reverts at the bind step.
-    function test_deployTREXSuite_RevertWhen_ProvidedIRS_FactoryCannotSelfGrantBinder() public {
-        // Deploy a first suite to obtain a properly initialized IRS to reuse.
-        ITREXFactory.TokenDetails memory tempTokenDetails = _createEmptyTokenDetails();
-        ITREXFactory.ClaimDetails memory tempClaimDetails = _createEmptyClaimDetails();
-        _deploySuite("temp-salt-2", tempTokenDetails, tempClaimDetails);
-
-        address tempTokenAddress = trexFactory.getToken("temp-salt-2");
-        Token tempToken = Token(tempTokenAddress);
-        address irAddress = address(tempToken.identityRegistry());
-        address deployedIRS = address(IERC3643IdentityRegistry(irAddress).identityStorage());
-
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, deployedIRS);
-
-        // Remove the factory's ability to administer IRS_BINDER (admin = AGENT_ADMIN). Without it,
-        // the self-grant inside deployTREXSuite reverts and the reused-IRS bind cannot proceed.
-        accessManager.revokeRole(RolesLib.AGENT_ADMIN, address(trexFactory));
-
-        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
-        tokenDetails.irs = deployedIRS;
-        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
-
-        vm.prank(deployer);
-        vm.expectRevert();
-        trexFactory.deployTREXSuite("salt-irs-revert", tokenDetails, claimDetails);
     }
 
     // ============ AccessManagerSetupLib.setupTREXImplementationAuthorityRoles() Tests ============
@@ -1320,17 +1235,17 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector),
-            RolesLib.VERSION_MANAGER,
+            RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER),
             "publish must be mapped to VERSION_MANAGER"
         );
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.upgrade.selector),
-            RolesLib.VERSION_MANAGER,
+            RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER),
             "upgrade must be mapped to VERSION_MANAGER"
         );
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publishAndUpgrade.selector),
-            RolesLib.VERSION_MANAGER,
+            RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER),
             "publishAndUpgrade must be mapped to VERSION_MANAGER"
         );
     }
@@ -1349,7 +1264,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     }
 
     /// @notice Should revert when a reused IRS is governed by a different AccessManager than the suite
-    function test_deployTREXSuite_RevertWhen_ReusedIRS_ForeignAuthority() public {
+    function test_deployTREXSuite_RevertWhen_ReusedIRS_UnderForeignAuthority() public {
         // Deploy a standalone IRS proxy governed by a DIFFERENT AccessManager than the suite's accessManager
         AccessManager otherAccessManager = new AccessManager(address(this));
         address foreignIRS = address(
@@ -1363,11 +1278,23 @@ contract TREXFactoryTest is TREXSuiteTest {
         tokenDetails.irs = foreignIRS;
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
-        // bindIdentityRegistry's `restricted` guard rejects the factory: it holds no IRS_BINDER on the
-        // foreign AccessManager, so the revert is AccessManagedUnauthorized, not AuthorityMismatch.
+        // The storage reports another manager as its authority, so the suite could never be bound to
+        // it: the factory rejects the combination up front.
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(trexFactory)));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.StorageAuthorityMismatch.selector,
+                foreignIRS,
+                address(accessManager),
+                address(otherAccessManager)
+            )
+        );
         trexFactory.deployTREXSuite("salt-authority-mismatch", tokenDetails, claimDetails);
+
+        assertEq(trexFactory.getToken("salt-authority-mismatch"), address(0));
+        assertEq(IdentityRegistryStorage(foreignIRS).linkedIdentityRegistries().length, 0);
+        (bool binder,) = otherAccessManager.hasRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory));
+        assertFalse(binder);
     }
 
 }
@@ -1378,7 +1305,11 @@ contract EmptyBeaconsAuthority {
 
     function beacons() external pure returns (ITREXImplementationAuthority.SuiteBeacons memory) {
         return ITREXImplementationAuthority.SuiteBeacons({
-            tokenBeacon: address(0), trexRegistryBeacon: address(0), irsBeacon: address(0), mcBeacon: address(0)
+            tokenBeacon: address(0),
+            trexRegistryBeacon: address(0),
+            irsBeacon: address(0),
+            mcBeacon: address(0),
+            accessManagerBeacon: address(0)
         });
     }
 

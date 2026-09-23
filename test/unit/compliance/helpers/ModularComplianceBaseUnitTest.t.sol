@@ -33,7 +33,7 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
                 )
             )
         );
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc));
+        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc), 1);
         _grantOwnerRole(address(this));
         _grantComplianceManagerRole(address(this));
         _grantAgentRole(agentAccount);

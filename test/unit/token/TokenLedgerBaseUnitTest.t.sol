@@ -55,7 +55,7 @@ abstract contract TokenLedgerBaseUnitTest is TokenBaseUnitTest {
         );
         ledger = TokenLedgerHarness(address(token));
 
-        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token));
+        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token), 1);
         _grantAllAgentRoles(agent);
 
         vm.prank(agent);

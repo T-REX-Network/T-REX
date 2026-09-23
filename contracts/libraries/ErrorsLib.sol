@@ -128,10 +128,12 @@ library ErrorsLib {
 
     // TREXFactory Errors
     error AuthorityMismatch();
+    error StorageAuthorityMismatch(address identityRegistryStorage, address expected, address actual);
+    error AccessManagerNotAContract(address accessManager);
+    error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    error MaxAgentsReached(uint256 max);
     /// @dev The IdentityFactory already binds the predicted token address to a different identity.
     error TokenIdentityAlreadyBound(address token, address boundIdentity);
     error TokenAlreadyDeployed();
@@ -151,6 +153,18 @@ library ErrorsLib {
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
+
+    // AccessManagerSetupLib Errors
+    error NotAssigned(address target);
+    error PendingDelayChange(address account, uint64 role);
+    error PendingRoleGrant(address account, uint64 role);
+    error RoleNotHeld(address account, uint64 role);
+
+    // RolesLib Errors
+    error InvalidDomain();
+
+    // TREXAccessManager Errors
+    error DomainNotFound(uint32 domainId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

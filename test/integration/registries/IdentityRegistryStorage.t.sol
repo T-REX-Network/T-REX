@@ -37,6 +37,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // bindIdentityRegistry is now gated by the transient IRS_BINDER role (not OWNER). deployer
         // already holds OWNER for the suite; grant it IRS_BINDER too so the bind-path tests can run.
         _grantIRSBinderRole(deployer);
+        _grantStorageWriterRole(agent);
 
         // Note: In Hardhat fixture, identityRegistry.target is bound to storage in setUp
         // For Foundry, we start with 0 bound registries (tests will bind as needed)

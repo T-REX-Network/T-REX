@@ -235,6 +235,10 @@ abstract contract ERC3643IdentityRegistryStorage is IERC3643IdentityRegistryStor
         return _erc3643IdentityRegistryStorageStorage().identityRegistries.values();
     }
 
+    function _isIdentityRegistryBound(address identityRegistry) internal view virtual returns (bool) {
+        return _erc3643IdentityRegistryStorageStorage().identityRegistries.contains(identityRegistry);
+    }
+
     /// @dev Reads the stored identity of a wallet, separate from the external getter so derived
     ///  contracts can consult the standard record without re-entering their own overridden view.
     function _storedIdentity(address userAddress) internal view virtual returns (IIdentity) {
