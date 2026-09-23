@@ -97,6 +97,17 @@ interface IModularCompliance is IERC3643Compliance {
     function removeModule(address _module) external;
 
     /**
+     *  @dev removes a module from the list of compliance modules without calling it, for a module that
+     *  reverts on `unbindCompliance` or everywhere. The module keeps its own binding record, so the same
+     *  address cannot be added again; a fresh deployment can.
+     *  @param _module address of the module to remove
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleForceRemoved event and no ModuleRemoved, so indexers can tell a forced removal
+     *  from a regular one
+     */
+    function forceRemoveModule(address _module) external;
+
+    /**
      *  @dev calls any function on bound modules
      *  can be called only on bound modules
      *  @param callData the bytecode for interaction with the module, abi encoded

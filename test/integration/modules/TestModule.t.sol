@@ -153,8 +153,8 @@ contract TestModuleTest is TREXSuiteTest {
     function test_getNonce_Increments_WhenUnbinding() public {
         assertEq(testModule.getNonce(address(compliance)), 0);
 
-        vm.prank(address(compliance));
-        testModule.unbindCompliance(address(compliance));
+        vm.prank(deployer);
+        compliance.removeModule(address(testModule));
 
         assertEq(testModule.getNonce(address(compliance)), 1);
 
@@ -302,8 +302,8 @@ contract TestModuleTest is TREXSuiteTest {
     /// @notice Should revert when compliance is already bound
     function test_bindCompliance_RevertWhen_AlreadyBound() public {
         // First unbind the compliance that was bound in setUp
-        vm.prank(address(compliance));
-        testModule.unbindCompliance(address(compliance));
+        vm.prank(deployer);
+        compliance.removeModule(address(testModule));
 
         // Bind it again
         vm.prank(address(compliance));
@@ -344,6 +344,14 @@ contract TestModuleTest is TREXSuiteTest {
         // The onlyComplianceCall modifier checks first, so it reverts with OnlyBoundComplianceCanCall
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
         testModule.unbindCompliance(address(compliance));
+    }
+
+    function test_unbindCompliance_RevertWhen_ComplianceStillRoutesToModule() public {
+        vm.prank(address(compliance));
+        vm.expectRevert(ErrorsLib.ModuleStillBound.selector);
+        testModule.unbindCompliance(address(compliance));
+
+        assertTrue(testModule.isComplianceBound(address(compliance)));
     }
 
     /// @notice Should revert when msg.sender is bound compliance but _compliance parameter is different

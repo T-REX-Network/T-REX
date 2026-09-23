@@ -158,6 +158,23 @@ All notable changes to this project will be documented in this file.
   manager. `MaxAgentsReached` is removed.
   - Rollout: this stops new grants. It does not revoke `AGENT_ADMIN` that issuers granted to earlier
     factories on their managers; revoke it on every manager that holds it.
+- **Module removal never depends on the module** (OZ M-11, L-13): a module upgraded to revert
+  everywhere can no longer hold the token hostage.
+  - `removeModule` is unchanged and strict: it deletes the entry, then calls `unbindCompliance` and
+    reverts if that call fails for any reason, a module revert or a caller who starved the subcall of
+    gas alike. A best-effort call was considered and rejected: with the 63/64 gas rule any caller can
+    make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
+    healthy module's unbind at will.
+  - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
+    module and emits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
+    can tell a forced removal from a regular one. The module keeps its own binding record, so the same
+    proxy address cannot be re-added afterwards; a fresh deployment can.
+  - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
+    compliance still lists the module, so an unbind forwarded through `callModuleFunction`, directly
+    or nested in `multicall`, cannot leave the compliance routing to a module that considers itself
+    unbound. Only the two removal paths unbind.
+  - Deployments upgrading an existing `ModularCompliance` must register the `forceRemoveModule`
+    selector for OWNER on their AccessManager; `AccessManagerSetupLib` does it for new deployments.
 - **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
