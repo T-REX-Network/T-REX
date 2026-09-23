@@ -412,6 +412,10 @@ library AccessManagerSetupLib {
         return false;
     }
 
+    /// @dev Walks `table` as runs of consecutive same-role entries and maps each run with one
+    ///  `setTargetFunctionRole`. The tables above keep every role's selectors consecutive; a table that
+    ///  interleaves roles still maps every selector correctly, since the manager writes per selector, it
+    ///  only spends one extra call per extra run.
     function _apply(IAccessManager accessManager, address target, SelectorRole[] memory table, uint32 domainId)
         private
     {
