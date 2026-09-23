@@ -104,6 +104,7 @@ library EventsLib {
     event ModuleAdded(address indexed module);
     event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
     event ModuleRemoved(address indexed module);
+    event ModuleForceRemoved(address indexed module);
 
     // AbstractModule / AbstractModuleUpgradeable Events
 
