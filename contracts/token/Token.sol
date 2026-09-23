@@ -226,6 +226,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc IToken
     function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireNotPaused();
 
         (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
         if (toNative) {
@@ -238,6 +239,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc IToken
     function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireNotPaused();
         _holdInTransit(from, amount, validationId);
     }
 
@@ -339,6 +341,12 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /* ----- Ledger Transitions ----- */
+
+    // Pause policy for everything below: the transitions move balances without {_update} and check no pause
+    // themselves; the entry points that reach them do. Today those are `_handleSettlement`, `settleValidation`
+    // and `holdInTransit`, each of which requires the token not to be paused. A delegation-out or recall flow
+    // that lands later must do the same before calling `_delegateOut` or `_recall`, so that the pause halts
+    // every movement between wallets, native or satellite, while mints and burns stay allowed.
 
     /// @dev Moves `amount` of `holder`'s free balance out to `toWallet`, a wallet on a satellite chain: a native
     ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
@@ -531,6 +539,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         override
         returns (bool)
     {
+        _requireNotPaused();
         require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
         require(balanceOf(lostWallet) != 0, ErrorsLib.NoTokenToRecover());
 
@@ -547,6 +556,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev Adds the T-REX `ForcedTransfer` event to the standard forced transfer. It is emitted before
     ///  the compliance hook so that no module log can land between `Transfer` and this event.
     function _forcedTransfer(address from, address to, uint256 amount) internal override returns (bool) {
+        _requireNotPaused();
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());

@@ -175,7 +175,20 @@ All notable changes to this project will be documented in this file.
     unbound. Only the two removal paths unbind.
   - Deployments upgrading an existing `ModularCompliance` must register the `forceRemoveModule`
     selector for OWNER on their AccessManager; `AccessManagerSetupLib` does it for new deployments.
-- **`SpenderVerificationModule`**: opt-in module requiring the spender of a `transferFrom` to be a
+- **Forced transfers and recovery respect the pause** (OZ M-09): `forcedTransfer`, `batchForcedTransfer`
+  and `recoveryAddress` reached `_forceUpdate` without a pause check, so a forced-transfer agent could
+  move balances during an incident halt and pausing alone could not contain that agent. `_forcedTransfer`
+  and `_recoveryAddress` now start with `_requireNotPaused`, in the ERC-3643 base and in the T-REX
+  override, so single and batch forms revert with `EnforcedPause` while paused and work again after
+  `unpause`. Recovery is not an exception: it moves a balance like any transfer and waits for the halt to
+  be lifted.
+  - Pause policy, written down: the pause halts every balance movement between wallets, native or
+    satellite. Paths through `_update` (transfers) check it there; paths that bypass `_update` check it
+    at their entry: `_forcedTransfer`, `_recoveryAddress`, `_handleSettlement`, and now the two ledger
+    entries the compliance calls back, `settleValidation` and `holdInTransit`, so the halt holds at the
+    token boundary whatever routed the settlement. Mints and burns stay allowed while paused, unchanged.
+    The `_delegateOut` and `_recall` transitions have no entry point yet; the flow that lands them must
+    check the pause first, and the ledger section says so.
   verified identity in the token's registry — the rule an issuer would otherwise have to hardcode.
   It declares `CHECK_SPENDER` alone, keeps no state and resolves the registry through the compliance
   on every call, so it is plug and play and binds in any order. Investors are unaffected: a direct
