@@ -6,6 +6,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
@@ -49,12 +50,23 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
     function testPauseBlocksEveryMovementBetweenWalletsAndLeavesMintAndBurnOpen() public {
         address holder = makeAddr("Holder");
         address other = makeAddr("Other");
+        address investorOnchainId = makeAddr("Identity");
         address[] memory froms = new address[](1);
         address[] memory tos = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         froms[0] = holder;
         tos[0] = other;
         amounts[0] = 1;
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(IERC3643IdentityRegistry.contains.selector, holder),
+            abi.encode(true)
+        );
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(IERC3643IdentityRegistry.contains.selector, other),
+            abi.encode(false)
+        );
         vm.startPrank(agent);
         token.mint(holder, 10);
         token.pause();
@@ -76,7 +88,7 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
         token.batchForcedTransfer(froms, tos, amounts);
         vm.prank(agent);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        token.recoveryAddress(holder, other, makeAddr("Identity"));
+        token.recoveryAddress(holder, other, investorOnchainId);
         vm.prank(compliance);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         token.settleValidation("", "", 1, 1);
