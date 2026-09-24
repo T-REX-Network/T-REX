@@ -116,9 +116,8 @@ interface IERC3643Compliance {
      *  @param _from The address of the sender
      *  @param _to The address of the receiver
      *  @param _amount The amount of tokens involved in the transfer
-     *  This function will call moduleCheck() on every module bound to the compliance
-     *  If each of the module checks return TRUE, this function will return TRUE as well
-     *  returns FALSE otherwise
+     *  the implementation asks every rule bound to the compliance what it allows, and returns TRUE when
+     *  `_amount` is within every answer, FALSE otherwise
      *  the token also calls this function on a mint, with `_from` set to the zero address, so that distribution
      *  rules can be enforced at issuance, following the same convention as the `Transfer` event of `ERC-20`
      *  a burn does not go through this function

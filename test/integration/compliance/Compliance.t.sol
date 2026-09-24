@@ -702,7 +702,7 @@ contract ComplianceTest is TREXSuiteTest {
         vm.prank(deployer);
         compliance.addModule(moduleAddress);
 
-        // Block the module to make moduleCheck return false
+        // Block the module so the rule allows nothing
         bytes memory callData = abi.encodeWithSignature("blockModule(bool)", true);
         vm.prank(deployer);
         compliance.callModuleFunction(callData, moduleAddress);

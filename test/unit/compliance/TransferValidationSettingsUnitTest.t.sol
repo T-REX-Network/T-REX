@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
+import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -146,6 +147,13 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     function test_supportsInterface_Success_WhenQueriedForITransferValidation() public view {
         assertTrue(mc.supportsInterface(type(ITransferValidation).interfaceId));
+    }
+
+    /// @notice The compliance advertises the ledger, which is how a module finds the four numbers it reads.
+    ///         A rule resolves them through this id, so an implementation that stopped answering it would
+    ///         leave every rule reading a contract that cannot answer.
+    function test_supportsInterface_Success_WhenQueriedForIComplianceLedger() public view {
+        assertTrue(mc.supportsInterface(type(IComplianceLedger).interfaceId));
     }
 
     /// @notice The namespace sits where its derivation says, apart from the compliance's own storage.
