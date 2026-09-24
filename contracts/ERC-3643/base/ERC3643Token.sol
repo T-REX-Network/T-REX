@@ -397,24 +397,33 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
     }
 
     /// @dev Moves tokens irrespective of freezes, unfreezing just enough to cover the amount, then tells
-    ///  compliance the move happened. Recipient identity is still verified.
+    ///  compliance the move happened. Recipient identity is still verified. Reverts while the token is
+    ///  paused: a forced transfer is privileged, not exempt from an incident halt.
     /// @dev Guarded like {_update}: this path reaches compliance through `_forceUpdate`, which bypasses
     ///  {_update}, so it needs its own guard to cover the `transferred` hook. An override that does not
     ///  call `super` must carry `nonReentrant` itself.
-    function _forcedTransfer(address from, address to, uint256 amount) internal virtual nonReentrant returns (bool) {
+    function _forcedTransfer(address from, address to, uint256 amount)
+        internal
+        virtual
+        whenNotPaused
+        nonReentrant
+        returns (bool)
+    {
         require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         _getCompliance().transferred(from, to, amount);
         return true;
     }
 
-    /// @dev Moves a lost wallet's balance, freezes and identity onto a new wallet.
+    /// @dev Moves a lost wallet's balance, freezes and identity onto a new wallet. Reverts while the token
+    ///  is paused: recovery moves a balance like any transfer and waits for the halt to be lifted.
     /// @dev Guarded like {_update}: this path reaches compliance through `_forceUpdate`, which bypasses
     ///  {_update}, so it needs its own guard to cover the `transferred` hook. An override that does not
     ///  call `super` must carry `nonReentrant` itself.
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainID)
         internal
         virtual
+        whenNotPaused
         nonReentrant
         returns (bool)
     {
@@ -505,8 +514,11 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
     }
 
     /// @dev Moves tokens bypassing {_update}: no pause, freeze, identity or compliance check, and no
-    ///  compliance notification. Callers are responsible for notifying compliance themselves, which is
-    ///  why `_forcedTransfer` and `_recoveryAddress` each call `transferred` explicitly.
+    ///  compliance notification. Pause policy: the pause halts every balance movement between wallets,
+    ///  and every caller of this function enforces it before calling; `_forcedTransfer` and
+    ///  `_recoveryAddress` both use `whenNotPaused`. Mints and burns stay allowed while paused, see
+    ///  {_update}. Callers are also responsible for notifying compliance themselves, which is why
+    ///  `_forcedTransfer` and `_recoveryAddress` each call `transferred` explicitly.
     function _forceUpdate(address from, address to, uint256 value) internal virtual {
         _autoUnfreezeFor(from, value);
         super._update(from, to, value);

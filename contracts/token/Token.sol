@@ -224,7 +224,10 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId)
+        external
+        whenNotPaused
+    {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
 
         (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
@@ -236,7 +239,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external {
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external whenNotPaused {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
         _holdInTransit(from, amount, validationId);
     }
@@ -339,6 +342,12 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /* ----- Ledger Transitions ----- */
+
+    // Pause policy for everything below: the transitions move balances without {_update} and check no pause
+    // themselves; the entry points that reach them do. Today those are `_handleSettlement`, `settleValidation`
+    // and `holdInTransit`, each of which requires the token not to be paused. A delegation-out or recall flow
+    // that lands later must do the same before calling `_delegateOut` or `_recall`, so that the pause halts
+    // every movement between wallets, native or satellite, while mints and burns stay allowed.
 
     /// @dev Moves `amount` of `holder`'s free balance out to `toWallet`, a wallet on a satellite chain: a native
     ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
@@ -546,10 +555,16 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @dev Adds the T-REX `ForcedTransfer` event to the standard forced transfer. It is emitted before
     ///  the compliance hook so that no module log can land between `Transfer` and this event.
-    /// @dev Carries its own `nonReentrant` because it reimplements the base body instead of calling
-    ///  `super`, so the base guard never runs on this path. {_recoveryAddress} does call `super` and
-    ///  inherits the base guard, which is why it is not marked here.
-    function _forcedTransfer(address from, address to, uint256 amount) internal override nonReentrant returns (bool) {
+    /// @dev Carries its own `nonReentrant` and `whenNotPaused` because it reimplements the base body
+    ///  instead of calling `super`, so the base modifiers never run on this path. {_recoveryAddress} does
+    ///  call `super` and inherits both, which is why it is not marked here.
+    function _forcedTransfer(address from, address to, uint256 amount)
+        internal
+        override
+        whenNotPaused
+        nonReentrant
+        returns (bool)
+    {
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
@@ -584,8 +599,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
         internal
         override
+        whenNotPaused
     {
-        _requireNotPaused();
         bool halt = ISettlementHandler(address(_getCompliance())).handleSettlement(chainKey, notification);
         if (halt) _pause();
     }

@@ -101,7 +101,8 @@ interface IToken is IERC3643 {
     ///  the position a settlement debits is one the executing satellite held all along.
     /// @dev Callable by the bound compliance only, which classified the settlement against the validation it
     ///  issued; reverts with `OnlyBoundCompliance` otherwise. Reverts with `InsufficientBridgedBalance` when
-    ///  `from`'s position no longer covers `amount`, which leaves the settlement deliverable again. Bypasses
+    ///  `from`'s position no longer covers `amount`, which leaves the settlement deliverable again. Reverts
+    ///  with `EnforcedPause` while the token is paused, so a halt stops satellite settlements too. Bypasses
     ///  `_update`, like every ledger transition.
     /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param to the ERC-7930 envelope of the recipient
@@ -116,7 +117,8 @@ interface IToken is IERC3643 {
     ///  later credits the recipient from the hold instead of debiting `from` again.
     /// @dev Callable by the bound compliance only; reverts with `OnlyBoundCompliance` otherwise. Reverts with
     ///  `TransitAlreadyHeld` when the validation already holds an amount, and with `InsufficientBridgedBalance`
-    ///  when `from`'s position no longer covers `amount`, which leaves the burn leg deliverable again.
+    ///  when `from`'s position no longer covers `amount`, which leaves the burn leg deliverable again. Reverts
+    ///  with `EnforcedPause` while the token is paused.
     /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param amount the exact amount the satellite burned
     /// @param validationId the validation the burn leg consumed
