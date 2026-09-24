@@ -26,8 +26,8 @@ A module says what it is in `moduleTypes()`, and the compliance calls it only wh
 | Type | Function | When |
 |---|---|---|
 | `RULE` | `allowedAmount(ctx)` | before a transfer or a mint, and when a cross-chain validation is issued |
-| `SPENDER` | `moduleCheckSpender(spender, from, to, value, compliance)` | before an allowance is spent in `transferFrom` |
-| `TRACKER` | `moduleTransferAction`, `moduleMintAction`, `moduleBurnAction` | after the tokens moved and the positions were updated |
+| `SPENDER` | `moduleCheckSpender(ctx)` | before an allowance is spent in `transferFrom`, and when a validation names a spender |
+| `TRACKER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated |
 
 A module may name one, two or all three. It inherits `AbstractModuleUpgradeable`, which answers every
 question neutrally, and overrides only the ones its types cover.
@@ -61,13 +61,27 @@ struct TransferContext {
     bytes32 fromWallet;     // canonical wallet key, zero on a mint
     bytes32 toWallet;       // zero on a burn
     uint256 amountMin;      // equal to amountMax on a native movement
-    uint256 amountMax;      // the requested maximum on an issuance
+    uint256 amountMax;      // the amount that moved, or the requested maximum on an issuance
     bool    isIssuance;     // true while a cross-chain validation is being issued
+    bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
 }
 ```
 
+A `SPENDER` module answers about `ctx.spender`, a wallet on this chain or on a satellite, so one
+policy covers `transferFrom` here and a validation a satellite operator will execute. The shipped
+`SpenderVerificationModule` asks the registry whether that wallet is eligible; `SpenderWhitelistModule`
+keeps an allowlist of wallets by their canonical key.
+
 Identities arrive resolved, so a module never calls the registry to find out whose tokens these are. The
 ledger describes the state before the move.
+
+One context, one convention, everywhere. A mint has no sender, so `fromIdentity` and `fromWallet` are zero;
+a burn has no recipient, so `toIdentity` and `toWallet` are zero. A `TRACKER` reads that to tell the three
+apart, which is why it needs one function and not three.
+
+A recipient that resolves to no identity is refused before any rule is asked, whenever a rule is bound. A
+distribution rule keys on the identity and would read a zero one as a burn, so the tokens would land where
+no cap could reach them. Only a token whose registry has eligibility checks disabled can get that far.
 
 ## Two rules a module must follow
 
@@ -100,6 +114,20 @@ function moduleTypes() external pure returns (ModuleType[] memory types) {
 
 No burn is limited, no relocation between one identity's wallets is limited, and the same nine lines
 cover a native transfer, an issuance, two validations racing for the same cap and a late settlement.
+`MaxBalancePerIdentityModule.t.sol` exercises exactly that list.
+
+## The compliance follows its token from the first mint
+
+The numbers above are right because the compliance saw every movement since the token's first mint. A
+token deployed with its compliance needs nothing. Moving a token that already has holders onto a new
+compliance with `setCompliance` is not supported: the new compliance would start every identity at
+zero. A circulating token's compliance is upgraded in place through its beacon, or changed through its
+modules.
+
+Two events say when a position and the balances disagree: `PositionUnresolved` when a wallet that holds
+tokens resolves to no identity, `PositionUnderflow` when a debit exceeds what the identity held. Both
+mean a registry entry was removed or relinked under a wallet that holds tokens; neither reverts, so a
+burn or a forced transfer stays possible while the link is repaired.
 
 ## Binding
 

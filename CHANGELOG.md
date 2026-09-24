@@ -32,19 +32,54 @@ All notable changes to this project will be documented in this file.
     `isVerified`.
   - New events: `ClaimTopicAddedForIdentityType`, `ClaimTopicRemovedForIdentityType`. New custom
     error: `InvalidIdentityType`.
-- **Capabilities-based selective module dispatch**: a module declares which dispatch points are
-  meaningful for it, and `ModularCompliance` only calls it there.
-  - `IModule.moduleCapabilities()` returns a bitmask built from the flags of the new
-    `ModuleCapabilitiesLib` (`CHECK_TRANSFER`, `CHECK_SPENDER`, `HOOK_TRANSFER`, `HOOK_MINT`,
-    `HOOK_BURN`). It MUST be `pure`: the declaration is read once, at binding time.
-  - `refreshModuleCapabilities(address)` re-reads the declaration of a bound module, for when an
-    implementation upgrade changed it. Restricted to OWNER. The module moves to the end of the set.
-  - `getModuleCapabilities(address)` and `getModulesByCapability(uint256)` expose the recorded
-    routing. `UtilityChecker.getTransferDetails` now reports only the modules that vet transfers.
-  - `ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities)` on bind and refresh.
-- **Spender compliance check**: `IModule.moduleCheckSpender(...)` and
-  `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules declaring
-  `CHECK_SPENDER`.
+- **Compliance ledger and typed modules** (#81, PR #83): the compliance keeps the numbers every
+  distribution rule needs, once, and a module is one of three kinds.
+  - `IComplianceLedger` on `ModularCompliance`: `positionOf(identity)` (free, frozen and bridged over
+    every linked wallet), `pendingInOf(identity)` and `pendingOutOf(identity)` (what open validations
+    promise to and from it, at `amountMax`), `pendingOutOfWallet(walletKey)` (what open validations may
+    still draw from one satellite wallet). Written from the hooks the token already calls and from the
+    issuance, settlement and discard paths; nothing outside the compliance writes them. A movement
+    between two wallets of one identity changes none of them. Own ERC-7201 namespace
+    `erc3643.storage.ComplianceLedger`.
+  - The compliance follows its token from the first mint. Moving a token that already has holders onto
+    a new compliance is not supported: the new compliance would start every position at zero. A
+    circulating token's compliance is upgraded in place, never replaced.
+  - `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` report a movement
+    whose wallet resolves to no identity, or a debit past what the identity held; neither reverts.
+  - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`RULE`, `SPENDER`, `TRACKER`),
+    read once at binding. `ModularCompliance` keeps one list per type and dispatches to it only:
+    `RULE` answers `allowedAmount(ctx)`, the largest amount it allows, and the compliance keeps the
+    smallest answer (`type(uint256).max` is no limit, 0 is refused; the rule must be monotonic);
+    `SPENDER` answers `moduleCheckSpender`, all must agree; `TRACKER` is told `afterTransfer(ctx)` after
+    the positions moved. One action, not three: a mint is a movement with a zero sender side and a burn one
+    with a zero recipient side, the convention `allowedAmount` already used, so the tracker sorts them
+    itself and the compliance keeps one dispatch loop.
+  - `IModule.TransferContext`: the compliance asking, both identities resolved once, both wallet keys,
+    `amountMin` / `amountMax`, `isIssuance` and `spender`. Every rule, spender policy and tracker receives
+    it, built in one place, so a module never resolves a wallet itself. On an action `amountMax` is the
+    exact amount that moved, so there is no second amount beside it.
+  - A recipient that resolves to no identity is refused while a `RULE` is bound: a distribution rule keys
+    on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
+    registry with eligibility checks disabled reaches that path.
+  - `resyncModuleTypes(address)` re-reads a bound module's declaration after an implementation
+    upgrade, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
+    `ModuleTypesRecorded(module, moduleTypes)` on bind and resync. `ModuleHasNoType` and
+    `DuplicateModuleType` refuse a declaration the compliance cannot route.
+  - `MaxBalancePerIdentityModule`: the first rule over the ledger, a cap per identity over every
+    wallet and every chain, plug and play, one function for a native transfer, an issuance, two
+    validations racing for the same cap and a late reconciliation.
+  - `UtilityChecker.getTransferDetails` reports each `RULE` module's `allowedAmount` next to the
+    pass verdict (`ComplianceCheckDetails.allowedAmount`).
+  - `docs/compliance-modules.md` is the one-page guide to writing a module.
+- **Spender compliance check**: `IModule.moduleCheckSpender(ctx)` and
+  `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules naming
+  `SPENDER`. The spender travels in `TransferContext.spender` as an ERC-7930 envelope, so one policy
+  covers the caller of `transferFrom` and the operator a validation names on a satellite.
+  `SpenderVerificationModule` asks `isWalletVerified` on it; `SpenderWhitelistModule` lists wallets by
+  canonical key (`allowSpender(bytes)`, `disallowSpender(bytes)`, `isSpenderAllowed(compliance, bytes)`,
+  `SpenderAllowed` / `SpenderDisallowed` carry the key and the envelope, `SpenderAlreadyAllowed` and
+  `SpenderNotListed` take the envelope). The context is only built, and the wallets resolved, when a
+  `SPENDER` module is bound.
   - `Token.transferFrom` consults it before spending the allowance and reverts
     `SpenderNotAllowed(address spender, address from, address to, uint256 value)` when a module
     refuses the caller — the whole call is reported, since a module may accept a spender in general
@@ -53,7 +88,7 @@ All notable changes to this project will be documented in this file.
   - Only `transferFrom` is concerned. A direct `transfer` has no spender to vet and pays nothing for
     the check; `mint`, `burn` and `forcedTransfer` stay gated by roles alone, since agent
     permissioning is not investor-facing compliance.
-  - A deployment binding no `CHECK_SPENDER` module is unaffected: the check returns true across an
+  - A deployment binding no `SPENDER` module is unaffected: the check returns true across an
     empty set.
 - **Role domains** (OZ H-02, #55): role ids on a shared AccessManager were one set for every
   suite, so an `AGENT_MINTER` of token A satisfied token B's `mint` as well.
@@ -297,24 +332,18 @@ All notable changes to this project will be documented in this file.
     moves, where a native balance stays free to leave between issuance and settlement; a native
     position reaches a satellite through delegation-out, which burns before it instructs. `from` must
     resolve to an identity (revoked included), `to` must pass `isWalletVerified`, every envelope must
-    be canonical. The range is capped at `from`'s bridged position, narrowed by intersection through
-    every module declaring
-    the new `BOUNDS` capability (skipped when both wallets belong to one identity), then by the
-    manager's clamp; an empty range reverts with `EmptyValidationRange`, a zero maximum with
-    `ZeroValue`, and nothing is written. The record (`validationOf`) is stored for the slot lifecycle,
+    be canonical. The range is capped at `from`'s bridged position less what is already pending out of
+    it, then at the smallest `allowedAmount` any `RULE` module answers (skipped when both wallets belong
+    to one identity); an empty range reverts with `EmptyValidationRange`, a zero maximum with
+    `ZeroValue`, and nothing is written. The record (`validationOf`) is stored for the lifecycle,
     `TransferValidationIssued` carries the full envelopes, and one leg per involved satellite chain
-    leaves through `Token.dispatchComplianceValidation` under the same id.
-  - `IModule.validationBounds(from, to, spender, currentMin, currentMax, compliance)` behind the
-    `ModuleCapabilitiesLib.BOUNDS` flag: a module narrows the running range or reverts to refuse.
-    The spender rides along because no module runs on the satellite, so issuance is the only place a
-    spender policy can refuse one. `AbstractModuleUpgradeable` ships a pass-through default, so
-    existing modules are unaffected.
+    leaves through `Token.dispatchComplianceValidation` under the same id. The spender is parsed and
+    carried on the wire for the satellite to enforce; no rule here reads it.
   - `TREXRegistry.resolveIdentity(bytes)` and `isWalletVerified(bytes)`, backed by the registry's
     IdentityFactory: the first attributes (revoked bindings included), the second admits (active
     binding, then the same claim check as `isVerified`).
   - `COMPLIANCE_MANAGER`, administered by `SUITE_ADMIN`, over `setDefaultValidityWindow`,
-    `setReconciliationWindow(chainKey, duration)`, `setValidationClamp` (zero clears),
-    `pauseValidationIssuance(chainKey)` and `unpauseValidationIssuance(chainKey)`. Windows are
+    `setReconciliationWindow(chainKey, duration)` and `setIssuancePaused(chainKey, paused)`. Windows are
     snapshot at issuance; a cross-chain validation takes the larger of its two chains' windows;
     issuance refuses to run without them (`ValidityWindowNotSet`, `ReconciliationWindowNotSet`).
   - Late-reconciliation surface: `LateReconciliation(validationId, chainKey)` on every late leg, and
@@ -329,16 +358,14 @@ All notable changes to this project will be documented in this file.
     `SenderNotOnSatellite`.
   - Test assets: `BoundsModule`, `TransferValidationHarness`, `ModularComplianceBaseUnitTest`, and
     the satellite-wallet fixtures on `TREXSuiteTest`.
-- **Compliance slots: reservation, settlement and discard lifecycle.** Once a validation is issued the
-  engine treats the movement as executed for every distribution-dependent rule, so concurrent
-  validations cannot jointly breach a cap; ownership hard-commits only when the settlement comes back.
-  - `IModule.reserveSlot(validationId, from, to, amountMax)`, `commitSlot(validationId, executedAmount)`
-    and `releaseSlot(validationId)` behind the new `ModuleCapabilitiesLib.SLOTS` flag; static modules
-    are untouched. A reservation counts the worst case at `amountMax`; a commit reconciles to the exact
-    amount and MUST tolerate an id the module never reserved (bound after issuance, or a late
-    reconciliation) by applying the delta anyway, returning whether the state it then holds breaches
-    its rule; a release undoes it entirely. `ModularCompliance` dispatches to declaring modules only,
-    right after the record is written, and reports a breach when any of them does.
+- **Pending reservation, settlement and discard lifecycle.** Once a validation is issued the compliance
+  counts it as executed at `amountMax` for every distribution rule, so concurrent validations cannot
+  jointly breach a cap; ownership hard-commits only when the settlement comes back.
+  - The reservation is two writes into the ledger, `pendingIn` / `pendingOut` of the identities and
+    `pendingOutOfWallet` of the sender, and involves no module. Settlement releases it and moves the
+    positions at the executed amount; a discard releases it. Relocating between two wallets of one
+    identity reserves nothing against the identity, only against the wallet. A rule bound after
+    issuance sees the settlement through the ledger, since the position belongs to the compliance.
   - `ITransferValidation.ValidationStatus` (`Pending`, `LegConfirmed`, `Settled`, `Expired`,
     `Discarded`, `LateReconciled`) and `ValidationState` (status, the two per-leg consumption flags,
     the executed amount, the wallet the first of two legs carried), read through `statusOf` and
@@ -375,12 +402,12 @@ All notable changes to this project will be documented in this file.
     A discard releases the slots and emits `ValidationDiscarded`; `LegConfirmed` is never discardable.
     The role is restricted by design: `RolesLib` names the discard front-running vector a permissionless
     keeper would open, against the liveness dependency a restricted one carries.
-  - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the modules catch up
-    through `commitSlot` with no live reservation, the status becomes `LateReconciled` and
-    `LateReconciliation` fires. Issuance for that chain pauses only when a module reports the state it
-    then holds as breaching its rule, forcing a late delivery being cheap enough that pausing on every
-    one would be a denial of service. A late first leg of two commits no module, so it stays
-    `Discarded` with its flag set and only warns for its own chain.
+  - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the status becomes
+    `LateReconciled` and `LateReconciliation` fires. Issuance for that chain pauses only when the
+    executed amount is above the smallest `allowedAmount` the rules answer once the reservation is
+    released, forcing a late delivery being cheap enough that pausing on every one would be a denial
+    of service. A late first leg of two consults no rule, so it stays `Discarded` with its flag set and
+    only warns for its own chain.
   - Emergencies: a leg already consumed, or an id never issued, applies nothing, emits
     `ReplayedSettlement` and halts the whole token through its pause (`handleSettlement` returns
     `haltToken`); only `AGENT_PAUSER` lifts it through `unpause`. While the token is paused every
@@ -389,8 +416,10 @@ All notable changes to this project will be documented in this file.
     `HeldInTransit`. Errors: `OnlyBoundCompliance`, `UnknownValidation`, `ValidationNotDiscardable`,
     `ValidationNotReleasable`, `SettlementTokenMismatch`, `SettlementLegMismatch`,
     `SettlementOutOfBounds`, `SettlementAmountMismatch`, `TransitAlreadyHeld`, `TransitAmountMismatch`.
-  - Test assets: `SlotsModule` (a max-balance-per-recipient counter over reservations),
-    `SlotsOnlyModule`, and the settlement-leg builders on `InteropSuiteTest`.
+  - Test assets: `CappedRecipientModule` (a cap over the ledger), the settlement-leg builders on
+    `InteropSuiteTest`, and `ComplianceLedger.invariants.t.sol`, which holds the four ledger numbers
+    to a recount of the token's buckets under fuzzed mints, burns, transfers, issuances, settlements
+    and discards.
 - **`TREXRegistry`**: one eligibility registry replacing `IdentityRegistry`, `TrustedIssuersRegistry`
   and `ClaimTopicsRegistry`. Registered identities, trusted issuers and required claim topics share a
   single namespaced storage, so `isVerified` resolves the rule set without a cross-contract hop.
@@ -477,33 +506,45 @@ All notable changes to this project will be documented in this file.
   empty set, so stripping an issuer of every topic means `removeTrustedIssuer`.
 - `batchRegisterIdentity` is `restricted` and bound to AGENT. No role was bound to its selector
   before, so the AccessManager fell back to admin-only on a function meant for agents.
-- **Breaking, `IModule`**: `moduleCapabilities()` is mandatory and abstract, so every module must
-  declare its dispatch points. `AbstractModuleUpgradeable` now ships defaults for the five dispatch
-  functions (no-op hooks, passing checks), so a module implements only what it enforces. Capabilities
-  are immutable per implementation; an upgrade that changes them needs a refresh on every bound
-  compliance.
-- **Breaking, interface ids**: `type(IModule).interfaceId` (capabilities, then `validationBounds`, then
-  the three slot hooks), `type(IModularCompliance).interfaceId`, `type(ITREXRegistry).interfaceId`
-  (the two wallet views), `type(ITransferValidation).interfaceId` (the lifecycle views and the keeper's
-  discard), `type(ISettlementHandler).interfaceId` (`handleSettlement` now returns `haltToken`) and
-  `type(IToken).interfaceId` (`settleValidation`, `holdInTransit` and the in-transit views) all change.
-  `ValidationRecord` gained three fields.
-- `ModularCompliance` holds its bound modules in an `EnumerableSet.UintSet` of packed entries
-  (`uint160(module) | capabilities << 160`), so one `SLOAD` yields both the call target and the
-  routing decision. Ordering is not preserved across a removal or a refresh.
-- Binding validates fully before writing state, so `canComplianceBind` now sees the module as not yet
-  bound. A module declaring nothing, or carrying an undefined bit, cannot be bound
-  (`ModuleHasNoCapabilities`, `InvalidModuleCapabilities`).
+- **Breaking, `IModule`**: `moduleTypes()` replaces `moduleCapabilities()`, `allowedAmount(ctx)`
+  replaces `moduleCheck` and `validationBounds`, and one `afterTransfer(ctx)` replaces
+  `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
+  `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.
+  `AbstractModuleUpgradeable` ships the neutral default for every question, so a module implements
+  only what it enforces. What a module names is read at binding; an upgrade that changes it needs
+  `resyncModuleTypes` on every bound compliance.
+- **Breaking, `ITransferValidation`**: `Validation` replaces `ValidationRecord` and `ValidationState`,
+  read through `validationOf` alone (`stateOf` is gone); it carries the identities resolved at
+  issuance and the two reservation flags. `setIssuancePaused(chainKey, paused)`, idempotent, replaces
+  `pauseValidationIssuance` / `unpauseValidationIssuance` (`ValidationIssuanceNotPaused` is gone).
+  `setValidationClamp` and `validationClamp` are gone: a ceiling on what may be issued is a rule, not
+  a setting. A validation that names a spender is refused when a `SPENDER` module objects
+  (`ValidationSpenderRefused`): no module runs on the satellite, so issuance is the only place that
+  spender can be judged, as `validationBounds` allowed before.
+- **Breaking, interface ids**: `type(IModule).interfaceId`, `type(IModularCompliance).interfaceId`,
+  `type(ITransferValidation).interfaceId`, `type(IUtilityChecker).interfaceId` and
+  `type(IComplianceLedger).interfaceId` change with the above.
+- `ModularCompliance` holds its bound modules in one `EnumerableSet.AddressSet` plus one per type, so
+  a dispatch is a loop over exactly the modules that answer it. Ordering follows binding order within a
+  type. Binding validates fully before writing state, so `canComplianceBind` sees the module as not
+  yet bound.
+- Every hook now resolves both identities through the registry and writes the position, whether or
+  not a rule is bound. Measured warm with no module bound: a transfer costs about 26k gas more than
+  before, a burn about 37k, a mint about 14k. A rule that used to keep its own position no longer
+  resolves anything, which is where the cost comes back with an identity-aware rule bound.
 - **Breaking, `ModuleInteraction`**: now `(address indexed target, bytes data)` instead of
   `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
   through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
 
-Measured on an eight-module set against warm storage: ~8.9k gas saved on a mint, ~10.7k on a burn and
-~7.9k on a transfer and a transferFrom, against a higher binding cost. Binding is an admin operation;
-transfers are not.
-
 ### Removed
+
+- `ModuleCapabilitiesLib` and the capability bitmask, `refreshModuleCapabilities`,
+  `getModuleCapabilities`, `getModulesByCapability`, `ModuleCapabilitiesRecorded`,
+  `InvalidModuleCapabilities`, `ModuleHasNoCapabilities`; `IModule.moduleCheck`, `validationBounds`,
+  `reserveSlot`, `commitSlot`, `releaseSlot`; `ITransferValidation.stateOf`, `setValidationClamp`,
+  `validationClamp`, `pauseValidationIssuance`, `unpauseValidationIssuance`, `ValidationClampSet`,
+  `ValidationIssuanceNotPaused`. Test fixtures `SlotsModule`, `SlotsOnlyModule`, `BoundsModule`.
 
 - Custom `AbstractProxy` / `IProxy`-based `TREXImplementationAuthority` / `IAFactory` stack removed.
   The per-type wrapper proxies (`TokenProxy`, `IdentityRegistryStorageProxy`, `TREXRegistryProxy`,
