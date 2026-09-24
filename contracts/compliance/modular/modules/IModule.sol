@@ -62,6 +62,18 @@
 
 pragma solidity 0.8.30;
 
+/// @title IModule
+/// @dev Compliance module interface.
+///
+/// Reserve before calling out. A module that accumulates state (a cumulative cap, a running total, a
+/// per-period counter) must record the pending amount BEFORE it makes any external call, and rely on
+/// transaction rollback to undo that record if the operation later fails. A module that calls out first
+/// and records afterwards lets the callee observe accounting that omits the in-flight operation.
+///
+/// The token wraps each operation in a reentrancy guard, so a callback cannot reenter the token itself.
+/// That guard does not extend to calls a module makes to other contracts, nor to accounting a module
+/// shares with anything reachable from its own callbacks, which is why the discipline is required here
+/// rather than assumed from the guard.
 interface IModule {
 
     /// functions
