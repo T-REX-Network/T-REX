@@ -348,6 +348,169 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(updated[1], extraIR);
     }
 
+    // ============ isIdentityRegistryBound() / linkedIdentityRegistryCount() Tests ============
+
+    /// @notice Should track membership as registries are bound and unbound
+    function test_isIdentityRegistryBound_TracksBindAndUnbind() public {
+        address existingIR = address(token.identityRegistry());
+        address extraIR = makeAddr("extraIR");
+
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
+        assertFalse(identityRegistryStorage.isIdentityRegistryBound(extraIR));
+
+        vm.mockCall(
+            extraIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(extraIR);
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(extraIR));
+
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(extraIR);
+        assertFalse(identityRegistryStorage.isIdentityRegistryBound(extraIR));
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
+    }
+
+    /// @notice Should return false for the zero address, which is never bindable
+    function test_isIdentityRegistryBound_ReturnsFalse_ForZeroAddress() public view {
+        assertFalse(identityRegistryStorage.isIdentityRegistryBound(address(0)));
+    }
+
+    /// @notice Should agree with the length of the enumerated set at every step
+    function test_linkedIdentityRegistryCount_MatchesEnumeratedLength() public {
+        assertEq(
+            identityRegistryStorage.linkedIdentityRegistryCount(),
+            identityRegistryStorage.linkedIdentityRegistries().length
+        );
+        assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), 1);
+
+        address extraIR = makeAddr("extraIR");
+        vm.mockCall(
+            extraIR, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+        );
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(extraIR);
+
+        assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), 2);
+        assertEq(
+            identityRegistryStorage.linkedIdentityRegistryCount(),
+            identityRegistryStorage.linkedIdentityRegistries().length
+        );
+
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(extraIR);
+        assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), 1);
+    }
+
+    /// @notice A silent rebind must not double-count
+    function test_linkedIdentityRegistryCount_Unchanged_OnRebind() public {
+        address existingIR = address(token.identityRegistry());
+        uint256 countBefore = identityRegistryStorage.linkedIdentityRegistryCount();
+
+        vm.prank(deployer);
+        identityRegistryStorage.bindIdentityRegistry(existingIR);
+
+        assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), countBefore);
+        assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
+    }
+
+    // ============ linkedIdentityRegistries(start, end) pagination Tests ============
+
+    /// @dev Binds `count` extra registries and returns them, sharing the storage authority so each
+    ///  passes the onlySharedAuthority guard.
+    function _bindExtraRegistries(uint256 count) internal returns (address[] memory extras) {
+        extras = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            address extra = makeAddr(string.concat("pagedIR", vm.toString(i)));
+            vm.mockCall(
+                extra, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
+            );
+            vm.prank(deployer);
+            identityRegistryStorage.bindIdentityRegistry(extra);
+            extras[i] = extra;
+        }
+    }
+
+    /// @notice Paging through the set in slices must reconstruct the full enumeration
+    function test_linkedIdentityRegistriesPaged_ReassemblesFullSet() public {
+        _bindExtraRegistries(4);
+
+        address[] memory all = identityRegistryStorage.linkedIdentityRegistries();
+        assertEq(all.length, 5);
+
+        address[] memory assembled = new address[](all.length);
+        uint256 filled = 0;
+        for (uint256 start = 0; start < all.length; start += 2) {
+            address[] memory page = identityRegistryStorage.linkedIdentityRegistries(start, start + 2);
+            for (uint256 i = 0; i < page.length; i++) {
+                assembled[filled++] = page[i];
+            }
+        }
+
+        assertEq(filled, all.length);
+        for (uint256 i = 0; i < all.length; i++) {
+            assertEq(assembled[i], all[i]);
+        }
+    }
+
+    /// @notice A page must match the same window of the full enumeration
+    function test_linkedIdentityRegistriesPaged_MatchesFullEnumerationWindow() public {
+        _bindExtraRegistries(3);
+
+        address[] memory all = identityRegistryStorage.linkedIdentityRegistries();
+        address[] memory page = identityRegistryStorage.linkedIdentityRegistries(1, 3);
+
+        assertEq(page.length, 2);
+        assertEq(page[0], all[1]);
+        assertEq(page[1], all[2]);
+    }
+
+    /// @notice An end past the set size clamps instead of reverting
+    function test_linkedIdentityRegistriesPaged_ClampsEndBeyondLength() public {
+        _bindExtraRegistries(2);
+
+        address[] memory page = identityRegistryStorage.linkedIdentityRegistries(0, 999);
+        assertEq(page.length, identityRegistryStorage.linkedIdentityRegistryCount());
+        assertEq(page.length, 3);
+    }
+
+    /// @notice A start past the set size yields an empty page, not a revert
+    function test_linkedIdentityRegistriesPaged_ReturnsEmpty_WhenStartBeyondLength() public view {
+        address[] memory page = identityRegistryStorage.linkedIdentityRegistries(50, 60);
+        assertEq(page.length, 0);
+    }
+
+    /// @notice An inverted range yields an empty page, not a revert
+    function test_linkedIdentityRegistriesPaged_ReturnsEmpty_WhenStartExceedsEnd() public {
+        _bindExtraRegistries(2);
+
+        address[] memory page = identityRegistryStorage.linkedIdentityRegistries(2, 1);
+        assertEq(page.length, 0);
+    }
+
+    /// @notice An empty window inside the set yields an empty page
+    function test_linkedIdentityRegistriesPaged_ReturnsEmpty_WhenStartEqualsEnd() public {
+        _bindExtraRegistries(2);
+
+        address[] memory page = identityRegistryStorage.linkedIdentityRegistries(1, 1);
+        assertEq(page.length, 0);
+    }
+
+    /// @notice Documents the swap-and-pop reorder: an unbind moves the last entry into the freed slot,
+    ///  so a page read across a mutation is not a consistent snapshot.
+    function test_linkedIdentityRegistriesPaged_OrderShifts_WhenEarlierEntryUnbound() public {
+        address[] memory extras = _bindExtraRegistries(3);
+        address last = identityRegistryStorage.linkedIdentityRegistries(3, 4)[0];
+        assertEq(last, extras[2]);
+
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(extras[0]);
+
+        // extras[0] sat at index 1; the tail entry took its place rather than the set shifting down.
+        assertEq(identityRegistryStorage.linkedIdentityRegistries(1, 2)[0], last);
+        assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), 3);
+    }
+
     // ============ storedIdentity() fallback / storedInvestorCountry() deprecated ============
 
     /// @notice storedIdentity returns the local identity when present (no fallback to global)

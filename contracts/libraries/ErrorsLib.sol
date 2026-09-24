@@ -147,6 +147,8 @@ library ErrorsLib {
     error EligibilityChecksDisabledAlready();
     error EligibilityChecksEnabledAlready();
     error InvalidIdentityRegistryStorage();
+    /// @dev The identity registry storage does not list this registry in its bound set.
+    error RegistryNotBoundToStorage();
 
     // IdentityRegistryStorage Errors
     error AddressAlreadyStored();

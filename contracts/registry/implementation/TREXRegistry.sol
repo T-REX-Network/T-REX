@@ -324,9 +324,12 @@ contract TREXRegistry is
     function _requiredClaimTopics(IIdentity userIdentity) internal view override returns (uint256[] memory) {
         uint256 identityType = _IDENTITY_FACTORY.identityTypeOf(address(userIdentity));
         if (identityType != 0) {
-            uint256[] memory typeTopics = _getStorage().claimTopicsByIdentityType[identityType].values();
-            if (typeTopics.length > 0) {
-                return typeTopics;
+            // Emptiness decides which set applies, so it is asked before copying: this runs on every
+            // transfer through `isVerified`, and the default path would otherwise copy an override set
+            // it goes on to discard.
+            EnumerableSet.UintSet storage typeTopics = _getStorage().claimTopicsByIdentityType[identityType];
+            if (typeTopics.length() > 0) {
+                return typeTopics.values();
             }
         }
         return _getClaimTopics();
@@ -372,12 +375,25 @@ contract TREXRegistry is
     ///  reads halts the token, which calls `isVerified` on every transfer, so the target is checked for
     ///  interface support and for a shared authority. `onlySharedAuthority` is a misconfiguration guard
     ///  only: `authority()` is spoofable.
+    ///  The new storage must already list this registry in its bound set. The registry cannot bind
+    ///  itself: bind/unbind are roles on the IRS, which is shared, so holding them here would let one
+    ///  suite mutate every other suite's resolution set. Binding stays with the IRS admin; this only
+    ///  makes a forgotten pre-bind revert now instead of silently breaking `_globalIdentity` later.
+    ///  Unbinding the old storage stays the IRS admin's job for the same reason.
+    ///  Membership is asked for directly rather than enumerated: `isIdentityRegistryBound` reads one
+    ///  slot instead of copying the whole bound set. It is a T-REX addition, not plain ERC-3643, so it
+    ///  is reached through `IIdentityRegistryStorage`; the ERC-165 check above covers only the standard
+    ///  surface, and a storage that answers the standard but lacks this getter reverts here.
     function _authorizeRegistryUpdate(address newRegistry) internal override {
         _checkCanCall(_msgSender(), _msgData());
         _checkSharedAuthority(newRegistry);
         require(
             ERC165Checker.supportsInterface(newRegistry, type(IERC3643IdentityRegistryStorage).interfaceId),
             ErrorsLib.InvalidIdentityRegistryStorage()
+        );
+        require(
+            IIdentityRegistryStorage(newRegistry).isIdentityRegistryBound(address(this)),
+            ErrorsLib.RegistryNotBoundToStorage()
         );
     }
 
