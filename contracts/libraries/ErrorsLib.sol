@@ -109,10 +109,12 @@ library ErrorsLib {
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
     error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
     error MaxModulesReached(uint256 maxValue);
     error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
+    /// @dev A module names no type at all, so the compliance would never call it.
+    error ModuleHasNoType();
+    /// @dev A module names the same type twice.
+    error DuplicateModuleType(uint8 moduleType);
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
@@ -190,8 +192,6 @@ library ErrorsLib {
     error ZeroDuration();
     /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
     error ValidationIssuancePaused(bytes32 chainKey);
-    /// @dev Unpausing a chain that is not paused.
-    error ValidationIssuanceNotPaused(bytes32 chainKey);
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.

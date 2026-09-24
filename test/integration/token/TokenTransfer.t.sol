@@ -12,7 +12,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
-import { RecordingModule, SpenderCheckOnlyModule } from "../mocks/CapabilityModules.sol";
+import { RecordingModule, SpenderOnlyModule } from "../mocks/CapabilityModules.sol";
 import { TestModule } from "../mocks/TestModule.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -367,7 +367,7 @@ contract TokenTransferTest is TREXSuiteTest {
 
     /// @notice Should re-open transferFrom once the refusing module is unbound
     function test_transferFrom_Success_AfterRefusingModuleUnbound() public {
-        SpenderCheckOnlyModule spenderCheck = _bindRefusingSpenderModule();
+        SpenderOnlyModule spenderCheck = _bindRefusingSpenderModule();
 
         vm.prank(deployer);
         ModularCompliance(address(token.compliance())).removeModule(address(spenderCheck));
@@ -382,11 +382,9 @@ contract TokenTransferTest is TREXSuiteTest {
     }
 
     /// @dev Binds a module that declares CHECK_SPENDER and refuses every spender.
-    function _bindRefusingSpenderModule() internal returns (SpenderCheckOnlyModule) {
-        SpenderCheckOnlyModule spenderCheck = SpenderCheckOnlyModule(
-            address(
-                new ModuleProxy(address(new SpenderCheckOnlyModule()), abi.encodeCall(RecordingModule.initialize, ()))
-            )
+    function _bindRefusingSpenderModule() internal returns (SpenderOnlyModule) {
+        SpenderOnlyModule spenderCheck = SpenderOnlyModule(
+            address(new ModuleProxy(address(new SpenderOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
         );
 
         vm.prank(deployer);

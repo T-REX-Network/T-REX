@@ -21,7 +21,7 @@ contract UpgradeTest is TREXSuiteTest {
         UtilityChecker implementation = new UtilityChecker();
 
         // Deploy proxy with initialization data
-        bytes memory initData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, ());
         UtilityCheckerProxy proxy = new UtilityCheckerProxy(address(implementation), initData);
         UtilityChecker utilityChecker = UtilityChecker(address(proxy));
 
@@ -43,7 +43,7 @@ contract UpgradeTest is TREXSuiteTest {
         UtilityChecker implementation = new UtilityChecker();
 
         // Deploy proxy with initialization data
-        bytes memory initData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, ());
         UtilityCheckerProxy proxy = new UtilityCheckerProxy(address(implementation), initData);
         UtilityChecker utilityChecker = UtilityChecker(address(proxy));
 

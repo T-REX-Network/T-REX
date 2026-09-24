@@ -292,8 +292,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Transfer Functions ----- */
 
     /// @inheritdoc IERC20
-    /// @dev The bound modules vet the spender before the allowance is spent: a module declaring
-    ///      `CHECK_SPENDER` may refuse the caller even when the transfer itself would comply.
+    /// @dev The bound modules vet the spender before the allowance is spent: a `SPENDER` module may refuse
+    ///      the caller even when the transfer itself would comply.
     ///      A direct {transfer} never reaches this path, so it carries no spender check and no extra gas.
     /// @param from address the tokens are taken from
     /// @param to address the tokens are sent to

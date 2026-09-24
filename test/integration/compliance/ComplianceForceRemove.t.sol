@@ -11,16 +11,13 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
-import { ModuleCapabilitiesLib as Caps } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import {
-    AllCapabilitiesModule,
-    BurnOnlyModule,
-    CheckTransferOnlyModule,
-    MintOnlyModule,
+    AllTypesModule,
     RecordingModule,
-    SpenderCheckOnlyModule,
-    TransferHookOnlyModule
+    RuleOnlyModule,
+    SpenderOnlyModule,
+    TrackerOnlyModule
 } from "test/integration/mocks/CapabilityModules.sol";
 import { RevertEverywhereModule, UnbindRevertingModule } from "test/integration/mocks/HostileModules.sol";
 
@@ -58,7 +55,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_removeModule_RevertWhen_ModuleRevertsEverywhere() public {
-        address module = _bindHostage(address(new AllCapabilitiesModule()));
+        address module = _bindHostage(address(new AllTypesModule()));
 
         vm.prank(alice);
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
@@ -72,7 +69,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
 
     function testFuzz_removeModule_NeverRemovesWithoutUnbinding(uint64 gasLimit) public {
         gasLimit = uint64(bound(gasLimit, 30_000, 400_000));
-        address module = _deploy(address(new AllCapabilitiesModule()));
+        address module = _deploy(address(new AllTypesModule()));
         _bind(module);
 
         vm.prank(deployer);
@@ -83,7 +80,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_removeModule_Success_WhenModuleIsHealthy_UnbindsIt() public {
-        address module = _deploy(address(new AllCapabilitiesModule()));
+        address module = _deploy(address(new AllTypesModule()));
         _bind(module);
 
         vm.prank(deployer);
@@ -94,7 +91,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_forceRemoveModule_Success_WhenModuleRevertsEverywhere() public {
-        address module = _bindHostage(address(new AllCapabilitiesModule()));
+        address module = _bindHostage(address(new AllTypesModule()));
 
         vm.recordLogs();
         vm.expectEmit(true, false, false, false, address(mc));
@@ -109,64 +106,48 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         _assertTokenOperationsWork();
     }
 
-    function test_forceRemoveModule_Success_WhenCheckTransferIsHeldHostage() public {
-        address hostage = _bindHostage(address(new CheckTransferOnlyModule()));
+    function test_forceRemoveModule_Success_WhenARuleIsHeldHostage() public {
+        address hostage = _bindHostage(address(new RuleOnlyModule()));
 
         vm.prank(alice);
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.transfer(bob, 100);
 
-        _forceRemove(hostage, Caps.CHECK_TRANSFER);
-
-        vm.prank(alice);
-        token.transfer(bob, 100);
-        assertEq(token.balanceOf(bob), 600);
-    }
-
-    function test_forceRemoveModule_Success_WhenTransferHookIsHeldHostage() public {
-        address hostage = _bindHostage(address(new TransferHookOnlyModule()));
-
-        vm.prank(alice);
-        vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
-        token.transfer(bob, 100);
-
-        _forceRemove(hostage, Caps.HOOK_TRANSFER);
+        _forceRemove(hostage, IModule.ModuleType.RULE);
 
         vm.prank(alice);
         token.transfer(bob, 100);
         assertEq(token.balanceOf(bob), 600);
     }
 
-    function test_forceRemoveModule_Success_WhenMintHookIsHeldHostage() public {
-        address hostage = _bindHostage(address(new MintOnlyModule()));
+    /// @notice A tracker holds every movement hostage at once, since it is told about all three. Removing it
+    ///         frees the transfer, the mint and the burn together.
+    function test_forceRemoveModule_Success_WhenATrackerIsHeldHostage() public {
+        address hostage = _bindHostage(address(new TrackerOnlyModule()));
 
+        vm.prank(alice);
+        vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
+        token.transfer(bob, 100);
         vm.prank(agent);
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.mint(alice, 10);
-
-        _forceRemove(hostage, Caps.HOOK_MINT);
-
-        vm.prank(agent);
-        token.mint(alice, 10);
-        assertEq(token.balanceOf(alice), 1010);
-    }
-
-    function test_forceRemoveModule_Success_WhenBurnHookIsHeldHostage() public {
-        address hostage = _bindHostage(address(new BurnOnlyModule()));
-
         vm.prank(agent);
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.burn(alice, 10);
 
-        _forceRemove(hostage, Caps.HOOK_BURN);
+        _forceRemove(hostage, IModule.ModuleType.TRACKER);
 
+        vm.prank(alice);
+        token.transfer(bob, 100);
+        vm.prank(agent);
+        token.mint(alice, 10);
         vm.prank(agent);
         token.burn(alice, 10);
-        assertEq(token.balanceOf(alice), 990);
+        assertEq(token.balanceOf(bob), 600);
     }
 
-    function test_forceRemoveModule_Success_WhenSpenderCheckIsHeldHostage() public {
-        address hostage = _bindHostage(address(new SpenderCheckOnlyModule()));
+    function test_forceRemoveModule_Success_WhenASpenderRuleIsHeldHostage() public {
+        address hostage = _bindHostage(address(new SpenderOnlyModule()));
         vm.prank(alice);
         token.approve(another, 100);
 
@@ -174,7 +155,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.transferFrom(alice, bob, 100);
 
-        _forceRemove(hostage, Caps.CHECK_SPENDER);
+        _forceRemove(hostage, IModule.ModuleType.SPENDER);
 
         vm.prank(another);
         token.transferFrom(alice, bob, 100);
@@ -182,20 +163,20 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_forceRemoveModule_Success_KeepsOtherModulesRouted() public {
-        address healthy = _deploy(address(new MintOnlyModule()));
+        address healthy = _deploy(address(new TrackerOnlyModule()));
         _bind(healthy);
-        address hostage = _bindHostage(address(new BurnOnlyModule()));
+        address hostage = _bindHostage(address(new RuleOnlyModule()));
 
         vm.prank(deployer);
         mc.forceRemoveModule(hostage);
 
-        address[] memory minters = mc.getModulesByCapability(Caps.HOOK_MINT);
-        assertEq(minters.length, 1);
-        assertEq(minters[0], healthy);
+        address[] memory trackers = mc.getModulesByType(IModule.ModuleType.TRACKER);
+        assertEq(trackers.length, 1);
+        assertEq(trackers[0], healthy);
         assertEq(mc.getModules().length, 1);
         vm.prank(agent);
         token.mint(alice, 1);
-        assertEq(RecordingModule(healthy).mintHookCalls(), 1);
+        assertEq(RecordingModule(healthy).mintActionCalls(), 1);
     }
 
     function test_forceRemoveModule_RevertWhen_NotOwner() public {
@@ -211,7 +192,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_forceRemoveModule_RevertWhen_ModuleNotBound() public {
-        address module = _deploy(address(new MintOnlyModule()));
+        address module = _deploy(address(new TrackerOnlyModule()));
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ModuleNotBound.selector);
@@ -219,7 +200,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_addModule_RevertWhen_RebindingAForceRemovedModule() public {
-        address module = _deploy(address(new AllCapabilitiesModule()));
+        address module = _deploy(address(new AllTypesModule()));
         _bind(module);
         vm.prank(deployer);
         mc.forceRemoveModule(module);
@@ -232,8 +213,8 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_addModule_Success_WhenRebindingAfterRemoveModuleUnbound() public {
-        address module = _bindHostage(address(new AllCapabilitiesModule()));
-        UUPSUpgradeable(module).upgradeToAndCall(address(new AllCapabilitiesModule()), "");
+        address module = _bindHostage(address(new AllTypesModule()));
+        UUPSUpgradeable(module).upgradeToAndCall(address(new AllTypesModule()), "");
 
         vm.prank(deployer);
         mc.removeModule(module);
@@ -245,7 +226,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_removeModule_RevertWhen_ModuleHasNoCode_ForceRemovalStillWorks() public {
-        address module = _deploy(address(new AllCapabilitiesModule()));
+        address module = _deploy(address(new AllTypesModule()));
         _bind(module);
         vm.etch(module, "");
 
@@ -262,7 +243,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_callModuleFunction_RevertWhen_ForwardingUnbindCompliance() public {
-        address module = _deploy(address(new AllCapabilitiesModule()));
+        address module = _deploy(address(new AllTypesModule()));
         _bind(module);
 
         vm.prank(deployer);
@@ -274,7 +255,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function test_callModuleFunction_RevertWhen_ForwardingUnbindComplianceThroughMulticall() public {
-        address module = _deploy(address(new AllCapabilitiesModule()));
+        address module = _deploy(address(new AllTypesModule()));
         _bind(module);
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeCall(IModule.unbindCompliance, (address(mc)));
@@ -289,11 +270,11 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         token.mint(alice, 1);
     }
 
-    function _forceRemove(address hostage, uint256 capability) private {
+    function _forceRemove(address hostage, IModule.ModuleType moduleType) private {
         vm.prank(deployer);
         mc.forceRemoveModule(hostage);
         assertFalse(mc.isModuleBound(hostage));
-        assertEq(mc.getModulesByCapability(capability).length, 0);
+        assertEq(mc.getModulesByType(moduleType).length, 0);
     }
 
     function _bindHostage(address implementation) private returns (address module) {
@@ -322,10 +303,10 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     }
 
     function _assertNoRouting(address module) private view {
-        uint256[5] memory bits =
-            [Caps.CHECK_TRANSFER, Caps.HOOK_TRANSFER, Caps.HOOK_MINT, Caps.HOOK_BURN, Caps.CHECK_SPENDER];
-        for (uint256 i = 0; i < bits.length; i++) {
-            address[] memory routed = mc.getModulesByCapability(bits[i]);
+        IModule.ModuleType[3] memory types =
+            [IModule.ModuleType.RULE, IModule.ModuleType.SPENDER, IModule.ModuleType.TRACKER];
+        for (uint256 i = 0; i < types.length; i++) {
+            address[] memory routed = mc.getModulesByType(types[i]);
             for (uint256 j = 0; j < routed.length; j++) {
                 assertNotEq(routed[j], module);
             }

@@ -185,21 +185,19 @@ library AccessManagerSetupLib {
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](14);
+        table = new SelectorRole[](12);
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.forceRemoveModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
         table[3] = SelectorRole(ModularCompliance.addModule.selector, RolesLib.Role.OWNER);
         table[4] = SelectorRole(ModularCompliance.callModuleFunction.selector, RolesLib.Role.OWNER);
         table[5] = SelectorRole(RolesLib.BIND_UNBIND_TOKEN, RolesLib.Role.OWNER);
-        table[6] = SelectorRole(ModularCompliance.refreshModuleCapabilities.selector, RolesLib.Role.OWNER);
+        table[6] = SelectorRole(ModularCompliance.resyncModuleTypes.selector, RolesLib.Role.OWNER);
         table[7] = SelectorRole(ModularCompliance.setDefaultValidityWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
         table[8] = SelectorRole(ModularCompliance.setReconciliationWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[9] = SelectorRole(ModularCompliance.setValidationClamp.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[10] = SelectorRole(ModularCompliance.pauseValidationIssuance.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[11] = SelectorRole(ModularCompliance.unpauseValidationIssuance.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[12] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
-        table[13] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
+        table[9] = SelectorRole(ModularCompliance.setIssuancePaused.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[10] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
+        table[11] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {

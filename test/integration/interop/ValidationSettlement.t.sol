@@ -5,6 +5,7 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
@@ -12,8 +13,8 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
-import { SlotsModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev One-leg settlements through the real messaging layer: a same-chain movement, a native sender, a native
 ///      recipient, the deadline that never refuses a leg, every mismatch that does, and the two emergencies that
@@ -25,7 +26,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     ERC7786GatewayMock internal polygonGateway;
     ERC7786GatewayMock internal optimismGateway;
-    SlotsModule internal slots;
+    CappedRecipientModule internal cappedRule;
     bytes internal aliceSat;
     bytes internal bobSat;
     bytes internal nativeBob;
@@ -42,11 +43,13 @@ contract ValidationSettlementTest is InteropSuiteTest {
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
         nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
 
-        slots = SlotsModule(
-            address(new ModuleProxy(address(new SlotsModule()), abi.encodeCall(SlotsModule.initialize, ())))
+        cappedRule = CappedRecipientModule(
+            address(
+                new ModuleProxy(address(new CappedRecipientModule()), abi.encodeCall(RecordingModule.initialize, ()))
+            )
         );
         vm.startPrank(deployer);
-        boundCompliance.addModule(address(slots));
+        boundCompliance.addModule(address(cappedRule));
         vm.stopPrank();
 
         vm.startPrank(agent);
@@ -63,7 +66,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
         uint256 id = _issue(aliceSat, bobSat, 90, 100);
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95));
 
-        vm.expectCall(address(slots), abi.encodeCall(IModule.commitSlot, (id, 95)), 1);
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.BridgedTransfer(keccak256(aliceSat), keccak256(bobSat), id, aliceSat, bobSat, 95);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
@@ -74,9 +76,11 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(token.bridgedBalanceOf(bobSat), 95);
         assertEq(token.totalBridged(), BALANCE);
         assertEq(token.totalSupply(), BALANCE + NATIVE_BALANCE);
-        assertEq(slots.heldOf(address(boundCompliance), bobSat), 95);
+        IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
+        assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "released once settled");
+        assertEq(ledger.positionOf(address(bobIdentity)), 95, "and became a position");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        ITransferValidation.ValidationState memory state = boundCompliance.stateOf(id);
+        ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
         assertTrue(state.fromLegConsumed);
         assertTrue(state.toLegConsumed);
         assertEq(state.executedAmount, 95);
@@ -174,7 +178,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, leg));
         uint256 replay = _liteSettles(polygonGateway, token, leg);
 
-        vm.expectCall(address(slots), abi.encodeWithSelector(IModule.commitSlot.selector), 0);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.expectEmit(false, false, false, true, address(token));
@@ -185,7 +188,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(replay)));
         assertEq(token.bridgedBalanceOf(bobSat), 95);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(slots.commitCalls(), 1);
     }
 
     /// @notice A notification for an id never issued applies nothing, writes nothing and halts the token.
@@ -198,7 +200,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         assertTrue(token.paused());
         assertEq(token.bridgedBalanceOf(bobSat), 0);
-        assertEq(boundCompliance.stateOf(999).executedAmount, 0);
+        assertEq(boundCompliance.validationOf(999).executedAmount, 0);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, 999));
         boundCompliance.statusOf(999);
     }

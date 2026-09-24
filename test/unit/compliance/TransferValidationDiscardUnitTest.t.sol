@@ -6,18 +6,15 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
-import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { IToken } from "contracts/token/IToken.sol";
 import { Token } from "contracts/token/Token.sol";
-import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
-import { SlotsOnlyModule } from "test/integration/mocks/SlotsModule.sol";
+import { RecordingModule, TrackerOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 
-/// @dev The lifecycle views and the keeper's discard on a mocked token and registry: what `statusOf` derives over
-///      time, every refusal of a discard, and which modules a release reaches.
 contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     uint256 internal constant POLYGON = 137;
@@ -32,6 +29,8 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     bytes32 internal optimism = _evmChainKey(OPTIMISM);
     address internal aliceIdentity = makeAddr("AliceIdentity");
     address internal bobIdentity = makeAddr("BobIdentity");
+    address internal aliceId;
+    address internal bobId;
     bytes internal fromSat;
     bytes internal toSat;
     bytes internal toOptimism;
@@ -41,6 +40,8 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         fromSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("aliceOnPolygon"));
         toSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("bobOnPolygon"));
         toOptimism = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("bobOnOptimism"));
+        aliceId = aliceIdentity;
+        bobId = bobIdentity;
 
         mc.setDefaultValidityWindow(VALIDITY_WINDOW);
         mc.setReconciliationWindow(polygon, POLYGON_WINDOW);
@@ -57,13 +58,13 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.warp(ISSUED_AT);
     }
 
-    // ==== .statusOf Tests ====
+    /* ----- Status ----- */
 
     function test_statusOf_Success_WhenFreshlyIssued() public {
         uint256 id = _issue();
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        ITransferValidation.ValidationState memory state = mc.stateOf(id);
+        ITransferValidation.Validation memory state = mc.validationOf(id);
         assertEq(uint8(state.status), uint8(ITransferValidation.ValidationStatus.Pending));
         assertFalse(state.fromLegConsumed);
         assertFalse(state.toLegConsumed);
@@ -87,7 +88,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
-        assertEq(uint8(mc.stateOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(mc.validationOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
     }
 
     function test_statusOf_Success_WhenLegConfirmedNeverDerivesExpired() public {
@@ -109,34 +110,71 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_stateOf_Success_WhenIdWasNeverIssued() public view {
-        ITransferValidation.ValidationState memory state = mc.stateOf(42);
+        ITransferValidation.Validation memory state = mc.validationOf(42);
 
         assertEq(uint8(state.status), 0);
         assertEq(state.executedAmount, 0);
     }
 
-    // ==== .discardExpiredValidations Tests ====
+    /* ----- Discard ----- */
 
     function test_discardExpiredValidations_Success_WhenExpired() public {
-        address slots = _bindSlotsModule();
-        address bounds = _bindBoundsModule();
+        _track();
+        address recorder = _bindAfterTransferModule();
         uint256 id = _issue();
+        assertEq(mc.pendingInOf(bobId), 90);
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
-        vm.expectCall(slots, abi.encodeCall(IModule.releaseSlot, (id)), 1);
-        vm.expectCall(bounds, abi.encodeWithSelector(IModule.releaseSlot.selector), 0);
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationDiscarded(id);
         vm.prank(keeperAccount);
         mc.discardExpiredValidations(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
-        assertEq(SlotsOnlyModule(slots).releaseCalls(), 1);
+        assertEq(mc.pendingInOf(bobId), 0, "the reservation is released");
+        assertEq(mc.pendingOutOf(aliceId), 0);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 0);
+        assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE, "nothing moved");
+        assertEq(mc.positionOf(bobId), 0);
+        assertEq(RecordingModule(recorder).transferActionCalls(), 0, "a discard involves no module");
+    }
+
+    function test_discardExpiredValidations_Success_WhenTheReleaseFreesTheRoomForTheNext() public {
+        _track();
+        uint256 id = _issue();
+        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+
+        vm.prank(keeperAccount);
+        mc.discardExpiredValidations(_ids(id));
+
+        vm.prank(aliceIdentity);
+        uint256 next = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        assertEq(mc.validationOf(next).amountMax, 90, "issued as if the discarded one never happened");
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+    }
+
+    /// @notice A relocation between one identity's wallets reserves nothing against the identity, so its
+    ///         discard has nothing to give back there. The wallet's share is still released.
+    function test_discardExpiredValidations_Success_WhenNothingWasReservedAgainstTheIdentities() public {
+        _track();
+        _bind(toSat, aliceIdentity);
+        uint256 id = _issue();
+        assertFalse(mc.validationOf(id).pendingReserved);
+        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+
+        vm.prank(keeperAccount);
+        mc.discardExpiredValidations(_ids(id));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(mc.pendingInOf(bobId), 0);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 0, "the wallet's share came back");
     }
 
     function test_discardExpiredValidations_Success_WhenBatchingSeveralIds() public {
+        _track();
         uint256 first = _issue();
         uint256 second = _issue();
+        assertEq(mc.pendingInOf(bobId), 100, "both reserved, the second capped by the wallet");
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
         uint256[] memory ids = new uint256[](2);
@@ -151,6 +189,8 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
         assertEq(uint8(mc.statusOf(first)), uint8(ITransferValidation.ValidationStatus.Discarded));
         assertEq(uint8(mc.statusOf(second)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(mc.pendingInOf(bobId), 0);
+        assertEq(mc.pendingOutOf(aliceId), 0);
     }
 
     function test_discardExpiredValidations_RevertWhen_CallerIsNotTheKeeper() public {
@@ -165,7 +205,6 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
         mc.discardExpiredValidations(_ids(id));
 
-        // The manager holds the policy, not the garbage collection.
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
         mc.discardExpiredValidations(_ids(id));
     }
@@ -204,6 +243,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_discardExpiredValidations_RevertWhen_LegConfirmedWhateverTheClock() public {
+        _track();
         uint256 id = _issueCrossChainWithBurnLeg();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
@@ -216,10 +256,12 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
             )
         );
         mc.discardExpiredValidations(_ids(id));
+
+        assertEq(mc.pendingInOf(bobId), 90, "a pinned validation keeps its reservation");
     }
 
     function test_discardExpiredValidations_RevertWhen_OneIdOfTheBatchIsRefused() public {
-        address slots = _bindSlotsModule();
+        _track();
         uint256 expired = _issue();
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         uint256 pending = _issue();
@@ -233,7 +275,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         mc.discardExpiredValidations(ids);
 
         assertEq(uint8(mc.statusOf(expired)), uint8(ITransferValidation.ValidationStatus.Expired));
-        assertEq(SlotsOnlyModule(slots).releaseCalls(), 0);
+        assertEq(mc.pendingInOf(bobId), 100, "the whole batch is rolled back");
     }
 
     function _issue() private returns (uint256 id) {
@@ -241,7 +283,6 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
     }
 
-    /// @dev A cross-chain validation whose burn leg landed: the real `LegConfirmed`.
     function _issueCrossChainWithBurnLeg() private returns (uint256 id) {
         vm.prank(aliceIdentity);
         id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
@@ -263,14 +304,20 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         );
     }
 
-    function _bindSlotsModule() private returns (address module) {
-        module =
-            address(new ModuleProxy(address(new SlotsOnlyModule()), abi.encodeCall(SlotsOnlyModule.initialize, ())));
-        mc.addModule(module);
+    /// @dev Gives alice's identity the position her satellite wallet holds, the way a real deployment does:
+    ///  through the token's mint hook. The compliance keeps positions from the token's first mint, so there
+    ///  is nothing to turn on.
+    function _track() private {
+        address aliceNative = makeAddr("aliceNative");
+        vm.mockCall(registry, abi.encodeWithSignature("identity(address)", aliceNative), abi.encode(aliceIdentity));
+        vm.prank(token);
+        mc.created(aliceNative, BRIDGED_BALANCE);
     }
 
-    function _bindBoundsModule() private returns (address module) {
-        module = address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())));
+    function _bindAfterTransferModule() private returns (address module) {
+        module = address(
+            new ModuleProxy(address(new TrackerOnlyModule()), abi.encodeCall(RecordingModule.initialize, ()))
+        );
         mc.addModule(module);
     }
 

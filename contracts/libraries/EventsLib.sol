@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
+import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { MessageTypesLib } from "./MessageTypesLib.sol";
 import { Version } from "./VersionLib.sol";
@@ -102,9 +103,19 @@ library EventsLib {
 
     event ModuleInteraction(address indexed target, bytes data);
     event ModuleAdded(address indexed module);
-    event ModuleCapabilitiesRecorded(address indexed module, uint256 capabilities);
+    event ModuleTypesRecorded(address indexed module, IModule.ModuleType[] moduleTypes);
     event ModuleRemoved(address indexed module);
     event ModuleForceRemoved(address indexed module);
+
+    // ComplianceLedger Events
+
+    /// @notice A movement touched a non-zero wallet that resolves to no identity, so no position was moved for
+    ///         that side. The token's balances and the positions now disagree by `amount` until an agent
+    ///         repairs the link.
+    event PositionUnresolved(bytes32 indexed wallet, uint256 amount);
+    /// @notice A debit asked for more position than the identity held, so its position was floored at zero.
+    ///         Only a registry unlink and relink can produce this; `missing` is what the recount owes.
+    event PositionUnderflow(address indexed identity, uint256 missing);
 
     // AbstractModule / AbstractModuleUpgradeable Events
 
@@ -174,7 +185,6 @@ library EventsLib {
     // TransferValidation Events
     event DefaultValidityWindowSet(uint64 duration);
     event ReconciliationWindowSet(bytes32 indexed chainKey, uint64 duration);
-    event ValidationClampSet(uint256 maxAmount);
     event ValidationIssuancePaused(bytes32 indexed chainKey);
     event ValidationIssuanceUnpaused(bytes32 indexed chainKey);
     /// @notice Emitted on issuance with the full envelopes and the final bounds, so indexers need no reverse table.

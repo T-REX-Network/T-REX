@@ -65,7 +65,6 @@ pragma solidity 0.8.30;
 import { IERC3643 } from "../../../ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "../../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
-import { ModuleCapabilitiesLib } from "../../../libraries/ModuleCapabilitiesLib.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -93,7 +92,7 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
     }
 
     /// @inheritdoc IModule
-    /// @return true if the spender is verified in the registry of the bound token
+    /// @dev A spender policy: allowed when the operator passes this module's check, refused otherwise.
     function moduleCheckSpender(address _spender, address, address, uint256, address _compliance)
         external
         view
@@ -104,9 +103,9 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
     }
 
     /// @inheritdoc IModule
-    /// @return the bitmask of the dispatch points this module implements
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_SPENDER;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.SPENDER;
     }
 
     /// @inheritdoc IModule
@@ -118,7 +117,7 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
 
     /// @inheritdoc IModule
     /// @dev Binds anywhere, in any order. The registry is resolved through the bound token at check
-    /// time, and `moduleCheckSpender` is only ever reached from a token's `transferFrom`, so a token
+    /// time, and a spender only ever reaches `allowedAmount` from a token's `transferFrom`, so a token
     /// is necessarily bound by then.
     /// @return always true
     function isPlugAndPlay() external pure returns (bool) {

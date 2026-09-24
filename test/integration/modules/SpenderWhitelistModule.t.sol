@@ -4,10 +4,10 @@ pragma solidity 0.8.30;
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -37,9 +37,9 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
     // ============ Declaration Tests ============
 
     /// @notice Should declare the spender check and nothing else
-    function test_moduleCapabilities_DeclaresOnlyTheSpenderCheck() public view {
-        assertEq(module.moduleCapabilities(), ModuleCapabilitiesLib.CHECK_SPENDER);
-        assertEq(mc.getModuleCapabilities(address(module)), ModuleCapabilitiesLib.CHECK_SPENDER);
+    function test_moduleTypes_NamesOnlySpender() public view {
+        assertEq(uint8(module.moduleTypes()[0]), uint8(IModule.ModuleType.SPENDER));
+        assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER)[0], address(module));
         assertTrue(module.isPlugAndPlay());
         assertEq(module.name(), "SpenderWhitelistModule");
     }

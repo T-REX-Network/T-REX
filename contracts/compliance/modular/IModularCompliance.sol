@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
+import { IModule } from "./modules/IModule.sol";
 
 interface IModularCompliance is IERC3643Compliance {
 
@@ -71,22 +72,26 @@ interface IModularCompliance is IERC3643Compliance {
      *  @dev adds a module to the list of compliance modules
      *  @param _module address of the module to add
      *  there cannot be more than 25 modules bound to the modular compliance for gas cost reasons
-     *  the module must declare at least one dispatch point through {IModule-moduleCapabilities},
-     *  and the declaration is recorded so the compliance only calls it where it declared
+     *  the module must name at least one type in `moduleTypes`, and it is sorted into the list of each type
+     *  it names, so the compliance only calls it where it said it answers
      *  Restricted to the configured AccessManager role (OWNER).
-     *  Emits a ModuleAdded event and a ModuleCapabilitiesRecorded event
+     *  Emits a ModuleAdded event and a ModuleTypesRecorded event
      */
     function addModule(address _module) external;
 
     /**
-     *  @dev re-reads a bound module's declared dispatch points and records them again
+     *  @dev re-reads what a bound module says it is and files it again
      *  @param _module address of the bound module to resynchronise
-     *  the escape hatch for an implementation upgrade that changed a module's capabilities, avoiding
-     *  a full unbind and rebind cycle. The module keeps its position in the bound modules
+     *  a module sits behind a proxy, so an implementation upgrade can change what `moduleTypes` answers while
+     *  this compliance still routes by what it recorded at binding. Until this is called, the compliance keeps
+     *  calling the module for a type it dropped, which reverts on every movement, and never calls it for a type
+     *  it gained
+     *  removing and re-adding the module is not the same thing: an unbind increments the module's bind nonce,
+     *  which is how a module scopes its per-compliance settings, so the rebound module comes back unconfigured
      *  Restricted to the configured AccessManager role (OWNER).
-     *  Emits a ModuleCapabilitiesRecorded event, including when nothing changed
+     *  Emits a ModuleTypesRecorded event, including when nothing changed
      */
-    function refreshModuleCapabilities(address _module) external;
+    function resyncModuleTypes(address _module) external;
 
     /**
      *  @dev removes a module from the list of compliance modules
@@ -163,7 +168,7 @@ interface IModularCompliance is IERC3643Compliance {
      *  @param _from address of the transfer sender
      *  @param _to address of the transfer receiver
      *  @param _value amount of tokens sent
-     *  only the modules that declared the spender check are consulted, and all of them must agree
+     *  only the `SPENDER` modules are consulted, and all of them must agree
      *  a direct transfer needs no spender check: the spender is the sender, already covered by
      *  {canTransfer}
      *  returns true when no bound module objects, including when none enforces a spender rule
@@ -171,19 +176,11 @@ interface IModularCompliance is IERC3643Compliance {
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool);
 
     /**
-     *  @dev getter for the dispatch points a bound module declared
-     *  @param _module address of the bound module
-     *  reverts when the module is not bound
-     *  returns the recorded bitmask, built from the flags of `ModuleCapabilitiesLib`
+     *  @dev getter for the bound modules of one type, in the order they were bound
+     *  @param moduleType which modules to list, see {IModule-ModuleType}
+     *  a module that named several types appears in each of their lists
      */
-    function getModuleCapabilities(address _module) external view returns (uint256);
-
-    /**
-     *  @dev getter for the bound modules that declared a given dispatch point
-     *  @param _capability one of the flags of `ModuleCapabilitiesLib`
-     *  returns the addresses the compliance actually calls at that dispatch point
-     */
-    function getModulesByCapability(uint256 _capability) external view returns (address[] memory);
+    function getModulesByType(IModule.ModuleType moduleType) external view returns (address[] memory);
 
     /**
      *  @dev checks if a module is bound to the compliance contract

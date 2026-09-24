@@ -185,7 +185,7 @@ contract ModularComplianceInitUnitTest is Test {
 
     function _deployTestModuleWithProxy() private returns (address) {
         TestModule moduleImplementation = new TestModule();
-        bytes memory initData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory initData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy moduleProxy = new ModuleProxy(address(moduleImplementation), initData);
         return address(moduleProxy);
     }

@@ -60,73 +60,58 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
         mc.setReconciliationWindow(POLYGON, 30 minutes);
     }
 
-    // ==== .setValidationClamp Tests ====
+    // ==== .setIssuancePaused Tests ====
 
-    function test_setValidationClamp_Success_WhenCalledByManager() public {
-        vm.expectEmit(false, false, false, true, address(mc));
-        emit EventsLib.ValidationClampSet(1000);
-        mc.setValidationClamp(1000);
-        assertEq(mc.validationClamp(), 1000);
-
-        vm.expectEmit(false, false, false, true, address(mc));
-        emit EventsLib.ValidationClampSet(0);
-        mc.setValidationClamp(0);
-        assertEq(mc.validationClamp(), 0);
-    }
-
-    function test_setValidationClamp_RevertWhen_CallerIsNotManager() public {
-        vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setValidationClamp(1000);
-    }
-
-    // ==== .pauseValidationIssuance / .unpauseValidationIssuance Tests ====
-
-    function test_pauseValidationIssuance_Success_WhenChainIsOpen() public {
+    function test_setIssuancePaused_Success_WhenPausingAnOpenChain() public {
         assertFalse(mc.isIssuancePaused(POLYGON));
 
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationIssuancePaused(POLYGON);
-        mc.pauseValidationIssuance(POLYGON);
+        mc.setIssuancePaused(POLYGON, true);
 
         assertTrue(mc.isIssuancePaused(POLYGON));
         assertFalse(mc.isIssuancePaused(OPTIMISM));
     }
 
-    function test_unpauseValidationIssuance_Success_WhenChainIsPaused() public {
-        mc.pauseValidationIssuance(POLYGON);
+    function test_setIssuancePaused_Success_WhenResumingAPausedChain() public {
+        mc.setIssuancePaused(POLYGON, true);
 
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationIssuanceUnpaused(POLYGON);
-        mc.unpauseValidationIssuance(POLYGON);
+        mc.setIssuancePaused(POLYGON, false);
 
         assertFalse(mc.isIssuancePaused(POLYGON));
     }
 
-    function test_pauseValidationIssuance_RevertWhen_ChainIsAlreadyPaused() public {
-        mc.pauseValidationIssuance(POLYGON);
+    /// @notice Setting the state a chain already has changes nothing and emits nothing, so a keeper can
+    ///         pause without first checking whether someone else already did.
+    function test_setIssuancePaused_Success_WhenTheStateIsAlreadyTheOneAsked() public {
+        mc.setIssuancePaused(POLYGON, true);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, POLYGON));
-        mc.pauseValidationIssuance(POLYGON);
+        vm.recordLogs();
+        mc.setIssuancePaused(POLYGON, true);
+        assertEq(vm.getRecordedLogs().length, 0, "no event on a no-op");
+        assertTrue(mc.isIssuancePaused(POLYGON));
+
+        mc.setIssuancePaused(POLYGON, false);
+        vm.recordLogs();
+        mc.setIssuancePaused(POLYGON, false);
+        assertEq(vm.getRecordedLogs().length, 0, "no event on a no-op");
+        assertFalse(mc.isIssuancePaused(POLYGON));
     }
 
-    function test_unpauseValidationIssuance_RevertWhen_ChainIsNotPaused() public {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuanceNotPaused.selector, POLYGON));
-        mc.unpauseValidationIssuance(POLYGON);
-    }
-
-    function test_pauseValidationIssuance_RevertWhen_CallerIsNotManager() public {
+    function test_setIssuancePaused_RevertWhen_PauserIsNotManager() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.pauseValidationIssuance(POLYGON);
+        mc.setIssuancePaused(POLYGON, true);
     }
 
-    function test_unpauseValidationIssuance_RevertWhen_CallerIsNotManager() public {
-        mc.pauseValidationIssuance(POLYGON);
+    function test_setIssuancePaused_RevertWhen_ResumerIsNotManager() public {
+        mc.setIssuancePaused(POLYGON, true);
 
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.unpauseValidationIssuance(POLYGON);
+        mc.setIssuancePaused(POLYGON, false);
     }
 
     /// @notice OWNER alone does not reach the manager surface: the roles are distinct.
@@ -139,45 +124,21 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
         mc.setDefaultValidityWindow(1 hours);
     }
 
-    // ==== ._onLateReconciliation Tests ====
+    // ==== automatic pause Tests ====
 
-    /// @notice A late settlement that leaves a breaching state closes the chain, so it cannot compound.
-    function test_onLateReconciliation_Success_WhenTheRecordedStateBreachesARule() public {
-        vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.LateReconciliation(7, POLYGON);
-        vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ValidationIssuancePaused(POLYGON);
-        mc.exposed_onLateReconciliation(7, POLYGON, true);
-
+    /// @notice Only the manager lifts a pause, whoever set it. A late settlement that breached a rule closes
+    ///         the chain from inside `handleSettlement`; `LateReconciliation.t.sol` covers that path end to
+    ///         end, and this pins that the lift is a manager action and not automatic.
+    function test_setIssuancePaused_Success_WhenTheManagerLiftsAnAutomaticPause() public {
+        mc.setIssuancePaused(POLYGON, true);
         assertTrue(mc.isIssuancePaused(POLYGON));
-    }
 
-    /// @notice Lateness alone is not an exception: warn, and keep issuing. Otherwise one held message would be a
-    ///         denial of service on the chain's issuance.
-    function test_onLateReconciliation_Success_WhenTheRecordedStateBreachesNothing() public {
-        vm.recordLogs();
-        mc.exposed_onLateReconciliation(7, POLYGON, false);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
+        mc.setIssuancePaused(POLYGON, false);
+        assertTrue(mc.isIssuancePaused(POLYGON), "issuance stays closed until the manager acts");
 
-        assertEq(vm.getRecordedLogs().length, 1, "only the warning is emitted");
-        assertFalse(mc.isIssuancePaused(POLYGON));
-    }
-
-    function test_onLateReconciliation_Success_WhenChainIsAlreadyPaused() public {
-        mc.pauseValidationIssuance(POLYGON);
-
-        vm.recordLogs();
-        mc.exposed_onLateReconciliation(7, POLYGON, true);
-
-        assertEq(vm.getRecordedLogs().length, 1, "only the warning is emitted");
-        assertTrue(mc.isIssuancePaused(POLYGON));
-    }
-
-    /// @notice Only the manager lifts an automatic pause, and issuance stays closed until then.
-    function test_unpauseValidationIssuance_Success_AfterALateReconciliation() public {
-        mc.exposed_onLateReconciliation(7, POLYGON, true);
-
-        mc.unpauseValidationIssuance(POLYGON);
-
+        mc.setIssuancePaused(POLYGON, false);
         assertFalse(mc.isIssuancePaused(POLYGON));
     }
 
@@ -199,7 +160,7 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     function test_views_Success_WhenNothingWasIssued() public view {
         assertEq(mc.lastValidationId(), 0);
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(1);
+        ITransferValidation.Validation memory record = mc.validationOf(1);
         assertEq(record.hash, bytes32(0));
         assertEq(record.expiry, 0);
         assertEq(record.releaseAt, 0);

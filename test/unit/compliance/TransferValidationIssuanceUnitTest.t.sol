@@ -11,7 +11,12 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
-import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
+import {
+    CappedRecipientModule,
+    RecordingModule,
+    RuleOnlyModule,
+    WritingRuleModule
+} from "test/integration/mocks/CapabilityModules.sol";
 
 /// @dev The issuance engine on a mocked token and registry: who may ask, what is refused before any write, how
 ///      the range is capped, what is recorded and what leaves toward which chain.
@@ -158,7 +163,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_requestTransferValidation_RevertWhen_FromChainIsPaused() public configured {
-        mc.pauseValidationIssuance(polygon);
+        mc.setIssuancePaused(polygon, true);
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
@@ -166,7 +171,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_requestTransferValidation_RevertWhen_ToChainIsPaused() public configured {
-        mc.pauseValidationIssuance(optimism);
+        mc.setIssuancePaused(optimism, true);
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, optimism));
@@ -174,8 +179,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_requestTransferValidation_Success_AfterTheChainIsUnpaused() public configured {
-        mc.pauseValidationIssuance(polygon);
-        mc.unpauseValidationIssuance(polygon);
+        mc.setIssuancePaused(polygon, true);
+        mc.setIssuancePaused(polygon, false);
 
         vm.prank(aliceIdentity);
         assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, ""), 1);
@@ -205,7 +210,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 90, 110, "");
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
+        ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 90);
         assertEq(record.amountMax, BRIDGED_BALANCE);
     }
@@ -214,7 +219,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 9, 11, "");
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
+        ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 9);
         assertEq(record.amountMax, 11);
     }
@@ -241,46 +246,212 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.lastValidationId(), 0);
     }
 
-    function test_requestTransferValidation_Success_WhenTheClampAppliesLast() public configured {
-        mc.setValidationClamp(60);
-
-        vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
-
-        assertEq(mc.validationOf(id).amountMax, 60);
-    }
-
-    function test_requestTransferValidation_RevertWhen_TheClampEmptiesTheRange() public configured {
-        mc.setValidationClamp(5);
-
-        vm.prank(aliceIdentity);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 5));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
-
-        assertEq(mc.lastValidationId(), 0);
-    }
-
     /// @notice Two wallets of one identity: issued, recorded, but no module consulted.
     function test_requestTransferValidation_Success_WhenBothWalletsBelongToOneIdentity() public configured {
-        address bounds = _bindBoundsModule();
-        mc.callModuleFunction(abi.encodeCall(BoundsModule.setFloor, (1000)), bounds);
+        address module = _bindAllowedAmountModule();
+        RecordingModule(module).setAllowedAmount(5);
         _bind(toSat, aliceIdentity);
 
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
+        ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 10);
         assertEq(record.amountMax, 90);
+        assertEq(record.fromIdentity, aliceIdentity);
+        assertEq(record.toIdentity, aliceIdentity);
+    }
+
+    function test_requestTransferValidation_Success_WhenAModuleNarrowsTheMaximum() public configured {
+        address module = _bindAllowedAmountModule();
+        RecordingModule(module).setAllowedAmount(60);
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        ITransferValidation.Validation memory record = mc.validationOf(id);
+        assertEq(record.amountMin, 10);
+        assertEq(record.amountMax, 60);
+        assertEq(record.fromIdentity, aliceIdentity);
+        assertEq(record.toIdentity, bobIdentity);
+    }
+
+    function test_requestTransferValidation_Success_WhenTheSmallestAnswerWins() public configured {
+        RecordingModule(_bindAllowedAmountModule()).setAllowedAmount(60);
+        RecordingModule(_bindAllowedAmountModule()).setAllowedAmount(30);
+        RecordingModule(_bindAllowedAmountModule()).setAllowedAmount(80);
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        assertEq(mc.validationOf(id).amountMax, 30);
+    }
+
+    function test_requestTransferValidation_Success_WhenAModuleAnswersNoLimit() public configured {
+        _bindAllowedAmountModule();
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        assertEq(mc.validationOf(id).amountMax, 90);
     }
 
     function test_requestTransferValidation_RevertWhen_AModuleEmptiesTheRange() public configured {
-        address bounds = _bindBoundsModule();
-        mc.callModuleFunction(abi.encodeCall(BoundsModule.setFloor, (1000)), bounds);
+        address module = _bindAllowedAmountModule();
+        RecordingModule(module).setAllowedAmount(5);
 
         vm.prank(aliceIdentity);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1000, 90));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 5));
         mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+    }
+
+    function test_requestTransferValidation_RevertWhen_AModuleRefuses() public configured {
+        RecordingModule(_bindAllowedAmountModule()).setAllow(false);
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 0));
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert(ErrorsLib.ZeroValue.selector);
+        mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
+    }
+
+    function test_requestTransferValidation_RevertWhen_AModuleWritesInAllowedAmount() public configured {
+        address module = address(new WritingRuleModule());
+        mc.addModule(module);
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert();
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        assertEq(WritingRuleModule(module).writes(), 0);
+        assertEq(mc.lastValidationId(), 0);
+    }
+
+    /// @notice A named spender is carried on the wire for the satellite to enforce, not resolved here: a
+    ///         spender policy is about who moves the tokens, and the satellite is where that call happens.
+    ///         The envelope must still parse, which is what keeps an unusable one out of the record.
+    function test_requestTransferValidation_Success_WhenTheSpenderIsUnknownHere() public configured {
+        bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
+        _bind(spender, address(0));
+        _bindAllowedAmountModule();
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);
+
+        assertEq(mc.validationOf(id).amountMax, 90);
+    }
+
+    function test_requestTransferValidation_Success_WhenTheSpenderResolves() public configured {
+        bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
+        _bind(spender, makeAddr("SpenderIdentity"));
+        _bindAllowedAmountModule();
+
+        vm.prank(aliceIdentity);
+        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, spender), 1);
+    }
+
+    /* ----- The reservation ----- */
+
+    function test_requestTransferValidation_Success_WhenReservingThePendingAmounts() public configured {
+        _track();
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        assertTrue(mc.validationOf(id).pendingReserved);
+        assertEq(mc.pendingOutOf(aliceIdentity), 90);
+        assertEq(mc.pendingInOf(bobIdentity), 90);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+        assertEq(mc.positionOf(aliceIdentity), BRIDGED_BALANCE);
+        assertEq(mc.positionOf(bobIdentity), 0);
+    }
+
+    function test_requestTransferValidation_Success_WhenReservationsAccumulate() public configured {
+        _track();
+
+        vm.startPrank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 30, "");
+        mc.requestTransferValidation(fromSat, toOptimism, 10, 40, "");
+        vm.stopPrank();
+
+        assertEq(mc.pendingOutOf(aliceIdentity), 70);
+        assertEq(mc.pendingInOf(bobIdentity), 70);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 70);
+    }
+
+    function test_requestTransferValidation_Success_WhenPendingOutOfTheWalletCapsTheNext() public configured {
+        _track();
+
+        vm.startPrank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        uint256 second = mc.requestTransferValidation(fromSat, toSat, 5, 90, "");
+        vm.stopPrank();
+
+        assertEq(mc.validationOf(second).amountMax, BRIDGED_BALANCE - 90);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 100);
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert(ErrorsLib.ZeroValue.selector);
+        mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
+    }
+
+    function test_requestTransferValidation_Success_WhenOneIdentityReservesNothing() public configured {
+        _track();
+        _bind(toSat, aliceIdentity);
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        // Nothing is reserved against the identity: relocating your own tokens changes no position, so it
+        // must not eat your own room. The wallet's share is still written, because the wallet can only ever
+        // send what it holds, whoever owns the far side.
+        assertFalse(mc.validationOf(id).pendingReserved);
+        assertEq(mc.pendingOutOf(aliceIdentity), 0);
+        assertEq(mc.pendingInOf(aliceIdentity), 0);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+    }
+
+    /// @notice The wallet's share of a reservation is written on every issuance, whatever the identities do:
+    ///         it is what stops a second validation drawing more than the wallet can cover.
+    function test_requestTransferValidation_Success_WhenTheWalletShareIsAlwaysReserved() public configured {
+        _track();
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+
+        assertTrue(mc.validationOf(id).walletPendingReserved);
+        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+    }
+
+    function test_requestTransferValidation_Success_WhenTwoValidationsRaceForOneCap() public configured {
+        _track();
+        address capped = _bindCappedModule(50);
+
+        vm.startPrank(aliceIdentity);
+        uint256 first = mc.requestTransferValidation(fromSat, toSat, 10, 30, "");
+        uint256 second = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        vm.stopPrank();
+
+        assertEq(mc.validationOf(first).amountMax, 30);
+        assertEq(mc.validationOf(second).amountMax, 20, "the second sees the first as executed at its maximum");
+        assertEq(CappedRecipientModule(capped).capOf(address(mc)), 50);
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
+        mc.requestTransferValidation(fromSat, toSat, 1, 90, "");
+    }
+
+    /// @notice A rule that decides from positions binds anywhere, with nothing to set up first: the
+    ///         compliance keeps every position from the token's first mint, so the numbers it reads always
+    ///         exist. Under the previous design such a module had to be refused until tracking was enabled.
+    function test_addModule_Success_WhenAReaderOfPositionsBinds() public configured {
+        address module = _deployCappedModule();
+
+        mc.addModule(module);
+
+        assertTrue(mc.isModuleBound(module));
     }
 
     // ==== record, event and dispatch Tests ====
@@ -303,7 +474,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
+        ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.expiry, 1_700_000_000 + VALIDITY_WINDOW);
         assertEq(record.releaseAt, 1_700_000_000 + VALIDITY_WINDOW + POLYGON_WINDOW);
         assertEq(record.fromChainKey, polygon);
@@ -320,7 +491,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
+        ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.releaseAt, 1_700_000_000 + VALIDITY_WINDOW + OPTIMISM_WINDOW);
         assertEq(record.fromChainKey, polygon);
         assertEq(record.toChainKey, optimism);
@@ -330,7 +501,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
+        ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.fromChainKey, polygon);
         assertEq(record.toChainKey, referenceChain);
         assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
@@ -344,7 +515,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         uint256 crossChain = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
         vm.stopPrank();
 
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(sameChain);
+        ITransferValidation.Validation memory record = mc.validationOf(sameChain);
         assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
         assertEq(record.toKey, WalletKeyLib.canonicalKey(toSat));
         assertFalse(record.twoLegs);
@@ -358,6 +529,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_Success_WhenTheEventAndRecordMatchTheObject() public configured {
         vm.warp(1_700_000_000);
         bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
+        _bind(spender, makeAddr("SpenderIdentity"));
         MessageTypesLib.ComplianceValidation memory expected =
             _expected(1, fromSat, toSat, spender, 10, 90, POLYGON_WINDOW);
 
@@ -443,9 +615,31 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         );
     }
 
-    function _bindBoundsModule() private returns (address module) {
-        module = address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())));
+    function _bindAllowedAmountModule() private returns (address module) {
+        module = address(new ModuleProxy(address(new RuleOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())));
         mc.addModule(module);
+    }
+
+    function _deployCappedModule() private returns (address module) {
+        module = address(
+            new ModuleProxy(address(new CappedRecipientModule()), abi.encodeCall(RecordingModule.initialize, ()))
+        );
+    }
+
+    function _bindCappedModule(uint256 cap) private returns (address module) {
+        module = _deployCappedModule();
+        mc.addModule(module);
+        mc.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (cap)), module);
+    }
+
+    /// @dev Gives alice's identity the position her satellite wallet holds, the way a real deployment does:
+    ///  through the token's mint hook. The compliance keeps positions from the token's first mint, so there
+    ///  is nothing to turn on.
+    function _track() private {
+        address aliceNative = makeAddr("aliceNative");
+        vm.mockCall(registry, abi.encodeWithSignature("identity(address)", aliceNative), abi.encode(aliceIdentity));
+        vm.prank(token);
+        mc.created(aliceNative, BRIDGED_BALANCE);
     }
 
     function _evmChainKey(uint256 chainId) private pure returns (bytes32) {

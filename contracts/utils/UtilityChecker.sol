@@ -76,7 +76,6 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
-import { ModuleCapabilitiesLib } from "../libraries/ModuleCapabilitiesLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
@@ -213,17 +212,37 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
-        // Only the modules that declared the transfer check are consulted, matching what the
-        // compliance actually calls. Listing the others would report a pass they never gave.
-        address[] memory modules = compliance.getModulesByCapability(ModuleCapabilitiesLib.CHECK_TRANSFER);
-        uint256 length = modules.length;
-        _details = new ComplianceCheckDetails[](length);
-        for (uint256 i; i < length; i++) {
-            IModule module = IModule(modules[i]);
+        // Only the `RULE` modules are consulted, matching what the compliance actually calls. Listing the
+        // others would report a pass they never gave.
+        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
+        IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
+        _details = new ComplianceCheckDetails[](rules.length);
+        for (uint256 i; i < rules.length; i++) {
+            uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
             _details[i] = ComplianceCheckDetails({
-                moduleName: module.name(), pass: module.moduleCheck(_from, _to, _value, address(compliance))
+                moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed
             });
         }
+    }
+
+    /// @dev The context the compliance would build for a native movement: both wallets resolved, no spender.
+    function _buildContext(address _token, address _compliance, address _from, address _to, uint256 _value)
+        private
+        view
+        returns (IModule.TransferContext memory ctx)
+    {
+        IERC3643IdentityRegistry registry = IERC3643(_token).identityRegistry();
+        ctx.compliance = _compliance;
+        if (_from != address(0)) {
+            ctx.fromIdentity = address(registry.identity(_from));
+            ctx.fromWallet = bytes32(uint256(uint160(_from)));
+        }
+        if (_to != address(0)) {
+            ctx.toIdentity = address(registry.identity(_to));
+            ctx.toWallet = bytes32(uint256(uint160(_to)));
+        }
+        ctx.amountMin = _value;
+        ctx.amountMax = _value;
     }
 
     function _authorizeUpgrade(

@@ -31,9 +31,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
 
         // setCompliance is guarded by onlySharedAuthority(compliance): the new compliance must report the
         // same AccessManager authority as the Token, so the mock advertises the suite's AccessManager.
-        vm.mockCall(
-            newCompliance, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
+        vm.mockCall(newCompliance, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
 
         // setCompliance also requires the target to advertise IERC3643Compliance via ERC-165.
         mockSupportsInterface(newCompliance, type(IERC3643Compliance).interfaceId);
@@ -66,9 +64,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     /// @notice A target with no ERC-165 support is refused, so a mistyped address cannot break transfers.
     function testTokenSetComplianceRevertsWhenNoERC165() public {
         address notAContract = makeAddr("NotAContract");
-        vm.mockCall(
-            notAContract, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
+        vm.mockCall(notAContract, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
 
         vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
         token.setCompliance(notAContract);
@@ -79,9 +75,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     /// @notice A contract that is not a compliance is refused, ahead of the getTokenBound() probe.
     function testTokenSetComplianceRevertsWhenWrongInterface() public {
         address wrongType = makeAddr("IdentityRegistryNotCompliance");
-        vm.mockCall(
-            wrongType, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
+        vm.mockCall(wrongType, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         mockSupportsInterface(wrongType, type(IERC3643IdentityRegistry).interfaceId);
 
         vm.expectRevert(ErrorsLib.InvalidCompliance.selector);

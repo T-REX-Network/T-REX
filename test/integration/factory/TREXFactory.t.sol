@@ -20,7 +20,6 @@ import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import {
     ITREXImplementationAuthority,
@@ -178,13 +177,9 @@ contract TREXFactoryTest is TREXSuiteTest {
             // make each address behave like a bindable plug-and-play module so init binds the first
             // 25 and reaches ModularCompliance's own 25-module cap on the 26th, instead of failing
             // earlier on a call to a non-contract address
-            vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.isPlugAndPlay.selector), abi.encode(true));
+            vm.mockCall(complianceModules[i], abi.encodeCall(IModule.isPlugAndPlay, ()), abi.encode(true));
             vm.mockCall(complianceModules[i], abi.encodeWithSelector(IModule.bindCompliance.selector), abi.encode());
-            vm.mockCall(
-                complianceModules[i],
-                abi.encodeWithSelector(IModule.moduleCapabilities.selector),
-                abi.encode(ModuleCapabilitiesLib.CHECK_TRANSFER)
-            );
+            vm.mockCall(complianceModules[i], abi.encodeCall(IModule.moduleTypes, ()), abi.encode(_ruleOnly()));
         }
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
@@ -271,7 +266,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     function _runDeployTREXSuiteSuccess(address claimIssuer, uint256 claimTopic) internal {
         // Deploy TestModule (implementation + proxy)
         TestModule testModuleImplementation = new TestModule();
-        bytes memory initData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory initData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy testModuleProxy = new ModuleProxy(address(testModuleImplementation), initData);
         TestModule testModule = TestModule(address(testModuleProxy));
 
@@ -526,7 +521,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_deployTREXSuite_MC_OwnershipAndTokenBinding_SetAtInit() public {
         // Deploy TestModule (implementation + proxy) so the configured module passes the isPlugAndPlay check
         TestModule testModuleImplementation = new TestModule();
-        bytes memory initData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory initData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy testModuleProxy = new ModuleProxy(address(testModuleImplementation), initData);
         TestModule testModule = TestModule(address(testModuleProxy));
 
@@ -848,7 +843,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Deploy TestModule (implementation + proxy) so the configured module passes isPlugAndPlay
         TestModule testModuleImplementation = new TestModule();
         ModuleProxy testModuleProxy =
-            new ModuleProxy(address(testModuleImplementation), abi.encodeWithSelector(TestModule.initialize.selector));
+            new ModuleProxy(address(testModuleImplementation), abi.encodeCall(TestModule.initialize, ()));
         testModuleAddr = address(testModuleProxy);
 
         // Issuer for the TIR + claim topic. The TIR only records the address.
@@ -1295,6 +1290,12 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(IdentityRegistryStorage(foreignIRS).linkedIdentityRegistries().length, 0);
         (bool binder,) = otherAccessManager.hasRole(_role(RolesLib.Role.IRS_BINDER), address(trexFactory));
         assertFalse(binder);
+    }
+
+    /// @dev The `moduleTypes` answer of a plain rule, for the mocked modules above.
+    function _ruleOnly() private pure returns (IModule.ModuleType[] memory types) {
+        types = new IModule.ModuleType[](1);
+        types[0] = IModule.ModuleType.RULE;
     }
 
 }

@@ -4,7 +4,6 @@ pragma solidity 0.8.30;
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 contract UnbindRevertingModule is IModule {
 
@@ -16,41 +15,25 @@ contract UnbindRevertingModule is IModule {
         revert UnbindRefused();
     }
 
-    function moduleTransferAction(address, address, uint256) external { }
-
-    function moduleMintAction(address, uint256) external { }
-
-    function moduleBurnAction(address, uint256) external { }
-
-    function moduleCheck(address, address, uint256, address) external pure returns (bool) {
-        return true;
+    function allowedAmount(IModule.TransferContext calldata) external pure returns (uint256) {
+        return type(uint256).max;
     }
+
+    function moduleTransferAction(IModule.TransferContext calldata, uint256) external { }
+
+    function moduleMintAction(IModule.TransferContext calldata, uint256) external { }
+
+    function moduleBurnAction(IModule.TransferContext calldata, uint256) external { }
 
     function moduleCheckSpender(address, address, address, uint256, address) external pure returns (bool) {
         return true;
     }
 
-    function validationBounds(
-        bytes calldata,
-        bytes calldata,
-        bytes calldata,
-        uint256 currentMin,
-        uint256 currentMax,
-        address
-    ) external pure returns (uint256, uint256) {
-        return (currentMin, currentMax);
-    }
-
-    function reserveSlot(uint256, bytes calldata, bytes calldata, uint256) external { }
-
-    function commitSlot(uint256, uint256) external pure returns (bool) {
-        return false;
-    }
-
-    function releaseSlot(uint256) external { }
-
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.ALL;
+    function moduleTypes() external pure returns (IModule.ModuleType[] memory types) {
+        types = new IModule.ModuleType[](3);
+        types[0] = IModule.ModuleType.RULE;
+        types[1] = IModule.ModuleType.SPENDER;
+        types[2] = IModule.ModuleType.TRACKER;
     }
 
     function isComplianceBound(address) external pure returns (bool) {

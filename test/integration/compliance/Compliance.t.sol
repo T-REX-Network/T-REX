@@ -34,7 +34,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Helper to deploy TestModule with proxy
     function _deployTestModuleWithProxy() internal returns (address moduleAddress) {
         TestModule moduleImplementation = new TestModule();
-        bytes memory initData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory initData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy moduleProxy = new ModuleProxy(address(moduleImplementation), initData);
         moduleAddress = address(moduleProxy);
     }
@@ -42,7 +42,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Helper to deploy ModuleNotPnP with proxy
     function _deployModuleNotPnPWithProxy() internal returns (address moduleAddress) {
         ModuleNotPnP moduleImplementation = new ModuleNotPnP();
-        bytes memory initData = abi.encodeWithSelector(ModuleNotPnP.initialize.selector);
+        bytes memory initData = abi.encodeCall(ModuleNotPnP.initialize, ());
         ModuleProxy moduleProxy = new ModuleProxy(address(moduleImplementation), initData);
         moduleAddress = address(moduleProxy);
     }

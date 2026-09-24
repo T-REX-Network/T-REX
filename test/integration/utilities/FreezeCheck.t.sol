@@ -20,7 +20,7 @@ contract FreezeCheckTest is TREXSuiteTest {
 
         // Deploy UtilityChecker via proxy
         UtilityChecker utilityCheckerImpl = new UtilityChecker();
-        bytes memory utilityCheckerInitData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        bytes memory utilityCheckerInitData = abi.encodeCall(UtilityChecker.initialize, ());
         UtilityCheckerProxy utilityCheckerProxy =
             new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
         utilityChecker = UtilityChecker(address(utilityCheckerProxy));

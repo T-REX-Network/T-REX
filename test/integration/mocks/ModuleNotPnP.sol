@@ -66,7 +66,6 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 // basic test contract showcasing the behavior of a module not plug & play
@@ -100,30 +99,11 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
     }
 
     /**
-     *  @dev See {IModule-moduleCheck}.
-     *  always returns true (just a test module)
+     *  @dev See {IModule-allowedAmount}.
+     *  never limits anything (just a test module)
      */
-    function moduleCheck(
-        address,
-        /*_from*/
-        address,
-        uint256,
-        address
-    )
-        external
-        pure
-        override
-        returns (bool)
-    {
-        return true;
-    }
-
-    /**
-     *  @dev See {IModule-moduleCapabilities}.
-     *  only the transfer check is implemented, the hooks keep the base defaults
-     */
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER;
+    function allowedAmount(TransferContext calldata) external pure override returns (uint256) {
+        return type(uint256).max;
     }
 
     /**
@@ -149,5 +129,11 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
 
     /// @dev Upgrade guard: no-op in this test mock.
     function _authorizeUpgrade(address) internal override { }
+
+    /// @dev See {IModule-moduleTypes}.
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.RULE;
+    }
 
 }

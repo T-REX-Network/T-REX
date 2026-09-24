@@ -46,21 +46,15 @@ contract IdentityRegistryStorageStoredIdentityUnitTest is Test {
         );
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
 
-        vm.mockCall(
-            registry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
-        vm.mockCall(registry, abi.encodeWithSelector(ITREXRegistry.identityFactory.selector), abi.encode(idFactory));
+        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(registry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));
         vm.mockCall(
             idFactory, abi.encodeCall(IIdentityFactory.getIdentity, (_account(wallet))), abi.encode(globalIdentity)
         );
 
         // A second registry built on another factory: it knows `otherWallet`, the first one does not.
-        vm.mockCall(
-            otherRegistry, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
-        vm.mockCall(
-            otherRegistry, abi.encodeWithSelector(ITREXRegistry.identityFactory.selector), abi.encode(otherIdFactory)
-        );
+        vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(otherRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(otherIdFactory));
         vm.mockCall(
             idFactory, abi.encodeCall(IIdentityFactory.getIdentity, (_account(otherWallet))), abi.encode(address(0))
         );

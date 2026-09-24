@@ -63,7 +63,6 @@
 pragma solidity 0.8.30;
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
-import { ModuleCapabilitiesLib } from "../../../libraries/ModuleCapabilitiesLib.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -142,7 +141,7 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     }
 
     /// @inheritdoc IModule
-    /// @return true if the spender is on the allowlist of the compliance
+    /// @dev A spender policy: allowed when the operator passes this module's check, refused otherwise.
     function moduleCheckSpender(address _spender, address, address, uint256, address _compliance)
         external
         view
@@ -153,9 +152,9 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     }
 
     /// @inheritdoc IModule
-    /// @return the bitmask of the dispatch points this module implements
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_SPENDER;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.SPENDER;
     }
 
     /// @inheritdoc IModule

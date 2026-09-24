@@ -9,17 +9,15 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
-import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
 import {
-    BurnOnlyModule,
-    CheckTransferOnlyModule,
-    MintOnlyModule,
+    BurnTrackerOnlyModule,
+    MintTrackerOnlyModule,
     RecordingModule,
-    SpenderCheckOnlyModule,
-    TransferHookOnlyModule,
-    UndeclaredCheckModule
+    RuleOnlyModule,
+    SpenderOnlyModule,
+    TransferTrackerOnlyModule,
+    UndeclaredRuleModule
 } from "test/integration/mocks/CapabilityModules.sol";
-import { SlotsOnlyModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev The point of the whole capability design: a module is reached at the dispatch points it
 ///      declared and at no other. Every test here asserts the negative as well as the positive.
@@ -42,9 +40,9 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         token.unpause();
         vm.stopPrank();
 
-        mintOnly = RecordingModule(_deploy(address(new MintOnlyModule())));
-        burnOnly = RecordingModule(_deploy(address(new BurnOnlyModule())));
-        transferOnly = RecordingModule(_deploy(address(new TransferHookOnlyModule())));
+        mintOnly = RecordingModule(_deploy(address(new MintTrackerOnlyModule())));
+        burnOnly = RecordingModule(_deploy(address(new BurnTrackerOnlyModule())));
+        transferOnly = RecordingModule(_deploy(address(new TransferTrackerOnlyModule())));
 
         vm.startPrank(deployer);
         mc.addModule(address(mintOnly));
@@ -60,7 +58,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(agent);
         token.mint(bob, 100);
 
-        assertEq(mintOnly.mintHookCalls(), 1);
+        assertEq(mintOnly.mintActionCalls(), 1);
         assertEq(burnOnly.totalHookCalls(), 0);
         assertEq(transferOnly.totalHookCalls(), 0);
     }
@@ -72,7 +70,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(agent);
         token.burn(alice, 100);
 
-        assertEq(burnOnly.burnHookCalls(), 1);
+        assertEq(burnOnly.burnActionCalls(), 1);
         assertEq(mintOnly.totalHookCalls(), 0);
         assertEq(transferOnly.totalHookCalls(), 0);
     }
@@ -84,7 +82,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(alice);
         token.transfer(bob, 100);
 
-        assertEq(transferOnly.transferHookCalls(), 1);
+        assertEq(transferOnly.transferActionCalls(), 1);
         assertEq(mintOnly.totalHookCalls(), 0);
         assertEq(burnOnly.totalHookCalls(), 0);
     }
@@ -98,17 +96,17 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(agent);
         token.burn(alice, 100);
 
-        assertEq(mintOnly.mintHookCalls(), 1);
-        assertEq(mintOnly.transferHookCalls(), 0);
-        assertEq(mintOnly.burnHookCalls(), 0);
+        assertEq(mintOnly.mintActionCalls(), 1);
+        assertEq(mintOnly.transferActionCalls(), 0);
+        assertEq(mintOnly.burnActionCalls(), 0);
 
-        assertEq(burnOnly.burnHookCalls(), 1);
-        assertEq(burnOnly.mintHookCalls(), 0);
-        assertEq(burnOnly.transferHookCalls(), 0);
+        assertEq(burnOnly.burnActionCalls(), 1);
+        assertEq(burnOnly.mintActionCalls(), 0);
+        assertEq(burnOnly.transferActionCalls(), 0);
 
-        assertEq(transferOnly.transferHookCalls(), 1);
-        assertEq(transferOnly.mintHookCalls(), 0);
-        assertEq(transferOnly.burnHookCalls(), 0);
+        assertEq(transferOnly.transferActionCalls(), 1);
+        assertEq(transferOnly.mintActionCalls(), 0);
+        assertEq(transferOnly.burnActionCalls(), 0);
     }
 
     /// @notice A forced transfer reaches the transfer hook, like a normal transfer does.
@@ -116,7 +114,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(agent);
         token.forcedTransfer(alice, bob, 100);
 
-        assertEq(transferOnly.transferHookCalls(), 1);
+        assertEq(transferOnly.transferActionCalls(), 1);
         assertEq(mintOnly.totalHookCalls(), 0);
         assertEq(burnOnly.totalHookCalls(), 0);
     }
@@ -127,29 +125,52 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     function test_transferred_Success_WhenRecoveringAWallet() public {
         uint256 aliceBalance = token.balanceOf(alice);
 
-        vm.expectCall(
-            address(transferOnly), abi.encodeCall(IModule.moduleTransferAction, (alice, another, aliceBalance))
-        );
+        // Both wallets resolve to the same identity during the hook, which is what keeps a recovery from
+        // corrupting the position: see TokenRecovery.t.sol for the regression this protects.
+        IModule.TransferContext memory expected = IModule.TransferContext({
+            compliance: address(mc),
+            fromIdentity: address(aliceIdentity),
+            toIdentity: address(aliceIdentity),
+            fromWallet: bytes32(uint256(uint160(alice))),
+            toWallet: bytes32(uint256(uint160(another))),
+            amountMin: aliceBalance,
+            amountMax: aliceBalance,
+            isIssuance: false
+        });
+        vm.expectCall(address(transferOnly), abi.encodeCall(IModule.moduleTransferAction, (expected, aliceBalance)), 1);
         vm.prank(agent);
         token.recoveryAddress(alice, another, address(aliceIdentity));
 
-        assertEq(transferOnly.transferHookCalls(), 1);
+        assertEq(transferOnly.transferActionCalls(), 1);
         assertEq(mintOnly.totalHookCalls(), 0);
         assertEq(burnOnly.totalHookCalls(), 0);
     }
 
     /// @notice The declared hook is genuinely invoked, not merely counted.
     function test_created_Success_WhenExpectingTheCallOnTheDeclaringModule() public {
-        vm.expectCall(address(mintOnly), abi.encodeCall(IModule.moduleMintAction, (bob, 100)));
+        // A mint has no sender, so the from side of the context is zero throughout.
+        IModule.TransferContext memory expected = IModule.TransferContext({
+            compliance: address(mc),
+            fromIdentity: address(0),
+            toIdentity: address(bobIdentity),
+            fromWallet: bytes32(0),
+            toWallet: bytes32(uint256(uint160(bob))),
+            amountMin: 100,
+            amountMax: 100,
+            isIssuance: false
+        });
+        vm.expectCall(address(mintOnly), abi.encodeCall(IModule.moduleMintAction, (expected, 100)), 1);
         vm.prank(agent);
         token.mint(bob, 100);
+
+        assertEq(mintOnly.lastAmount(), 100);
     }
 
     // ==== .canTransfer routing Tests ====
 
     /// @notice A rejecting module that declared the check blocks the transfer.
     function test_canTransfer_Success_WhenDeclaringModuleRejects() public {
-        CheckTransferOnlyModule checker = CheckTransferOnlyModule(_deploy(address(new CheckTransferOnlyModule())));
+        RuleOnlyModule checker = RuleOnlyModule(_deploy(address(new RuleOnlyModule())));
         vm.prank(deployer);
         mc.addModule(address(checker));
 
@@ -159,13 +180,13 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertFalse(mc.canTransfer(alice, bob, 100));
     }
 
-    /// @notice A module that rejects but never declared the check is not consulted at all.
+    /// @notice A module that refuses but never named itself a rule is not consulted at all.
     function test_canTransfer_Success_WhenRejectingModuleDidNotDeclareTheCheck() public {
-        UndeclaredCheckModule liar = UndeclaredCheckModule(_deploy(address(new UndeclaredCheckModule())));
+        UndeclaredRuleModule liar = UndeclaredRuleModule(_deploy(address(new UndeclaredRuleModule())));
         vm.prank(deployer);
         mc.addModule(address(liar));
 
-        // its moduleCheck returns false, but CHECK_TRANSFER was never declared
+        // its allowedAmount returns 0, but it never named itself a RULE
         assertTrue(mc.canTransfer(alice, bob, 100));
 
         vm.prank(alice);
@@ -174,7 +195,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         // the hook it did declare still fires on a mint
         vm.prank(agent);
         token.mint(bob, 100);
-        assertEq(liar.mintHookCalls(), 1);
+        assertEq(liar.mintActionCalls(), 1);
     }
 
     // ==== .canSpenderCall routing Tests ====
@@ -186,7 +207,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice A bound spender module decides the answer.
     function test_canSpenderCall_Success_WhenDeclaringModuleRejects() public {
-        SpenderCheckOnlyModule spenderCheck = SpenderCheckOnlyModule(_deploy(address(new SpenderCheckOnlyModule())));
+        SpenderOnlyModule spenderCheck = SpenderOnlyModule(_deploy(address(new SpenderOnlyModule())));
         vm.prank(deployer);
         mc.addModule(address(spenderCheck));
 
@@ -198,7 +219,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice The spender check leaves the transfer path untouched.
     function test_canSpenderCall_Success_WhenTransferCheckIsUnaffected() public {
-        SpenderCheckOnlyModule spenderCheck = SpenderCheckOnlyModule(_deploy(address(new SpenderCheckOnlyModule())));
+        SpenderOnlyModule spenderCheck = SpenderOnlyModule(_deploy(address(new SpenderOnlyModule())));
         vm.prank(deployer);
         mc.addModule(address(spenderCheck));
         spenderCheck.setAllow(false);
@@ -210,56 +231,52 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     // ==== .requestTransferValidation routing Tests ====
 
-    /// @notice Issuance reaches the bounds hook of the module that declared it, and no other dispatch point of
-    ///         any other module.
-    function test_requestTransferValidation_Success_WhenOnlyTheBoundsHookIsDeclared() public {
+    /// @notice Issuance asks every rule for an amount, and touches no tracker: nothing has moved yet.
+    function test_requestTransferValidation_Success_WhenEveryRuleIsAsked() public {
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
-        address bounds =
-            address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())));
-        CheckTransferOnlyModule checker = CheckTransferOnlyModule(_deploy(address(new CheckTransferOnlyModule())));
+        RuleOnlyModule firstRule = RuleOnlyModule(_deploy(address(new RuleOnlyModule())));
+        RuleOnlyModule secondRule = RuleOnlyModule(_deploy(address(new RuleOnlyModule())));
         vm.startPrank(deployer);
-        mc.addModule(bounds);
-        mc.addModule(address(checker));
+        mc.addModule(address(firstRule));
+        mc.addModule(address(secondRule));
         vm.stopPrank();
 
-        vm.expectCall(bounds, abi.encodeCall(IModule.validationBounds, (from, to, "", 10, 100, address(mc))), 1);
-        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
-        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.moduleCheck.selector), 0);
+        IModule.TransferContext memory expected = IModule.TransferContext({
+            compliance: address(mc),
+            fromIdentity: address(aliceIdentity),
+            toIdentity: address(bobIdentity),
+            fromWallet: keccak256(from),
+            toWallet: keccak256(to),
+            amountMin: 10,
+            amountMax: 100,
+            isIssuance: true
+        });
+        vm.expectCall(address(firstRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
+        vm.expectCall(address(secondRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
         _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
-        assertEq(mintOnly.totalHookCalls(), 0);
+        assertEq(mintOnly.totalHookCalls(), 0, "no tracker is told: nothing moved yet");
         assertEq(burnOnly.totalHookCalls(), 0);
         assertEq(transferOnly.totalHookCalls(), 0);
     }
 
-    /// @notice Issuance reaches the slot reservation of the module that declared it, with the issued maximum, and
-    ///         touches no module that did not.
-    function test_requestTransferValidation_Success_WhenOnlyTheSlotHooksAreDeclared() public {
+    /// @notice A rule that allows less narrows the issued range, and the trackers stay untouched.
+    function test_requestTransferValidation_Success_WhenARuleNarrowsTheRange() public {
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
-        SlotsOnlyModule slotsOnly = SlotsOnlyModule(
-            address(new ModuleProxy(address(new SlotsOnlyModule()), abi.encodeCall(SlotsOnlyModule.initialize, ())))
-        );
-        CheckTransferOnlyModule checker = CheckTransferOnlyModule(_deploy(address(new CheckTransferOnlyModule())));
-        vm.startPrank(deployer);
-        mc.addModule(address(slotsOnly));
-        mc.addModule(address(checker));
-        vm.stopPrank();
+        RuleOnlyModule narrowing = RuleOnlyModule(_deploy(address(new RuleOnlyModule())));
+        narrowing.setAllowedAmount(40);
+        vm.prank(deployer);
+        mc.addModule(address(narrowing));
 
-        vm.expectCall(address(slotsOnly), abi.encodeCall(IModule.reserveSlot, (1, from, to, 100)), 1);
-        vm.expectCall(address(slotsOnly), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
-        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.reserveSlot.selector), 0);
-        vm.expectCall(address(checker), abi.encodeWithSelector(IModule.validationBounds.selector), 0);
-        _requestValidation(address(aliceIdentity), from, to, 10, 100);
+        uint256 id = _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
-        assertEq(slotsOnly.reserveCalls(), 1);
-        assertEq(slotsOnly.lastValidationId(), 1);
-        assertEq(slotsOnly.lastAmountMax(), 100);
+        assertEq(mc.validationOf(id).amountMax, 40, "narrowed to what the rule allows");
         assertEq(mintOnly.totalHookCalls(), 0);
         assertEq(burnOnly.totalHookCalls(), 0);
         assertEq(transferOnly.totalHookCalls(), 0);
