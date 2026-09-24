@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
+import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
 import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
@@ -265,6 +267,43 @@ contract AllCapabilitiesModule is RecordingModule {
 
     function name() external pure override returns (string memory) {
         return "AllCapabilitiesModule";
+    }
+
+}
+
+/**
+ * @dev Keys its aggregate by identity rather than by wallet, the shape issue #70 is about.
+ *
+ * Both endpoints are resolved through the bound token's identity registry at hook time, so the module only
+ * stays correct if the token notifies compliance while both wallets still resolve to the identities that
+ * hold and receive the tokens. Debiting an unknown identity underflows, which is what makes the corruption
+ * visible in a test.
+ */
+contract IdentityAggregateModule is RecordingModule {
+
+    /// @dev tokens currently attributed to each identity
+    mapping(address identity => uint256 balance) public aggregate;
+
+    /// @dev Credits an identity directly, so a test can seed the pre-recovery state.
+    function seed(address identity, uint256 value) external {
+        aggregate[identity] += value;
+    }
+
+    function moduleTransferAction(address from, address to, uint256 value) external override onlyComplianceCall {
+        transferHookCalls++;
+        IERC3643 token = IERC3643(IModularCompliance(msg.sender).getTokenBound());
+        address fromId = address(token.identityRegistry().identity(from));
+        address toId = address(token.identityRegistry().identity(to));
+        aggregate[fromId] -= value;
+        aggregate[toId] += value;
+    }
+
+    function moduleCapabilities() external pure returns (uint256) {
+        return ModuleCapabilitiesLib.HOOK_TRANSFER;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "IdentityAggregateModule";
     }
 
 }
