@@ -28,3 +28,4 @@ gambit_out/
 emv-*/
 .last_confs/
 certora_internal/
+.DS_Store
