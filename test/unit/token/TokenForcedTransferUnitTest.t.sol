@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { Vm } from "@forge-std/Vm.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -76,6 +77,46 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         vm.prank(agent);
         token.forcedTransfer(from, to, transferAmount);
+    }
+
+    function testTokenForcedTransferRevertsWhenPausedAndSucceedsAfterUnpause() public {
+        vm.prank(agent);
+        token.pause();
+
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(agent);
+        token.forcedTransfer(from, to, transferAmount);
+        assertEq(token.balanceOf(from), mintAmount);
+        assertEq(token.balanceOf(to), 0);
+
+        vm.startPrank(agent);
+        token.unpause();
+        token.forcedTransfer(from, to, transferAmount);
+        vm.stopPrank();
+        assertEq(token.balanceOf(from), mintAmount - transferAmount);
+        assertEq(token.balanceOf(to), transferAmount);
+    }
+
+    function testTokenBatchForcedTransferRevertsWhenPausedAndSucceedsAfterUnpause() public {
+        address[] memory froms = new address[](1);
+        address[] memory tos = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        froms[0] = from;
+        tos[0] = to;
+        amounts[0] = transferAmount;
+        vm.prank(agent);
+        token.pause();
+
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(agent);
+        token.batchForcedTransfer(froms, tos, amounts);
+        assertEq(token.balanceOf(to), 0);
+
+        vm.startPrank(agent);
+        token.unpause();
+        token.batchForcedTransfer(froms, tos, amounts);
+        vm.stopPrank();
+        assertEq(token.balanceOf(to), transferAmount);
     }
 
     function testTokenForcedTransferNominal() public {
