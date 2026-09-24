@@ -538,7 +538,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         internal
         override
-        whenNotPaused
         returns (bool)
     {
         require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
