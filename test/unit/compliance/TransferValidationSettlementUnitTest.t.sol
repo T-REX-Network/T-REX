@@ -329,7 +329,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
             bytes32 toWallet,
             uint256 amountMin,
             uint256 amountMax,
-            bool issuance
+            bool issuance,
         ) = TrackerOnlyModule(recorder).lastContext();
         assertEq(compliance, address(mc));
         assertEq(fromIdentity, aliceIdentity);
@@ -387,7 +387,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertFalse(halt);
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(mc.positionOf(bobId), 40);
-        (,,,, bytes32 toWallet,,,) = TrackerOnlyModule(recorder).lastContext();
+        (,,,, bytes32 toWallet,,,,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(toWallet, bytes32(uint256(uint160(bob))), "a native wallet is its padded address");
     }
 
@@ -425,7 +425,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
-        (, address fromIdentity, address toIdentity,,,,,) = TrackerOnlyModule(recorder).lastContext();
+        (, address fromIdentity, address toIdentity,,,,,,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(fromIdentity, aliceIdentity, "the settlement knows whose it is");
         assertEq(toIdentity, bobIdentity);
         assertEq(mc.positionOf(bobId), 50);

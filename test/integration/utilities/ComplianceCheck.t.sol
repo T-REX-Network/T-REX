@@ -7,7 +7,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
-import { MintTrackerOnlyModule, RecordingModule } from "../mocks/CapabilityModules.sol";
+import { RecordingModule, TrackerOnlyModule } from "../mocks/CapabilityModules.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -127,19 +127,19 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertTrue(results[1].pass);
     }
 
-    /// @notice Should skip modules that never declared the transfer check
-    function test_getTransferDetails_OmitsModules_WithoutTheTransferCheck() public {
-        MintTrackerOnlyModule mintOnlyImplementation = new MintTrackerOnlyModule();
+    /// @notice Should skip a module that is not a `RULE`, since it vets nothing
+    function test_getTransferDetails_OmitsModules_ThatAreNotRules() public {
+        TrackerOnlyModule trackerImplementation = new TrackerOnlyModule();
         bytes memory initData = abi.encodeCall(RecordingModule.initialize, ());
-        address mintOnly = address(new ModuleProxy(address(mintOnlyImplementation), initData));
+        address trackerOnly = address(new ModuleProxy(address(trackerImplementation), initData));
 
         vm.prank(deployer);
-        compliance.addModule(mintOnly);
+        compliance.addModule(trackerOnly);
 
         UtilityChecker.ComplianceCheckDetails[] memory results =
             utilityChecker.getTransferDetails(address(mockContract), alice, bob, 100);
 
-        // the mint-only module is bound, but it enforces nothing on a transfer
+        // the tracker is bound, but it enforces nothing on a transfer
         assertEq(compliance.getModules().length, 2);
         assertEq(results.length, 1);
         assertEq(keccak256(bytes(results[0].moduleName)), keccak256(bytes("TestModule")));

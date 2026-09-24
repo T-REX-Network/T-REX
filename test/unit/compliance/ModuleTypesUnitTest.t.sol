@@ -81,42 +81,33 @@ contract ModuleTypesUnitTest is Test {
         IModule module = IModule(_deploy(address(new TrackerOnlyModule())));
 
         assertEq(module.allowedAmount(_context(1)), type(uint256).max, "no limit by default");
-        assertTrue(module.moduleCheckSpender(_stranger, _stranger, _stranger, 1, address(this)), "allowed by default");
+        assertTrue(module.moduleCheckSpender(_context(1)), "allowed by default");
     }
 
-    function test_defaults_Success_WhenTheActionsAreNotOverridden() public {
+    function test_defaults_Success_WhenTheActionIsNotOverridden() public {
         IModule module = IModule(_deploy(address(new RuleOnlyModule())));
         module.bindCompliance(address(this));
 
-        module.moduleTransferAction(_context(1), 1);
-        module.moduleMintAction(_context(1), 1);
-        module.moduleBurnAction(_context(1), 1);
+        module.afterTransfer(_context(1));
     }
 
-    /// @notice The actions are the compliance's to call. Their defaults carry the guard too, so a module that
+    /// @notice The action is the compliance's to call. Its default carries the guard too, so a module that
     ///         implements nothing still cannot be driven by a stranger.
-    function test_defaults_RevertWhen_AnActionIsCalledByAnyoneElse() public {
+    function test_defaults_RevertWhen_TheActionIsCalledByAnyoneElse() public {
         IModule module = IModule(_deploy(address(new RuleOnlyModule())));
 
-        vm.startPrank(_stranger);
+        vm.prank(_stranger);
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        module.moduleTransferAction(_context(1), 1);
-
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        module.moduleMintAction(_context(1), 1);
-
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        module.moduleBurnAction(_context(1), 1);
-        vm.stopPrank();
+        module.afterTransfer(_context(1));
     }
 
-    /// @notice A tracker guards its own overrides the same way, so the guard is the module's, not the base's.
-    function test_overrides_RevertWhen_AnActionIsCalledByAnyoneElse() public {
+    /// @notice A tracker guards its own override the same way, so the guard is the module's, not the base's.
+    function test_overrides_RevertWhen_TheActionIsCalledByAnyoneElse() public {
         IModule module = IModule(_deploy(address(new TrackerOnlyModule())));
 
         vm.prank(_stranger);
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        module.moduleTransferAction(_context(1), 1);
+        module.afterTransfer(_context(1));
     }
 
     function test_recorders_Success_WhenModuleIsFreshlyDeployed() public {

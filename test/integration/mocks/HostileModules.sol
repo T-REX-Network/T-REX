@@ -19,13 +19,9 @@ contract UnbindRevertingModule is IModule {
         return type(uint256).max;
     }
 
-    function moduleTransferAction(IModule.TransferContext calldata, uint256) external { }
+    function afterTransfer(IModule.TransferContext calldata) external { }
 
-    function moduleMintAction(IModule.TransferContext calldata, uint256) external { }
-
-    function moduleBurnAction(IModule.TransferContext calldata, uint256) external { }
-
-    function moduleCheckSpender(address, address, address, uint256, address) external pure returns (bool) {
+    function moduleCheckSpender(IModule.TransferContext calldata) external pure returns (bool) {
         return true;
     }
 

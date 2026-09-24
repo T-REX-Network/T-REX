@@ -27,6 +27,7 @@ pragma solidity 0.8.30;
 
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
+import { IModule } from "./modules/IModule.sol";
 
 /**
  * @title ComplianceLedger
@@ -166,8 +167,31 @@ abstract contract ComplianceLedger is IComplianceLedger {
     }
 
     /// @dev The id a native wallet has in the ledger and in a module's context: its address padded on the left.
-    function _walletKeyOf(address wallet) internal pure returns (bytes32) {
+    function _walletIdOf(address wallet) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(wallet)));
+    }
+
+    /// @dev Fills the movement every rule and tracker receives. The one place a context is built: the
+    ///  compliance's hooks, the issuance and the settlement all come through here, so a module is asked the
+    ///  same shape whatever produced the movement. `spender` stays empty; the two callers that have one set
+    ///  it afterwards.
+    function _buildContext(
+        address fromIdentity,
+        address toIdentity,
+        bytes32 fromWallet,
+        bytes32 toWallet,
+        uint256 amountMin,
+        uint256 amountMax,
+        bool isIssuance
+    ) internal view returns (IModule.TransferContext memory ctx) {
+        ctx.compliance = address(this);
+        ctx.fromIdentity = fromIdentity;
+        ctx.toIdentity = toIdentity;
+        ctx.fromWallet = fromWallet;
+        ctx.toWallet = toWallet;
+        ctx.amountMin = amountMin;
+        ctx.amountMax = amountMax;
+        ctx.isIssuance = isIssuance;
     }
 
     function _ledger() internal pure returns (Ledger storage ledger) {

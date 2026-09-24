@@ -264,28 +264,12 @@ contract TestModuleTest is TREXSuiteTest {
         testModule.blockModule(true);
     }
 
-    /// @notice Should revert when moduleTransferAction called from non-bound compliance
-    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_ModuleTransferAction() public {
+    /// @notice Should revert when afterTransfer is called from a non-bound compliance
+    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_AfterTransfer() public {
         address nonCompliance = makeAddr("nonCompliance3");
         vm.prank(nonCompliance);
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        testModule.moduleTransferAction(_emptyContext(), 100);
-    }
-
-    /// @notice Should revert when moduleMintAction called from non-bound compliance
-    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_ModuleMintAction() public {
-        address nonCompliance = makeAddr("nonCompliance4");
-        vm.prank(nonCompliance);
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        testModule.moduleMintAction(_emptyContext(), 100);
-    }
-
-    /// @notice Should revert when moduleBurnAction called from non-bound compliance
-    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_ModuleBurnAction() public {
-        address nonCompliance = makeAddr("nonCompliance5");
-        vm.prank(nonCompliance);
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        testModule.moduleBurnAction(_emptyContext(), 100);
+        testModule.afterTransfer(_emptyContext());
     }
 
     // ============================================

@@ -45,19 +45,11 @@ contract ReentrantModule is AbstractModuleUpgradeable {
         _fired = false;
     }
 
-    function moduleTransferAction(TransferContext calldata, uint256) external override onlyComplianceCall {
+    function afterTransfer(TransferContext calldata) external override onlyComplianceCall {
         _reenter();
     }
 
-    function moduleMintAction(TransferContext calldata, uint256) external override onlyComplianceCall {
-        _reenter();
-    }
-
-    function moduleBurnAction(TransferContext calldata, uint256) external override onlyComplianceCall {
-        _reenter();
-    }
-
-    /// @dev Declares every hook so the compliance dispatches to this module on transfer, mint and burn.
+    /// @dev Named `TRACKER`, so the compliance dispatches to this module on a transfer, a mint and a burn.
     function canComplianceBind(address) external pure returns (bool) {
         return true;
     }

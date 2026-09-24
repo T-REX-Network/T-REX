@@ -1,33 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import {
-    BurnTrackerOnlyModule,
-    MintTrackerOnlyModule,
     RecordingModule,
     RuleOnlyModule,
     SpenderOnlyModule,
-    TransferTrackerOnlyModule,
+    TrackerOnlyModule,
     UndeclaredRuleModule
 } from "test/integration/mocks/CapabilityModules.sol";
 
-/// @dev The point of the whole capability design: a module is reached at the dispatch points it
-///      declared and at no other. Every test here asserts the negative as well as the positive.
+/// @dev The point of the whole type design: a module is reached for the types it named and for no other.
+///      Every test here asserts the negative as well as the positive.
+///
+///      A `TRACKER` is told every movement through one `afterTransfer`, so where three fixtures used to
+///      declare one hook each there is now one that sorts the movement itself. The assertions are the same
+///      ones: a mint must arrive as a mint, a burn as a burn, and a module of another type must hear nothing.
 contract ComplianceDispatchTest is InteropSuiteTest {
 
     ModularCompliance internal mc;
 
-    RecordingModule internal mintOnly;
-    RecordingModule internal burnOnly;
-    RecordingModule internal transferOnly;
+    RecordingModule internal tracker;
+    RecordingModule internal rule;
 
     function setUp() public override {
         super.setUp();
@@ -40,55 +43,56 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         token.unpause();
         vm.stopPrank();
 
-        mintOnly = RecordingModule(_deploy(address(new MintTrackerOnlyModule())));
-        burnOnly = RecordingModule(_deploy(address(new BurnTrackerOnlyModule())));
-        transferOnly = RecordingModule(_deploy(address(new TransferTrackerOnlyModule())));
+        tracker = RecordingModule(_deploy(address(new TrackerOnlyModule())));
+        rule = RecordingModule(_deploy(address(new RuleOnlyModule())));
 
         vm.startPrank(deployer);
-        mc.addModule(address(mintOnly));
-        mc.addModule(address(burnOnly));
-        mc.addModule(address(transferOnly));
+        mc.addModule(address(tracker));
+        mc.addModule(address(rule));
         vm.stopPrank();
     }
 
     // ==== .created routing Tests ====
 
-    /// @notice A mint reaches the mint hook and nothing else.
-    function test_created_Success_WhenOnlyTheMintHookIsDeclared() public {
+    /// @notice A mint arrives as a mint: no sender side, and no other counter moves.
+    function test_created_Success_WhenTheTrackerIsToldAboutAMint() public {
         vm.prank(agent);
         token.mint(bob, 100);
 
-        assertEq(mintOnly.mintActionCalls(), 1);
-        assertEq(burnOnly.totalHookCalls(), 0);
-        assertEq(transferOnly.totalHookCalls(), 0);
+        assertEq(tracker.mintActionCalls(), 1);
+        assertEq(tracker.burnActionCalls(), 0);
+        assertEq(tracker.transferActionCalls(), 0);
+        assertEq(rule.totalHookCalls(), 0, "a rule is never told about a movement");
     }
 
     // ==== .destroyed routing Tests ====
 
-    /// @notice A burn reaches the burn hook and nothing else.
-    function test_destroyed_Success_WhenOnlyTheBurnHookIsDeclared() public {
+    /// @notice A burn arrives as a burn: no recipient side, and no other counter moves.
+    function test_destroyed_Success_WhenTheTrackerIsToldAboutABurn() public {
         vm.prank(agent);
         token.burn(alice, 100);
 
-        assertEq(burnOnly.burnActionCalls(), 1);
-        assertEq(mintOnly.totalHookCalls(), 0);
-        assertEq(transferOnly.totalHookCalls(), 0);
+        assertEq(tracker.burnActionCalls(), 1);
+        assertEq(tracker.mintActionCalls(), 0);
+        assertEq(tracker.transferActionCalls(), 0);
+        assertEq(rule.totalHookCalls(), 0, "a rule is never told about a movement");
     }
 
     // ==== .transferred routing Tests ====
 
-    /// @notice A transfer reaches the transfer hook and nothing else.
-    function test_transferred_Success_WhenOnlyTheTransferHookIsDeclared() public {
+    /// @notice A transfer arrives with both sides filled in, and no other counter moves.
+    function test_transferred_Success_WhenTheTrackerIsToldAboutATransfer() public {
         vm.prank(alice);
         token.transfer(bob, 100);
 
-        assertEq(transferOnly.transferActionCalls(), 1);
-        assertEq(mintOnly.totalHookCalls(), 0);
-        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(tracker.transferActionCalls(), 1);
+        assertEq(tracker.mintActionCalls(), 0);
+        assertEq(tracker.burnActionCalls(), 0);
     }
 
-    /// @notice Across a full mint, transfer and burn cycle each module is reached exactly once.
-    function test_dispatch_Success_WhenDrivingEveryDispatchPoint() public {
+    /// @notice Across a full mint, transfer and burn cycle the tracker is told each movement once, under the
+    ///         kind it really was, and a module of another type is told none of them.
+    function test_dispatch_Success_WhenDrivingEveryMovement() public {
         vm.prank(agent);
         token.mint(bob, 100);
         vm.prank(alice);
@@ -96,17 +100,10 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(agent);
         token.burn(alice, 100);
 
-        assertEq(mintOnly.mintActionCalls(), 1);
-        assertEq(mintOnly.transferActionCalls(), 0);
-        assertEq(mintOnly.burnActionCalls(), 0);
-
-        assertEq(burnOnly.burnActionCalls(), 1);
-        assertEq(burnOnly.mintActionCalls(), 0);
-        assertEq(burnOnly.transferActionCalls(), 0);
-
-        assertEq(transferOnly.transferActionCalls(), 1);
-        assertEq(transferOnly.mintActionCalls(), 0);
-        assertEq(transferOnly.burnActionCalls(), 0);
+        assertEq(tracker.mintActionCalls(), 1);
+        assertEq(tracker.transferActionCalls(), 1);
+        assertEq(tracker.burnActionCalls(), 1);
+        assertEq(rule.totalHookCalls(), 0);
     }
 
     /// @notice A forced transfer reaches the transfer hook, like a normal transfer does.
@@ -114,9 +111,9 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(agent);
         token.forcedTransfer(alice, bob, 100);
 
-        assertEq(transferOnly.transferActionCalls(), 1);
-        assertEq(mintOnly.totalHookCalls(), 0);
-        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(tracker.transferActionCalls(), 1);
+        assertEq(tracker.mintActionCalls(), 0);
+        assertEq(tracker.burnActionCalls(), 0);
     }
 
     /// @notice A recovery reaches the transfer hook too. It moves the balance outside `_update`, so without an
@@ -135,19 +132,20 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             toWallet: bytes32(uint256(uint160(another))),
             amountMin: aliceBalance,
             amountMax: aliceBalance,
-            isIssuance: false
+            isIssuance: false,
+            spender: ""
         });
-        vm.expectCall(address(transferOnly), abi.encodeCall(IModule.moduleTransferAction, (expected, aliceBalance)), 1);
+        vm.expectCall(address(tracker), abi.encodeCall(IModule.afterTransfer, (expected)), 1);
         vm.prank(agent);
         token.recoveryAddress(alice, another, address(aliceIdentity));
 
-        assertEq(transferOnly.transferActionCalls(), 1);
-        assertEq(mintOnly.totalHookCalls(), 0);
-        assertEq(burnOnly.totalHookCalls(), 0);
+        assertEq(tracker.transferActionCalls(), 1);
+        assertEq(tracker.mintActionCalls(), 0);
+        assertEq(tracker.burnActionCalls(), 0);
     }
 
-    /// @notice The declared hook is genuinely invoked, not merely counted.
-    function test_created_Success_WhenExpectingTheCallOnTheDeclaringModule() public {
+    /// @notice The tracker is genuinely invoked with the movement, not merely counted.
+    function test_created_Success_WhenExpectingTheCallOnTheTracker() public {
         // A mint has no sender, so the from side of the context is zero throughout.
         IModule.TransferContext memory expected = IModule.TransferContext({
             compliance: address(mc),
@@ -157,16 +155,46 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             toWallet: bytes32(uint256(uint160(bob))),
             amountMin: 100,
             amountMax: 100,
-            isIssuance: false
+            isIssuance: false,
+            spender: ""
         });
-        vm.expectCall(address(mintOnly), abi.encodeCall(IModule.moduleMintAction, (expected, 100)), 1);
+        vm.expectCall(address(tracker), abi.encodeCall(IModule.afterTransfer, (expected)), 1);
         vm.prank(agent);
         token.mint(bob, 100);
 
-        assertEq(mintOnly.lastAmount(), 100);
+        assertEq(tracker.lastAmount(), 100);
     }
 
     // ==== .canTransfer routing Tests ====
+
+    /// @notice A recipient that resolves to no identity is refused while a rule is bound. Every rule about
+    ///         distribution keys on the identity and would read a zero one as the absent side of a burn,
+    ///         answering "no limit", so the tokens would land where no cap could ever reach them. Only a token
+    ///         whose registry has eligibility checks disabled gets this far, since `isVerified` otherwise
+    ///         refuses the recipient first.
+    function test_canTransfer_Success_WhenTheRecipientResolvesToNoIdentity() public {
+        vm.prank(deployer);
+        ITREXRegistry(address(token.identityRegistry())).disableEligibilityChecks();
+        address unregistered = makeAddr("walletWithNoIdentity");
+
+        assertFalse(mc.canTransfer(alice, unregistered, 1), "an unattributable recipient is refused");
+
+        vm.prank(alice);
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        token.transfer(unregistered, 1);
+    }
+
+    /// @notice With no rule bound there is nothing to mis-decide, so the same transfer goes through: the guard
+    ///         costs a token without distribution rules nothing.
+    function test_canTransfer_Success_WhenNoRuleIsBoundAndTheRecipientIsUnattributable() public {
+        vm.startPrank(deployer);
+        ITREXRegistry(address(token.identityRegistry())).disableEligibilityChecks();
+        mc.removeModule(address(rule));
+        vm.stopPrank();
+        address unregistered = makeAddr("walletWithNoIdentity");
+
+        assertTrue(mc.canTransfer(alice, unregistered, 1));
+    }
 
     /// @notice A rejecting module that declared the check blocks the transfer.
     function test_canTransfer_Success_WhenDeclaringModuleRejects() public {
@@ -252,15 +280,14 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             toWallet: keccak256(to),
             amountMin: 10,
             amountMax: 100,
-            isIssuance: true
+            isIssuance: true,
+            spender: ""
         });
         vm.expectCall(address(firstRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
         vm.expectCall(address(secondRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
         _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
-        assertEq(mintOnly.totalHookCalls(), 0, "no tracker is told: nothing moved yet");
-        assertEq(burnOnly.totalHookCalls(), 0);
-        assertEq(transferOnly.totalHookCalls(), 0);
+        assertEq(tracker.totalHookCalls(), 0, "no tracker is told: nothing moved yet");
     }
 
     /// @notice A rule that allows less narrows the issued range, and the trackers stay untouched.
@@ -277,9 +304,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         uint256 id = _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(mc.validationOf(id).amountMax, 40, "narrowed to what the rule allows");
-        assertEq(mintOnly.totalHookCalls(), 0);
-        assertEq(burnOnly.totalHookCalls(), 0);
-        assertEq(transferOnly.totalHookCalls(), 0);
+        assertEq(tracker.totalHookCalls(), 0);
     }
 
     function _deploy(address implementation) private returns (address) {

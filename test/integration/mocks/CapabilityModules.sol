@@ -62,9 +62,14 @@ abstract contract RecordingModule is AbstractModuleUpgradeable {
 
     function _authorizeUpgrade(address) internal override { }
 
-    function _record(TransferContext calldata ctx, uint256 amount) internal {
+    /// @dev Counts the movement under the hook it would have been before the three merged into one, so the
+    ///      suites keep asserting "the mint hook fired" rather than "a hook fired".
+    function _countAndRecord(TransferContext calldata ctx) internal {
+        if (ctx.fromWallet == bytes32(0)) mintActionCalls++;
+        else if (ctx.toWallet == bytes32(0)) burnActionCalls++;
+        else transferActionCalls++;
         lastContext = ctx;
-        lastAmount = amount;
+        lastAmount = ctx.amountMax;
     }
 
 }
@@ -90,7 +95,7 @@ contract RuleOnlyModule is RecordingModule {
 /// @dev A spender policy and nothing else.
 contract SpenderOnlyModule is RecordingModule {
 
-    function moduleCheckSpender(address, address, address, uint256, address) external view override returns (bool) {
+    function moduleCheckSpender(TransferContext calldata) external view override returns (bool) {
         return _spenderAllowed;
     }
 
@@ -109,19 +114,8 @@ contract SpenderOnlyModule is RecordingModule {
 ///      from a burn from a transfer.
 contract TrackerOnlyModule is RecordingModule {
 
-    function moduleTransferAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        transferActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleMintAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        mintActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleBurnAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        burnActionCalls++;
-        _record(ctx, amount);
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
@@ -142,19 +136,8 @@ contract RuleAndTrackerModule is RecordingModule {
         return _allowed;
     }
 
-    function moduleTransferAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        transferActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleMintAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        mintActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleBurnAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        burnActionCalls++;
-        _record(ctx, amount);
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
@@ -176,23 +159,12 @@ contract AllTypesModule is RecordingModule {
         return _allowed;
     }
 
-    function moduleCheckSpender(address, address, address, uint256, address) external view override returns (bool) {
+    function moduleCheckSpender(TransferContext calldata) external view override returns (bool) {
         return _spenderAllowed;
     }
 
-    function moduleTransferAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        transferActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleMintAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        mintActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleBurnAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        burnActionCalls++;
-        _record(ctx, amount);
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
@@ -301,9 +273,8 @@ contract CappedRecipientModule is RecordingModule {
         return held >= cap ? 0 : cap - held;
     }
 
-    function moduleTransferAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        transferActionCalls++;
-        _record(ctx, amount);
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
@@ -326,9 +297,8 @@ contract RuleAndMintTrackerModule is RecordingModule {
         return _allowed;
     }
 
-    function moduleMintAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        mintActionCalls++;
-        _record(ctx, amount);
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
@@ -351,9 +321,8 @@ contract UndeclaredRuleModule is RecordingModule {
         return 0;
     }
 
-    function moduleMintAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        mintActionCalls++;
-        _record(ctx, amount);
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
@@ -363,63 +332,6 @@ contract UndeclaredRuleModule is RecordingModule {
 
     function name() external pure override returns (string memory) {
         return "UndeclaredRuleModule";
-    }
-
-}
-
-/// @dev A tracker that records mints only, so a routing test can tell one action from another.
-contract MintTrackerOnlyModule is RecordingModule {
-
-    function moduleMintAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        mintActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleTypes() external pure returns (ModuleType[] memory types) {
-        types = new ModuleType[](1);
-        types[0] = ModuleType.TRACKER;
-    }
-
-    function name() external pure override returns (string memory) {
-        return "MintTrackerOnlyModule";
-    }
-
-}
-
-/// @dev A tracker that records burns only.
-contract BurnTrackerOnlyModule is RecordingModule {
-
-    function moduleBurnAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        burnActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleTypes() external pure returns (ModuleType[] memory types) {
-        types = new ModuleType[](1);
-        types[0] = ModuleType.TRACKER;
-    }
-
-    function name() external pure override returns (string memory) {
-        return "BurnTrackerOnlyModule";
-    }
-
-}
-
-/// @dev A tracker that records transfers only.
-contract TransferTrackerOnlyModule is RecordingModule {
-
-    function moduleTransferAction(TransferContext calldata ctx, uint256 amount) external override onlyComplianceCall {
-        transferActionCalls++;
-        _record(ctx, amount);
-    }
-
-    function moduleTypes() external pure returns (ModuleType[] memory types) {
-        types = new ModuleType[](1);
-        types[0] = ModuleType.TRACKER;
-    }
-
-    function name() external pure override returns (string memory) {
-        return "TransferTrackerOnlyModule";
     }
 
 }
