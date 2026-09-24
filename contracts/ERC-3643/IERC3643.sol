@@ -298,6 +298,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
      * - `RecoverySuccess` upon successful completion of the recovery process.
      *
      * Reverts if:
+     * - The contract is paused (`EnforcedPause`): recovery moves a balance and waits for the halt to be lifted.
      * - The agent calling the function does not have the necessary permissions to perform recovery (`AgentNotAuthorized`).
      * - The `_lostWallet` has no tokens to recover (`NoTokenToRecover`).
      * - Neither `_lostWallet` nor `_newWallet` is present in the identity registry (`RecoveryNotPossible`).
@@ -338,6 +339,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
      *  Also emits _fromList.length `Transfer` events upon successful batch transfer.
      *  To execute this function, the calling agent must not be restricted from initiating forced transfer.
      *  If the agent is restricted from this capability, the function call will fail.
+     *  The function can only be called when the contract is not paused.
      */
     function batchForcedTransfer(address[] calldata _fromList, address[] calldata _toList, uint256[] calldata _amounts)
         external;

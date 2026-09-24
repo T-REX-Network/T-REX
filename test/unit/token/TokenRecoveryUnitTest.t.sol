@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
@@ -65,6 +66,28 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         vm.expectRevert(ErrorsLib.RecoveryNotPossible.selector);
         vm.prank(agent);
         token.recoveryAddress(lostWallet, unregisteredWallet, investorOnchainId);
+    }
+
+    function testTokenRecoveryAddressRevertsWhenPausedAndSucceedsAfterUnpause() public {
+        mockIdentityRegistryContains(lostWallet, true);
+        mockIdentityRegistryContains(newWallet, false);
+        mockIdentityRegistryIsLocallyRegistered(lostWallet, true);
+        mockIdentityRegistryRegisterIdentity(newWallet, IIdentity(investorOnchainId), 0);
+        vm.prank(agent);
+        token.pause();
+
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(agent);
+        token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        assertEq(token.balanceOf(lostWallet), mintAmount);
+
+        vm.startPrank(agent);
+        token.unpause();
+        bool success = token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        vm.stopPrank();
+        assertTrue(success);
+        assertEq(token.balanceOf(lostWallet), 0);
+        assertEq(token.balanceOf(newWallet), mintAmount);
     }
 
     function testTokenRecoveryAddressNominal() public {
