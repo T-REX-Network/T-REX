@@ -574,17 +574,19 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @dev The new wallet is registered only when it resolves nowhere, so a wallet the global registry
     ///  already binds keeps following that binding rather than a local copy. Only local entries can be
-    ///  deleted. Country is passed as 0 rather than read from the lost wallet, because T-REX stores none;
-    ///  drop this override if country storage comes back, so the base reads the real value again.
-    function _migrateIdentity(address lostWallet, address newWallet, address investorOnchainID) internal override {
+    ///  deleted, so the lost wallet is reported for deletion only when it is locally registered. Country is
+    ///  passed as 0 rather than read from the lost wallet, because T-REX stores none; drop this override if
+    ///  country storage comes back, so the base reads the real value again.
+    function _registerRecoveredWallet(address lostWallet, address newWallet, address investorOnchainID)
+        internal
+        override
+        returns (bool)
+    {
         IERC3643IdentityRegistry registry = _getIdentityRegistry();
-
         if (!registry.contains(newWallet)) {
             registry.registerIdentity(newWallet, IIdentity(investorOnchainID), 0);
         }
-        if (ITREXRegistry(address(registry)).isLocallyRegistered(lostWallet)) {
-            registry.deleteIdentity(lostWallet);
-        }
+        return ITREXRegistry(address(registry)).isLocallyRegistered(lostWallet);
     }
 
     /// @inheritdoc TREXMessaging

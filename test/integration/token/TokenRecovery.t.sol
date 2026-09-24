@@ -5,12 +5,15 @@ import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { IdentityAggregateModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 
 contract TokenRecoveryTest is TREXSuiteTest {
 
@@ -281,6 +284,84 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
         assertEq(token.balanceOf(another), 500);
         assertTrue(identityRegistry.isLocallyRegistered(another));
+    }
+
+    // ============ Identity-keyed compliance (issue #70) ============
+
+    /// @notice A module keyed by identity sees both wallets resolve during the compliance hook: the new
+    ///         wallet is registered before the move and the lost wallet deleted after the hook. Before the
+    ///         fix the lost wallet was deleted first, so the module debited the zero identity.
+    function test_recoveryAddress_Success_IdentityKeyedModuleKeepsAggregate() public {
+        IdentityAggregateModule module = _bindIdentityAggregateModule();
+        module.seed(address(bobIdentity), 500);
+        _unbindGlobally(bob);
+
+        vm.prank(agent);
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertEq(module.transferHookCalls(), 1, "hook not reached");
+        assertEq(module.aggregate(address(bobIdentity)), 500, "aggregate corrupted by the recovery");
+        assertFalse(identityRegistry.isLocallyRegistered(bob));
+        assertEq(address(identityRegistry.identity(another)), address(bobIdentity));
+    }
+
+    /// @notice The debit and the credit land on different identities when the new wallet is already bound
+    ///         to one: the lost identity is emptied and the new identity carries the balance.
+    function test_recoveryAddress_Success_IdentityKeyedModuleMovesAcrossIdentities() public {
+        IdentityAggregateModule module = _bindIdentityAggregateModule();
+        module.seed(address(bobIdentity), 500);
+        _unbindGlobally(bob);
+        vm.prank(agent);
+        identityRegistry.registerIdentity(another, aliceIdentity, 1);
+
+        vm.prank(agent);
+        token.recoveryAddress(bob, another, address(aliceIdentity));
+
+        assertEq(module.aggregate(address(bobIdentity)), 0, "lost identity not debited");
+        assertEq(module.aggregate(address(aliceIdentity)), 500, "new identity not credited");
+    }
+
+    /// @notice The lost wallet's local binding shadows a global one. The hook must debit the local identity
+    ///         that held the tokens, not the global one the wallet falls back to once the local entry is gone.
+    function test_recoveryAddress_Success_IdentityKeyedModuleDebitsLocalIdentityNotGlobalShadow() public {
+        IdentityAggregateModule module = _bindIdentityAggregateModule();
+        module.seed(address(bobIdentity), 500);
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
+            ),
+            abi.encode(address(charlieIdentity))
+        );
+
+        vm.prank(agent);
+        token.recoveryAddress(bob, another, address(bobIdentity));
+
+        assertEq(module.aggregate(address(bobIdentity)), 500, "aggregate corrupted");
+        assertEq(module.aggregate(address(charlieIdentity)), 0, "global shadow leaked into hook");
+    }
+
+    /// @dev Makes the ONCHAINID factory answer "unknown" for `wallet`, so only its local binding speaks for
+    ///  it. Without this the global fallback keeps resolving the wallet after `deleteIdentity` and would hide
+    ///  the pre-fix corruption.
+    function _unbindGlobally(address wallet) private {
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, wallet)
+            ),
+            abi.encode(address(0))
+        );
+    }
+
+    function _bindIdentityAggregateModule() private returns (IdentityAggregateModule module) {
+        module = IdentityAggregateModule(
+            address(
+                new ModuleProxy(address(new IdentityAggregateModule()), abi.encodeCall(RecordingModule.initialize, ()))
+            )
+        );
+        vm.prank(deployer);
+        ModularCompliance(address(token.compliance())).addModule(address(module));
     }
 
 }
