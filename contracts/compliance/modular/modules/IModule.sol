@@ -31,8 +31,8 @@ pragma solidity 0.8.30;
 /// A module says what it is through {moduleTypes}, read once at binding, and the compliance calls it only
 /// where it said so:
 /// - `RULE`: asked {allowedAmount}, the largest amount it allows; the compliance takes the minimum;
-/// - `SPENDER`: asked {moduleCheckSpender}, whether an operator may spend on a holder's behalf;
-/// - `TRACKER`: told {moduleTransferAction}, {moduleMintAction} or {moduleBurnAction} after the ledger moved.
+/// - `SPENDER`: asked {moduleCheckSpender}, whether the operator named in the context may execute the movement;
+/// - `TRACKER`: told {afterTransfer} after the ledger moved.
 ///
 /// A module never calls another module. It reads the compliance's ledger ({IComplianceLedger}: position and
 /// pending amounts per identity) and the token's identity registry, and keeps nothing but its own settings
@@ -51,7 +51,7 @@ interface IModule {
         RULE,
         /// Answers {moduleCheckSpender}.
         SPENDER,
-        /// Is told {moduleTransferAction}, {moduleMintAction} and {moduleBurnAction}.
+        /// Is told {afterTransfer}.
         TRACKER
     }
 
@@ -71,11 +71,16 @@ interface IModule {
         bytes32 toWallet;
         /// Inclusive lower bound of the movement. Equal to `amountMax` on a native movement.
         uint256 amountMin;
-        /// Inclusive upper bound: the exact amount on a native movement, the requested maximum, already
-        /// capped at what the sending wallet holds, on an issuance.
+        /// Inclusive upper bound: the exact amount on a native movement, and the exact amount that moved
+        /// when a `TRACKER` is told about one; the requested maximum, already capped at what the sending
+        /// wallet holds, on an issuance.
         uint256 amountMax;
         /// True while a validation is being issued for a satellite movement.
         bool isIssuance;
+        /// ERC-7930 envelope of who executes the movement on the sender's behalf: the caller of `transferFrom`
+        /// on a native movement, the spender named on a validation. Empty when the sender executes itself,
+        /// which is every direct transfer, mint and burn.
+        bytes spender;
     }
 
     /**
@@ -100,33 +105,17 @@ interface IModule {
     function unbindCompliance(address _compliance) external;
 
     /**
-     *  @dev the ledger moved between two wallets. Called on every `TRACKER` module after the compliance
-     *  updated the positions, on a native transfer, a forced transfer, a recovery and a settled validation
+     *  @dev the ledger moved. Called on every `TRACKER` module after the compliance updated the positions, on
+     *  a native transfer, a mint, a burn, a forced transfer, a recovery and a settled validation
+     *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, a zero
+     *  `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and `toWallet` mean a burn. That is
+     *  the convention {allowedAmount} already uses, so one function covers what three hooks used to
      *  reverting stops the movement: a module that cannot record a move has to stop it. `forceRemoveModule`
      *  is the escape hatch for a module that reverts everywhere
      *  This function can be called ONLY by the compliance contract itself
-     *  @param ctx the movement, see {TransferContext}; `amountMin == amountMax == _value`
-     *  @param _value the exact amount moved
+     *  @param ctx the movement, see {TransferContext}; `amountMin == amountMax`
      */
-    function moduleTransferAction(TransferContext calldata ctx, uint256 _value) external;
-
-    /**
-     *  @dev tokens were minted. Called on every `TRACKER` module after the compliance updated the position
-     *  `ctx.fromIdentity` and `ctx.fromWallet` are zero
-     *  This function can be called ONLY by the compliance contract itself
-     *  @param ctx the movement, see {TransferContext}
-     *  @param _value the amount minted
-     */
-    function moduleMintAction(TransferContext calldata ctx, uint256 _value) external;
-
-    /**
-     *  @dev tokens were burned. Called on every `TRACKER` module after the compliance updated the position
-     *  `ctx.toIdentity` and `ctx.toWallet` are zero
-     *  This function can be called ONLY by the compliance contract itself
-     *  @param ctx the movement, see {TransferContext}
-     *  @param _value the amount burned
-     */
-    function moduleBurnAction(TransferContext calldata ctx, uint256 _value) external;
+    function afterTransfer(TransferContext calldata ctx) external;
 
     /**
      *  @dev the largest amount this rule allows to move. Called on every `RULE` module, on a native transfer
@@ -149,22 +138,17 @@ interface IModule {
     function allowedAmount(TransferContext calldata ctx) external view returns (uint256);
 
     /**
-     *  @dev whether `_spender` may move `_value` from `_from` to `_to`. Called on every `SPENDER` module from
-     *  `canSpenderCall`, which the token runs before spending an allowance in `transferFrom`
+     *  @dev whether `ctx.spender` may execute the movement on the sender's behalf. Called on every `SPENDER`
+     *  module from `canSpenderCall`, which the token runs before spending an allowance in `transferFrom`, and
+     *  at the issuance of a validation that names a spender (`ctx.isIssuance` set), since no module runs on
+     *  the satellite and issuance is the only place that spender can be refused
      *  all declaring modules must agree. A direct transfer never reaches this path: the spender is the sender
-     *  wallets arrive unresolved, as the token knows them, since a spender policy is about who calls, not about
-     *  how the tokens are distributed
-     *  @param _spender address initiating the transfer on behalf of `_from`
-     *  @param _from address the tokens are taken from
-     *  @param _to address the tokens are sent to
-     *  @param _value amount of tokens moved
-     *  @param _compliance address of the compliance asking, which the module keys its settings by
-     *  @return true if the module allows the spender to call, false otherwise
+     *  `ctx.spender` is never empty here
+     *  MUST be a view: the compliance calls it under `staticcall`
+     *  @param ctx the movement, see {TransferContext}
+     *  @return true if the module allows the spender to execute it, false otherwise
      */
-    function moduleCheckSpender(address _spender, address _from, address _to, uint256 _value, address _compliance)
-        external
-        view
-        returns (bool);
+    function moduleCheckSpender(TransferContext calldata ctx) external view returns (bool);
 
     /**
      *  @dev what this module is, see {ModuleType}

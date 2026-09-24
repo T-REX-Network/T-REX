@@ -63,8 +63,8 @@
 pragma solidity 0.8.30;
 
 import { IERC3643 } from "../../../ERC-3643/IERC3643.sol";
-import { IERC3643IdentityRegistry } from "../../../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
+import { ITREXRegistry } from "../../../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -74,8 +74,8 @@ import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
 import { IModule } from "./IModule.sol";
 
 /// @title SpenderVerificationModule
-/// @dev Requires the spender of a `transferFrom` to be verified in the token's registry.
-/// Stateless: the registry is resolved through the compliance on every call.
+/// @dev Requires the spender of a `transferFrom`, or the spender named on a validation, to be a wallet the
+/// token's registry admits. Stateless: the registry is resolved through the compliance on every call.
 contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable {
 
     constructor() {
@@ -92,14 +92,9 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
     }
 
     /// @inheritdoc IModule
-    /// @dev A spender policy: allowed when the operator passes this module's check, refused otherwise.
-    function moduleCheckSpender(address _spender, address, address, uint256, address _compliance)
-        external
-        view
-        override
-        returns (bool)
-    {
-        return _identityRegistry(_compliance).isVerified(_spender);
+    /// @dev Allowed when the spender's wallet, native or satellite, is eligible in the token's registry.
+    function moduleCheckSpender(TransferContext calldata ctx) external view override returns (bool) {
+        return _identityRegistry(ctx.compliance).isWalletVerified(ctx.spender);
     }
 
     /// @inheritdoc IModule
@@ -117,8 +112,8 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
 
     /// @inheritdoc IModule
     /// @dev Binds anywhere, in any order. The registry is resolved through the bound token at check
-    /// time, and a spender only ever reaches `allowedAmount` from a token's `transferFrom`, so a token
-    /// is necessarily bound by then.
+    /// time, and a spender only ever reaches this module from the token's `transferFrom` or from an
+    /// issuance, so a token is necessarily bound by then.
     /// @return always true
     function isPlugAndPlay() external pure returns (bool) {
         return true;
@@ -146,9 +141,9 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
 
     /// @dev Resolves the registry of the token bound to a compliance.
     /// @param _compliance address of the compliance contract
-    /// @return the identity registry of the token bound to `_compliance`
-    function _identityRegistry(address _compliance) private view returns (IERC3643IdentityRegistry) {
-        return IERC3643(IModularCompliance(_compliance).getTokenBound()).identityRegistry();
+    /// @return the registry of the token bound to `_compliance`
+    function _identityRegistry(address _compliance) private view returns (ITREXRegistry) {
+        return ITREXRegistry(address(IERC3643(IModularCompliance(_compliance).getTokenBound()).identityRegistry()));
     }
 
     /// @dev Gated through the shared authority.

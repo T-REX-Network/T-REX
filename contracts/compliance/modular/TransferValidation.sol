@@ -145,8 +145,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /* ----- Issuance ----- */
 
     /// @inheritdoc ITransferValidation
-    /// @dev Four questions, in order: where is this going, may the caller ask for it, by when must it happen,
-    ///  and how much may actually move. Only then is anything written.
+    /// @dev Five questions, in order: where is this going, may the caller ask for it, by when must it happen,
+    ///  how much may actually move, and may the named spender execute it. Only then is anything written.
     function requestTransferValidation(
         bytes calldata from,
         bytes calldata to,
@@ -163,13 +163,14 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _requireCallerOwnsTheWallet(draft, from);
         _setExpiryAndRelease(draft);
         _narrowAmountRange(draft, from, to);
+        _requireSpenderAllowed(draft, to, spender);
 
         validationId = _issueValidation(from, to, spender, draft);
     }
 
     /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
-    ///  two when the wallets are on two different satellite chains. The spender is parsed and carried on the
-    ///  wire for the satellite to enforce; no rule here reads it.
+    ///  two when the wallets are on two different satellite chains. The spender is parsed here and judged in
+    ///  {_requireSpenderAllowed}, once the range is known.
     function _resolveRoute(Draft memory draft, bytes calldata from, bytes calldata to, bytes calldata spender)
         private
         view
@@ -241,6 +242,18 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         uint256 allowed = _minAllowedAmount(ctx);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
         require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
+    }
+
+    /// @dev Who may execute: every `SPENDER` module must accept the named spender, since no module runs on the
+    ///  satellite and this is the only place it can be refused. A validation the sender executes itself names
+    ///  no spender and asks nobody. Asked on a relocation too: who executes is not about distribution.
+    function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
+        if (spender.length == 0) return;
+        IModule.TransferContext memory ctx = _buildContext(
+            draft.fromIdentity, draft.toIdentity, draft.fromKey, _walletIdOf(to), draft.amountMin, draft.amountMax, true
+        );
+        ctx.spender = spender;
+        require(_spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
     /// @dev Turns a settled draft into an issued validation: take the next id, build the object the satellite
@@ -490,7 +503,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _settleOnToken(from, to, notification.amount, notification.validationId);
 
         emit EventsLib.ValidationSettled(notification.validationId, originChainKey, notification.amount);
-        _callTransferAction(ctx, notification.amount);
+        _callAfterTransfer(ctx);
     }
 
     /// @dev Both chains must report the same amount: the first one to arrive recorded it, the second has to
@@ -623,8 +636,12 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  Evaluated under `staticcall`: the ledger still describes the state before the move.
     function _minAllowedAmount(IModule.TransferContext memory ctx) internal view virtual returns (uint256);
 
-    /// @dev Calls `moduleTransferAction` on every `TRACKER` module, once the positions have been updated.
-    function _callTransferAction(IModule.TransferContext memory ctx, uint256 amount) internal virtual;
+    /// @dev Whether every `SPENDER` module accepts `ctx.spender`, `true` when none is bound. A view: the
+    ///  modules are called under `staticcall`.
+    function _spenderAllowed(IModule.TransferContext memory ctx) internal view virtual returns (bool);
+
+    /// @dev Calls `afterTransfer` on every `TRACKER` module, once the positions have been updated.
+    function _callAfterTransfer(IModule.TransferContext memory ctx) internal virtual;
 
     /// @dev Sends one leg of a validation toward `chainKey`, through the token.
     function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal virtual;
@@ -637,27 +654,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal virtual;
 
     /* ----- Shared by the three flows ----- */
-
-    /// @dev The one place a context is built. Settlement names the identities recorded at issuance, so the
-    ///  release and the position move name the same parties the reservation did.
-    function _buildContext(
-        address fromIdentity,
-        address toIdentity,
-        bytes32 fromWallet,
-        bytes32 toWallet,
-        uint256 amountMin,
-        uint256 amountMax,
-        bool isIssuance
-    ) internal view returns (IModule.TransferContext memory ctx) {
-        ctx.compliance = address(this);
-        ctx.fromIdentity = fromIdentity;
-        ctx.toIdentity = toIdentity;
-        ctx.fromWallet = fromWallet;
-        ctx.toWallet = toWallet;
-        ctx.amountMin = amountMin;
-        ctx.amountMax = amountMax;
-        ctx.isIssuance = isIssuance;
-    }
 
     /// @dev Releases whatever of the reservation is still outstanding, once: the flags make a second call, such
     ///  as a settlement after the keeper's discard, a no-op instead of an underflow.
@@ -672,11 +668,11 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         }
     }
 
-    /// @dev The id a wallet has in the shared storage and the context: a native address padded on the left, the
+    /// @dev The id a wallet has in the ledger and in a module's context: a native address padded on the left, the
     ///  canonical key otherwise. The validation keeps the canonical key of both sides for leg matching.
     function _walletIdOf(bytes memory wallet) internal view returns (bytes32) {
         (bool native, address addr) = WalletKeyLib.isReferenceChain(wallet);
-        if (native) return _walletKeyOf(addr);
+        if (native) return _walletIdOf(addr);
         return WalletKeyLib.canonicalKey(wallet);
     }
 

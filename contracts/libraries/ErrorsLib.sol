@@ -125,8 +125,8 @@ library ErrorsLib {
     error ModuleStillBound();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
+    error SpenderAlreadyAllowed(bytes spender);
+    error SpenderNotListed(bytes spender);
 
     // TREXFactory Errors
     error AuthorityMismatch();
@@ -188,6 +188,8 @@ library ErrorsLib {
     error Deprecated();
 
     // TransferValidation Errors
+    /// @dev A `SPENDER` module refused the spender named on the requested validation.
+    error ValidationSpenderRefused(bytes spender);
     /// @dev A validity or reconciliation window must be positive.
     error ZeroDuration();
     /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.

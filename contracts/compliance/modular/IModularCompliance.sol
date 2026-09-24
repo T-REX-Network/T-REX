@@ -168,7 +168,8 @@ interface IModularCompliance is IERC3643Compliance {
      *  @param _from address of the transfer sender
      *  @param _to address of the transfer receiver
      *  @param _value amount of tokens sent
-     *  only the `SPENDER` modules are consulted, and all of them must agree
+     *  only the `SPENDER` modules are consulted, and all of them must agree; they receive the same resolved
+     *  context as a rule, with the spender as a native ERC-7930 envelope
      *  a direct transfer needs no spender check: the spender is the sender, already covered by
      *  {canTransfer}
      *  returns true when no bound module objects, including when none enforces a spender rule

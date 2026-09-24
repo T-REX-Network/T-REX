@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
@@ -90,8 +91,9 @@ import { IModule } from "./modules/IModule.sol";
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
 /// `RULE` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
-/// every `TRACKER` module what happened. A module is kept in one list per type it named at binding, so a
-/// dispatch is a plain loop over the modules concerned and nothing else.
+/// every `TRACKER` module what happened. A mint and a burn are the same movement with one side missing, so the
+/// three base hooks differ only in which side they fill in. A module is kept in one list per type it named at
+/// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
 contract ModularCompliance is
     IModularCompliance,
     ISettlementHandler,
@@ -164,7 +166,6 @@ contract ModularCompliance is
      *  Deletes the module from the routing set without any call into it, so a module that reverts on
      *  `unbindCompliance` or everywhere cannot hold the token hostage. The module keeps its own binding
      *  record, so the same address cannot be added to this compliance again; a fresh deployment can.
-     *  A writer is refused here too: `removeKeyWriter` needs no call into the module, so it comes first.
      *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleForceRemoved event and no ModuleRemoved, so indexers can tell a forced removal
      *  from a regular one.
@@ -233,18 +234,14 @@ contract ModularCompliance is
 
     /**
      *  @dev See {IModularCompliance-canSpenderCall}.
-     *  Every `SPENDER` module must agree. Wallets are passed as the token knows them: a spender policy is
-     *  about who calls, not about how the asset is distributed, so nothing is resolved here.
+     *  Every `SPENDER` module must agree. The context is built, and the wallets resolved, only when one is
+     *  bound, so a token with no spender policy pays nothing here.
      */
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
-        EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
-        uint256 length = spenderRules.length();
-        for (uint256 i = 0; i < length; i++) {
-            if (!IModule(spenderRules.at(i)).moduleCheckSpender(_spender, _from, _to, _value, address(this))) {
-                return false;
-            }
-        }
-        return true;
+        if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
+        IModule.TransferContext memory ctx = _buildNativeContext(_from, _to, _value);
+        ctx.spender = InteroperableAddress.formatEvmV1(block.chainid, _spender);
+        return _spenderAllowed(ctx);
     }
 
     /**
@@ -312,38 +309,38 @@ contract ModularCompliance is
 
     /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
     ///  Nothing is resolved when no rule is bound.
+    ///
+    ///  A recipient that resolves to no identity is refused outright while a rule is bound. Every rule about
+    ///  distribution keys on the identity, so it would read a zero one as the absent side of a burn and answer
+    ///  "no limit", letting tokens land where no cap can ever reach them. Only a token whose registry has
+    ///  eligibility checks disabled reaches this, since `isVerified` otherwise refuses the recipient first.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
-        return value <= _minAllowedAmount(_buildNativeContext(from, to, value));
+        IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
+        if (to != address(0) && ctx.toIdentity == address(0)) return false;
+        return value <= _minAllowedAmount(ctx);
     }
 
     /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
-        IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
-        _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, value);
-        _callTransferAction(ctx, value);
+        _applyMovement(_buildNativeContext(from, to, value));
     }
 
     /// @dev A mint: no sender, the recipient's position grows.
     function _created(address to, uint256 value) internal override {
-        IModule.TransferContext memory ctx = _buildNativeContext(address(0), to, value);
-        _movePosition(address(0), ctx.toIdentity, bytes32(0), ctx.toWallet, value);
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
-        uint256 length = trackers.length();
-        for (uint256 i = 0; i < length; i++) {
-            IModule(trackers.at(i)).moduleMintAction(ctx, value);
-        }
+        _applyMovement(_buildNativeContext(address(0), to, value));
     }
 
     /// @dev A burn: no recipient, the sender's position shrinks.
     function _destroyed(address from, uint256 value) internal override {
-        IModule.TransferContext memory ctx = _buildNativeContext(from, address(0), value);
-        _movePosition(ctx.fromIdentity, address(0), ctx.fromWallet, bytes32(0), value);
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
-        uint256 length = trackers.length();
-        for (uint256 i = 0; i < length; i++) {
-            IModule(trackers.at(i)).moduleBurnAction(ctx, value);
-        }
+        _applyMovement(_buildNativeContext(from, address(0), value));
+    }
+
+    /// @dev Moves the positions and tells the trackers. The absent side of a mint or a burn is already zero
+    ///  in the context, so one function serves all three hooks.
+    function _applyMovement(IModule.TransferContext memory ctx) private {
+        _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
+        _callAfterTransfer(ctx);
     }
 
     /// @dev Resolves both wallets once, through the registry's native lookup, and builds the context of a
@@ -354,17 +351,19 @@ contract ModularCompliance is
         returns (IModule.TransferContext memory ctx)
     {
         ITREXRegistry registry = _boundRegistry();
-        ctx.compliance = address(this);
-        if (from != address(0)) {
-            ctx.fromIdentity = address(registry.identity(from));
-            ctx.fromWallet = _walletKeyOf(from);
-        }
-        if (to != address(0)) {
-            ctx.toIdentity = address(registry.identity(to));
-            ctx.toWallet = _walletKeyOf(to);
-        }
-        ctx.amountMin = value;
-        ctx.amountMax = value;
+        address fromIdentity;
+        address toIdentity;
+        if (from != address(0)) fromIdentity = address(registry.identity(from));
+        if (to != address(0)) toIdentity = address(registry.identity(to));
+        return _buildContext(
+            fromIdentity,
+            toIdentity,
+            from == address(0) ? bytes32(0) : _walletIdOf(from),
+            to == address(0) ? bytes32(0) : _walletIdOf(to),
+            value,
+            value,
+            false
+        );
     }
 
     /* ----- What the validation layer needs ----- */
@@ -399,11 +398,21 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    function _callTransferAction(IModule.TransferContext memory ctx, uint256 amount) internal override {
+    function _spenderAllowed(IModule.TransferContext memory ctx) internal view override returns (bool) {
+        EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
+        uint256 length = spenderRules.length();
+        for (uint256 i = 0; i < length; i++) {
+            if (!IModule(spenderRules.at(i)).moduleCheckSpender(ctx)) return false;
+        }
+        return true;
+    }
+
+    /// @inheritdoc TransferValidation
+    function _callAfterTransfer(IModule.TransferContext memory ctx) internal override {
         EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
         uint256 length = trackers.length();
         for (uint256 i = 0; i < length; i++) {
-            IModule(trackers.at(i)).moduleTransferAction(ctx, amount);
+            IModule(trackers.at(i)).afterTransfer(ctx);
         }
     }
 

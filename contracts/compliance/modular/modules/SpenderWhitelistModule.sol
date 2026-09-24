@@ -63,6 +63,7 @@
 pragma solidity 0.8.30;
 
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
+import { WalletKeyLib } from "../../../libraries/WalletKeyLib.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -71,31 +72,34 @@ import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
 import { IModule } from "./IModule.sol";
 
 /// @title SpenderWhitelistModule
-/// @dev Restricts `transferFrom` to an allowlist of operators the issuer named, per compliance.
-/// Default closed: a freshly bound module blocks every `transferFrom` until someone is listed, so
-/// bind it with `addAndSetModule` to list in the same transaction.
+/// @dev Restricts `transferFrom`, and the spender a validation may name, to an allowlist of operators the
+/// issuer named, per compliance. An operator is an ERC-7930 wallet, on this chain or on a satellite, listed by
+/// its canonical key. Default closed: a freshly bound module blocks every `transferFrom` and every validation
+/// naming a spender until someone is listed, so bind it with `addAndSetModule` to list in the same transaction.
 /// Entries are keyed by the bind nonce, so an unbind discards the list.
 contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable {
 
     /// @dev Emitted when a spender is allowed to move tokens on behalf of holders.
     /// @param _compliance compliance contract the allowlist belongs to
-    /// @param _spender address allowed to call `transferFrom`
-    event SpenderAllowed(address indexed _compliance, address indexed _spender);
+    /// @param _spenderKey canonical key of the listed wallet
+    /// @param _spender ERC-7930 envelope of the wallet allowed to execute on holders' behalf
+    event SpenderAllowed(address indexed _compliance, bytes32 indexed _spenderKey, bytes _spender);
 
     /// @dev Emitted when a spender loses that authorization.
     /// @param _compliance compliance contract the allowlist belongs to
-    /// @param _spender address no longer allowed to call `transferFrom`
-    event SpenderDisallowed(address indexed _compliance, address indexed _spender);
+    /// @param _spenderKey canonical key of the delisted wallet
+    /// @param _spender ERC-7930 envelope of the wallet no longer allowed
+    event SpenderDisallowed(address indexed _compliance, bytes32 indexed _spenderKey, bytes _spender);
 
     /// @custom:storage-location erc7201:erc3643.storage.SpenderWhitelistModule
     struct SpenderWhitelistStorage {
-        /// allowlist per compliance, scoped by the bind nonce so an unbind invalidates every entry at
-        /// once, without iterating storage.
+        /// allowlist per compliance, keyed by the wallet's canonical key and scoped by the bind nonce so an
+        /// unbind invalidates every entry at once, without iterating storage.
         /// Example: compliance C binds, its nonce is 0, and `allowSpender(alice)` writes
-        /// `allowedSpenders[C][0][alice] = true`. C unbinds and the nonce becomes 1. On re-bind, reads
+        /// `allowedSpenders[C][0][key(alice)] = true`. C unbinds and the nonce becomes 1. On re-bind, reads
         /// use nonce 1, so alice is not allowed anymore; listing her again writes
-        /// `allowedSpenders[C][1][alice]` and the nonce-0 entries stay behind as harmless orphans.
-        mapping(address compliance => mapping(uint256 nonce => mapping(address spender => bool))) allowedSpenders;
+        /// `allowedSpenders[C][1][key(alice)]` and the nonce-0 entries stay behind as harmless orphans.
+        mapping(address compliance => mapping(uint256 nonce => mapping(bytes32 spenderKey => bool))) allowedSpenders;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.SpenderWhitelistModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -117,38 +121,35 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @dev Lists a spender for the calling compliance. Driven by the compliance owner through
     /// `callModuleFunction`. Emits `SpenderAllowed`.
-    /// @param _spender address allowed to move tokens on behalf of holders
-    function allowSpender(address _spender) external onlyComplianceCall {
-        require(_spender != address(0), ErrorsLib.ZeroAddress());
+    /// @param _spender ERC-7930 envelope of the wallet allowed to execute on holders' behalf; must be canonical
+    function allowSpender(bytes calldata _spender) external onlyComplianceCall {
+        bytes32 key = WalletKeyLib.canonicalKey(_spender);
 
         SpenderWhitelistStorage storage s = _getSpenderWhitelistStorage();
         uint256 nonce = getNonce(msg.sender);
-        require(!s.allowedSpenders[msg.sender][nonce][_spender], ErrorsLib.SpenderAlreadyAllowed(_spender));
+        require(!s.allowedSpenders[msg.sender][nonce][key], ErrorsLib.SpenderAlreadyAllowed(_spender));
 
-        s.allowedSpenders[msg.sender][nonce][_spender] = true;
-        emit SpenderAllowed(msg.sender, _spender);
+        s.allowedSpenders[msg.sender][nonce][key] = true;
+        emit SpenderAllowed(msg.sender, key, _spender);
     }
 
     /// @dev Delists a spender for the calling compliance. Emits `SpenderDisallowed`.
-    /// @param _spender address to delist
-    function disallowSpender(address _spender) external onlyComplianceCall {
+    /// @param _spender ERC-7930 envelope of the wallet to delist
+    function disallowSpender(bytes calldata _spender) external onlyComplianceCall {
+        bytes32 key = WalletKeyLib.canonicalKey(_spender);
+
         SpenderWhitelistStorage storage s = _getSpenderWhitelistStorage();
         uint256 nonce = getNonce(msg.sender);
-        require(s.allowedSpenders[msg.sender][nonce][_spender], ErrorsLib.SpenderNotListed(_spender));
+        require(s.allowedSpenders[msg.sender][nonce][key], ErrorsLib.SpenderNotListed(_spender));
 
-        s.allowedSpenders[msg.sender][nonce][_spender] = false;
-        emit SpenderDisallowed(msg.sender, _spender);
+        s.allowedSpenders[msg.sender][nonce][key] = false;
+        emit SpenderDisallowed(msg.sender, key, _spender);
     }
 
     /// @inheritdoc IModule
-    /// @dev A spender policy: allowed when the operator passes this module's check, refused otherwise.
-    function moduleCheckSpender(address _spender, address, address, uint256, address _compliance)
-        external
-        view
-        override
-        returns (bool)
-    {
-        return isSpenderAllowed(_compliance, _spender);
+    /// @dev Allowed when the spender's wallet is on the calling compliance's list.
+    function moduleCheckSpender(TransferContext calldata ctx) external view override returns (bool) {
+        return isSpenderAllowed(ctx.compliance, ctx.spender);
     }
 
     /// @inheritdoc IModule
@@ -179,10 +180,11 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @dev Allowlist status of a spender, resolved at the compliance's current bind nonce.
     /// @param _compliance compliance contract the allowlist belongs to
-    /// @param _spender address to look up
-    /// @return true if the spender may call `transferFrom` under `_compliance`
-    function isSpenderAllowed(address _compliance, address _spender) public view returns (bool) {
-        return _getSpenderWhitelistStorage().allowedSpenders[_compliance][getNonce(_compliance)][_spender];
+    /// @param _spender ERC-7930 envelope of the wallet to look up
+    /// @return true if the wallet may execute on holders' behalf under `_compliance`
+    function isSpenderAllowed(address _compliance, bytes memory _spender) public view returns (bool) {
+        bytes32 key = WalletKeyLib.canonicalKey(_spender);
+        return _getSpenderWhitelistStorage().allowedSpenders[_compliance][getNonce(_compliance)][key];
     }
 
     /// @inheritdoc AccessManagedOwnableBase

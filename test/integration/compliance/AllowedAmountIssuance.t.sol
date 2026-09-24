@@ -127,21 +127,48 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         assertEq(max, 80);
     }
 
-    /// @notice A spender policy is about who moves the tokens, not how they are distributed, so it is not
-    ///         consulted while a validation is issued. The satellite enforces the named spender instead.
-    function test_requestTransferValidation_Success_WhenASpenderRuleIsBound() public {
+    /// @notice A validation that names a spender is judged by the `SPENDER` modules at issuance. No module
+    ///         runs on the satellite, so this is the only place that spender can be refused.
+    function test_requestTransferValidation_RevertWhen_ASpenderPolicyRefuses() public {
         SpenderOnlyModule policy = SpenderOnlyModule(_deployRule(address(new SpenderOnlyModule())));
         policy.setSpenderAllowed(false);
         vm.prank(deployer);
         boundCompliance.addModule(address(policy));
         bytes memory spender = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("spenderOnPolygon"));
 
-        // Never called at all, whatever the arguments would have been: a selector-wide expectation.
-        vm.expectCall(address(policy), abi.encodeWithSelector(IModule.moduleCheckSpender.selector), 0);
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, spender));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender);
+
+        assertEq(boundCompliance.lastValidationId(), 0, "nothing was issued");
+    }
+
+    /// @notice The same policy lets the issuance through once it accepts the named spender.
+    function test_requestTransferValidation_Success_WhenASpenderPolicyAccepts() public {
+        SpenderOnlyModule policy = SpenderOnlyModule(_deployRule(address(new SpenderOnlyModule())));
+        vm.prank(deployer);
+        boundCompliance.addModule(address(policy));
+        bytes memory spender = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("spenderOnPolygon"));
+
         vm.prank(address(aliceIdentity));
         uint256 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender);
 
-        assertEq(boundCompliance.validationOf(id).amountMax, BALANCE, "issued despite the refusing policy");
+        assertEq(boundCompliance.validationOf(id).amountMax, BALANCE);
+    }
+
+    /// @notice A validation the sender executes itself names no spender, so no policy is asked.
+    function test_requestTransferValidation_Success_WhenNoSpenderIsNamed() public {
+        SpenderOnlyModule policy = SpenderOnlyModule(_deployRule(address(new SpenderOnlyModule())));
+        policy.setSpenderAllowed(false);
+        vm.prank(deployer);
+        boundCompliance.addModule(address(policy));
+
+        // Never called at all, whatever the arguments would have been: a selector-wide expectation.
+        vm.expectCall(address(policy), abi.encodeWithSelector(IModule.moduleCheckSpender.selector), 0);
+        vm.prank(address(aliceIdentity));
+        uint256 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "");
+
+        assertEq(boundCompliance.validationOf(id).amountMax, BALANCE);
     }
 
     /// @notice Two wallets of one identity: no rule is consulted and only the balance narrows, because
