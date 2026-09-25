@@ -420,6 +420,17 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
+  same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
+  revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same
+  wallet resolved through the factory fallback returned false: the fallback asks `getIdentity`, which
+  only answers active bindings, but a local entry is a plain mapping and knew nothing of revocation.
+  `ERC3643IdentityRegistry` now reads the identity behind `isVerified` through a new
+  `_activeIdentityOf` hook, which defaults to `_identityOf`; `TREXRegistry` overrides it to return the
+  zero identity when the factory reports the wallet as `Revoked`. The attribution reads are untouched:
+  `storedIdentity`, `contains`, `identity` and `resolveIdentity` keep answering for a revoked wallet,
+  so recovery (which relies on `contains(lostWallet)`) and position attribution still work. A locally
+  registered wallet the factory never linked is unaffected; only the `Revoked` status denies.
 - **`recoveryAddress` now notifies compliance**: recovery moves the balance through `_forceUpdate`,
   which skips `_update` and therefore its compliance hooks, so `Token.recoveryAddress` now calls
   `compliance.transferred(lostWallet, newWallet, investorTokens)` after the balance / frozen /

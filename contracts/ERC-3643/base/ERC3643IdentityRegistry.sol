@@ -247,7 +247,7 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     ///  of the address the identity supplied. The call is made with a bounded low-level staticcall so a
     ///  hostile or broken issuer cannot halt verification by reverting or returning oversized data.
     function _isVerified(address userAddress) internal view virtual returns (bool) {
-        IIdentity userIdentity = _identityOf(userAddress);
+        IIdentity userIdentity = _activeIdentityOf(userAddress);
         if (address(userIdentity) == address(0)) return false;
 
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(userIdentity);
@@ -299,9 +299,18 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
         return _issuersRegistry().getTrustedIssuersForClaimTopic(claimTopic);
     }
 
-    /// @dev The identity of a wallet, read through the identity storage.
+    /// @dev The identity of a wallet, read through the identity storage. This is the attribution read
+    ///  behind `contains` and `identity`: it answers who owns what the wallet holds.
     function _identityOf(address userAddress) internal view virtual returns (IIdentity) {
         return _identityStorage().storedIdentity(userAddress);
+    }
+
+    /// @dev The identity a wallet may act through, or zero when it may not. This is the admission read
+    ///  behind `isVerified`: it is kept apart from `_identityOf` so an extension can deny new activity to a
+    ///  wallet (a revoked one, for instance) while `contains` and `identity` keep attributing its holdings.
+    ///  Defaults to `_identityOf`.
+    function _activeIdentityOf(address userAddress) internal view virtual returns (IIdentity) {
+        return _identityOf(userAddress);
     }
 
     /// @dev The country of a wallet, read through the identity storage.
