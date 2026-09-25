@@ -349,13 +349,14 @@ contract TREXRegistry is
         return true;
     }
 
-    /// @dev A wallet the IdentityFactory has revoked may not act, however it was registered. The global
-    ///  fallback of the storage already returns zero for it (it asks `getIdentity`, which only answers
-    ///  active bindings), but a local binding is a plain mapping and knows nothing of revocation; without
-    ///  this, the same revoked wallet passed `isVerified` when registered locally and failed it when
-    ///  resolved through the factory (#69). The status is asked of the factory directly, so a locally
-    ///  bound wallet the factory never linked (status `None`) is unaffected. `_identityOf` is left as is:
-    ///  `contains`, `identity` and recovery keep attributing the revoked wallet's holdings.
+    /// @dev A wallet the IdentityFactory has revoked may not act, however it was registered. Neither read it
+    ///  would otherwise pass through catches that on its own: a local binding is a plain mapping that knows
+    ///  nothing of revocation, and the storage's global fallback deliberately keeps answering for a revoked
+    ///  wallet so its holdings never lose an owner. So the status is asked of the factory directly here, and
+    ///  a wallet the factory never linked (status `None`) is unaffected.
+    ///
+    ///  `_identityOf` is left as is. Attribution and admission are separate questions: `contains`, `identity`
+    ///  and recovery keep naming who owns a revoked wallet's tokens, while this read decides who may act.
     function _activeIdentityOf(address userAddress) internal view override returns (IIdentity) {
         IIdentity userIdentity = _identityOf(userAddress);
         if (address(userIdentity) == address(0)) return userIdentity;
