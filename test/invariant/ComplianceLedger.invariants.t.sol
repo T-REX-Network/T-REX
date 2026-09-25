@@ -3,8 +3,11 @@ pragma solidity 0.8.30;
 
 import { StdInvariant } from "@forge-std/StdInvariant.sol";
 import { console } from "@forge-std/console.sol";
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
@@ -51,6 +54,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     uint256 public callsIssue;
     uint256 public callsSettle;
     uint256 public callsDiscard;
+    uint256 public callsRevoke;
 
     function setUp() public override {
         super.setUp();
@@ -86,7 +90,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         token.unpause();
 
         targetContract(address(this));
-        bytes4[] memory selectors = new bytes4[](7);
+        bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = this.mint.selector;
         selectors[1] = this.burn.selector;
         selectors[2] = this.transfer.selector;
@@ -94,6 +98,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         selectors[4] = this.issue.selector;
         selectors[5] = this.settle.selector;
         selectors[6] = this.discard.selector;
+        selectors[7] = this.revokeNativeWallet.selector;
         targetSelector(FuzzSelector({ addr: address(this), selectors: selectors }));
     }
 
@@ -200,6 +205,26 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         boundCompliance.discardExpiredValidations(ids);
     }
 
+    /// @dev An investor retires one of their own native wallets in ONCHAINID. It keeps whatever it holds and
+    ///      keeps its owner, so every later movement out of it must still reach the right position; what it
+    ///      loses is the right to act. Revocation is terminal, so a wallet is revoked at most once and the
+    ///      sequence never walks back.
+    function revokeNativeWallet(uint256 actorSeed) external {
+        uint256 actor = actorSeed % ACTORS;
+        bytes memory envelope = InteroperableAddress.formatEvmV1(block.chainid, actors[actor]);
+        if (idFactory.getAccountStatus(envelope) != IIdentityFactory.AccountStatus.Active) return;
+
+        callsRevoke++;
+        // The local entry goes first: it is a plain mapping that knows nothing of revocation, so while it
+        // stands the wallet resolves through it and the revocation would not reach the ledger at all.
+        ITREXRegistry registry = ITREXRegistry(address(token.identityRegistry()));
+        if (registry.isLocallyRegistered(actors[actor])) {
+            vm.prank(agent);
+            IERC3643IdentityRegistry(address(registry)).deleteIdentity(actors[actor]);
+        }
+        _revokeWallet(identities[actor], envelope);
+    }
+
     /* ----- Invariants ----- */
 
     /// LEDGER-1: a position is exactly what the identity's wallets hold, native and bridged.
@@ -249,6 +274,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         console.log("issue         ", callsIssue);
         console.log("settle        ", callsSettle);
         console.log("discard       ", callsDiscard);
+        console.log("revoke        ", callsRevoke);
         console.log("validations   ", issued.length);
     }
 

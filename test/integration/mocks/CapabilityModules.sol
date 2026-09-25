@@ -255,6 +255,34 @@ contract WritingRuleModule {
 
 /// @dev Reads the ledger: refuses a recipient whose position plus pending reaches the cap. The shape of a
 ///      distribution rule with no ledger of its own.
+/// @dev A rule keyed on the sender: the identity class every lockup, holding floor and outflow limit
+///      belongs to. It exists to prove such a rule is asked at all, so a wallet the registry no longer
+///      attributes cannot walk past it by presenting a zero sender.
+contract LockedSenderModule is RecordingModule {
+
+    /// Identities that may not send. Keyed by compliance, as every module setting is.
+    mapping(address compliance => mapping(address identity => bool)) public lockedOf;
+
+    function setLocked(address identity, bool locked) external onlyComplianceCall {
+        lockedOf[msg.sender][identity] = locked;
+    }
+
+    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+        if (ctx.fromIdentity == address(0)) return type(uint256).max;
+        return lockedOf[ctx.compliance][ctx.fromIdentity] ? 0 : type(uint256).max;
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.RULE;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "LockedSenderModule";
+    }
+
+}
+
 contract CappedRecipientModule is RecordingModule {
 
     /// Zero means no cap.

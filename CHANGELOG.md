@@ -55,7 +55,9 @@ All notable changes to this project will be documented in this file.
   - `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` report a movement
     whose wallet resolves to no identity, or a debit past what the identity held; neither reverts. After
     the above, only an agent deleting the local entry of a wallet that holds tokens and has no global
-    link can produce one.
+    link can produce one. `LedgerAttribution.t.sol` pins the separation of the two reads, and the ledger
+    invariant harness now revokes native wallets mid-sequence, so the fuzzer explores movements out of a
+    revoked wallet rather than only registry-stable ones.
   - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`RULE`, `SPENDER`, `TRACKER`),
     read once at binding. `ModularCompliance` keeps one list per type and dispatches to it only:
     `RULE` answers `allowedAmount(ctx)`, the largest amount it allows, and the compliance keeps the
