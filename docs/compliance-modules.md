@@ -102,7 +102,7 @@ function allowedAmount(TransferContext calldata ctx) external view override retu
     if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
     IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
     uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);
-    uint256 cap = _getMaxBalanceStorage().maxBalance[ctx.compliance];
+    uint256 cap = _getMaxBalanceStorage().maxBalance[ctx.compliance][getNonce(ctx.compliance)];
     return held >= cap ? 0 : cap - held;
 }
 

@@ -69,6 +69,21 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(rule.maxBalanceOf(address(boundCompliance)), CAP * 2);
     }
 
+    /// @notice The cap is scoped by the bind nonce: an unbind discards it, and a re-bind starts unset.
+    function test_removeModule_DiscardsTheCap() public {
+        vm.prank(deployer);
+        boundCompliance.removeModule(address(rule));
+        assertEq(rule.maxBalanceOf(address(boundCompliance)), 0);
+
+        vm.prank(deployer);
+        boundCompliance.addModule(address(rule));
+        assertEq(rule.maxBalanceOf(address(boundCompliance)), 0);
+
+        vm.prank(agent);
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        token.mint(alice, 1);
+    }
+
     function test_setMaxBalance_RevertWhen_CalledDirectly() public {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);

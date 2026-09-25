@@ -381,7 +381,7 @@ contract TokenTransferTest is TREXSuiteTest {
         assertEq(token.balanceOf(bob), 600);
     }
 
-    /// @dev Binds a module that declares CHECK_SPENDER and refuses every spender.
+    /// @dev Binds a SPENDER module that refuses every spender.
     function _bindRefusingSpenderModule() internal returns (SpenderOnlyModule) {
         SpenderOnlyModule spenderCheck = SpenderOnlyModule(
             address(new ModuleProxy(address(new SpenderOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))

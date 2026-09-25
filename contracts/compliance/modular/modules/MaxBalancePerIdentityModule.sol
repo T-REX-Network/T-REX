@@ -46,8 +46,9 @@ contract MaxBalancePerIdentityModule is AbstractModuleUpgradeable, AccessManaged
 
     /// @custom:storage-location erc7201:erc3643.storage.MaxBalancePerIdentityModule
     struct MaxBalanceStorage {
-        /// Zero means the cap was never set, which refuses every acquisition: bind with `addAndSetModule`.
-        mapping(address compliance => uint256) maxBalance;
+        /// The cap per compliance, scoped by the bind nonce so an unbind discards it. Zero means the cap was
+        /// never set, which refuses every acquisition: bind with `addAndSetModule`.
+        mapping(address compliance => mapping(uint256 nonce => uint256)) maxBalance;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.MaxBalancePerIdentityModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -72,13 +73,13 @@ contract MaxBalancePerIdentityModule is AbstractModuleUpgradeable, AccessManaged
     /// @dev Sets the cap for the calling compliance. Emits `MaxBalanceSet`.
     /// @param _max the largest position one identity may own
     function setMaxBalance(uint256 _max) external onlyComplianceCall {
-        _getMaxBalanceStorage().maxBalance[msg.sender] = _max;
+        _getMaxBalanceStorage().maxBalance[msg.sender][getNonce(msg.sender)] = _max;
         emit MaxBalanceSet(msg.sender, _max);
     }
 
     /// @dev The cap configured for `_compliance`.
     function maxBalanceOf(address _compliance) external view returns (uint256) {
-        return _getMaxBalanceStorage().maxBalance[_compliance];
+        return _getMaxBalanceStorage().maxBalance[_compliance][getNonce(_compliance)];
     }
 
     /// @inheritdoc IModule
@@ -89,7 +90,7 @@ contract MaxBalancePerIdentityModule is AbstractModuleUpgradeable, AccessManaged
         if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
         IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
         uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);
-        uint256 cap = _getMaxBalanceStorage().maxBalance[ctx.compliance];
+        uint256 cap = _getMaxBalanceStorage().maxBalance[ctx.compliance][getNonce(ctx.compliance)];
         return held >= cap ? 0 : cap - held;
     }
 

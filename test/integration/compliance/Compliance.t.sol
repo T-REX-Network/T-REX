@@ -446,8 +446,8 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.created(bob, 10);
     }
 
-    /// @notice Should call moduleMintAction on all bound modules
-    function test_created_Success_CallsModuleMintAction() public {
+    /// @notice Should call afterTransfer on every bound tracker, with a zero sender side
+    function test_created_Success_CallsAfterTransfer() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         address moduleAddress = _deployTestModuleWithProxy();
@@ -495,8 +495,8 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.destroyed(alice, 10);
     }
 
-    /// @notice Should call moduleBurnAction on all bound modules
-    function test_destroyed_Success_CallsModuleBurnAction() public {
+    /// @notice Should call afterTransfer on every bound tracker, with a zero recipient side
+    function test_destroyed_Success_CallsAfterTransfer() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         address moduleAddress = _deployTestModuleWithProxy();
