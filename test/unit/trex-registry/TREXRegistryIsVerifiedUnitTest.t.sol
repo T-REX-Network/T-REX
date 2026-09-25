@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
 
@@ -59,6 +60,57 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
     function test_isVerified_ReturnsFalse_WhenIdentityHasNoMatchingClaim() public view {
         // charlie has no claim attached
         assertFalse(registry.isVerified(charlie));
+    }
+
+    // ============ Wallet revocation (#69) ============
+
+    /// @notice A locally registered wallet the factory has revoked is attributed but no longer admitted,
+    ///  exactly as a wallet resolved through the factory fallback.
+    function test_isVerified_ReturnsFalse_WhenLocallyRegisteredWalletIsRevoked() public {
+        assertTrue(registry.isVerified(alice));
+        assertTrue(registry.isLocallyRegistered(alice));
+
+        vm.prank(address(aliceIdentity));
+        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, alice));
+
+        assertFalse(registry.isVerified(alice));
+        assertTrue(registry.contains(alice));
+        assertEq(address(registry.identity(alice)), address(aliceIdentity));
+    }
+
+    /// @notice A wallet resolved through the factory fallback fails the same way once revoked, so both
+    ///  registration paths give one answer.
+    function test_isVerified_ReturnsFalse_WhenGloballyResolvedWalletIsRevoked() public {
+        vm.prank(agent);
+        registry.deleteIdentity(alice);
+        assertFalse(registry.isLocallyRegistered(alice));
+        assertTrue(registry.isVerified(alice));
+
+        vm.prank(address(aliceIdentity));
+        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, alice));
+
+        assertFalse(registry.isVerified(alice));
+    }
+
+    /// @notice A locally registered wallet the factory never linked keeps verifying: only a `Revoked`
+    ///  status denies, never the absence of a factory record.
+    function test_isVerified_ReturnsTrue_WhenLocallyRegisteredWalletIsUnknownToFactory() public {
+        vm.prank(agent);
+        registry.registerIdentity(another, aliceIdentity, 0);
+
+        assertEq(address(idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, another))), address(0));
+        assertTrue(registry.isVerified(another));
+    }
+
+    /// @notice The kill switch still admits a revoked wallet: it bypasses the binding check as well.
+    function test_isVerified_ReturnsTrue_WhenWalletIsRevokedAndChecksAreDisabled() public {
+        vm.prank(address(aliceIdentity));
+        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, alice));
+        assertFalse(registry.isVerified(alice));
+
+        vm.prank(deployer);
+        registry.disableEligibilityChecks();
+        assertTrue(registry.isVerified(alice));
     }
 
     // ============ Topic / issuer mutations ============

@@ -158,9 +158,10 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// answers for a wallet on this chain.
     ///
     /// A wallet on this chain reads its registry entry; every other wallet resolves its active binding
-    /// through the IdentityFactory, so a revoked satellite wallet is not eligible even though
-    /// `resolveIdentity` still attributes it. The identity then passes the same claim check as
-    /// `isVerified`, and `disableEligibilityChecks` short-circuits it the same way.
+    /// through the IdentityFactory. A wallet the IdentityFactory has revoked is not eligible on either
+    /// path, however it was registered, even though `resolveIdentity` still attributes it. The identity
+    /// then passes the same claim check as `isVerified`, and `disableEligibilityChecks` short-circuits it
+    /// the same way.
     ///
     /// Requirements:
     /// - `wallet` must be a canonical ERC-7930 v1 envelope; otherwise reverts with
