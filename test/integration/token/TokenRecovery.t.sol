@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -79,9 +80,9 @@ contract TokenRecoveryTest is TREXSuiteTest {
         vm.mockCall(
             address(idFactory),
             abi.encodeWithSelector(
-                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, another)
+                idFactory.getIdentityIncludingRevoked.selector, InteroperableAddress.formatEvmV1(block.chainid, another)
             ),
-            abi.encode(address(bobIdentity))
+            abi.encode(address(bobIdentity), IIdentityFactory.AccountStatus.Active)
         );
         assertTrue(identityRegistry.contains(another));
         assertFalse(identityRegistry.isLocallyRegistered(another));
@@ -134,9 +135,9 @@ contract TokenRecoveryTest is TREXSuiteTest {
         vm.mockCall(
             address(idFactory),
             abi.encodeWithSelector(
-                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
+                idFactory.getIdentityIncludingRevoked.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
             ),
-            abi.encode(address(charlieIdentity))
+            abi.encode(address(charlieIdentity), IIdentityFactory.AccountStatus.Active)
         );
 
         vm.expectEmit(identityStorage);
@@ -335,9 +336,9 @@ contract TokenRecoveryTest is TREXSuiteTest {
         vm.mockCall(
             address(idFactory),
             abi.encodeWithSelector(
-                idFactory.getIdentity.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
+                idFactory.getIdentityIncludingRevoked.selector, InteroperableAddress.formatEvmV1(block.chainid, bob)
             ),
-            abi.encode(address(charlieIdentity))
+            abi.encode(address(charlieIdentity), IIdentityFactory.AccountStatus.Active)
         );
 
         vm.prank(agent);

@@ -119,14 +119,17 @@ cover a native transfer, an issuance, two validations racing for the same cap an
 ## The compliance follows its token from the first mint
 
 The numbers above are right because the compliance saw every movement since the token's first mint. A
-token deployed with its compliance needs nothing. Moving a token that already has holders onto a new
-compliance with `setCompliance` is not supported: the new compliance would start every identity at
-zero. A circulating token's compliance is upgraded in place through its beacon, or changed through its
-modules.
+token deployed with its compliance needs nothing. Once the token has supply, `setCompliance`,
+`setIdentityRegistry` and the compliance's `bindToken` all revert with `TokenCirculating`: a new
+compliance would start every identity at zero, and a new registry could attribute wallets to identities
+that hold no position. A circulating token's compliance is upgraded in place through its beacon, or
+changed through its modules; wallet bindings are changed in the registry it has.
 
-Two events say when a position and the balances disagree: `PositionUnresolved` when a wallet that holds
-tokens resolves to no identity, `PositionUnderflow` when a debit exceeds what the identity held. Both
-mean a registry entry was removed or relinked under a wallet that holds tokens; neither reverts, so a
+A wallet keeps its identity after the investor revokes it, so a revoked wallet can still be burned,
+recovered or force-transferred against the right position; it just may not act. Two events say when a
+position and the balances still disagree: `PositionUnresolved` when a wallet that holds tokens resolves
+to no identity, `PositionUnderflow` when a debit exceeds what the identity held. Both mean a registry
+agent deleted the local entry of a wallet that holds tokens and has no global link; neither reverts, so a
 burn or a forced transfer stays possible while the link is repaired.
 
 ## Binding

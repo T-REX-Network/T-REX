@@ -41,11 +41,21 @@ All notable changes to this project will be documented in this file.
     issuance, settlement and discard paths; nothing outside the compliance writes them. A movement
     between two wallets of one identity changes none of them. Own ERC-7201 namespace
     `erc3643.storage.ComplianceLedger`.
-  - The compliance follows its token from the first mint. Moving a token that already has holders onto
-    a new compliance is not supported: the new compliance would start every position at zero. A
-    circulating token's compliance is upgraded in place, never replaced.
+  - The compliance follows its token from the first mint. Once the token has supply, `setCompliance`,
+    `setIdentityRegistry` and the compliance's `bindToken` revert with `TokenCirculating`: a new
+    compliance would start every position at zero, a new registry could attribute wallets to identities
+    that hold none. A circulating token's compliance is upgraded in place, never replaced.
+  - A wallet keeps its identity after the investor revokes it: the identity storage's global fallback
+    asks the IdentityFactory with `getIdentityIncludingRevoked`, the lookup satellite wallets already
+    used, so `identity` and `contains` keep attributing a revoked wallet's holdings and the ledger
+    debits the right position on a burn, a recovery or a forced transfer. Admission is unchanged:
+    `isVerified` still refuses a revoked wallet (#69).
+  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
+    refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
   - `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` report a movement
-    whose wallet resolves to no identity, or a debit past what the identity held; neither reverts.
+    whose wallet resolves to no identity, or a debit past what the identity held; neither reverts. After
+    the above, only an agent deleting the local entry of a wallet that holds tokens and has no global
+    link can produce one.
   - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`RULE`, `SPENDER`, `TRACKER`),
     read once at binding. `ModularCompliance` keeps one list per type and dispatches to it only:
     `RULE` answers `allowedAmount(ctx)`, the largest amount it allows, and the compliance keeps the

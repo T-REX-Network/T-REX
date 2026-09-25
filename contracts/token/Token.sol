@@ -495,11 +495,16 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  `isVerified` is called on every transfer, so the target must advertise the standard interface
     ///  and share this token's authority. `onlySharedAuthority` is a misconfiguration guard only:
     ///  `authority()` is spoofable.
+    ///
+    ///  A token with supply keeps its registry. The compliance attributes every position through it, so a
+    ///  registry that binds wallets differently would leave positions under identities no wallet resolves
+    ///  to any more. Wallet bindings are changed in the registry the token has, never by swapping it.
     function _setIdentityRegistry(address identityRegistryAddress)
         internal
         override
         onlySharedAuthority(identityRegistryAddress)
     {
+        require(address(_getIdentityRegistry()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
         require(
             ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
             ErrorsLib.InvalidIdentityRegistry()
@@ -511,7 +516,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev Adds T-REX validation and the bind/unbind handshake to the standard setter. A compliance
     ///  already bound to a different token would make every transferred/created/destroyed hook revert
     ///  (onlyBoundedToken), silently breaking transfers after the swap.
+    ///
+    ///  A token with supply keeps its compliance. The compliance keeps every identity's position from the
+    ///  token's first mint and has no seeding step, so a new one would start every holder at zero and every
+    ///  rule over the ledger would be wrong from the first transfer. A circulating token's compliance is
+    ///  upgraded in place through its beacon, or changed through its modules.
     function _setCompliance(address complianceAddress) internal override onlySharedAuthority(complianceAddress) {
+        require(address(_getCompliance()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
+
         // Checked before getTokenBound() so a wrong contract gives a named error.
         require(
             ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),

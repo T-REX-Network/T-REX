@@ -87,6 +87,7 @@ library ErrorsLib {
     error EmptyString();
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
+    error TokenCirculating();
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();

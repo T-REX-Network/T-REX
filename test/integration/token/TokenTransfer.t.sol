@@ -41,10 +41,9 @@ contract TokenTransferTest is TREXSuiteTest {
         ModuleProxy testModuleProxy = new ModuleProxy(address(testModuleImplementation), moduleInitData);
         TestModule testModule = TestModule(address(testModuleProxy));
 
-        // Deploy a fresh, unbound compliance (sharing the suite AccessManager) and add the module to it.
-        // The token's existing compliance is already bound, so setCompliance would reject it; an unbound
-        // compliance lets the caller perform a real compliance swap via setCompliance.
-        ModularCompliance compliance = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        // Bound to the token's own compliance: a token with supply keeps its compliance, so the way to make
+        // it break is a module on the compliance it has.
+        ModularCompliance compliance = ModularCompliance(address(token.compliance()));
         vm.prank(deployer);
         compliance.addModule(address(testModule));
 
@@ -127,9 +126,6 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when transfer breaks compliance rules (covers AND condition: isVerified=true, canTransfer=false)
     function test_transfer_RevertWhen_ComplianceBreaks() public {
         (ModularCompliance compliance, TestModule testModule) = _deployComplianceSetup();
-
-        vm.prank(deployer);
-        token.setCompliance(address(compliance));
 
         // Block transfers in module
         bytes memory blockModuleCall = abi.encodeWithSignature("blockModule(bool)", true);
@@ -254,9 +250,6 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when transfer breaks compliance rules (covers AND condition: isVerified=true, canTransfer=false)
     function test_transferFrom_RevertWhen_ComplianceBreaks() public {
         (ModularCompliance compliance, TestModule testModule) = _deployComplianceSetup();
-
-        vm.prank(deployer);
-        token.setCompliance(address(compliance));
 
         // Block transfers in module
         bytes memory blockModuleCall = abi.encodeWithSignature("blockModule(bool)", true);
@@ -425,9 +418,6 @@ contract TokenTransferTest is TREXSuiteTest {
     function test_forcedTransfer_Success_WhenComplianceBreaks() public {
         (ModularCompliance compliance, TestModule testModule) = _deployComplianceSetup();
 
-        vm.prank(deployer);
-        token.setCompliance(address(compliance));
-
         // Block transfers in module
         bytes memory blockModuleCall = abi.encodeWithSignature("blockModule(bool)", true);
         vm.prank(deployer);
@@ -501,9 +491,6 @@ contract TokenTransferTest is TREXSuiteTest {
     /// @notice Should revert when the mint breaks compliance rules
     function test_mint_RevertWhen_ComplianceBreaks() public {
         (ModularCompliance compliance, TestModule testModule) = _deployComplianceSetup();
-
-        vm.prank(deployer);
-        token.setCompliance(address(compliance));
 
         // Block transfers in module
         bytes memory blockModuleCall = abi.encodeWithSignature("blockModule(bool)", true);

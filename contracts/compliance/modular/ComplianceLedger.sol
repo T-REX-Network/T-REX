@@ -96,10 +96,14 @@ abstract contract ComplianceLedger is IComplianceLedger {
 
     /// @dev Takes `amount` off an identity's position.
     ///
-    ///  A wallet that resolves to no identity, which only a registry unlink can produce, has no position to
-    ///  debit, and a debit larger than the position floors at zero. Both are reported and neither reverts:
-    ///  the cause is outside this contract, and blocking a burn or a forced transfer would make the repair
-    ///  harder rather than safer.
+    ///  A wallet that resolves to no identity has no position to debit, and a debit larger than the position
+    ///  floors at zero. Both are reported and neither reverts: the cause is outside this contract, and blocking
+    ///  a burn or a forced transfer would make the repair harder rather than safer.
+    ///
+    ///  The ledger's numbers are exact on one precondition: every wallet that holds tokens attributes to an
+    ///  identity. A revoked wallet still does, so an investor cannot break it. Only a registry agent can, by
+    ///  deleting the local entry of a wallet that holds tokens and has no global link; from then on the sum of
+    ///  positions is short of the supply by what that wallet moves, and `PositionUnresolved` names the amount.
     function _debitPosition(address identity, bytes32 wallet, uint256 amount) private {
         if (identity == address(0)) {
             emit EventsLib.PositionUnresolved(wallet, amount);

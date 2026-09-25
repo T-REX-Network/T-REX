@@ -473,6 +473,10 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  A late settlement is applied all the same, since the satellite already executed it and nothing on this
     ///  chain can undo that. What a late one additionally produces is a verdict, see {_exceedsWhatRulesAllowNow},
     ///  and that verdict is what decides whether the chain that sent it stops issuing.
+    ///
+    ///  A tracker that reverts here reverts the delivery, and the delivery stays deliverable. That is deliberate:
+    ///  swallowing the revert would leave that module's counter silently wrong, which no later message can
+    ///  repair, while a refused delivery is repaired by `forceRemoveModule` and a redelivery.
     function _settleValidation(
         Validation storage validation,
         bytes memory from,

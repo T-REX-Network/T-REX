@@ -113,6 +113,12 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should revert when compliance is already bound and caller is not token
     function test_bindToken_RevertWhen_AlreadyBoundAndNotToken() public {
+        // A circulating token cannot be bound, so retire the supply first
+        vm.startPrank(agent);
+        token.burn(alice, 1000);
+        token.burn(bob, 500);
+        vm.stopPrank();
+
         // Deploy new compliance and bind it to token
         ModularCompliance newCompliance = _deployModularComplianceWithProxy(address(trexImplementationAuthority));
 
@@ -194,6 +200,12 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should bind the new compliance to the token when called as token
     function test_unbindToken_Success_WhenCalledByToken() public {
+        // A token with supply keeps its compliance, so the swap is only possible once nothing circulates.
+        vm.startPrank(agent);
+        token.burn(alice, token.balanceOf(alice));
+        token.burn(bob, token.balanceOf(bob));
+        vm.stopPrank();
+
         // Set new compliance (this triggers unbind on old compliance)
         // Event order: TokenUnbound (old) -> TokenBound (new) -> ComplianceAdded (token)
         vm.expectEmit(true, false, false, false, address(compliance));
@@ -243,9 +255,6 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should revert when module is not plug & play and compliance is not suitable
     function test_addModule_RevertWhen_ModuleNotPnPAndNotSuitable() public {
-        vm.prank(deployer);
-        compliance.bindToken(address(token));
-
         address moduleAddress = _deployModuleNotPnPWithProxy();
 
         vm.prank(deployer);
@@ -257,9 +266,6 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should bind when module is not plug & play but compliance is suitable
     function test_addModule_Success_WhenModuleNotPnPAndSuitable() public {
-        vm.prank(deployer);
-        compliance.bindToken(address(token));
-
         // Burn tokens to make compliance suitable
         vm.prank(agent);
         token.burn(alice, 1000);
@@ -547,9 +553,6 @@ contract ComplianceTest is TREXSuiteTest {
         // Use ModuleNotPnP which doesn't have a fallback function
         // So calls to non-existent functions will revert
         address moduleAddress = _deployModuleNotPnPWithProxy();
-
-        vm.prank(deployer);
-        compliance.bindToken(address(token));
 
         // Make compliance suitable for ModuleNotPnP by burning tokens
         vm.startPrank(agent);

@@ -50,22 +50,28 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
         vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         vm.mockCall(registry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));
         vm.mockCall(
-            idFactory, abi.encodeCall(IIdentityFactory.getIdentity, (_account(wallet))), abi.encode(globalIdentity)
+            idFactory,
+            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(wallet))),
+            abi.encode(globalIdentity, IIdentityFactory.AccountStatus.Active)
         );
         vm.mockCall(
-            idFactory, abi.encodeCall(IIdentityFactory.getIdentity, (_account(otherWallet))), abi.encode(address(0))
+            idFactory,
+            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(otherWallet))),
+            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
         );
 
         // A second registry built on another factory: it knows `otherWallet`, the first one does not.
         vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         vm.mockCall(otherRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(otherIdFactory));
         vm.mockCall(
-            otherIdFactory, abi.encodeCall(IIdentityFactory.getIdentity, (_account(wallet))), abi.encode(address(0))
+            otherIdFactory,
+            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(wallet))),
+            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
         );
         vm.mockCall(
             otherIdFactory,
-            abi.encodeCall(IIdentityFactory.getIdentity, (_account(otherWallet))),
-            abi.encode(otherIdentity)
+            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(otherWallet))),
+            abi.encode(otherIdentity, IIdentityFactory.AccountStatus.Active)
         );
     }
 

@@ -293,11 +293,17 @@ contract ModularCompliance is
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
     ///  claim a fresh compliance during setup), and the owner may always bind or unbind.
+    ///
+    ///  Neither door admits a token that already has supply. The ledger keeps every position from the
+    ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
+    ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
+    ///  same; this covers the owner calling here directly.
     function _authorizeTokenBinding(address token) internal view override {
         require(
             (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
+        if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
@@ -310,13 +316,15 @@ contract ModularCompliance is
     /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
-    ///  A recipient that resolves to no identity is refused outright while a rule is bound. Every rule about
-    ///  distribution keys on the identity, so it would read a zero one as the absent side of a burn and answer
-    ///  "no limit", letting tokens land where no cap can ever reach them. Only a token whose registry has
-    ///  eligibility checks disabled reaches this, since `isVerified` otherwise refuses the recipient first.
+    ///  A wallet that resolves to no identity is refused outright while a rule is bound, on either side. Every
+    ///  rule about distribution keys on the identity: a zero recipient would read as the absent side of a burn
+    ///  and answer "no limit", letting tokens land where no cap can ever reach them; a zero sender would read as
+    ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
+    ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
+        if (from != address(0) && ctx.fromIdentity == address(0)) return false;
         if (to != address(0) && ctx.toIdentity == address(0)) return false;
         return value <= _minAllowedAmount(ctx);
     }

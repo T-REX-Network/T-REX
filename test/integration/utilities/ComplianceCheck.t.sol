@@ -10,6 +10,7 @@ import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 import { RecordingModule, TrackerOnlyModule } from "../mocks/CapabilityModules.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract ComplianceCheckTest is TREXSuiteTest {
@@ -39,7 +40,8 @@ contract ComplianceCheckTest is TREXSuiteTest {
         // Deploy MockContract
         mockContract = new MockContract();
 
-        // Bind token to compliance
+        // Bind token to compliance; a token with supply cannot be bound, and the mock has none
+        vm.mockCall(address(mockContract), abi.encodeCall(IERC20.totalSupply, ()), abi.encode(uint256(0)));
         vm.prank(deployer);
         compliance.bindToken(address(mockContract));
 
