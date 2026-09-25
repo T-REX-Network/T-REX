@@ -94,7 +94,7 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
         token.settleValidation("", "", 1, 1);
         vm.prank(compliance);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        token.holdInTransit("", 1, 1);
+        token.holdInTransit("", 1, 1, 0);
 
         vm.startPrank(agent);
         token.mint(holder, 5);

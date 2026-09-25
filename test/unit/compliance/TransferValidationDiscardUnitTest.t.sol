@@ -14,6 +14,7 @@ import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { IToken } from "contracts/token/IToken.sol";
 import { Token } from "contracts/token/Token.sol";
 import { RecordingModule, TrackerOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
+import { TokenReservationStub } from "test/unit/compliance/helpers/TokenReservationStub.sol";
 
 contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
@@ -48,9 +49,11 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         mc.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
-        vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
+        // The wallet's room lives on the token now, so the mocked token address gets a stub with real
+        // arithmetic for those few selectors; `vm.mockCall` still wins for everything mocked explicitly.
+        vm.etch(token, address(new TokenReservationStub()).code);
+        TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
-        vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
@@ -66,8 +69,6 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
         ITransferValidation.Validation memory state = mc.validationOf(id);
         assertEq(uint8(state.status), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertFalse(state.fromLegConsumed);
-        assertFalse(state.toLegConsumed);
         assertEq(state.executedAmount, 0);
         assertEq(state.legWallet.length, 0);
     }
@@ -91,12 +92,12 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.validationOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
     }
 
-    function test_statusOf_Success_WhenLegConfirmedNeverDerivesExpired() public {
+    function test_statusOf_Success_WhenAwaitingTheMintLegNeverDerivesExpired() public {
         uint256 id = _issueCrossChainWithBurnLeg();
 
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
     }
 
     function test_statusOf_RevertWhen_IdWasNeverIssued() public {
@@ -125,6 +126,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingInOf(bobId), 90);
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
+        vm.expectCall(token, abi.encodeCall(IToken.releaseFromValidation, (fromSat, 90)), 1);
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationDiscarded(id);
         vm.prank(keeperAccount);
@@ -133,7 +135,6 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
         assertEq(mc.pendingInOf(bobId), 0, "the reservation is released");
         assertEq(mc.pendingOutOf(aliceId), 0);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 0);
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE, "nothing moved");
         assertEq(mc.positionOf(bobId), 0);
         assertEq(RecordingModule(recorder).transferActionCalls(), 0, "a discard involves no module");
@@ -147,10 +148,10 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(keeperAccount);
         mc.discardExpiredValidations(_ids(id));
 
+        vm.expectCall(token, abi.encodeCall(IToken.reserveForValidation, (fromSat, 90)), 1);
         vm.prank(aliceIdentity);
         uint256 next = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
         assertEq(mc.validationOf(next).amountMax, 90, "issued as if the discarded one never happened");
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
     }
 
     /// @notice A relocation between one identity's wallets reserves nothing against the identity, so its
@@ -159,15 +160,15 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         _track();
         _bind(toSat, aliceIdentity);
         uint256 id = _issue();
-        assertFalse(mc.validationOf(id).pendingReserved);
+        assertTrue(mc.validationOf(id).relocation, "nothing was reserved against the identities");
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
+        vm.expectCall(token, abi.encodeCall(IToken.releaseFromValidation, (fromSat, 90)), 1);
         vm.prank(keeperAccount);
         mc.discardExpiredValidations(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
         assertEq(mc.pendingInOf(bobId), 0);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 0, "the wallet's share came back");
     }
 
     function test_discardExpiredValidations_Success_WhenBatchingSeveralIds() public {
@@ -242,7 +243,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         mc.discardExpiredValidations(_ids(id));
     }
 
-    function test_discardExpiredValidations_RevertWhen_LegConfirmedWhateverTheClock() public {
+    function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLegWhateverTheClock() public {
         _track();
         uint256 id = _issueCrossChainWithBurnLeg();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
@@ -252,7 +253,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotDiscardable.selector,
                 id,
-                uint8(ITransferValidation.ValidationStatus.LegConfirmed)
+                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
             )
         );
         mc.discardExpiredValidations(_ids(id));

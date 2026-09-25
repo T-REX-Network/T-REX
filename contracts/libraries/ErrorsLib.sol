@@ -88,6 +88,9 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
     error TokenCirculating();
+    error NothingInTransit(uint256 validationId);
+    error ValidationNotStuck(uint256 validationId, uint8 status);
+    error ValidationNotYetResolvable(uint256 validationId, uint64 resolvableAt);
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();

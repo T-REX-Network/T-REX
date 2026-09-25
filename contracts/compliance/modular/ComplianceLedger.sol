@@ -50,8 +50,6 @@ abstract contract ComplianceLedger is IComplianceLedger {
         mapping(address identity => uint256 amount) pendingIn;
         /// What open validations promise out of each identity.
         mapping(address identity => uint256 amount) pendingOut;
-        /// What open validations may still draw from each satellite wallet.
-        mapping(bytes32 walletKey => uint256 amount) pendingOutOfWallet;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ComplianceLedger")) - 1)) & ~bytes32(uint256(0xff));
@@ -71,11 +69,6 @@ abstract contract ComplianceLedger is IComplianceLedger {
     /// @inheritdoc IComplianceLedger
     function pendingOutOf(address identity) external view returns (uint256) {
         return _ledger().pendingOut[identity];
-    }
-
-    /// @inheritdoc IComplianceLedger
-    function pendingOutOfWallet(bytes32 walletKey) external view returns (uint256) {
-        return _ledger().pendingOutOfWallet[walletKey];
     }
 
     /// @dev Moves `amount` of position from one identity to the other: one side loses it, the other gains it.
@@ -129,21 +122,16 @@ abstract contract ComplianceLedger is IComplianceLedger {
         _ledger().position[identity] += amount;
     }
 
-    /// @dev Counts an issued validation as pending at `amountMax`, the worst case for any additive rule.
-    ///
-    ///  A reservation has two halves, and they are released at different moments, which is why the release
-    ///  is two functions and this returns which halves it wrote:
-    ///  - the wallet's half is always written, and caps what a further validation may draw from that wallet;
-    ///  - the identities' half is written only when ownership really moves, so relocating tokens between two
-    ///    wallets of one identity never eats that identity's own room.
-    /// @return identitiesReserved whether the identities' half was written, which the caller records on the
-    ///  validation so the release undoes exactly what this wrote
+    /// @dev Counts an issued validation as pending at `amountMax`, the worst case for any additive rule. Only
+    ///  when ownership really moves: relocating tokens between two wallets of one identity never eats that
+    ///  identity's own room. What the sending wallet may still send is the token's to track, beside the balance
+    ///  it reserves against.
+    /// @return identitiesReserved whether anything was written, which the caller records on the validation
     function _reservePending(address fromIdentity, address toIdentity, bytes32 fromWallet, uint256 amountMax)
         internal
         returns (bool identitiesReserved)
     {
         Ledger storage ledger = _ledger();
-        ledger.pendingOutOfWallet[fromWallet] += amountMax;
         if (_isRelocation(fromIdentity, toIdentity)) return false;
         ledger.pendingOut[fromIdentity] += amountMax;
         ledger.pendingIn[toIdentity] += amountMax;
@@ -156,13 +144,6 @@ abstract contract ComplianceLedger is IComplianceLedger {
         Ledger storage ledger = _ledger();
         ledger.pendingOut[fromIdentity] -= amountMax;
         ledger.pendingIn[toIdentity] -= amountMax;
-    }
-
-    /// @dev Undoes the wallet's half of {_reservePending}. It is released earlier than the identities' half
-    ///  when a burn leg lands first: that leg is proof the wallet's tokens are already gone, so nothing more
-    ///  can be drawn from it, while the identities' half waits for the movement to complete.
-    function _releasePendingOfWallet(bytes32 walletKey, uint256 amountMax) internal {
-        _ledger().pendingOutOfWallet[walletKey] -= amountMax;
     }
 
     /// @dev One identity on both sides. Two wallets that resolve to nobody are not that.

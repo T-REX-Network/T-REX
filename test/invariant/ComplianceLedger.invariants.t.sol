@@ -31,7 +31,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///   LEDGER-2  sum of positions == totalSupply()
 ///   LEDGER-3  pendingInOf / pendingOutOf == sum of amountMax over stored-Pending validations of the identity,
 ///             relocations excluded
-///   LEDGER-4  pendingOutOfWallet(wallet) == sum of amountMax over stored-Pending validations out of the wallet
+///   LEDGER-4  the token's reservedOf(wallet) == sum of amountMax over open validations out of that wallet
 contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
 
     uint256 internal constant ACTORS = 3;
@@ -159,7 +159,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
             : satellites[toActor][toWallet % WALLETS_PER_ACTOR];
 
         uint256 balance = token.bridgedBalanceOf(from);
-        uint256 pending = ledger.pendingOutOfWallet(WalletKeyLib.canonicalKey(from));
+        uint256 pending = token.reservedOf(from);
         if (balance <= pending) return;
         max = bound(max, 1, balance - pending);
         min = bound(min, 1, max);
@@ -182,7 +182,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         if (issued.length == 0) return;
         uint256 id = issued[idSeed % issued.length];
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
-        if (validation.fromLegConsumed) return;
+        if (_burnLegArrived(validation.status)) return;
         uint256 amount = bound(amountSeed, validation.amountMin, validation.amountMax);
 
         (bytes memory from, bytes memory to) = _walletsOf(validation);
@@ -260,8 +260,12 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     function invariant_walletPendingMatchesOpenValidations() public view {
         for (uint256 i = 0; i < ACTORS; i++) {
             for (uint256 j = 0; j < WALLETS_PER_ACTOR; j++) {
-                bytes32 key = WalletKeyLib.canonicalKey(satellites[i][j]);
-                assertEq(ledger.pendingOutOfWallet(key), _openWalletPendingOf(key), "LEDGER-4 wallet pending drifted");
+                bytes memory wallet = satellites[i][j];
+                assertEq(
+                    token.reservedOf(wallet),
+                    _openWalletPendingOf(WalletKeyLib.canonicalKey(wallet)),
+                    "LEDGER-4 wallet reservation drifted"
+                );
             }
         }
     }
@@ -287,10 +291,36 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         }
     }
 
+    /// @dev The reservation rules, spelled out here rather than read back from the compliance. A harness that
+    ///      asked the contract what it still reserves would agree with it by construction and prove nothing;
+    ///      these are the rules the lifecycle is supposed to follow, written independently.
+    function _burnLegArrived(ITransferValidation.ValidationStatus status) private pure returns (bool) {
+        return status == ITransferValidation.ValidationStatus.AwaitingMint
+            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint
+            || status == ITransferValidation.ValidationStatus.Settled
+            || status == ITransferValidation.ValidationStatus.LateReconciled;
+    }
+
+    /// @dev The identities' pending amounts are outstanding while the movement is still expected, and never on
+    ///      a relocation, where nothing was reserved against them in the first place.
+    function _reservesIdentities(ITransferValidation.Validation memory v) private pure returns (bool) {
+        if (v.relocation) return false;
+        return v.status == ITransferValidation.ValidationStatus.Pending
+            || v.status == ITransferValidation.ValidationStatus.AwaitingMint
+            || v.status == ITransferValidation.ValidationStatus.AwaitingBurn;
+    }
+
+    /// @dev The sender wallet's share is outstanding until its burn leg arrives, which moves the amount into
+    ///      transit on the token instead.
+    function _reservesWallet(ITransferValidation.Validation memory v) private pure returns (bool) {
+        return v.status == ITransferValidation.ValidationStatus.Pending
+            || v.status == ITransferValidation.ValidationStatus.AwaitingBurn;
+    }
+
     function _openPendingOf(address identity) private view returns (uint256 pendingIn, uint256 pendingOut) {
         for (uint256 i = 0; i < issued.length; i++) {
             ITransferValidation.Validation memory validation = boundCompliance.validationOf(issued[i]);
-            if (!validation.pendingReserved) continue;
+            if (!_reservesIdentities(validation)) continue;
             if (validation.toIdentity == identity) pendingIn += validation.amountMax;
             if (validation.fromIdentity == identity) pendingOut += validation.amountMax;
         }
@@ -299,7 +329,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     function _openWalletPendingOf(bytes32 key) private view returns (uint256 pending) {
         for (uint256 i = 0; i < issued.length; i++) {
             ITransferValidation.Validation memory validation = boundCompliance.validationOf(issued[i]);
-            if (validation.walletPendingReserved && validation.fromKey == key) pending += validation.amountMax;
+            if (_reservesWallet(validation) && validation.fromKey == key) pending += validation.amountMax;
         }
     }
 

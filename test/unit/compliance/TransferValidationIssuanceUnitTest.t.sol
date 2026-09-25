@@ -17,6 +17,7 @@ import {
     RuleOnlyModule,
     WritingRuleModule
 } from "test/integration/mocks/CapabilityModules.sol";
+import { TokenReservationStub } from "test/unit/compliance/helpers/TokenReservationStub.sol";
 
 /// @dev The issuance engine on a mocked token and registry: who may ask, what is refused before any write, how
 ///      the range is capped, what is recorded and what leaves toward which chain.
@@ -63,7 +64,11 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
-        vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(BRIDGED_BALANCE));
+        // The wallet's room lives on the token now, and these tests are about it accumulating, so the mocked
+        // token address gets a stub with real arithmetic. `vm.mockCall` still wins over etched code for the
+        // selectors mocked below, so only the reservation calls actually reach the stub.
+        vm.etch(token, address(new TokenReservationStub()).code);
+        TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
 
         _bind(fromSat, aliceIdentity);
@@ -238,7 +243,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
         mc.requestTransferValidation(fromSat, toSat, 0, 0, "");
 
-        vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", fromSat), abi.encode(uint256(0)));
+        TokenReservationStub(token).setBridgedBalance(fromSat, 0);
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
         mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
@@ -360,10 +365,10 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
-        assertTrue(mc.validationOf(id).pendingReserved);
+        assertFalse(mc.validationOf(id).relocation, "reserved against the identities");
         assertEq(mc.pendingOutOf(aliceIdentity), 90);
         assertEq(mc.pendingInOf(bobIdentity), 90);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+        assertEq(TokenReservationStub(token).reservedOf(fromSat), 90);
         assertEq(mc.positionOf(aliceIdentity), BRIDGED_BALANCE);
         assertEq(mc.positionOf(bobIdentity), 0);
     }
@@ -378,7 +383,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         assertEq(mc.pendingOutOf(aliceIdentity), 70);
         assertEq(mc.pendingInOf(bobIdentity), 70);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 70);
+        assertEq(TokenReservationStub(token).reservedOf(fromSat), 70);
     }
 
     function test_requestTransferValidation_Success_WhenPendingOutOfTheWalletCapsTheNext() public configured {
@@ -390,7 +395,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.stopPrank();
 
         assertEq(mc.validationOf(second).amountMax, BRIDGED_BALANCE - 90);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 100);
+        assertEq(TokenReservationStub(token).reservedOf(fromSat), 100);
 
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
@@ -407,10 +412,10 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         // Nothing is reserved against the identity: relocating your own tokens changes no position, so it
         // must not eat your own room. The wallet's share is still written, because the wallet can only ever
         // send what it holds, whoever owns the far side.
-        assertFalse(mc.validationOf(id).pendingReserved);
+        assertTrue(mc.validationOf(id).relocation, "a relocation reserves nothing against the identity");
         assertEq(mc.pendingOutOf(aliceIdentity), 0);
         assertEq(mc.pendingInOf(aliceIdentity), 0);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+        assertEq(TokenReservationStub(token).reservedOf(fromSat), 90);
     }
 
     /// @notice The wallet's share of a reservation is written on every issuance, whatever the identities do:
@@ -421,8 +426,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
 
-        assertTrue(mc.validationOf(id).walletPendingReserved);
-        assertEq(mc.pendingOutOfWallet(WalletKeyLib.canonicalKey(fromSat)), 90);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(TokenReservationStub(token).reservedOf(fromSat), 90);
     }
 
     function test_requestTransferValidation_Success_WhenTwoValidationsRaceForOneCap() public configured {

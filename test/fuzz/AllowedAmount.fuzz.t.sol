@@ -80,7 +80,9 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         if (requestedMin > requestedMax) {
             (requestedMin, requestedMax) = (requestedMax, requestedMin);
         }
-        vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", from), abi.encode(uint256(balance)));
+        // The wallet's room is the token's now: what it can still send is its balance less any reservation.
+        vm.mockCall(token, abi.encodeWithSignature("availableOf(bytes)", from), abi.encode(uint256(balance)));
+        vm.mockCall(token, abi.encodeWithSignature("reserveForValidation(bytes,uint256)"), "");
         a.setAllowedAmount(allowedByA);
         b.setAllowedAmount(allowedByB);
 

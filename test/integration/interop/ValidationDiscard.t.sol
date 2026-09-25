@@ -16,7 +16,7 @@ import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/C
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
 /// @dev The keeper against a real suite: the derived status over time, the discard releasing a counter module,
-///      the re-issuance it enables, and every refusal, including a real `LegConfirmed` validation.
+///      the re-issuance it enables, and every refusal, including one still awaiting its mint leg.
 contract ValidationDiscardTest is InteropSuiteTest {
 
     uint256 internal constant CAP = 100;
@@ -152,7 +152,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
     }
 
     /// @notice A consumed leg pins the validation: no clock makes it discardable.
-    function test_discardExpiredValidations_RevertWhen_LegConfirmed() public {
+    function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLeg() public {
         ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.routeFor(polygon));
         _openEvmChain(token, OPTIMISM, address(_newTrustedGateway(OPTIMISM)));
         bytes memory bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
@@ -166,13 +166,13 @@ contract ValidationDiscardTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
         vm.warp(issuedAt + 100 * VALIDITY_WINDOW);
 
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         vm.prank(keeper);
         vm.expectRevert(
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotDiscardable.selector,
                 crossChain,
-                uint8(ITransferValidation.ValidationStatus.LegConfirmed)
+                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
             )
         );
         boundCompliance.discardExpiredValidations(_ids(crossChain));

@@ -111,7 +111,7 @@ contract TREXAccessManagerUnitTest is Test {
 
         vm.prank(delayedAdmin);
         manager.schedule(address(manager), create, 0);
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
         vm.prank(delayedAdmin);
         manager.execute(address(manager), create);
 
@@ -120,7 +120,7 @@ contract TREXAccessManagerUnitTest is Test {
         bytes memory assignCall = abi.encodeCall(TREXAccessManager.assign, (1, token));
         vm.prank(delayedAdmin);
         manager.schedule(address(manager), assignCall, 0);
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
         vm.prank(delayedAdmin);
         manager.execute(address(manager), assignCall);
         assertEq(manager.domainOf(token), 1);

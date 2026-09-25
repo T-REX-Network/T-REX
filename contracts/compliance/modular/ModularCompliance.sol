@@ -276,6 +276,11 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
+    function resolveStuckValidation(uint256 validationId) external restricted {
+        _resolveStuckValidation(validationId);
+    }
+
+    /// @inheritdoc ITransferValidation
     function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
         _discardExpiredValidations(validationIds);
     }
@@ -439,8 +444,23 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal override {
-        _boundToken().holdInTransit(from, amount, validationId);
+    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId, uint256 reserved) internal override {
+        _boundToken().holdInTransit(from, amount, validationId, reserved);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _reserveOnToken(bytes memory wallet, uint256 amount) internal override {
+        _boundToken().reserveForValidation(wallet, amount);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _releaseOnToken(bytes memory wallet, uint256 amount) internal override {
+        _boundToken().releaseFromValidation(wallet, amount);
+    }
+
+    /// @inheritdoc TransferValidation
+    function _returnHeldOnToken(bytes memory to, uint256 validationId) internal override {
+        _boundToken().returnHeldInTransit(to, validationId);
     }
 
     /* ----- Module lifecycle ----- */
