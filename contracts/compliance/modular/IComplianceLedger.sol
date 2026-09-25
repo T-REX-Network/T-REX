@@ -36,6 +36,14 @@ pragma solidity 0.8.30;
 ///
 /// Nothing here is written from outside: the compliance updates these from the hooks the token already calls
 /// and from its own issuance, settlement and discard paths.
+///
+/// These numbers are exact on one precondition: every wallet that holds tokens resolves, through the token's
+/// identity registry, to the identity that owns it. A wallet keeps resolving after its investor revokes it, so
+/// no investor can break this on their own, and a token that circulates may not change its registry or its
+/// compliance. What remains is a registry agent deleting or relinking the local entry of a wallet that holds
+/// tokens: from then on the position the ledger keeps for that wallet's owner is stale, and the compliance
+/// emits `PositionUnresolved` or `PositionUnderflow` naming the amount it could not attribute. A wallet that
+/// holds tokens is recovered, never unbound.
 interface IComplianceLedger {
 
     /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
