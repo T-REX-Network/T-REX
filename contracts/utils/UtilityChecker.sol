@@ -76,6 +76,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
+import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
@@ -235,11 +236,11 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         ctx.compliance = _compliance;
         if (_from != address(0)) {
             ctx.fromIdentity = address(registry.identity(_from));
-            ctx.fromWallet = bytes32(uint256(uint160(_from)));
+            ctx.fromWallet = WalletKeyLib.walletId(_from);
         }
         if (_to != address(0)) {
             ctx.toIdentity = address(registry.identity(_to));
-            ctx.toWallet = bytes32(uint256(uint160(_to)));
+            ctx.toWallet = WalletKeyLib.walletId(_to);
         }
         ctx.amountMin = _value;
         ctx.amountMax = _value;

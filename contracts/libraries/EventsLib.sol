@@ -207,6 +207,26 @@ library EventsLib {
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+
+    /// The burn leg landed, the mint leg never came, and the operator gave up on the pair: the burned amount is
+    /// back on the wallet it left and the reservation is released.
+    event ValidationRefunded(uint256 indexed validationId, uint256 amount);
+
+    /// The mint leg landed, the burn leg never came: there is nothing on this chain to return, so the chain that
+    /// owes the burn stops being issued to until an operator has looked.
+    event ValidationStuck(uint256 indexed validationId, bytes32 indexed chainKey);
+
+    /// A held amount went back to the wallet it was burned from.
+    event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
+
+    /// The registry now names another identity for a wallet that holds tokens, so its balance followed it: what
+    /// the previous identity's position counted for this wallet is now the new one's.
+    event WalletOwnerChanged(
+        address indexed wallet, address indexed previousIdentity, address indexed identity, uint256 amount
+    );
+
+    /// The owner moved `amount` of position between two sides; a zero side is the gap.
+    event PositionFixed(address indexed from, address indexed to, uint256 amount);
     /// @notice Emitted when every expected leg of a validation was received: slots committed, ledger updated.
     ///         `chainKey` is the chain of the leg that completed it.
     event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);

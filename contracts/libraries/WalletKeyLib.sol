@@ -119,6 +119,21 @@ library WalletKeyLib {
         }
     }
 
+    /// @notice The id a wallet has in the compliance's ledger and in a module's context: a native address padded
+    ///  on the left, the canonical key of the envelope otherwise.
+    /// @param envelope the interoperable address
+    function walletId(bytes memory envelope) internal view returns (bytes32) {
+        (bool native, address wallet) = isReferenceChain(envelope);
+        if (native) return walletId(wallet);
+        return canonicalKey(envelope);
+    }
+
+    /// @notice The id a native wallet has in the compliance's ledger and in a module's context.
+    /// @param wallet the address on this chain
+    function walletId(address wallet) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(wallet)));
+    }
+
     /// @notice Tells whether an envelope designates an EVM wallet on this chain.
     /// @param envelope the interoperable address
     /// @return onReferenceChain true when the envelope is a non-zero EVM address on `block.chainid`

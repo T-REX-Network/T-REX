@@ -37,13 +37,15 @@ pragma solidity 0.8.30;
 /// Nothing here is written from outside: the compliance updates these from the hooks the token already calls
 /// and from its own issuance, settlement and discard paths.
 ///
-/// These numbers are exact on one precondition: every wallet that holds tokens resolves, through the token's
-/// identity registry, to the identity that owns it. A wallet keeps resolving after its investor revokes it, so
-/// no investor can break this on their own, and a token that circulates may not change its registry or its
-/// compliance. What remains is a registry agent deleting or relinking the local entry of a wallet that holds
-/// tokens: from then on the position the ledger keeps for that wallet's owner is stale, and the compliance
-/// emits `PositionUnresolved` or `PositionUnderflow` naming the amount it could not attribute. A wallet that
-/// holds tokens is recovered, never unbound.
+/// The positions are exact while every wallet that holds tokens resolves, through the token's identity
+/// registry, to the identity that owns it. A wallet keeps resolving after its investor revokes it, so no investor
+/// can break this on their own, and a token that circulates may not change its registry or its compliance. A
+/// registry agent still can, by deleting or relinking the local entry of a wallet that holds tokens. The ledger
+/// keeps up on its own: it remembers which identity it credited each native wallet to (`ownerOf`), and the next
+/// movement through a relinked wallet moves its balance to the new owner before applying the movement. A wallet
+/// the registry no longer names keeps its remembered owner. Only a wallet the ledger never credited and the
+/// registry does not know leaves a trace: that amount is counted in `positionGap`, signed, so that
+/// `sum(positions) + positionGap == totalSupply` holds regardless, and the owner moves it with `fixPosition`.
 interface IComplianceLedger {
 
     /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
@@ -66,5 +68,19 @@ interface IComplianceLedger {
     /// @param walletKey the canonical key of the wallet: a native address padded on the left, `keccak256` of a
     ///  satellite envelope otherwise
     function pendingOutOfWallet(bytes32 walletKey) external view returns (uint256);
+
+    /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to, which
+    ///  follows the registry on the wallet's next movement. Zero for a wallet the ledger has never credited.
+    function ownerOf(address wallet) external view returns (address);
+
+    /// @dev The gap between the positions and the supply, negative when they are over it: credits that landed on no
+    ///  identity add to it, debits that found no identity or too small a position subtract from it. Zero while
+    ///  the registry is stable, which the ledger invariants hold it to.
+    function positionGap() external view returns (int256);
+
+    /// @dev Moves `amount` of position from `from` to `to`. A zero side is the gap: from zero to an
+    ///  identity gives tokens that landed on nobody their owner, from an identity to zero takes a stale position off an
+    ///  identity a relink left too high. Owner only.
+    function fixPosition(address from, address to, uint256 amount) external;
 
 }

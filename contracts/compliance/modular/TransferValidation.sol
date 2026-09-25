@@ -69,6 +69,7 @@ import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedger } from "./ComplianceLedger.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
+import { TransferContextLib } from "./TransferContextLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /**
@@ -236,8 +237,15 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  identity, since relocating your own tokens changes no position and no distribution rule applies.
     function _capAtWhatTheRulesAllow(Draft memory draft, bytes calldata to) private view {
         if (_isRelocation(draft.fromIdentity, draft.toIdentity)) return;
-        IModule.TransferContext memory ctx = _buildContext(
-            draft.fromIdentity, draft.toIdentity, draft.fromKey, _walletIdOf(to), draft.amountMin, draft.amountMax, true
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            ""
         );
         uint256 allowed = _minAllowedAmount(ctx);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
@@ -249,10 +257,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  no spender and asks nobody. Asked on a relocation too: who executes is not about distribution.
     function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
         if (spender.length == 0) return;
-        IModule.TransferContext memory ctx = _buildContext(
-            draft.fromIdentity, draft.toIdentity, draft.fromKey, _walletIdOf(to), draft.amountMin, draft.amountMax, true
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            spender
         );
-        ctx.spender = spender;
         require(_spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
@@ -492,14 +506,18 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validation.status = late ? ValidationStatus.LateReconciled : ValidationStatus.Settled;
         _releaseReservation(validation);
 
-        IModule.TransferContext memory ctx = _buildContext(
+        // A native recipient may have changed owner since issuance; the token has not been credited yet here.
+        address toIdentity = validation.toIdentity;
+        (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
+        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
+
+        IModule.TransferContext memory ctx = TransferContextLib.settlement(
+            address(this),
             validation.fromIdentity,
-            validation.toIdentity,
-            _walletIdOf(from),
-            _walletIdOf(to),
-            notification.amount,
-            notification.amount,
-            false
+            toIdentity,
+            WalletKeyLib.walletId(from),
+            WalletKeyLib.walletId(to),
+            notification.amount
         );
         breachesRule = late && _exceedsWhatRulesAllowNow(ctx, notification.amount);
 
@@ -542,6 +560,40 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a `LegConfirmed` one is
     ///  refused whatever the clock says. One refused id reverts the whole batch.
+    /// @dev The way out of a pair of which one leg never came. Only a two-leg validation with exactly one leg
+    ///  consumed qualifies, whether it still waits as `LegConfirmed` or was discarded before its late first leg.
+    ///  The gate is a second reconciliation window past `releaseAt`, the same length the first one had, so a leg
+    ///  that is merely slow still lands as a late reconciliation and never as a refund.
+    ///
+    ///  Burn leg in: the held amount goes back to the wallet it left, the reservation is released, and the mint
+    ///  leg is marked consumed so that its arrival afterwards is treated as a replay and halts the token.
+    ///  Mint leg in: nothing on this chain can be returned, so the chain that owes the burn is paused for
+    ///  issuance and the validation is left as it is for an operator to investigate.
+    function _refundValidation(uint256 validationId) internal {
+        ValidationStorage storage store = _validationStorage();
+        require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+        Validation storage validation = store.validations[validationId];
+        require(
+            validation.twoLegs && validation.fromLegConsumed != validation.toLegConsumed,
+            ErrorsLib.ValidationNotRefundable(validationId)
+        );
+        uint64 refundableAt = validation.releaseAt + (validation.releaseAt - validation.expiry);
+        require(block.timestamp > refundableAt, ErrorsLib.ValidationNotYetRefundable(validationId, refundableAt));
+
+        if (!validation.fromLegConsumed) {
+            _setIssuancePaused(validation.fromChainKey, true);
+            emit EventsLib.ValidationStuck(validationId, validation.fromChainKey);
+            return;
+        }
+
+        validation.toLegConsumed = true;
+        validation.status = ValidationStatus.Refunded;
+        _returnOnToken(validation.legWallet, validationId);
+        _releaseReservation(validation);
+
+        emit EventsLib.ValidationRefunded(validationId, validation.executedAmount);
+    }
+
     function _discardExpiredValidations(uint256[] calldata validationIds) internal {
         ValidationStorage storage store = _validationStorage();
         for (uint256 i = 0; i < validationIds.length; i++) {
@@ -657,6 +709,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  the burn leg of a two-leg validation lands before the mint leg.
     function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal virtual;
 
+    /// @dev Returns the amount held for `validationId` to `to`, the wallet it was burned from, on the token.
+    function _returnOnToken(bytes memory to, uint256 validationId) internal virtual;
+
     /* ----- Shared by the three flows ----- */
 
     /// @dev Releases whatever of the reservation is still outstanding, once: the flags make a second call, such
@@ -672,12 +727,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         }
     }
 
-    /// @dev The id a wallet has in the ledger and in a module's context: a native address padded on the left, the
-    ///  canonical key otherwise. The validation keeps the canonical key of both sides for leg matching.
-    function _walletIdOf(bytes memory wallet) internal view returns (bytes32) {
-        (bool native, address addr) = WalletKeyLib.isReferenceChain(wallet);
-        if (native) return _walletIdOf(addr);
-        return WalletKeyLib.canonicalKey(wallet);
+    /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its
+    ///  mind. `adjustment` is what this very movement already did to the wallet's balance on the token, so that
+    ///  what moves is what the wallet held before it: `+amount` for a sender the token already debited,
+    ///  `-amount` for a recipient it already credited, zero when the token has not moved yet.
+    function _currentOwner(address wallet, address resolved, int256 adjustment) internal returns (address owner) {
+        address previous;
+        (owner, previous) = _followOwner(wallet, resolved);
+        if (previous == address(0)) return owner;
+        uint256 balance = uint256(int256(_boundToken().balanceOf(wallet)) + adjustment);
+        _moveWalletBalance(wallet, previous, owner, balance);
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.

@@ -88,6 +88,11 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
     error TokenCirculating();
+    error ValidationNotRefundable(uint256 validationId);
+    error ValidationNotYetRefundable(uint256 validationId, uint64 refundableAt);
+    error NothingInTransit(uint256 validationId);
+    error InsufficientPosition(address identity, uint256 held, uint256 amount);
+    error FromAndToAreTheSame();
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();

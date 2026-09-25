@@ -126,11 +126,19 @@ that hold no position. A circulating token's compliance is upgraded in place thr
 changed through its modules; wallet bindings are changed in the registry it has.
 
 A wallet keeps its identity after the investor revokes it, so a revoked wallet can still be burned,
-recovered or force-transferred against the right position; it just may not act. Two events say when a
-position and the balances still disagree: `PositionUnresolved` when a wallet that holds tokens resolves
-to no identity, `PositionUnderflow` when a debit exceeds what the identity held. Both mean a registry
-agent deleted the local entry of a wallet that holds tokens and has no global link; neither reverts, so a
-burn or a forced transfer stays possible while the link is repaired.
+recovered or force-transferred against the right position; it just may not act.
+
+What a registry agent changes under a wallet that holds tokens, the ledger follows on its own. It
+remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When an agent relinks
+the wallet to another identity, the next movement through it moves the wallet's balance to the new
+owner first, then counts the movement; `WalletOwnerChanged` says so. When an agent deletes the entry
+and nothing else names the wallet, the remembered owner still answers. Nobody calls anything.
+
+One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
+does not know, which only a registry with eligibility checks disabled allows. That amount is counted
+in `positionGap()`, signed, so that `sum(positions) + positionGap == totalSupply` holds regardless,
+`PositionUnresolved` names it, and the owner hands it to its identity with
+`fixPosition(from, to, amount)`, where a zero side is the gap.
 
 ## Binding
 

@@ -92,7 +92,10 @@ interface ITransferValidation {
         Discarded,
         /// Every leg arrived after the discard: applied anyway, `LateReconciliation` emitted per late leg and that
         /// leg's chain paused for issuance when the executed amount breached a rule.
-        LateReconciled
+        LateReconciled,
+        /// The burn leg landed, the mint leg never came, and the operator gave up on the pair: the burned amount
+        /// is back on the wallet it left, the reservation is released, and a mint leg arriving now halts the token.
+        Refunded
     }
 
     /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
@@ -238,6 +241,17 @@ interface ITransferValidation {
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.
     function discardExpiredValidations(uint256[] calldata validationIds) external;
+
+    /// @dev Gives up on a two-leg validation of which exactly one leg arrived, a second reconciliation window
+    ///  past `releaseAt`. When the burn leg is the one that landed, the burned amount goes back to the wallet it
+    ///  left and the reservation is released. When the mint leg is, there is nothing on this chain to return:
+    ///  the chain that owes the burn stops being issued to instead, and the validation stays as it is.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    ///
+    /// Emits `ValidationRefunded`, or `ValidationStuck`.
+    function refundValidation(uint256 validationId) external;
 
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);

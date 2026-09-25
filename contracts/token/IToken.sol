@@ -124,4 +124,8 @@ interface IToken is IERC3643 {
     /// @param validationId the validation the burn leg consumed
     function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external;
 
+    /// @dev Puts the amount held for `validationId` back on `to`, the satellite wallet it was burned from: the
+    ///  mint leg never came and the compliance gave up on the pair. Callable by the bound compliance alone.
+    function returnInTransit(bytes calldata to, uint256 validationId) external;
+
 }

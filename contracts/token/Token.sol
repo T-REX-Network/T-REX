@@ -239,6 +239,12 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
+    function returnInTransit(bytes calldata to, uint256 validationId) external whenNotPaused {
+        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _returnInTransit(to, validationId);
+    }
+
+    /// @inheritdoc IToken
     function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external whenNotPaused {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
         _holdInTransit(from, amount, validationId);
@@ -450,6 +456,21 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _debitBridged(s, fromWallet, fromKey, amount);
         s.totalBridged -= amount;
         ERC20Upgradeable._update(address(0), holder, amount);
+    }
+
+    /// @dev Returns a held amount to the wallet it was burned from. The mirror of {_holdInTransit}: the movement
+    ///  is unwound where it started rather than completed, `totalSupply` and `totalBridged` unmoved.
+    function _returnInTransit(bytes memory toWallet, uint256 validationId) internal {
+        TokenStorage storage s = _tokenStorage();
+        uint256 held = s.inTransit[validationId];
+        require(held != 0, ErrorsLib.NothingInTransit(validationId));
+
+        bytes32 toKey = WalletKeyLib.satelliteKey(toWallet);
+        delete s.inTransit[validationId];
+        s.totalInTransit -= held;
+        s.bridgedBalance[toKey] += held;
+
+        emit EventsLib.ReturnedInTransit(toKey, validationId, toWallet, held);
     }
 
     function _debitBridged(TokenStorage storage s, bytes memory wallet, bytes32 key, uint256 amount) private {
