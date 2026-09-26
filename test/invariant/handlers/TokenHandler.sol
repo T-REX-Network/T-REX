@@ -221,7 +221,7 @@ contract TokenHandler is Test {
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
         uint256 validationId = nextValidationId++;
         vm.prank(compliance);
-        try token.holdInTransit(from, amount, validationId) {
+        try token.holdInTransit(from, amount, validationId, 0) {
             holds.push(Hold({ validationId: validationId, from: from, amount: amount }));
             ghostInTransit += amount;
         } catch { }

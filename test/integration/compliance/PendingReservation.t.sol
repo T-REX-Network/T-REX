@@ -101,7 +101,7 @@ contract PendingReservationTest is InteropSuiteTest {
         vm.prank(address(aliceIdentity));
         uint256 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, CAP, "");
 
-        assertFalse(boundCompliance.validationOf(id).pendingReserved, "no reservation against the identity");
+        assertTrue(boundCompliance.validationOf(id).relocation, "no reservation against the identity");
         assertEq(_pendingIn(address(aliceIdentity)), 0, "alice's own room is untouched");
         assertEq(_pendingOut(address(aliceIdentity)), 0);
         assertEq(_max(_issue(10, CAP)), CAP, "a third party can still acquire the whole cap");
@@ -151,7 +151,11 @@ contract PendingReservationTest is InteropSuiteTest {
 
         assertEq(_position(), CAP, "the late settlement is applied regardless");
         assertEq(_pendingIn(), CAP, "the fresh reservation still stands");
-        assertTrue(boundCompliance.validationOf(fresh).pendingReserved);
+        assertEq(
+            uint8(boundCompliance.statusOf(fresh)),
+            uint8(ITransferValidation.ValidationStatus.Pending),
+            "the fresh validation is still holding its reservation"
+        );
         assertTrue(boundCompliance.isIssuancePaused(polygon), "the origin chain is stopped");
 
         vm.prank(deployer);

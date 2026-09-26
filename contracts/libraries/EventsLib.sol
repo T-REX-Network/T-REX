@@ -83,6 +83,20 @@ library EventsLib {
     event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
     /// @notice Emitted when the burn leg of a cross-chain validation takes the amount out of the sender's
     ///         position and holds it in transit until the mint leg lands.
+    /// A validation being issued reserved part of a satellite wallet's bridged balance.
+    event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
+
+    /// A reservation against a satellite wallet was given back, because the validation settled, was discarded,
+    /// or turned into an in-transit hold.
+    event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
+
+    /// A held amount went back to the wallet it was burned from.
+    event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
+
+    /// The keeper gave up on a pair whose other leg never arrived. `returnedAmount` went back to the wallet it
+    /// was burned from, or is zero when it was the mint leg that landed and nothing here could be returned.
+    event ValidationResolved(uint256 indexed validationId, uint256 returnedAmount);
+
     event HeldInTransit(bytes32 indexed fromKey, uint256 indexed validationId, bytes fromWallet, uint256 amount);
     /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
     event BridgedTransfer(
@@ -207,17 +221,6 @@ library EventsLib {
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
-
-    /// The burn leg landed, the mint leg never came, and the operator gave up on the pair: the burned amount is
-    /// back on the wallet it left and the reservation is released.
-    event ValidationRefunded(uint256 indexed validationId, uint256 amount);
-
-    /// The mint leg landed, the burn leg never came: there is nothing on this chain to return, so the chain that
-    /// owes the burn stops being issued to until an operator has looked.
-    event ValidationStuck(uint256 indexed validationId, bytes32 indexed chainKey);
-
-    /// A held amount went back to the wallet it was burned from.
-    event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
 
     /// The registry now names another identity for a wallet that holds tokens, so its balance followed it: what
     /// the previous identity's position counted for this wallet is now the new one's.

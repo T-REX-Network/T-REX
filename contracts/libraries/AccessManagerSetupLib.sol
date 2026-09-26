@@ -198,7 +198,7 @@ library AccessManagerSetupLib {
         table[9] = SelectorRole(ModularCompliance.setIssuancePaused.selector, RolesLib.Role.COMPLIANCE_MANAGER);
         table[10] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
         table[11] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
-        table[12] = SelectorRole(ModularCompliance.refundValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
+        table[12] = SelectorRole(ModularCompliance.resolveStuckValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
         table[13] = SelectorRole(ModularCompliance.fixPosition.selector, RolesLib.Role.OWNER);
     }
 

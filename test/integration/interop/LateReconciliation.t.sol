@@ -111,8 +111,11 @@ contract LateReconciliationTest is InteropSuiteTest {
         emit EventsLib.LateReconciliation(late, polygon);
         polygonGateway.relay(burn);
 
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.Discarded));
-        assertTrue(boundCompliance.validationOf(late).fromLegConsumed);
+        assertEq(
+            uint8(boundCompliance.statusOf(late)),
+            uint8(ITransferValidation.ValidationStatus.DiscardedAwaitingMint),
+            "the late burn leg landed on a discarded pair, which still owes its mint leg"
+        );
         assertFalse(boundCompliance.isIssuancePaused(polygon), "a first leg commits nothing, so it breaches nothing");
         assertFalse(boundCompliance.isIssuancePaused(optimism));
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "a late burn leg holds all the same");

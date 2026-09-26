@@ -226,9 +226,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Caps the range at what the sending wallet can still send: its bridged balance less what earlier
     ///  validations may still draw from it.
     function _capAtWhatTheWalletCanSend(Draft memory draft, bytes calldata from) private view {
-        uint256 balance = _boundToken().bridgedBalanceOf(from);
-        uint256 pending = _ledger().pendingOutOfWallet[draft.fromKey];
-        uint256 free = pending < balance ? balance - pending : 0;
+        uint256 free = _boundToken().availableOf(from);
         if (free < draft.amountMax) draft.amountMax = free;
         require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
     }
@@ -281,7 +279,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
         MessageTypesLib.ComplianceValidation memory issued =
             _buildIssuedValidation(validationId, from, to, spender, draft);
-        _recordValidation(validationId, issued, to, draft);
+        _recordValidation(validationId, issued, from, to, draft);
 
         emit EventsLib.TransferValidationIssued(
             validationId, from, to, spender, draft.amountMin, draft.amountMax, draft.expiry, draft.reconciliationWindow
@@ -319,6 +317,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     function _recordValidation(
         uint256 validationId,
         MessageTypesLib.ComplianceValidation memory issued,
+        bytes calldata from,
         bytes calldata to,
         Draft memory draft
     ) private {
@@ -331,12 +330,14 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         stored.fromChainKey = draft.fromChainKey;
         stored.toChainKey = draft.toChainKey;
         stored.fromKey = draft.fromKey;
+        stored.fromWallet = from;
         stored.toKey = WalletKeyLib.canonicalKey(to);
         stored.twoLegs = draft.twoLegs;
         stored.fromIdentity = draft.fromIdentity;
         stored.toIdentity = draft.toIdentity;
-        stored.pendingReserved = _reservePending(draft.fromIdentity, draft.toIdentity, draft.fromKey, draft.amountMax);
-        stored.walletPendingReserved = true;
+        // `_reservePending` returns whether it reserved against the identities; it does not on a relocation.
+        stored.relocation = !_reservePending(draft.fromIdentity, draft.toIdentity, draft.fromKey, draft.amountMax);
+        _reserveOnToken(from, draft.amountMax);
     }
 
     /* ----- Settlement ----- */
@@ -362,13 +363,13 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             validation.amountMin <= notification.amount && notification.amount <= validation.amountMax,
             ErrorsLib.SettlementOutOfBounds(notification.validationId, notification.amount)
         );
-        if (leg == Leg.Mint ? validation.toLegConsumed : validation.fromLegConsumed) {
+        if (_alreadyAccountedFor(validation.status, leg)) {
             emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
             return true;
         }
 
         // 2. Take in what this chain reported: complete the movement, or wait for the other chain.
-        bool late = validation.status == ValidationStatus.Discarded;
+        bool late = _wasDiscarded(validation.status);
         bool breachesRule = _applyChainReport(validation, leg, notification, originChainKey, late);
 
         // 3. A late leg always warns; the chain pauses only when the recorded state breaches a rule, since late
@@ -394,40 +395,30 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         bytes32 originChainKey,
         bool late
     ) private returns (bool breachesRule) {
-        if (leg == Leg.Single) {
-            validation.fromLegConsumed = true;
-            validation.toLegConsumed = true;
-            return _settleValidation(
-                validation, notification.from, notification.to, notification, originChainKey, late, false
-            );
-        }
-
         bool isBurnLeg = leg == Leg.Burn;
-        bool otherChainAlreadyReported = isBurnLeg ? validation.toLegConsumed : validation.fromLegConsumed;
-        if (isBurnLeg) validation.fromLegConsumed = true;
-        else validation.toLegConsumed = true;
+        bool isSingleLeg = leg == Leg.Single;
+        (ValidationStatus next, bool completesMovement) = _stateAfterLeg(validation.status, isBurnLeg, isSingleLeg);
 
-        if (!otherChainAlreadyReported) {
-            _recordFirstReport(
+        if (!completesMovement) {
+            _recordFirstLeg(
                 validation,
                 isBurnLeg ? notification.from : notification.to,
                 isBurnLeg,
                 notification,
                 originChainKey,
-                late
+                next
             );
             return false;
         }
 
-        // Both chains have now reported. The wallet the first one carried is the far side of the movement.
-        if (isBurnLeg) {
-            return _settleValidation(
-                validation, notification.from, validation.legWallet, notification, originChainKey, late, true
-            );
+        // The movement completes here. On a pair, the wallet the first leg carried is the far side of it.
+        bytes memory from = notification.from;
+        bytes memory to = notification.to;
+        if (!isSingleLeg) {
+            if (isBurnLeg) to = validation.legWallet;
+            else from = validation.legWallet;
         }
-        return _settleValidation(
-            validation, validation.legWallet, notification.to, notification, originChainKey, late, true
-        );
+        return _settleValidation(validation, from, to, notification, originChainKey, late, next, !isSingleLeg);
     }
 
     /// @dev A leg is matched by the wallets it carries and the chain it comes from. A one-leg validation expects
@@ -459,24 +450,28 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  counting it; a first mint leg moves nothing until the burn leg lands, and the pair is then applied
     ///  atomically. A late first leg stays `Discarded`, its flag set, and holds all the same: the burn is final
     ///  either way.
-    function _recordFirstReport(
+    function _recordFirstLeg(
         Validation storage validation,
         bytes calldata wallet,
         bool burn,
         MessageTypesLib.SettlementNotification calldata notification,
         bytes32 originChainKey,
-        bool late
+        ValidationStatus next
     ) private {
         validation.executedAmount = notification.amount;
         validation.legWallet = wallet;
-        if (!late) validation.status = ValidationStatus.LegConfirmed;
-        if (burn) {
-            if (validation.walletPendingReserved) {
-                validation.walletPendingReserved = false;
-                _releasePendingOfWallet(validation.fromKey, validation.amountMax);
-            }
-            _holdOnToken(wallet, notification.amount, notification.validationId);
+
+        // A burn leg takes the tokens out of the wallet, and the hold gives back whatever this validation had
+        // reserved against it at the same time. So when there is something to give back, the hold carries it
+        // and `_moveTo` leaves the wallet's half alone; otherwise `_moveTo` releases it the usual way.
+        uint256 releasedByTheHold = 0;
+        if (burn && _stillReservesWallet(validation.status)) {
+            releasedByTheHold = validation.amountMax;
         }
+
+        _moveTo(validation, next, releasedByTheHold > 0);
+
+        if (burn) _holdOnToken(wallet, notification.amount, notification.validationId, releasedByTheHold);
 
         emit EventsLib.ValidationLegConfirmed(notification.validationId, originChainKey, notification.amount);
     }
@@ -498,13 +493,13 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         MessageTypesLib.SettlementNotification calldata notification,
         bytes32 originChainKey,
         bool late,
+        ValidationStatus next,
         bool secondLeg
     ) private returns (bool breachesRule) {
         if (secondLeg) _requireRepeatsFirstLeg(validation, notification);
 
         validation.executedAmount = notification.amount;
-        validation.status = late ? ValidationStatus.LateReconciled : ValidationStatus.Settled;
-        _releaseReservation(validation);
+        _moveTo(validation, next, false);
 
         // A native recipient may have changed owner since issuance; the token has not been credited yet here.
         address toIdentity = validation.toIdentity;
@@ -558,40 +553,38 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /* ----- Discard ----- */
 
-    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a `LegConfirmed` one is
+    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a one still awaiting a leg is
     ///  refused whatever the clock says. One refused id reverts the whole batch.
-    /// @dev The way out of a pair of which one leg never came. Only a two-leg validation with exactly one leg
-    ///  consumed qualifies, whether it still waits as `LegConfirmed` or was discarded before its late first leg.
-    ///  The gate is a second reconciliation window past `releaseAt`, the same length the first one had, so a leg
-    ///  that is merely slow still lands as a late reconciliation and never as a refund.
+    /// @dev The way out of a pair of which one leg never arrived. The gate is a second reconciliation window
+    ///  past `releaseAt`, the same length as the first, so a leg that is merely slow still lands as a late
+    ///  reconciliation and never as a resolution.
     ///
-    ///  Burn leg in: the held amount goes back to the wallet it left, the reservation is released, and the mint
-    ///  leg is marked consumed so that its arrival afterwards is treated as a replay and halts the token.
-    ///  Mint leg in: nothing on this chain can be returned, so the chain that owes the burn is paused for
-    ///  issuance and the validation is left as it is for an operator to investigate.
-    function _refundValidation(uint256 validationId) internal {
+    ///  When the burn leg is the one that landed, the tokens it burned are waiting in transit: they go back to
+    ///  the wallet they left. When it was the mint leg, nothing on this chain can be returned, so the chain
+    ///  that owes the burn stops being issued to instead and an operator investigates. Either way the
+    ///  validation ends in `Resolved`, where any leg arriving afterwards halts the token.
+    function _resolveStuckValidation(uint256 validationId) internal {
         ValidationStorage storage store = _validationStorage();
         require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
         require(
-            validation.twoLegs && validation.fromLegConsumed != validation.toLegConsumed,
-            ErrorsLib.ValidationNotRefundable(validationId)
+            _awaitingOtherLeg(validation.status), ErrorsLib.ValidationNotStuck(validationId, uint8(validation.status))
         );
-        uint64 refundableAt = validation.releaseAt + (validation.releaseAt - validation.expiry);
-        require(block.timestamp > refundableAt, ErrorsLib.ValidationNotYetRefundable(validationId, refundableAt));
 
-        if (!validation.fromLegConsumed) {
+        uint64 resolvableAt = validation.releaseAt + (validation.releaseAt - validation.expiry);
+        require(block.timestamp > resolvableAt, ErrorsLib.ValidationNotYetResolvable(validationId, resolvableAt));
+
+        uint256 returnedAmount = 0;
+        if (_burnArrived(validation.status)) {
+            returnedAmount = validation.executedAmount;
+            _returnHeldOnToken(validation.legWallet, validationId);
+        } else {
             _setIssuancePaused(validation.fromChainKey, true);
-            emit EventsLib.ValidationStuck(validationId, validation.fromChainKey);
-            return;
         }
 
-        validation.toLegConsumed = true;
-        validation.status = ValidationStatus.Refunded;
-        _returnOnToken(validation.legWallet, validationId);
-        _releaseReservation(validation);
+        _moveTo(validation, ValidationStatus.Resolved, false);
 
-        emit EventsLib.ValidationRefunded(validationId, validation.executedAmount);
+        emit EventsLib.ValidationResolved(validationId, returnedAmount);
     }
 
     function _discardExpiredValidations(uint256[] calldata validationIds) internal {
@@ -609,8 +602,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
                 ErrorsLib.ValidationNotReleasable(validationId, validation.releaseAt)
             );
 
-            validation.status = ValidationStatus.Discarded;
-            _releaseReservation(validation);
+            _moveTo(validation, ValidationStatus.Discarded, false);
 
             emit EventsLib.ValidationDiscarded(validationId);
         }
@@ -648,6 +640,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         ValidationStorage storage store = _validationStorage();
         require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
+        // `Expired` is the one status never stored: it is `Pending` once the clock has passed `releaseAt`. Every
+        // other state is returned as it stands, including which leg a pair is still waiting for.
         if (validation.status == ValidationStatus.Pending && block.timestamp > validation.releaseAt) {
             return ValidationStatus.Expired;
         }
@@ -706,25 +700,120 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal virtual;
 
     /// @dev Takes the burned amount out of `from`'s position and holds it in transit, through the token, when
-    ///  the burn leg of a two-leg validation lands before the mint leg.
-    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId) internal virtual;
+    ///  the burn leg of a two-leg validation lands before the mint leg. `reserved` is what this validation had
+    ///  reserved against the wallet, which the token gives back as it takes the hold.
+    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId, uint256 reserved) internal virtual;
 
-    /// @dev Returns the amount held for `validationId` to `to`, the wallet it was burned from, on the token.
-    function _returnOnToken(bytes memory to, uint256 validationId) internal virtual;
+    /// @dev Reserves part of a satellite wallet's bridged balance for a validation being issued, on the token.
+    function _reserveOnToken(bytes memory wallet, uint256 amount) internal virtual;
+
+    /// @dev Gives back what this validation reserved against a satellite wallet, on the token.
+    function _releaseOnToken(bytes memory wallet, uint256 amount) internal virtual;
+
+    /// @dev Puts the amount held for `validationId` back on the wallet it was burned from, on the token.
+    function _returnHeldOnToken(bytes memory to, uint256 validationId) internal virtual;
 
     /* ----- Shared by the three flows ----- */
 
-    /// @dev Releases whatever of the reservation is still outstanding, once: the flags make a second call, such
-    ///  as a settlement after the keeper's discard, a no-op instead of an underflow.
-    function _releaseReservation(Validation storage validation) private {
-        if (validation.pendingReserved) {
-            validation.pendingReserved = false;
+    /* ----- The lifecycle, in one place ----- */
+
+    /// @dev Whether the burn leg has arrived in this state.
+    function _burnArrived(ValidationStatus status) internal pure returns (bool) {
+        return status == ValidationStatus.AwaitingMint || status == ValidationStatus.DiscardedAwaitingMint
+            || status == ValidationStatus.Settled || status == ValidationStatus.LateReconciled;
+    }
+
+    /// @dev Whether the mint leg has arrived in this state.
+    function _mintArrived(ValidationStatus status) internal pure returns (bool) {
+        return status == ValidationStatus.AwaitingBurn || status == ValidationStatus.DiscardedAwaitingBurn
+            || status == ValidationStatus.Settled || status == ValidationStatus.LateReconciled;
+    }
+
+    /// @dev Whether this leg has nothing left to do: either its own half already arrived, or the keeper gave up
+    ///  on the pair and sent the tokens back. Both mean the amount it carries is already accounted for
+    ///  somewhere else, so applying it again would move tokens twice. The caller treats it as an emergency.
+    function _alreadyAccountedFor(ValidationStatus status, Leg leg) internal pure returns (bool) {
+        if (status == ValidationStatus.Resolved) return true;
+        if (leg == Leg.Mint) return _mintArrived(status);
+        return _burnArrived(status);
+    }
+
+    /// @dev Whether the keeper has given up on this validation, in any of the states that say so.
+    function _wasDiscarded(ValidationStatus status) internal pure returns (bool) {
+        return status == ValidationStatus.Discarded || status == ValidationStatus.DiscardedAwaitingMint
+            || status == ValidationStatus.DiscardedAwaitingBurn;
+    }
+
+    /// @dev Whether exactly one leg of a pair has arrived and the other is still owed. Such a validation can be
+    ///  neither discarded nor derived `Expired`: one satellite has already executed irreversibly.
+    function _awaitingOtherLeg(ValidationStatus status) internal pure returns (bool) {
+        return status == ValidationStatus.AwaitingMint || status == ValidationStatus.AwaitingBurn
+            || status == ValidationStatus.DiscardedAwaitingMint || status == ValidationStatus.DiscardedAwaitingBurn;
+    }
+
+    /// @dev Whether the identities' pending amounts are still reserved in this state. A relocation never
+    ///  reserved them, which is the one thing the status cannot answer by itself.
+    function _stillReservesIdentities(ValidationStatus status, bool relocation) internal pure returns (bool) {
+        if (relocation) return false;
+        return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingMint
+            || status == ValidationStatus.AwaitingBurn;
+    }
+
+    /// @dev Whether the sender wallet's pending amount is still reserved in this state. Once the burn leg has
+    ///  arrived the tokens are in transit, so the wallet's cap must stop counting them.
+    function _stillReservesWallet(ValidationStatus status) internal pure returns (bool) {
+        return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingBurn;
+    }
+
+    /// @dev Where a validation goes when a leg lands on it, and whether that leg completes the movement.
+    ///
+    ///  A single-leg validation settles outright. A pair in `Pending` records the first leg and waits for the
+    ///  other; the same pair already discarded waits in the matching `Discarded*` state instead, so that when
+    ///  the second leg lands it reconciles late rather than settling. Any state this is not called for is a leg
+    ///  for a leg already arrived, which the caller has refused as a replay.
+    ///
+    /// @param status where the validation stands
+    /// @param burnLeg the leg that landed is the one from the sender's chain
+    /// @param singleLeg the validation expects one leg, not two
+    /// @return next where it stands afterwards
+    /// @return completesMovement whether the movement is now complete, so positions move and rules are asked
+    function _stateAfterLeg(ValidationStatus status, bool burnLeg, bool singleLeg)
+        internal
+        pure
+        returns (ValidationStatus next, bool completesMovement)
+    {
+        bool discarded = _wasDiscarded(status);
+
+        if (singleLeg) {
+            return (discarded ? ValidationStatus.LateReconciled : ValidationStatus.Settled, true);
+        }
+        if (status == ValidationStatus.Pending) {
+            return (burnLeg ? ValidationStatus.AwaitingMint : ValidationStatus.AwaitingBurn, false);
+        }
+        if (status == ValidationStatus.Discarded) {
+            return (burnLeg ? ValidationStatus.DiscardedAwaitingMint : ValidationStatus.DiscardedAwaitingBurn, false);
+        }
+        // One leg was already in and the other has now landed: the pair is complete.
+        return (discarded ? ValidationStatus.LateReconciled : ValidationStatus.Settled, true);
+    }
+
+    /// @dev Moves a validation to `next` and gives back whatever `next` no longer reserves. Because the
+    ///  reservations are read off the status, a release happens exactly when the move stops reserving something,
+    ///  and arriving twice at the same state gives nothing back twice.
+    /// @param heldByTheHold true when the caller is about to take an in-transit hold, which gives the wallet's
+    ///  reservation back itself; this function then leaves that half alone rather than releasing it twice.
+    function _moveTo(Validation storage validation, ValidationStatus next, bool heldByTheHold) private {
+        ValidationStatus current = validation.status;
+        bool relocation = validation.relocation;
+
+        if (_stillReservesIdentities(current, relocation) && !_stillReservesIdentities(next, relocation)) {
             _releasePendingOfIdentities(validation.fromIdentity, validation.toIdentity, validation.amountMax);
         }
-        if (validation.walletPendingReserved) {
-            validation.walletPendingReserved = false;
-            _releasePendingOfWallet(validation.fromKey, validation.amountMax);
+        if (_stillReservesWallet(current) && !_stillReservesWallet(next) && !heldByTheHold) {
+            _releaseOnToken(validation.fromWallet, validation.amountMax);
         }
+
+        validation.status = next;
     }
 
     /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its

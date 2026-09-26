@@ -81,8 +81,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(ledger.positionOf(address(bobIdentity)), 95, "and became a position");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
-        assertTrue(state.fromLegConsumed);
-        assertTrue(state.toLegConsumed);
         assertEq(state.executedAmount, 95);
         assertFalse(token.paused());
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));

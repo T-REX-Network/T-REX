@@ -122,10 +122,27 @@ interface IToken is IERC3643 {
     /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param amount the exact amount the satellite burned
     /// @param validationId the validation the burn leg consumed
-    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external;
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId, uint256 reserved) external;
 
-    /// @dev Puts the amount held for `validationId` back on `to`, the satellite wallet it was burned from: the
-    ///  mint leg never came and the compliance gave up on the pair. Callable by the bound compliance alone.
-    function returnInTransit(bytes calldata to, uint256 validationId) external;
+    /// @dev Puts the amount held for `validationId` back on `to`, the satellite wallet it was burned from,
+    ///  because the other leg never arrived and the compliance gave up on the pair. Callable by the bound
+    ///  compliance alone.
+    function returnHeldInTransit(bytes calldata to, uint256 validationId) external;
+
+    /// @dev What open validations may still draw from `wallet`. The compliance reserves this at issuance and
+    ///  gives it back when the validation settles or is discarded.
+    /// @param wallet the satellite wallet, ERC-7930
+    function reservedOf(bytes calldata wallet) external view returns (uint256);
+
+    /// @dev What `wallet` can still send: its bridged balance less what open validations may draw from it.
+    /// @param wallet the satellite wallet, ERC-7930
+    function availableOf(bytes calldata wallet) external view returns (uint256);
+
+    /// @dev Reserves `amount` of `wallet`'s bridged balance for a validation being issued. Callable by the
+    ///  bound compliance alone.
+    function reserveForValidation(bytes calldata wallet, uint256 amount) external;
+
+    /// @dev Gives back `amount` of what was reserved against `wallet`. Callable by the bound compliance alone.
+    function releaseFromValidation(bytes calldata wallet, uint256 amount) external;
 
 }

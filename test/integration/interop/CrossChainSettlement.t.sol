@@ -67,7 +67,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         emit EventsLib.ValidationLegConfirmed(id, polygon, 95);
         polygonGateway.relay(burn);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "the burned amount left the sender's position");
         assertEq(token.inTransitOf(id), 95, "and waits in transit");
         assertEq(token.totalInTransit(), 95);
@@ -100,10 +100,8 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         emit EventsLib.ValidationLegConfirmed(id, optimism, 95);
         optimismGateway.relay(mint);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingBurn));
         ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
-        assertFalse(state.fromLegConsumed);
-        assertTrue(state.toLegConsumed);
         assertEq(state.legWallet, bobOptimism);
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "a first mint leg moves nothing");
         assertEq(token.inTransitOf(id), 0);
@@ -123,7 +121,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
         vm.warp(issuedAt + VALIDITY_WINDOW + OPTIMISM_WINDOW + 365 days);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(keeper);
@@ -131,7 +129,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotDiscardable.selector,
                 id,
-                uint8(ITransferValidation.ValidationStatus.LegConfirmed)
+                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
             )
         );
         boundCompliance.discardExpiredValidations(ids);
@@ -173,10 +171,9 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         polygonGateway.relay(replay);
 
         assertTrue(token.paused());
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "debited once");
         assertEq(token.inTransitOf(id), 95, "held once");
-        assertFalse(boundCompliance.validationOf(id).toLegConsumed);
     }
 
     /// @notice The two legs must carry one amount.
@@ -188,7 +185,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         optimismGateway.relay(mint);
 
         assertFalse(token.messageReceived(address(optimismGateway), optimismGateway.receiveIdFor(mint)));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         assertEq(token.bridgedBalanceOf(bobOptimism), 0);
     }
 
@@ -229,8 +226,6 @@ contract CrossChainSettlementTest is InteropSuiteTest {
     function _assertSettledAt(uint256 amount) private view {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
-        assertTrue(state.fromLegConsumed);
-        assertTrue(state.toLegConsumed);
         assertEq(state.executedAmount, amount);
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - amount);
         assertEq(token.bridgedBalanceOf(bobOptimism), amount);

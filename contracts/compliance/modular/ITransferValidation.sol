@@ -71,31 +71,39 @@ pragma solidity 0.8.30;
  */
 interface ITransferValidation {
 
-    /// @dev Where a validation stands. Stored transitions: `Pending -> LegConfirmed -> Settled`,
-    /// `Pending -> Settled`, `Pending -> Discarded -> LateReconciled`. `Expired` is never written: `statusOf`
-    /// derives it for a `Pending` validation past `releaseAt` that the keeper has not discarded yet, since nothing
-    /// transitions storage at a timestamp without a transaction.
+    /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
+    /// the keeper gave up, and what is still reserved are all read off this one value.
+    ///
+    /// What is reserved is derived rather than stored, so the two can never disagree:
+    /// - the identities' pending amounts are outstanding in `Pending`, `AwaitingMint` and `AwaitingBurn`, and
+    ///   never on a relocation, where nothing was reserved for them in the first place;
+    /// - the sender wallet's pending amount is outstanding in `Pending` and `AwaitingBurn` alone, because a burn
+    ///   leg has already taken the tokens out of that wallet and into transit.
     enum ValidationStatus {
-        /// Issued, pending amounts reserved, waiting for the settlement notification(s).
+        /// Issued, amounts reserved, waiting for the settlement notification(s).
         Pending,
-        /// Cross-chain only: one of the two legs was consumed, whichever it was (`validationOf` says which). Never
-        /// discardable and never derived `Expired`: a consumed leg proves irreversible satellite execution, and a
-        /// mint stuck between two chains must not roll back the reservation. When the consumed leg is the burn
-        /// one, the amount already left the sender's position and waits in transit on the token.
-        LegConfirmed,
-        /// Every expected leg received, reservation released, positions and ledger updated.
+        /// Two-leg only: the burn leg arrived, the mint leg is still owed. The amount has left the sender's
+        /// position and waits in transit on the token. Never discardable and never derived `Expired`, because a
+        /// consumed leg proves the satellite has irreversibly executed its half.
+        AwaitingMint,
+        /// Two-leg only: the mint leg arrived, the burn leg is still owed.
+        AwaitingBurn,
+        /// Every expected leg arrived: reservation released, positions and token ledger updated.
         Settled,
-        /// Derived: `Pending` and past `releaseAt`, not yet discarded.
+        /// Derived, never stored: `Pending` and past `releaseAt`, not yet discarded.
         Expired,
-        /// The keeper released the reservation; issuance proceeds as if the validation never happened. A late
-        /// first leg of two keeps this status with its flag set.
+        /// The keeper gave up and released the reservation; issuance proceeds as if it never happened.
         Discarded,
-        /// Every leg arrived after the discard: applied anyway, `LateReconciliation` emitted per late leg and that
-        /// leg's chain paused for issuance when the executed amount breached a rule.
+        /// Discarded, then the burn leg arrived late. Still owed the mint leg.
+        DiscardedAwaitingMint,
+        /// Discarded, then the mint leg arrived late. Still owed the burn leg.
+        DiscardedAwaitingBurn,
+        /// Every leg arrived after the discard: applied anyway, `LateReconciliation` emitted per late leg, and
+        /// that leg's chain paused for issuance when the executed amount breached a rule.
         LateReconciled,
-        /// The burn leg landed, the mint leg never came, and the operator gave up on the pair: the burned amount
-        /// is back on the wallet it left, the reservation is released, and a mint leg arriving now halts the token.
-        Refunded
+        /// The keeper gave up on a pair whose other leg never arrived: whatever was held in transit went back to
+        /// the wallet it was burned from, and the reservation was released. A leg arriving now halts the token.
+        Resolved
     }
 
     /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
@@ -122,9 +130,11 @@ interface ITransferValidation {
         bytes32 fromChainKey;
         /// Same for `to`'s chain; the reference chain's own key for a native wallet.
         bytes32 toChainKey;
-        /// `keccak256` of the canonical `from` envelope: what a settlement leg's `from` is matched against, and
-        /// the key its pending amount is kept under in the ledger.
+        /// `keccak256` of the canonical `from` envelope: what a settlement leg's `from` is matched against.
         bytes32 fromKey;
+        /// The sender's wallet envelope itself, kept so the reservation it holds on the token can be given back
+        /// without the caller having to supply it again.
+        bytes fromWallet;
         /// Same for `to`.
         bytes32 toKey;
         /// Both sides on distinct satellite chains: two legs are expected, the burn one and the mint one.
@@ -137,20 +147,12 @@ interface ITransferValidation {
 
         /* ----- Moved by the lifecycle ----- */
 
-        /// Whether the identities' pending amounts are still outstanding. False when both wallets belong to one
-        /// identity, since nothing was reserved for them; cleared by the release, at settlement or at discard,
-        /// so a late settlement never releases twice.
-        bool pendingReserved;
-        /// Same for the sender wallet's pending amount, released earlier on a burn-first leg: the hold already
-        /// took the tokens out of the wallet, so the wallet's cap must stop counting them.
-        bool walletPendingReserved;
-        /// The stored status, `Expired` excluded.
+        /// Both wallets belong to one identity, so nothing was ever reserved against the identities. Written
+        /// once at issuance: it is the one thing the status cannot say on its own.
+        bool relocation;
+        /// Where the validation stands. Which legs have arrived and what is still reserved are read off this;
+        /// `Expired` is never stored, it is derived from `Pending` and the clock.
         ValidationStatus status;
-        /// The leg originating from `from`'s chain (the burn leg, or the single leg) was consumed.
-        bool fromLegConsumed;
-        /// The leg originating from `to`'s chain (the mint leg) was consumed. Set together with the other flag
-        /// on a single-leg settlement.
-        bool toLegConsumed;
         /// Exact amount transferred, written by the first leg and repeated by the second.
         uint256 executedAmount;
         /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
@@ -234,24 +236,27 @@ interface ITransferValidation {
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
-    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. `LegConfirmed` is
-    ///   refused whatever the clock says.
+    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
+    ///   awaiting a leg is refused whatever the clock says, since one satellite has already executed.
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     ///
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.
     function discardExpiredValidations(uint256[] calldata validationIds) external;
 
-    /// @dev Gives up on a two-leg validation of which exactly one leg arrived, a second reconciliation window
-    ///  past `releaseAt`. When the burn leg is the one that landed, the burned amount goes back to the wallet it
-    ///  left and the reservation is released. When the mint leg is, there is nothing on this chain to return:
-    ///  the chain that owes the burn stops being issued to instead, and the validation stays as it is.
+    /// @dev Gives up on a pair of which exactly one leg ever arrived, a second reconciliation window past
+    /// `releaseAt` so a merely slow leg still reconciles late instead. The burned amount goes back to the wallet
+    /// it left, whatever is still reserved is released, and the validation ends in `Resolved`, where any leg
+    /// arriving afterwards halts the token. When it was the mint leg that landed there is nothing on this chain
+    /// to return, so the chain that owes the burn is paused for issuance instead.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - The validation must be awaiting its other leg; otherwise reverts with `ValidationNotStuck`.
+    /// - `block.timestamp` must be past the second window; otherwise reverts with `ValidationNotYetResolvable`.
     ///
-    /// Emits `ValidationRefunded`, or `ValidationStuck`.
-    function refundValidation(uint256 validationId) external;
+    /// Emits `ValidationResolved`.
+    function resolveStuckValidation(uint256 validationId) external;
 
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);

@@ -63,12 +63,6 @@ interface IComplianceLedger {
     /// @param identity the ONCHAINID to look up
     function pendingOutOf(address identity) external view returns (uint256);
 
-    /// @dev Sum of `amountMax` over the validations issued out of one satellite wallet that may still draw on
-    ///  it. Caps what a further validation may take from that wallet, whoever owns it.
-    /// @param walletKey the canonical key of the wallet: a native address padded on the left, `keccak256` of a
-    ///  satellite envelope otherwise
-    function pendingOutOfWallet(bytes32 walletKey) external view returns (uint256);
-
     /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to, which
     ///  follows the registry on the wallet's next movement. Zero for a wallet the ledger has never credited.
     function ownerOf(address wallet) external view returns (address);
