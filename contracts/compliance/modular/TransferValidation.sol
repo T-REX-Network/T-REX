@@ -476,6 +476,30 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         emit EventsLib.ValidationLegConfirmed(notification.validationId, originChainKey, notification.amount);
     }
 
+    /// @dev The movement a settled validation turns out to be, as the modules are asked about it. Its own
+    ///  function because the settlement path holds enough live values without it, and the legacy pipeline runs
+    ///  out of stack there under `forge coverage`.
+    ///
+    ///  A native recipient may have changed owner since issuance, so it is resolved again here. The token has
+    ///  not been credited yet at this point, which is why nothing is adjusted for this very movement.
+    function _settledMovement(Validation storage validation, bytes memory from, bytes memory to, uint256 amount)
+        private
+        returns (IModule.TransferContext memory)
+    {
+        address toIdentity = validation.toIdentity;
+        (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
+        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
+
+        return TransferContextLib.settlement(
+            address(this),
+            validation.fromIdentity,
+            toIdentity,
+            WalletKeyLib.walletId(from),
+            WalletKeyLib.walletId(to),
+            amount
+        );
+    }
+
     /// @dev Every expected leg is in, so the movement completes: release whatever is still reserved, move the
     ///  positions and the token's ledger, mark the validation, announce it, then tell the tracker modules.
     ///
@@ -501,19 +525,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validation.executedAmount = notification.amount;
         _moveTo(validation, next, false);
 
-        // A native recipient may have changed owner since issuance; the token has not been credited yet here.
-        address toIdentity = validation.toIdentity;
-        (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
-        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
-
-        IModule.TransferContext memory ctx = TransferContextLib.settlement(
-            address(this),
-            validation.fromIdentity,
-            toIdentity,
-            WalletKeyLib.walletId(from),
-            WalletKeyLib.walletId(to),
-            notification.amount
-        );
+        IModule.TransferContext memory ctx = _settledMovement(validation, from, to, notification.amount);
         breachesRule = late && _exceedsWhatRulesAllowNow(ctx, notification.amount);
 
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, notification.amount);
