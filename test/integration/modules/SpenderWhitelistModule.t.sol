@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
+
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
@@ -37,9 +39,9 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
     // ============ Declaration Tests ============
 
     /// @notice Should declare the spender check and nothing else
-    function test_moduleCapabilities_DeclaresOnlyTheSpenderCheck() public view {
-        assertEq(module.moduleCapabilities(), ModuleCapabilitiesLib.CHECK_SPENDER);
-        assertEq(mc.getModuleCapabilities(address(module)), ModuleCapabilitiesLib.CHECK_SPENDER);
+    function test_moduleTypes_NamesOnlySpender() public view {
+        assertEq(uint8(module.moduleTypes()[0]), uint8(IModule.ModuleType.SPENDER));
+        assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER)[0], address(module));
         assertTrue(module.isPlugAndPlay());
         assertEq(module.name(), "SpenderWhitelistModule");
     }
@@ -48,7 +50,7 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
 
     /// @notice Should block every spender while the allowlist is empty
     function test_transferFrom_RevertWhen_AllowlistEmpty() public {
-        assertFalse(module.isSpenderAllowed(address(mc), charlie));
+        assertFalse(module.isSpenderAllowed(address(mc), _native(charlie)));
 
         vm.prank(alice);
         token.approve(charlie, 100);
@@ -60,11 +62,11 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
 
     /// @notice Should let a listed spender through
     function test_transferFrom_Success_WhenSpenderAllowed() public {
-        vm.expectEmit(true, true, false, false, address(module));
-        emit SpenderWhitelistModule.SpenderAllowed(address(mc), charlie);
+        vm.expectEmit(true, true, true, true, address(module));
+        emit SpenderWhitelistModule.SpenderAllowed(address(mc), keccak256(_native(charlie)), _native(charlie));
         _allow(charlie);
 
-        assertTrue(module.isSpenderAllowed(address(mc), charlie));
+        assertTrue(module.isSpenderAllowed(address(mc), _native(charlie)));
 
         vm.prank(alice);
         token.approve(charlie, 100);
@@ -80,7 +82,7 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         _allow(charlie);
 
         vm.expectEmit(true, true, false, false, address(module));
-        emit SpenderWhitelistModule.SpenderDisallowed(address(mc), charlie);
+        emit SpenderWhitelistModule.SpenderDisallowed(address(mc), keccak256(_native(charlie)), _native(charlie));
         _disallow(charlie);
 
         vm.prank(alice);
@@ -114,11 +116,11 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
 
     /// @notice Should list a spender and announce it
     function test_allowSpender_Success_ListsAndEmits() public {
-        vm.expectEmit(true, true, false, false, address(module));
-        emit SpenderWhitelistModule.SpenderAllowed(address(mc), charlie);
+        vm.expectEmit(true, true, true, true, address(module));
+        emit SpenderWhitelistModule.SpenderAllowed(address(mc), keccak256(_native(charlie)), _native(charlie));
         _allow(charlie);
 
-        assertTrue(module.isSpenderAllowed(address(mc), charlie));
+        assertTrue(module.isSpenderAllowed(address(mc), _native(charlie)));
     }
 
     /// @notice Should delist a spender and announce it
@@ -126,10 +128,10 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         _allow(charlie);
 
         vm.expectEmit(true, true, false, false, address(module));
-        emit SpenderWhitelistModule.SpenderDisallowed(address(mc), charlie);
+        emit SpenderWhitelistModule.SpenderDisallowed(address(mc), keccak256(_native(charlie)), _native(charlie));
         _disallow(charlie);
 
-        assertFalse(module.isSpenderAllowed(address(mc), charlie));
+        assertFalse(module.isSpenderAllowed(address(mc), _native(charlie)));
     }
 
     /// @notice Should refuse to list a spender that is already on the allowlist
@@ -137,29 +139,33 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         _allow(charlie);
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderAlreadyAllowed.selector, charlie));
-        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (charlie)), address(module));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderAlreadyAllowed.selector, _native(charlie)));
+        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (_native(charlie))), address(module));
     }
 
     /// @notice Should refuse to delist a spender that was never listed
     function test_disallowSpender_RevertWhen_NotListed() public {
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotListed.selector, charlie));
-        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.disallowSpender, (charlie)), address(module));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotListed.selector, _native(charlie)));
+        mc.callModuleFunction(
+            abi.encodeCall(SpenderWhitelistModule.disallowSpender, (_native(charlie))), address(module)
+        );
     }
 
-    /// @notice Should refuse the zero address
-    function test_allowSpender_RevertWhen_ZeroAddress() public {
+    /// @notice Should refuse a wallet that is not a canonical ERC-7930 envelope
+    function test_allowSpender_RevertWhen_NotCanonical() public {
+        bytes memory malformed = bytes.concat(_native(charlie), hex"00");
+
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (address(0))), address(module));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, malformed));
+        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (malformed)), address(module));
     }
 
     /// @notice Should reach the allowlist only through the bound compliance
     function test_allowSpender_RevertWhen_CalledDirectly() public {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        module.allowSpender(charlie);
+        module.allowSpender(_native(charlie));
     }
 
     // ============ Lifecycle Tests ============
@@ -167,14 +173,14 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
     /// @notice Should forget the allowlist across an unbind and rebind
     function test_isSpenderAllowed_Success_ForgetsListAfterRebind() public {
         _allow(charlie);
-        assertTrue(module.isSpenderAllowed(address(mc), charlie));
+        assertTrue(module.isSpenderAllowed(address(mc), _native(charlie)));
 
         vm.startPrank(deployer);
         mc.removeModule(address(module));
         mc.addModule(address(module));
         vm.stopPrank();
 
-        assertFalse(module.isSpenderAllowed(address(mc), charlie));
+        assertFalse(module.isSpenderAllowed(address(mc), _native(charlie)));
 
         vm.prank(alice);
         token.approve(charlie, 100);
@@ -217,14 +223,21 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
         new ModuleProxy(address(implementation), abi.encodeCall(SpenderWhitelistModule.initialize, (address(0))));
     }
 
+    /// @dev The native envelope of a wallet, as the compliance builds it before asking a spender policy.
+    function _native(address wallet) private view returns (bytes memory) {
+        return InteroperableAddress.formatEvmV1(block.chainid, wallet);
+    }
+
     function _allow(address spender) private {
         vm.prank(deployer);
-        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (spender)), address(module));
+        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.allowSpender, (_native(spender))), address(module));
     }
 
     function _disallow(address spender) private {
         vm.prank(deployer);
-        mc.callModuleFunction(abi.encodeCall(SpenderWhitelistModule.disallowSpender, (spender)), address(module));
+        mc.callModuleFunction(
+            abi.encodeCall(SpenderWhitelistModule.disallowSpender, (_native(spender))), address(module)
+        );
     }
 
     function _deployModule() private returns (SpenderWhitelistModule) {

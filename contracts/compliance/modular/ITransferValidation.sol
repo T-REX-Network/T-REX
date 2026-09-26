@@ -63,75 +63,100 @@ pragma solidity 0.8.30;
 
 /**
  * @title ITransferValidation
- * @dev The compliance's issuance surface for satellite movements: the settings a COMPLIANCE_MANAGER tunes, the
- * per-chain issuance pause, the lifecycle of every issued validation, the keeper's discard, and the views the
- * slot lifecycle reads. A satellite executes a transfer only against
- * a `ComplianceValidation` the reference chain issued for that exact transfer; this is where it comes from.
+ * @dev The compliance's issuance surface for satellite movements: the two windows a COMPLIANCE_MANAGER tunes, the
+ * per-chain issuance pause, the lifecycle of every issued validation and the keeper's discard. A satellite
+ * executes a transfer only against a `ComplianceValidation` the reference chain issued for that exact transfer;
+ * this is where it comes from. A ceiling on what may be issued is a rule, not a setting: a module answers it
+ * from `allowedAmount`.
  */
 interface ITransferValidation {
 
-    /// @dev Where a validation stands. Stored transitions: `Pending -> LegConfirmed -> Settled`,
-    /// `Pending -> Settled`, `Pending -> Discarded -> LateReconciled`. `Expired` is never written: `statusOf`
-    /// derives it for a `Pending` validation past `releaseAt` that the keeper has not discarded yet, since nothing
-    /// transitions storage at a timestamp without a transaction.
+    /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
+    /// the keeper gave up, and what is still reserved are all read off this one value.
+    ///
+    /// What is reserved is derived rather than stored, so the two can never disagree:
+    /// - the identities' pending amounts are outstanding in `Pending`, `AwaitingMint` and `AwaitingBurn`, and
+    ///   never on a relocation, where nothing was reserved for them in the first place;
+    /// - the sender wallet's pending amount is outstanding in `Pending` and `AwaitingBurn` alone, because a burn
+    ///   leg has already taken the tokens out of that wallet and into transit.
     enum ValidationStatus {
-        /// Issued, slots reserved, waiting for the settlement notification(s).
+        /// Issued, amounts reserved, waiting for the settlement notification(s).
         Pending,
-        /// Cross-chain only: one of the two legs was consumed, whichever it was (`stateOf` says which). Never
-        /// discardable and never derived `Expired`: a consumed leg proves irreversible satellite execution, and a
-        /// mint stuck between two chains must not roll back the reservation. When the consumed leg is the burn
-        /// one, the amount already left the sender's position and waits in transit on the token.
-        LegConfirmed,
-        /// Every expected leg received, slots committed, ledger updated.
+        /// Two-leg only: the burn leg arrived, the mint leg is still owed. The amount has left the sender's
+        /// position and waits in transit on the token. Never discardable and never derived `Expired`, because a
+        /// consumed leg proves the satellite has irreversibly executed its half.
+        AwaitingMint,
+        /// Two-leg only: the mint leg arrived, the burn leg is still owed.
+        AwaitingBurn,
+        /// Every expected leg arrived: reservation released, positions and token ledger updated.
         Settled,
-        /// Derived: `Pending` and past `releaseAt`, not yet discarded.
+        /// Derived, never stored: `Pending` and past `releaseAt`, not yet discarded.
         Expired,
-        /// The keeper released the slots; issuance proceeds as if the validation never happened. A late first
-        /// leg of two keeps this status with its flag set in `ValidationState`.
+        /// The keeper gave up and released the reservation; issuance proceeds as if it never happened.
         Discarded,
-        /// Every leg arrived after the discard: applied anyway, the modules caught up with no live reservation,
-        /// `LateReconciliation` emitted per late leg and that leg's chain paused for issuance.
-        LateReconciled
+        /// Discarded, then the burn leg arrived late. Still owed the mint leg.
+        DiscardedAwaitingMint,
+        /// Discarded, then the mint leg arrived late. Still owed the burn leg.
+        DiscardedAwaitingBurn,
+        /// Every leg arrived after the discard: applied anyway, `LateReconciliation` emitted per late leg, and
+        /// that leg's chain paused for issuance when the executed amount breached a rule.
+        LateReconciled,
+        /// The keeper gave up on a pair whose other leg never arrived: whatever was held in transit went back to
+        /// the wallet it was burned from, and the reservation was released. A leg arriving now halts the token.
+        Resolved
     }
 
-    /// @dev What settlement moves, keyed by the validation id. Kept forever, like the record.
-    struct ValidationState {
-        /// The stored status, `Expired` excluded.
-        ValidationStatus status;
-        /// The leg originating from `from`'s chain (the burn leg, or the single leg) was consumed.
-        bool fromLegConsumed;
-        /// The leg originating from `to`'s chain (the mint leg) was consumed. Set together with the other flag
-        /// on a single-leg settlement.
-        bool toLegConsumed;
-        /// Exact amount transferred, written by the first leg and repeated by the second.
-        uint256 executedAmount;
-        /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
-        bytes legWallet;
-    }
+    /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
+    /// stays classifiable against its stored status for good, which is what makes the emergency responses
+    /// possible.
+    ///
+    /// The fields come in two groups. The first twelve are written once, at issuance, and never change: the
+    /// terms of the movement. The last seven are the lifecycle: where the validation stands, what was released,
+    /// what a satellite actually executed.
+    struct Validation {
+        /* ----- Written once, at issuance ----- */
 
-    /// @dev What the compliance keeps of an issued validation, keyed by its id, for the slot lifecycle.
-    /// Immutable once written; what settlement moves lives in `ValidationState`.
-    struct ValidationRecord {
         /// EIP-712 struct hash of the issued `ComplianceValidation`, the identifier the satellite consumes.
         bytes32 hash;
         /// Final inclusive lower bound, so a settlement's executed amount can be classified.
         uint256 amountMin;
-        /// Final inclusive upper bound.
+        /// Final inclusive upper bound, what the reservation was taken at.
         uint256 amountMax;
         /// The satellite's hard deadline: no execution at or after it.
         uint64 expiry;
-        /// `expiry + reconciliationWindow`: past it, the slot may be released and the validation discarded.
+        /// `expiry + reconciliationWindow`: past it, the reservation may be released and the validation discarded.
         uint64 releaseAt;
         /// `from`'s satellite chain, keyed as `MessageTypesLib.chainKey` computes it.
         bytes32 fromChainKey;
         /// Same for `to`'s chain; the reference chain's own key for a native wallet.
         bytes32 toChainKey;
-        /// `keccak256` of the canonical `from` envelope, what a settlement leg's `from` is matched against.
+        /// `keccak256` of the canonical `from` envelope: what a settlement leg's `from` is matched against.
         bytes32 fromKey;
+        /// The sender's wallet envelope itself, kept so the reservation it holds on the token can be given back
+        /// without the caller having to supply it again.
+        bytes fromWallet;
         /// Same for `to`.
         bytes32 toKey;
         /// Both sides on distinct satellite chains: two legs are expected, the burn one and the mint one.
         bool twoLegs;
+        /// The identity `from` resolved to at issuance: whose pending amount was reserved and whose position
+        /// settlement debits.
+        address fromIdentity;
+        /// Same for `to`. Equal to `fromIdentity` on a relocation between one identity's wallets.
+        address toIdentity;
+
+        /* ----- Moved by the lifecycle ----- */
+
+        /// Both wallets belong to one identity, so nothing was ever reserved against the identities. Written
+        /// once at issuance: it is the one thing the status cannot say on its own.
+        bool relocation;
+        /// Where the validation stands. Which legs have arrived and what is still reserved are read off this;
+        /// `Expired` is never stored, it is derived from `Pending` and the clock.
+        ValidationStatus status;
+        /// Exact amount transferred, written by the first leg and repeated by the second.
+        uint256 executedAmount;
+        /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
+        bytes legWallet;
     }
 
     /// @dev Issues a `ComplianceValidation` for a movement out of a satellite wallet, toward another satellite
@@ -139,8 +164,8 @@ interface ITransferValidation {
     /// the reference chain is refused: the Lite that executes a validation must physically hold the position it
     /// moves, where a native balance stays free to leave between issuance and settlement. The caller derives the
     /// requested range from an amount and a slippage tolerance; the range is only ever narrowed: capped at `from`'s
-    /// bridged position, narrowed by every module declaring `BOUNDS` (skipped when both wallets belong to one
-    /// identity), then clamped.
+    /// bridged position less what is already pending out of it, then at the smallest `allowedAmount` any module
+    /// answers (skipped when both wallets belong to one identity).
     ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
@@ -179,7 +204,7 @@ interface ITransferValidation {
     /// @param duration The validity window in seconds.
     function setDefaultValidityWindow(uint64 duration) external;
 
-    /// @dev Sets how long T-REX keeps a slot reserved past `expiry` for a leg on that chain. Snapshot at issuance,
+    /// @dev Sets how long T-REX keeps a reservation past `expiry` for a leg on that chain. Snapshot at issuance,
     /// so a later change never moves an outstanding deadline.
     ///
     /// Requirements:
@@ -191,45 +216,54 @@ interface ITransferValidation {
     /// @param duration The window in seconds.
     function setReconciliationWindow(bytes32 chainKey, uint64 duration) external;
 
-    /// @dev Sets an optional global ceiling on `amountMax`, applied after every module narrowed the range.
+    /// @dev Stops or resumes issuing validations involving `chainKey`. A late reconciliation from that chain
+    /// whose executed amount breaches a rule pauses it too; lifting the pause is the explicit step after the
+    /// exception is resolved. Setting the state it already has changes nothing and emits nothing.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     ///
-    /// Emits `ValidationClampSet`.
-    /// @param maxAmount The ceiling, or zero to clear it.
-    function setValidationClamp(uint256 maxAmount) external;
-
-    /// @dev Stops issuing validations involving `chainKey`. Also triggered by a late reconciliation from it whose
-    /// recorded state breaches a rule; a late reconciliation that breaches nothing only warns.
-    ///
-    /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - The chain must not already be paused; otherwise reverts with `ValidationIssuancePaused`.
-    ///
-    /// Emits `ValidationIssuancePaused`.
+    /// Emits `ValidationIssuancePaused` or `ValidationIssuanceUnpaused` when the state changes.
     /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
-    function pauseValidationIssuance(bytes32 chainKey) external;
+    /// @param paused Whether issuance toward or from the chain is paused.
+    function setIssuancePaused(bytes32 chainKey, bool paused) external;
 
-    /// @dev Resumes issuance for `chainKey`, the explicit step after a late-reconciliation exception is resolved.
+    /// @dev Discards expired validations in a batch: releases their reservations, so the next issuance is
+    /// computed as if the pre-approved transfers never happened. Rollback is never automatic; this is the
+    /// keeper's job, a restricted role by design: see `RolesLib.VALIDATION_KEEPER` for why it is not
+    /// permissionless. The batch is atomic: one refused id reverts the whole call.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - The chain must be paused; otherwise reverts with `ValidationIssuanceNotPaused`.
+    /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
+    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
+    ///   awaiting a leg is refused whatever the clock says, since one satellite has already executed.
+    /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     ///
-    /// Emits `ValidationIssuanceUnpaused`.
-    /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
-    function unpauseValidationIssuance(bytes32 chainKey) external;
+    /// Emits `ValidationDiscarded` per id.
+    /// @param validationIds The validations to discard.
+    function discardExpiredValidations(uint256[] calldata validationIds) external;
+
+    /// @dev Gives up on a pair of which exactly one leg ever arrived, a second reconciliation window past
+    /// `releaseAt` so a merely slow leg still reconciles late instead. The burned amount goes back to the wallet
+    /// it left, whatever is still reserved is released, and the validation ends in `Resolved`, where any leg
+    /// arriving afterwards halts the token. When it was the mint leg that landed there is nothing on this chain
+    /// to return, so the chain that owes the burn is paused for issuance instead.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - The validation must be awaiting its other leg; otherwise reverts with `ValidationNotStuck`.
+    /// - `block.timestamp` must be past the second window; otherwise reverts with `ValidationNotYetResolvable`.
+    ///
+    /// Emits `ValidationResolved`.
+    function resolveStuckValidation(uint256 validationId) external;
 
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);
 
-    /// @dev The reconciliation window configured for `chainKey`, zero when unset.
+    /// @dev The reconciliation window configured for `chainKey`, zero when unset, which blocks issuance.
     /// @param chainKey The chain to look up.
     function reconciliationWindowOf(bytes32 chainKey) external view returns (uint64);
-
-    /// @dev The global ceiling on `amountMax`, zero when none.
-    function validationClamp() external view returns (uint256);
 
     /// @dev Whether issuance is paused for movements involving `chainKey`.
     /// @param chainKey The chain to look up.
@@ -238,25 +272,9 @@ interface ITransferValidation {
     /// @dev The last validation id issued; ids start at 1 and increase by one, so zero is never a valid id.
     function lastValidationId() external view returns (uint256);
 
-    /// @dev The record kept for `validationId`, all zeros when the id was never issued.
+    /// @dev Everything kept for `validationId`, all zeros when the id was never issued.
     /// @param validationId The validation to look up.
-    function validationOf(uint256 validationId) external view returns (ValidationRecord memory);
-
-    /// @dev Discards expired validations in a batch: releases their slots on every module declaring `SLOTS`, so
-    /// the next issuance is computed as if the pre-approved transfers never happened. Rollback is never
-    /// automatic; this is the keeper's job, a restricted role by design: see `RolesLib.VALIDATION_KEEPER` for
-    /// why it is not permissionless. The batch is atomic: one refused id reverts the whole call.
-    ///
-    /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
-    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. `LegConfirmed` is
-    ///   refused whatever the clock says.
-    /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
-    ///
-    /// Emits `ValidationDiscarded` per id.
-    /// @param validationIds The validations to discard.
-    function discardExpiredValidations(uint256[] calldata validationIds) external;
+    function validationOf(uint256 validationId) external view returns (Validation memory);
 
     /// @dev Where `validationId` stands: the stored status, or `Expired` for a stored `Pending` past `releaseAt`.
     ///
@@ -264,9 +282,5 @@ interface ITransferValidation {
     /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
     /// @param validationId The validation to look up.
     function statusOf(uint256 validationId) external view returns (ValidationStatus);
-
-    /// @dev The raw settlement state kept for `validationId`, all zeros when the id was never issued.
-    /// @param validationId The validation to look up.
-    function stateOf(uint256 validationId) external view returns (ValidationState memory);
 
 }

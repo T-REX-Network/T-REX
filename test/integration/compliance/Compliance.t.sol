@@ -34,7 +34,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Helper to deploy TestModule with proxy
     function _deployTestModuleWithProxy() internal returns (address moduleAddress) {
         TestModule moduleImplementation = new TestModule();
-        bytes memory initData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory initData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy moduleProxy = new ModuleProxy(address(moduleImplementation), initData);
         moduleAddress = address(moduleProxy);
     }
@@ -42,7 +42,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Helper to deploy ModuleNotPnP with proxy
     function _deployModuleNotPnPWithProxy() internal returns (address moduleAddress) {
         ModuleNotPnP moduleImplementation = new ModuleNotPnP();
-        bytes memory initData = abi.encodeWithSelector(ModuleNotPnP.initialize.selector);
+        bytes memory initData = abi.encodeCall(ModuleNotPnP.initialize, ());
         ModuleProxy moduleProxy = new ModuleProxy(address(moduleImplementation), initData);
         moduleAddress = address(moduleProxy);
     }
@@ -113,6 +113,12 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should revert when compliance is already bound and caller is not token
     function test_bindToken_RevertWhen_AlreadyBoundAndNotToken() public {
+        // A circulating token cannot be bound, so retire the supply first
+        vm.startPrank(agent);
+        token.burn(alice, 1000);
+        token.burn(bob, 500);
+        vm.stopPrank();
+
         // Deploy new compliance and bind it to token
         ModularCompliance newCompliance = _deployModularComplianceWithProxy(address(trexImplementationAuthority));
 
@@ -194,6 +200,12 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should bind the new compliance to the token when called as token
     function test_unbindToken_Success_WhenCalledByToken() public {
+        // A token with supply keeps its compliance, so the swap is only possible once nothing circulates.
+        vm.startPrank(agent);
+        token.burn(alice, token.balanceOf(alice));
+        token.burn(bob, token.balanceOf(bob));
+        vm.stopPrank();
+
         // Set new compliance (this triggers unbind on old compliance)
         // Event order: TokenUnbound (old) -> TokenBound (new) -> ComplianceAdded (token)
         vm.expectEmit(true, false, false, false, address(compliance));
@@ -243,9 +255,6 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should revert when module is not plug & play and compliance is not suitable
     function test_addModule_RevertWhen_ModuleNotPnPAndNotSuitable() public {
-        vm.prank(deployer);
-        compliance.bindToken(address(token));
-
         address moduleAddress = _deployModuleNotPnPWithProxy();
 
         vm.prank(deployer);
@@ -257,9 +266,6 @@ contract ComplianceTest is TREXSuiteTest {
 
     /// @notice Should bind when module is not plug & play but compliance is suitable
     function test_addModule_Success_WhenModuleNotPnPAndSuitable() public {
-        vm.prank(deployer);
-        compliance.bindToken(address(token));
-
         // Burn tokens to make compliance suitable
         vm.prank(agent);
         token.burn(alice, 1000);
@@ -446,8 +452,8 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.created(bob, 10);
     }
 
-    /// @notice Should call moduleMintAction on all bound modules
-    function test_created_Success_CallsModuleMintAction() public {
+    /// @notice Should call afterTransfer on every bound tracker, with a zero sender side
+    function test_created_Success_CallsAfterTransfer() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         address moduleAddress = _deployTestModuleWithProxy();
@@ -495,8 +501,8 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.destroyed(alice, 10);
     }
 
-    /// @notice Should call moduleBurnAction on all bound modules
-    function test_destroyed_Success_CallsModuleBurnAction() public {
+    /// @notice Should call afterTransfer on every bound tracker, with a zero recipient side
+    function test_destroyed_Success_CallsAfterTransfer() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         address moduleAddress = _deployTestModuleWithProxy();
@@ -547,9 +553,6 @@ contract ComplianceTest is TREXSuiteTest {
         // Use ModuleNotPnP which doesn't have a fallback function
         // So calls to non-existent functions will revert
         address moduleAddress = _deployModuleNotPnPWithProxy();
-
-        vm.prank(deployer);
-        compliance.bindToken(address(token));
 
         // Make compliance suitable for ModuleNotPnP by burning tokens
         vm.startPrank(agent);
@@ -702,7 +705,7 @@ contract ComplianceTest is TREXSuiteTest {
         vm.prank(deployer);
         compliance.addModule(moduleAddress);
 
-        // Block the module to make moduleCheck return false
+        // Block the module so the rule allows nothing
         bytes memory callData = abi.encodeWithSignature("blockModule(bool)", true);
         vm.prank(deployer);
         compliance.callModuleFunction(callData, moduleAddress);

@@ -2,7 +2,6 @@
 pragma solidity 0.8.30;
 
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 /// @notice A hostile module that reenters the token from its own post-operation hooks.
 /// @dev Models the M-06 threat: a module hook is an unguarded external call, so an early module can call
@@ -46,19 +45,11 @@ contract ReentrantModule is AbstractModuleUpgradeable {
         _fired = false;
     }
 
-    function moduleTransferAction(address, address, uint256) external override onlyComplianceCall {
+    function afterTransfer(TransferContext calldata) external override onlyComplianceCall {
         _reenter();
     }
 
-    function moduleMintAction(address, uint256) external override onlyComplianceCall {
-        _reenter();
-    }
-
-    /// @dev Declares every hook so the compliance dispatches to this module on transfer, mint and burn.
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.ALL;
-    }
-
+    /// @dev Named `TRACKER`, so the compliance dispatches to this module on a transfer, a mint and a burn.
     function canComplianceBind(address) external pure returns (bool) {
         return true;
     }
@@ -92,5 +83,11 @@ contract ReentrantModule is AbstractModuleUpgradeable {
     }
 
     function _authorizeUpgrade(address) internal override { }
+
+    /// @dev See {IModule-moduleTypes}.
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.TRACKER;
+    }
 
 }

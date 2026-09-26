@@ -73,16 +73,16 @@ import { IModularCompliance } from "../IModularCompliance.sol";
 import { IModule } from "./IModule.sol";
 
 /**
- * @dev Base for every compliance module.
+ * @dev Base for every compliance module: the binding handshake, the bind nonce, and a default for every
+ * question so a module writes only what it answers.
  *
- * The six dispatch points ship a default here, a no-op for the hooks, a pass for the checks and the
- * untouched range for the bounds, so a module implements only what it enforces. {IModule-moduleCapabilities} is left unimplemented on purpose:
- * it is the one member a module MUST declare.
+ * A module overrides {moduleTypes} to say what it is, then overrides the functions of those types. The
+ * defaults here are the neutral answer: no limit, spender allowed, nothing recorded. A module that names a
+ * type and forgets to override its function therefore lets everything through rather than reverting, which is
+ * why {moduleTypes} and the overrides are reviewed together.
  *
- * An override without its flag is never called, so the rule silently stops applying.
- *
- * Capabilities are immutable per implementation. An upgrade that changes them is a breaking change until
- * each bound compliance calls `refreshModuleCapabilities`.
+ * What a module names is read at binding. An upgrade that changes it takes effect once each bound compliance
+ * calls `resyncModuleTypes`.
  */
 abstract contract AbstractModuleUpgradeable is
     IModule,
@@ -160,73 +160,27 @@ abstract contract AbstractModuleUpgradeable is
     }
 
     /**
-     *  @dev See {IModule-moduleTransferAction}.
-     *  Default no-op: a module overrides it only when it declares `HOOK_TRANSFER`.
+     *  @dev See {IModule-afterTransfer}.
+     *  Default no-op: a module overrides it only when it names `TRACKER`.
      */
-    function moduleTransferAction(address, address, uint256) external virtual onlyComplianceCall { }
+    // solhint-disable-next-line no-empty-blocks
+    function afterTransfer(TransferContext calldata) external virtual onlyComplianceCall { }
 
     /**
-     *  @dev See {IModule-moduleMintAction}.
-     *  Default no-op: a module overrides it only when it declares `HOOK_MINT`.
+     *  @dev See {IModule-allowedAmount}.
+     *  Default no limit: a module overrides it only when it names `RULE`.
      */
-    function moduleMintAction(address, uint256) external virtual onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-moduleBurnAction}.
-     *  Default no-op: a module overrides it only when it declares `HOOK_BURN`.
-     */
-    function moduleBurnAction(address, uint256) external virtual onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-moduleCheck}.
-     *  Default pass: a module overrides it only when it declares `CHECK_TRANSFER`.
-     */
-    function moduleCheck(address, address, uint256, address) external view virtual returns (bool) {
-        return true;
+    function allowedAmount(TransferContext calldata) external view virtual returns (uint256) {
+        return type(uint256).max;
     }
 
     /**
      *  @dev See {IModule-moduleCheckSpender}.
-     *  Default pass: a module overrides it only when it declares `CHECK_SPENDER`.
+     *  Default allowed: a module overrides it only when it names `SPENDER`.
      */
-    function moduleCheckSpender(address, address, address, uint256, address) external view virtual returns (bool) {
+    function moduleCheckSpender(TransferContext calldata) external view virtual returns (bool) {
         return true;
     }
-
-    /**
-     *  @dev See {IModule-validationBounds}.
-     *  Default pass-through: a module overrides it only when it declares `BOUNDS`.
-     */
-    function validationBounds(
-        bytes calldata,
-        bytes calldata,
-        bytes calldata,
-        uint256 _currentMin,
-        uint256 _currentMax,
-        address
-    ) external view virtual returns (uint256 min, uint256 max) {
-        return (_currentMin, _currentMax);
-    }
-
-    /**
-     *  @dev See {IModule-reserveSlot}.
-     *  Default no-op: a module overrides it only when it declares `SLOTS`.
-     */
-    function reserveSlot(uint256, bytes calldata, bytes calldata, uint256) external virtual onlyComplianceCall { }
-
-    /**
-     *  @dev See {IModule-commitSlot}.
-     *  Default no-op: a module overrides it only when it declares `SLOTS`.
-     */
-    function commitSlot(uint256, uint256) external virtual onlyComplianceCall returns (bool) {
-        return false;
-    }
-
-    /**
-     *  @dev See {IModule-releaseSlot}.
-     *  Default no-op: a module overrides it only when it declares `SLOTS`.
-     */
-    function releaseSlot(uint256) external virtual onlyComplianceCall { }
 
     /**
      *  @dev See {IModule-isComplianceBound}.

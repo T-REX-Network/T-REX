@@ -86,6 +86,20 @@ contract DomainsTest is Test {
         );
     }
 
+    function test_complianceLedgerNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.ComplianceLedger"),
+            0x37065f79446a9096383af794d27f19e665b7dd5afcf9e812ca702bcc08bee600
+        );
+    }
+
+    function test_maxBalancePerIdentityModuleNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.MaxBalancePerIdentityModule"),
+            0xb46b06d4ef5f052799f86ec8b39b25cbd5647dec9a0f243c659eefdabbf28400
+        );
+    }
+
     function test_trexMessagingNamespace() public pure {
         assertEq(
             Utils.erc7201("erc3643.storage.TREXMessaging"),

@@ -256,7 +256,11 @@ contract IdentityRegistryStorage is
     }
 
     /// @dev Asks the IdentityFactory of each bound registry in turn and returns the first identity found,
-    ///  or the zero identity when none knows the wallet. The factory keys wallets by ERC-7930
+    ///  or the zero identity when none knows the wallet. A revoked binding still answers: this is the
+    ///  attribution read behind `identity` and `contains`, and a wallet that holds tokens must keep its owner
+    ///  after the investor revokes it, so the compliance can still debit the right position on a burn, a
+    ///  recovery or a forced transfer. Whether the wallet may still act is the admission read, `isVerified`,
+    ///  which asks the factory for the status itself. The factory keys wallets by ERC-7930
     ///  interoperable address, built with `formatEvmV1(block.chainid, wallet)`, so it resolves EVM wallets
     ///  on this chain only. Wallets of another chain type, or the same wallet on another chain, are out of
     ///  scope for this fallback and resolve to the zero identity; bind them locally instead.
@@ -264,7 +268,8 @@ contract IdentityRegistryStorage is
         bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
         address[] memory registries = _linkedIdentityRegistries();
         for (uint256 i = 0; i < registries.length && address(identity) == address(0); i++) {
-            identity = IIdentity(ITREXRegistry(registries[i]).identityFactory().getIdentity(account));
+            (address resolved,) = ITREXRegistry(registries[i]).identityFactory().getIdentityIncludingRevoked(account);
+            identity = IIdentity(resolved);
         }
     }
 

@@ -1,40 +1,53 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
-import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
+import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 
-/**
- * @dev Shared base for the capability routing fixtures.
- *
- * Each fixture declares one capability and overrides the matching dispatch function, so a test can assert
- * it was reached where it declared and — the point — nowhere else. Hooks record invocations in counters;
- * the checks are `view` so they expose a settable verdict instead.
- */
+/// @dev Base for the dispatch fixtures: it counts what the compliance called and remembers the last context,
+///      so a test asserts on what a module was actually asked rather than on a mock's internals.
 abstract contract RecordingModule is AbstractModuleUpgradeable {
 
-    uint256 public transferHookCalls;
-    uint256 public mintHookCalls;
-    uint256 public burnHookCalls;
+    uint256 public transferActionCalls;
+    uint256 public mintActionCalls;
+    uint256 public burnActionCalls;
 
-    /// @dev Verdict of whichever check this fixture implements. Set in `initialize`, not through a field
+    /// @dev What the fixture answers from `allowedAmount`. Set in `initialize`, not through a field
     ///      initializer: those run in the implementation's constructor and never reach proxy storage.
-    bool internal _allow;
+    uint256 internal _allowed;
+
+    /// @dev Whether the fixture allows a spender. Same reason.
+    bool internal _spenderAllowed;
+
+    /// @dev The last context and amount that reached one of the action hooks.
+    TransferContext public lastContext;
+    uint256 public lastAmount;
 
     function initialize() external initializer {
         __AbstractModule_init();
-        _allow = true;
+        _allowed = type(uint256).max;
+        _spenderAllowed = true;
     }
 
+    /// @dev `true` allows everything, `false` refuses everything: both the amount a rule answers and the
+    ///      verdict a spender policy gives, so one call covers whichever types the fixture names.
     function setAllow(bool allow) external {
-        _allow = allow;
+        _allowed = allow ? type(uint256).max : 0;
+        _spenderAllowed = allow;
     }
 
-    /// @dev total invocations across the three hooks, for a single "never called" assertion
+    function setAllowedAmount(uint256 allowed) external {
+        _allowed = allowed;
+    }
+
+    function setSpenderAllowed(bool allowed) external {
+        _spenderAllowed = allowed;
+    }
+
+    /// @dev Total invocations across the three action hooks, for a single "never called" assertion.
     function totalHookCalls() external view returns (uint256) {
-        return transferHookCalls + mintHookCalls + burnHookCalls;
+        return transferActionCalls + mintActionCalls + burnActionCalls;
     }
 
     function canComplianceBind(address) external pure returns (bool) {
@@ -49,261 +62,304 @@ abstract contract RecordingModule is AbstractModuleUpgradeable {
 
     function _authorizeUpgrade(address) internal override { }
 
-}
-
-/// @dev Declares the mint hook only.
-contract MintOnlyModule is RecordingModule {
-
-    function moduleMintAction(address, uint256) external override onlyComplianceCall {
-        mintHookCalls++;
+    /// @dev Counts the movement under the hook it would have been before the three merged into one, so the
+    ///      suites keep asserting "the mint hook fired" rather than "a hook fired".
+    function _countAndRecord(TransferContext calldata ctx) internal {
+        if (ctx.fromWallet == bytes32(0)) mintActionCalls++;
+        else if (ctx.toWallet == bytes32(0)) burnActionCalls++;
+        else transferActionCalls++;
+        lastContext = ctx;
+        lastAmount = ctx.amountMax;
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.HOOK_MINT;
+}
+
+/// @dev A rule and nothing else.
+contract RuleOnlyModule is RecordingModule {
+
+    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+        return _allowed;
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.RULE;
     }
 
     function name() external pure override returns (string memory) {
-        return "MintOnlyModule";
+        return "RuleOnlyModule";
     }
 
 }
 
-/// @dev Declares the burn hook only.
-contract BurnOnlyModule is RecordingModule {
+/// @dev A spender policy and nothing else.
+contract SpenderOnlyModule is RecordingModule {
 
-    function moduleBurnAction(address, uint256) external override onlyComplianceCall {
-        burnHookCalls++;
+    function moduleCheckSpender(TransferContext calldata) external view override returns (bool) {
+        return _spenderAllowed;
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.HOOK_BURN;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.SPENDER;
     }
 
     function name() external pure override returns (string memory) {
-        return "BurnOnlyModule";
+        return "SpenderOnlyModule";
     }
 
 }
 
-/// @dev Declares the transfer hook only.
-contract TransferHookOnlyModule is RecordingModule {
+/// @dev A tracker and nothing else: records each of the three actions separately, so a test can tell a mint
+///      from a burn from a transfer.
+contract TrackerOnlyModule is RecordingModule {
 
-    function moduleTransferAction(address, address, uint256) external override onlyComplianceCall {
-        transferHookCalls++;
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.HOOK_TRANSFER;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.TRACKER;
     }
 
     function name() external pure override returns (string memory) {
-        return "TransferHookOnlyModule";
+        return "TrackerOnlyModule";
     }
 
 }
 
-/// @dev Declares the transfer check only.
-contract CheckTransferOnlyModule is RecordingModule {
+/// @dev Both vets a movement and keeps a count of it, the shape of a rule with a counter of its own.
+contract RuleAndTrackerModule is RecordingModule {
 
-    function moduleCheck(address, address, uint256, address) external view override returns (bool) {
-        return _allow;
+    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+        return _allowed;
     }
 
-    function moduleCapabilities() external pure virtual returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER;
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](2);
+        types[0] = ModuleType.RULE;
+        types[1] = ModuleType.TRACKER;
     }
 
     function name() external pure override returns (string memory) {
-        return "CheckTransferOnlyModule";
+        return "RuleAndTrackerModule";
     }
 
 }
 
-/// @dev Declares the transfer check and the transfer hook, the shape of a module that both vets a
-///      transfer and keeps state about it.
-contract CheckAndTransferHookModule is RecordingModule {
+/// @dev Names all three types, so a compliance routes every question at it.
+contract AllTypesModule is RecordingModule {
 
-    function moduleTransferAction(address, address, uint256) external override onlyComplianceCall {
-        transferHookCalls++;
+    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+        return _allowed;
     }
 
-    function moduleCheck(address, address, uint256, address) external view override returns (bool) {
-        return _allow;
+    function moduleCheckSpender(TransferContext calldata) external view override returns (bool) {
+        return _spenderAllowed;
     }
 
-    function moduleCapabilities() external pure virtual returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER | ModuleCapabilitiesLib.HOOK_TRANSFER;
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](3);
+        types[0] = ModuleType.RULE;
+        types[1] = ModuleType.SPENDER;
+        types[2] = ModuleType.TRACKER;
     }
 
     function name() external pure override returns (string memory) {
-        return "CheckAndTransferHookModule";
+        return "AllTypesModule";
     }
 
 }
 
-/// @dev Declares the transfer check and the mint hook, the shape of a supply-limit style module.
-contract CheckAndMintHookModule is RecordingModule {
+/// @dev Names no type at all: binding it must be refused.
+contract NoTypeModule is RecordingModule {
 
-    function moduleMintAction(address, uint256) external override onlyComplianceCall {
-        mintHookCalls++;
-    }
-
-    function moduleCheck(address, address, uint256, address) external view override returns (bool) {
-        return _allow;
-    }
-
-    function moduleCapabilities() external pure virtual returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER | ModuleCapabilitiesLib.HOOK_MINT;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](0);
     }
 
     function name() external pure override returns (string memory) {
-        return "CheckAndMintHookModule";
+        return "NoTypeModule";
     }
 
 }
 
-/// @dev Declares the spender check only.
-contract SpenderCheckOnlyModule is RecordingModule {
+/// @dev Names the same type twice: binding it must be refused.
+contract DuplicateTypeModule is RecordingModule {
 
-    function moduleCheckSpender(address, address, address, uint256, address) external view override returns (bool) {
-        return _allow;
-    }
-
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_SPENDER;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](2);
+        types[0] = ModuleType.RULE;
+        types[1] = ModuleType.RULE;
     }
 
     function name() external pure override returns (string memory) {
-        return "SpenderCheckOnlyModule";
+        return "DuplicateTypeModule";
     }
 
 }
 
-/// @dev Implements a rejecting transfer check but declares only the mint hook, so the compliance
-///      must never consult it. Covers the desync direction that silently drops a rule.
-contract UndeclaredCheckModule is RecordingModule {
+/// @dev Writes to its own storage inside `allowedAmount`. It cannot inherit the base, where the function is a
+///      view, so it reproduces the plumbing by hand; the compliance calls it under `staticcall`, so every
+///      movement it is consulted on must revert.
+contract WritingRuleModule {
 
-    function moduleMintAction(address, uint256) external override onlyComplianceCall {
-        mintHookCalls++;
+    uint256 public writes;
+
+    mapping(address => bool) private _bound;
+
+    function bindCompliance(address compliance) external {
+        _bound[compliance] = true;
     }
 
-    function moduleCheck(address, address, uint256, address) external pure override returns (bool) {
-        return false;
+    function unbindCompliance(address compliance) external {
+        _bound[compliance] = false;
     }
 
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.HOOK_MINT;
+    function allowedAmount(IModule.TransferContext calldata) external returns (uint256) {
+        writes++;
+        return type(uint256).max;
+    }
+
+    function moduleTypes() external pure returns (IModule.ModuleType[] memory types) {
+        types = new IModule.ModuleType[](1);
+        types[0] = IModule.ModuleType.RULE;
+    }
+
+    function isComplianceBound(address compliance) external view returns (bool) {
+        return _bound[compliance];
+    }
+
+    function canComplianceBind(address) external pure returns (bool) {
+        return true;
+    }
+
+    function isPlugAndPlay() external pure returns (bool) {
+        return true;
+    }
+
+    function name() external pure returns (string memory) {
+        return "WritingRuleModule";
+    }
+
+}
+
+/// @dev Reads the ledger: refuses a recipient whose position plus pending reaches the cap. The shape of a
+///      distribution rule with no ledger of its own.
+/// @dev A rule keyed on the sender: the identity class every lockup, holding floor and outflow limit
+///      belongs to. It exists to prove such a rule is asked at all, so a wallet the registry no longer
+///      attributes cannot walk past it by presenting a zero sender.
+contract LockedSenderModule is RecordingModule {
+
+    /// Identities that may not send. Keyed by compliance, as every module setting is.
+    mapping(address compliance => mapping(address identity => bool)) public lockedOf;
+
+    function setLocked(address identity, bool locked) external onlyComplianceCall {
+        lockedOf[msg.sender][identity] = locked;
+    }
+
+    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+        if (ctx.fromIdentity == address(0)) return type(uint256).max;
+        return lockedOf[ctx.compliance][ctx.fromIdentity] ? 0 : type(uint256).max;
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.RULE;
     }
 
     function name() external pure override returns (string memory) {
-        return "UndeclaredCheckModule";
+        return "LockedSenderModule";
     }
 
 }
 
-/// @dev Declares nothing: must be rejected at binding time.
-contract ZeroCapabilityModule is RecordingModule {
+contract CappedRecipientModule is RecordingModule {
 
-    function moduleCapabilities() external pure returns (uint256) {
+    /// Zero means no cap.
+    mapping(address compliance => uint256) public capOf;
+
+    function setCap(uint256 cap) external onlyComplianceCall {
+        capOf[msg.sender] = cap;
+    }
+
+    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+        if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
+        uint256 cap = capOf[ctx.compliance];
+        if (cap == 0) return type(uint256).max;
+        IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
+        uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);
+        return held >= cap ? 0 : cap - held;
+    }
+
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](2);
+        types[0] = ModuleType.RULE;
+        types[1] = ModuleType.TRACKER;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "CappedRecipientModule";
+    }
+
+}
+
+/// @dev A rule that also keeps a count of mints, the shape of a supply-limit rule. Its transfer and burn
+///      actions stay at the base default, so a mint is the only movement it records.
+contract RuleAndMintTrackerModule is RecordingModule {
+
+    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+        return _allowed;
+    }
+
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](2);
+        types[0] = ModuleType.RULE;
+        types[1] = ModuleType.TRACKER;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "RuleAndMintTrackerModule";
+    }
+
+}
+
+/// @dev Implements a refusing `allowedAmount` but names only `TRACKER`, so the compliance must never consult
+///      it for an amount. Covers the desync direction that would silently drop a rule.
+contract UndeclaredRuleModule is RecordingModule {
+
+    function allowedAmount(TransferContext calldata) external pure override returns (uint256) {
         return 0;
     }
 
-    function name() external pure override returns (string memory) {
-        return "ZeroCapabilityModule";
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
     }
 
-}
-
-/// @dev Declares a bit outside the defined mask: must be rejected at binding time.
-contract UndefinedBitModule is RecordingModule {
-
-    function moduleCapabilities() external pure returns (uint256) {
-        return 1 << 7;
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.TRACKER;
     }
 
     function name() external pure override returns (string memory) {
-        return "UndefinedBitModule";
-    }
-
-}
-
-/// @dev {CheckTransferOnlyModule} declaring every dispatch point instead of the one it implements:
-///      the pre-capability behaviour, where a compliance called every module everywhere. Same body as
-///      its parent, so a measurement against it isolates the routing from the module's own work.
-contract UngatedCheckTransferOnlyModule is CheckTransferOnlyModule {
-
-    function moduleCapabilities() external pure override returns (uint256) {
-        return ModuleCapabilitiesLib.ALL;
-    }
-
-}
-
-/// @dev {CheckAndTransferHookModule} declaring every dispatch point. See {UngatedCheckTransferOnlyModule}.
-contract UngatedCheckAndTransferHookModule is CheckAndTransferHookModule {
-
-    function moduleCapabilities() external pure override returns (uint256) {
-        return ModuleCapabilitiesLib.ALL;
-    }
-
-}
-
-/// @dev {CheckAndMintHookModule} declaring every dispatch point. See {UngatedCheckTransferOnlyModule}.
-contract UngatedCheckAndMintHookModule is CheckAndMintHookModule {
-
-    function moduleCapabilities() external pure override returns (uint256) {
-        return ModuleCapabilitiesLib.ALL;
-    }
-
-}
-
-/// @dev Implements no dispatch function but claims every capability, so a compliance routes all
-///      five points at it. Used to check that a declared-but-unimplemented flag hits the harmless
-///      base defaults rather than reverting.
-contract AllCapabilitiesModule is RecordingModule {
-
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.ALL;
-    }
-
-    function name() external pure override returns (string memory) {
-        return "AllCapabilitiesModule";
-    }
-
-}
-
-/**
- * @dev Keys its aggregate by identity rather than by wallet, the shape issue #70 is about.
- *
- * Both endpoints are resolved through the bound token's identity registry at hook time, so the module only
- * stays correct if the token notifies compliance while both wallets still resolve to the identities that
- * hold and receive the tokens. Debiting an unknown identity underflows, which is what makes the corruption
- * visible in a test.
- */
-contract IdentityAggregateModule is RecordingModule {
-
-    /// @dev tokens currently attributed to each identity
-    mapping(address identity => uint256 balance) public aggregate;
-
-    /// @dev Credits an identity directly, so a test can seed the pre-recovery state.
-    function seed(address identity, uint256 value) external {
-        aggregate[identity] += value;
-    }
-
-    function moduleTransferAction(address from, address to, uint256 value) external override onlyComplianceCall {
-        transferHookCalls++;
-        IERC3643 token = IERC3643(IModularCompliance(msg.sender).getTokenBound());
-        address fromId = address(token.identityRegistry().identity(from));
-        address toId = address(token.identityRegistry().identity(to));
-        aggregate[fromId] -= value;
-        aggregate[toId] += value;
-    }
-
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.HOOK_TRANSFER;
-    }
-
-    function name() external pure override returns (string memory) {
-        return "IdentityAggregateModule";
+        return "UndeclaredRuleModule";
     }
 
 }

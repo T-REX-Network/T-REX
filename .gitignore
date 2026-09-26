@@ -29,3 +29,5 @@ emv-*/
 .last_confs/
 certora_internal/
 .DS_Store
+claudedocs/
+.claude/

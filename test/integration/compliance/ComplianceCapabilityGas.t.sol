@@ -8,29 +8,27 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import {
-    CheckAndMintHookModule,
-    CheckAndTransferHookModule,
-    CheckTransferOnlyModule,
+    AllTypesModule,
     RecordingModule,
-    UngatedCheckAndMintHookModule,
-    UngatedCheckAndTransferHookModule,
-    UngatedCheckTransferOnlyModule
+    RuleAndMintTrackerModule,
+    RuleAndTrackerModule,
+    RuleOnlyModule
 } from "test/integration/mocks/CapabilityModules.sol";
 
-/// @dev Before/after evidence for capability-gated dispatch, two eight-module sets on the same token:
-/// a realistic set where all eight vet transfers, two keep transfer state and one keeps mint state, and
-/// a baseline of the very same modules declaring every dispatch point — the pre-capability behaviour,
-/// where the compliance called every module everywhere.
+/// @dev Before/after evidence for type-filtered dispatch, two eight-module sets on the same token: a
+/// realistic set where all eight are rules, two also track transfers and one also tracks mints, and a
+/// baseline of modules naming every type, which is what a compliance that called every module everywhere
+/// would cost.
 ///
-/// The two sets differ only in what they declare, never in what they do, so the delta is the routing
+/// The two sets differ only in the types they name, never in what they do, so the delta is the routing
 /// and nothing else. Each operation also runs once un-measured first, so both are timed against the
 /// same warm state.
 contract ComplianceCapabilityGasTest is TREXSuiteTest {
 
     uint256 private constant MODULE_COUNT = 8;
     uint256 private constant MODULE_CAP = 25;
-    uint256 private constant DISPATCH_FIXED_READS = 1;
-    uint256 private constant DISPATCH_READS_PER_MODULE = 3;
+    uint256 private constant DISPATCH_FIXED_READS = 3;
+    uint256 private constant DISPATCH_READS_PER_MODULE = 2;
 
     ModularCompliance internal mc;
 
@@ -68,7 +66,7 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
 
     /// @notice Binding pays for the routing the transaction path stops paying for.
     function test_gas_Success_WhenReportingTheBindCost() public {
-        address module = _deploy(address(new CheckTransferOnlyModule()));
+        address module = _deploy(address(new RuleOnlyModule()));
 
         vm.prank(deployer);
         uint256 before = gasleft();
@@ -84,7 +82,7 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
     function test_gas_Success_WhenLookupDoesNotGrowWithTheModuleCount() public {
         address[] memory modules = new address[](MODULE_CAP);
         for (uint256 i = 0; i < MODULE_CAP; i++) {
-            modules[i] = _deploy(address(new CheckTransferOnlyModule()));
+            modules[i] = _deploy(address(new RuleOnlyModule()));
         }
         _bindAll(modules);
 
@@ -102,7 +100,7 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
     }
 
     /// @notice Dispatch touches a fixed number of slots per bound module and nothing beyond them.
-    function test_gas_Success_WhenDispatchReadsThreeSlotsPerModule() public {
+    function test_gas_Success_WhenDispatchReadsAFixedNumberOfSlotsPerModule() public {
         _bindAll(_deployRealisticSet());
         uint256 eight = _dispatchReads();
 
@@ -114,9 +112,11 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
         console.log("with eight bound:", eight);
         console.log("with  four bound:", four);
 
-        // per module the map costs the array bounds check on the key length, the key itself, and the
-        // value it maps to. The fixed read is the length behind `length()`. The proxy adds none of its
-        // own: a stock OZ `BeaconProxy` holds its beacon in an immutable, not in storage
+        // Per module the set costs the array bounds check on the key length and the key itself. Nothing is
+        // read to decide whether to call it: it is in this set because it named the type, so the filtering
+        // already happened at binding. The fixed reads are the set's own length and the two the compliance
+        // pays to reach the set of one type. The proxy adds none of its own: a stock OZ `BeaconProxy` holds
+        // its beacon in an immutable, not in storage
         assertEq(eight, DISPATCH_FIXED_READS + DISPATCH_READS_PER_MODULE * MODULE_COUNT, "dispatch reads changed");
         assertEq(four, DISPATCH_FIXED_READS + DISPATCH_READS_PER_MODULE * (MODULE_COUNT / 2), "dispatch reads changed");
         assertEq(
@@ -129,7 +129,7 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
     function _deployHalfSet() private returns (address[] memory modules) {
         modules = new address[](MODULE_COUNT / 2);
         for (uint256 i = 0; i < modules.length; i++) {
-            modules[i] = _deploy(address(new CheckTransferOnlyModule()));
+            modules[i] = _deploy(address(new RuleOnlyModule()));
         }
     }
 
@@ -203,22 +203,22 @@ contract ComplianceCapabilityGasTest is TREXSuiteTest {
     ///      but every transaction calls all of them everywhere.
     function _deployBaselineSet() private returns (address[] memory modules) {
         modules = new address[](MODULE_COUNT);
-        modules[0] = _deploy(address(new UngatedCheckAndMintHookModule()));
-        modules[1] = _deploy(address(new UngatedCheckAndTransferHookModule()));
-        modules[2] = _deploy(address(new UngatedCheckAndTransferHookModule()));
+        modules[0] = _deploy(address(new AllTypesModule()));
+        modules[1] = _deploy(address(new AllTypesModule()));
+        modules[2] = _deploy(address(new AllTypesModule()));
         for (uint256 i = 3; i < MODULE_COUNT; i++) {
-            modules[i] = _deploy(address(new UngatedCheckTransferOnlyModule()));
+            modules[i] = _deploy(address(new AllTypesModule()));
         }
     }
 
     /// @dev All eight vet transfers; two also keep transfer state, one also keeps mint state.
     function _deployRealisticSet() private returns (address[] memory modules) {
         modules = new address[](MODULE_COUNT);
-        modules[0] = _deploy(address(new CheckAndMintHookModule()));
-        modules[1] = _deploy(address(new CheckAndTransferHookModule()));
-        modules[2] = _deploy(address(new CheckAndTransferHookModule()));
+        modules[0] = _deploy(address(new RuleAndMintTrackerModule()));
+        modules[1] = _deploy(address(new RuleAndTrackerModule()));
+        modules[2] = _deploy(address(new RuleAndTrackerModule()));
         for (uint256 i = 3; i < MODULE_COUNT; i++) {
-            modules[i] = _deploy(address(new CheckTransferOnlyModule()));
+            modules[i] = _deploy(address(new RuleOnlyModule()));
         }
     }
 

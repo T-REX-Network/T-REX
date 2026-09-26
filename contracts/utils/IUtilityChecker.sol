@@ -69,6 +69,9 @@ interface IUtilityChecker {
 
     struct ComplianceCheckDetails {
         string moduleName;
+        /// The largest amount the module allows for this movement, `type(uint256).max` for no limit.
+        uint256 allowedAmount;
+        /// Whether the requested amount is within it.
         bool pass;
     }
 
@@ -115,7 +118,7 @@ interface IUtilityChecker {
     /// @param _from Address of the sender.
     /// @param _to Address of the receiver.
     /// @param _value Amount of tokens to transfer.
-    /// @return _details Array of struct with module name and result of the `moduleCheck` call.
+    /// @return _details Array of struct with module name, the amount it allows and whether the value fits.
     function getTransferDetails(address _token, address _from, address _to, uint256 _value)
         external
         view

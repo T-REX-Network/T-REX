@@ -117,6 +117,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         mapping(uint256 validationId => uint256) inTransit;
         /// @dev Sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
         uint256 totalInTransit;
+        /// @dev What open validations may still draw from each satellite wallet. Kept here, beside the balance
+        ///  it reserves against, so `availableOf` is one subtraction rather than two contracts agreeing: the
+        ///  compliance reserves at issuance and gives back at settlement or discard, and `holdInTransit` turns a
+        ///  reservation straight into a hold, which is why nothing has to be released in between.
+        mapping(bytes32 walletKey => uint256) reservedForValidations;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXToken")) - 1)) & ~bytes32(uint256(0xff));
@@ -239,9 +244,12 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId) external whenNotPaused {
+    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId, uint256 reserved)
+        external
+        whenNotPaused
+    {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        _holdInTransit(from, amount, validationId);
+        _holdInTransit(from, amount, validationId, reserved);
     }
 
     /* ----- Ledger Views ----- */
@@ -275,6 +283,46 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
+    function returnHeldInTransit(bytes calldata to, uint256 validationId) external whenNotPaused {
+        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _returnHeldInTransit(to, validationId);
+    }
+
+    /// @inheritdoc IToken
+    function reservedOf(bytes calldata wallet) external view returns (uint256) {
+        return _tokenStorage().reservedForValidations[WalletKeyLib.canonicalKey(wallet)];
+    }
+
+    /// @inheritdoc IToken
+    function availableOf(bytes calldata wallet) public view returns (uint256) {
+        TokenStorage storage s = _tokenStorage();
+        bytes32 key = WalletKeyLib.canonicalKey(wallet);
+        uint256 balance = s.bridgedBalance[key];
+        uint256 reserved = s.reservedForValidations[key];
+        return reserved < balance ? balance - reserved : 0;
+    }
+
+    /// @inheritdoc IToken
+    /// @dev No pause guard: a reservation moves no tokens, it only records what a validation may later draw.
+    ///  Issuance itself is allowed while the token is paused, and the reservation has to follow it, or a paused
+    ///  token would issue validations with nothing held against the wallet they draw from.
+    function reserveForValidation(bytes calldata wallet, uint256 amount) external {
+        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        bytes32 key = WalletKeyLib.satelliteKey(wallet);
+        _tokenStorage().reservedForValidations[key] += amount;
+
+        emit EventsLib.ReservedForValidation(key, wallet, amount);
+    }
+
+    /// @inheritdoc IToken
+    /// @dev No pause guard, for the reason `reserveForValidation` gives: a discard while the token is paused
+    ///  must still give the wallet its room back.
+    function releaseFromValidation(bytes calldata wallet, uint256 amount) external {
+        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _releaseFromValidation(WalletKeyLib.canonicalKey(wallet), wallet, amount);
+    }
+
+    /// @inheritdoc IToken
     function totalBridged() external view returns (uint256) {
         return _tokenStorage().totalBridged;
     }
@@ -292,8 +340,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Transfer Functions ----- */
 
     /// @inheritdoc IERC20
-    /// @dev The bound modules vet the spender before the allowance is spent: a module declaring
-    ///      `CHECK_SPENDER` may refuse the caller even when the transfer itself would comply.
+    /// @dev The bound modules vet the spender before the allowance is spent: a `SPENDER` module may refuse
+    ///      the caller even when the transfer itself would comply.
     ///      A direct {transfer} never reaches this path, so it carries no spender check and no extra gas.
     /// @param from address the tokens are taken from
     /// @param to address the tokens are sent to
@@ -374,16 +422,49 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  leg of a cross-chain validation landed, the mint leg has not. The amount stays bridged and stays the
     ///  sender's; only the wallet no longer holds it, so nothing can be issued or recalled against tokens the
     ///  satellite already burned. One hold per validation.
-    function _holdInTransit(bytes memory fromWallet, uint256 amount, uint256 validationId) internal {
+    /// @dev Turns what a validation reserved against the wallet into an in-transit hold, in one step: the
+    ///  tokens leave the wallet, so the reservation that was standing in for them is given back at the same
+    ///  time and there is nothing to release separately.
+    /// @param reserved what this validation had reserved against the wallet, released as the hold is taken
+    function _holdInTransit(bytes memory fromWallet, uint256 amount, uint256 validationId, uint256 reserved) internal {
         bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
 
         TokenStorage storage s = _tokenStorage();
         require(s.inTransit[validationId] == 0, ErrorsLib.TransitAlreadyHeld(validationId));
+        if (reserved != 0) _releaseFromValidation(fromKey, fromWallet, reserved);
         _debitBridged(s, fromWallet, fromKey, amount);
         s.inTransit[validationId] = amount;
         s.totalInTransit += amount;
 
         emit EventsLib.HeldInTransit(fromKey, validationId, fromWallet, amount);
+    }
+
+    /// @dev Puts a held amount back on the wallet it was burned from. The mirror of {_holdInTransit}: the
+    ///  movement is unwound where it started instead of completed, so `totalSupply` and `totalBridged` do not
+    ///  move, only the hold becomes a balance again.
+    function _returnHeldInTransit(bytes memory toWallet, uint256 validationId) internal {
+        TokenStorage storage s = _tokenStorage();
+        uint256 held = s.inTransit[validationId];
+        require(held != 0, ErrorsLib.NothingInTransit(validationId));
+
+        bytes32 toKey = WalletKeyLib.satelliteKey(toWallet);
+        delete s.inTransit[validationId];
+        s.totalInTransit -= held;
+        s.bridgedBalance[toKey] += held;
+
+        emit EventsLib.ReturnedInTransit(toKey, validationId, toWallet, held);
+    }
+
+    /// @dev Gives back what a validation reserved against a wallet. Floors at zero rather than reverting: the
+    ///  compliance is the only caller and releases each reservation once, so a shortfall would mean its own
+    ///  bookkeeping is wrong, and blocking a settlement over it would strand the movement.
+    function _releaseFromValidation(bytes32 key, bytes memory wallet, uint256 amount) private {
+        mapping(bytes32 => uint256) storage reserved = _tokenStorage().reservedForValidations;
+        uint256 held = reserved[key];
+        uint256 released = held < amount ? held : amount;
+        reserved[key] = held - released;
+
+        emit EventsLib.ReleasedFromValidation(key, wallet, released);
     }
 
     /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
@@ -495,11 +576,16 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  `isVerified` is called on every transfer, so the target must advertise the standard interface
     ///  and share this token's authority. `onlySharedAuthority` is a misconfiguration guard only:
     ///  `authority()` is spoofable.
+    ///
+    ///  A token with supply keeps its registry. The compliance attributes every position through it, so a
+    ///  registry that binds wallets differently would leave positions under identities no wallet resolves
+    ///  to any more. Wallet bindings are changed in the registry the token has, never by swapping it.
     function _setIdentityRegistry(address identityRegistryAddress)
         internal
         override
         onlySharedAuthority(identityRegistryAddress)
     {
+        require(address(_getIdentityRegistry()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
         require(
             ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
             ErrorsLib.InvalidIdentityRegistry()
@@ -511,7 +597,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev Adds T-REX validation and the bind/unbind handshake to the standard setter. A compliance
     ///  already bound to a different token would make every transferred/created/destroyed hook revert
     ///  (onlyBoundedToken), silently breaking transfers after the swap.
+    ///
+    ///  A token with supply keeps its compliance. The compliance keeps every identity's position from the
+    ///  token's first mint and has no seeding step, so a new one would start every holder at zero and every
+    ///  rule over the ledger would be wrong from the first transfer. A circulating token's compliance is
+    ///  upgraded in place through its beacon, or changed through its modules.
     function _setCompliance(address complianceAddress) internal override onlySharedAuthority(complianceAddress) {
+        require(address(_getCompliance()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
+
         // Checked before getTokenBound() so a wrong contract gives a named error.
         require(
             ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),

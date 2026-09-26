@@ -8,9 +8,9 @@
  *   - token (un)binding follows the owner / token-self-bind policy (MC-4).
  *
  * Module callbacks (IModule.*) and the AccessManager (`hasRole`, `canCall`) are summarised; the module set
- * itself is real state inside the EnumerableSet. `moduleCapabilities` is summarised as every defined bit,
- * so binding always succeeds and no dispatch point is skipped: these rules are about access control, not
- * about capability routing.
+ * itself is real state inside the EnumerableSet. `moduleTypes` is left NONDET, so a module may land in any
+ * of the three type lists and no dispatch point is skipped: these rules are about access control, not
+ * about type routing, which the Foundry dispatch suite covers.
  *
  * Run:  certoraRun certora/confs/ModularCompliance.conf
  */
@@ -34,13 +34,11 @@ methods {
     function moduleCount()          external returns (uint256) envfree;
 
     // ----- IModule callbacks: opaque -----
-    function _.moduleTransferAction(address,address,uint256) external => NONDET;
-    function _.moduleMintAction(address,uint256)             external => NONDET;
-    function _.moduleBurnAction(address,uint256)             external => NONDET;
-    function _.moduleCheck(address,address,uint256,address)  external => ALWAYS(true);
-    function _.moduleCheckSpender(address,address,address,uint256,address) external => ALWAYS(true);
-    // every defined capability bit set, so binding always succeeds and every dispatch point routes
-    function _.moduleCapabilities()                          external => ALWAYS(31);
+    function _.afterTransfer(IModule.TransferContext)        external => NONDET;
+    function _.allowedAmount(IModule.TransferContext)        external => ALWAYS(max_uint256);
+    function _.moduleCheckSpender(IModule.TransferContext)   external => ALWAYS(true);
+    // what a module names is opaque here: binding files it under the types it returns
+    function _.moduleTypes()                                 external => NONDET;
     function _.bindCompliance(address)                       external => NONDET;
     function _.unbindCompliance(address)                     external => NONDET;
     function _.isPlugAndPlay()                               external => ALWAYS(true);
@@ -88,7 +86,9 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:addAndSetModule(address,bytes[]).selector
     || f.selector == sig:addModule(address).selector
     || f.selector == sig:callModuleFunction(bytes,address).selector
-    || f.selector == sig:refreshModuleCapabilities(address).selector;
+    || f.selector == sig:resyncModuleTypes(address).selector
+    || f.selector == sig:setIssuancePaused(bytes32,bool).selector
+    || f.selector == sig:discardExpiredValidations(uint256[]).selector;
 
 /* MC-4: bindToken is restricted to the owner, or a self-binding token while the slot is empty. */
 rule bindTokenAccessControl(env e, address newToken) {

@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
-import { MintOnlyModule, RecordingModule } from "../mocks/CapabilityModules.sol";
+import { RecordingModule, TrackerOnlyModule } from "../mocks/CapabilityModules.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract ComplianceCheckTest is TREXSuiteTest {
@@ -27,7 +29,7 @@ contract ComplianceCheckTest is TREXSuiteTest {
         TestModule testModuleImplementation = new TestModule();
 
         // Deploy TestModule proxy with initialize using ModuleProxy
-        bytes memory moduleInitData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory moduleInitData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy testModuleProxy = new ModuleProxy(address(testModuleImplementation), moduleInitData);
         testModule = TestModule(address(testModuleProxy));
 
@@ -38,16 +40,29 @@ contract ComplianceCheckTest is TREXSuiteTest {
         // Deploy MockContract
         mockContract = new MockContract();
 
-        // Bind token to compliance
+        // Bind token to compliance; a token with supply cannot be bound, and the mock has none
+        vm.mockCall(address(mockContract), abi.encodeCall(IERC20.totalSupply, ()), abi.encode(uint256(0)));
         vm.prank(deployer);
         compliance.bindToken(address(mockContract));
 
         // Set compliance on mock contract
         mockContract.setCompliance(address(compliance));
 
+        // The checker resolves both identities before asking the rules, as the compliance does.
+        vm.mockCall(
+            address(mockContract),
+            abi.encodeCall(IERC3643IdentityRegistry.identity, (alice)),
+            abi.encode(address(aliceIdentity))
+        );
+        vm.mockCall(
+            address(mockContract),
+            abi.encodeCall(IERC3643IdentityRegistry.identity, (bob)),
+            abi.encode(address(bobIdentity))
+        );
+
         // Deploy UtilityChecker via proxy
         UtilityChecker utilityCheckerImpl = new UtilityChecker();
-        bytes memory utilityCheckerInitData = abi.encodeWithSelector(UtilityChecker.initialize.selector);
+        bytes memory utilityCheckerInitData = abi.encodeCall(UtilityChecker.initialize, ());
         UtilityCheckerProxy utilityCheckerProxy =
             new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
         utilityChecker = UtilityChecker(address(utilityCheckerProxy));
@@ -69,7 +84,7 @@ contract ComplianceCheckTest is TREXSuiteTest {
     function test_getTransferDetails_ReturnsNoPass_ForOneOfMultipleModules() public {
         // Deploy second module with proxy
         TestModule testModule2Implementation = new TestModule();
-        bytes memory module2InitData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory module2InitData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy testModule2Proxy = new ModuleProxy(address(testModule2Implementation), module2InitData);
         TestModule testModule2 = TestModule(address(testModule2Proxy));
 
@@ -96,7 +111,7 @@ contract ComplianceCheckTest is TREXSuiteTest {
     function test_getTransferDetails_ReturnsPass_ForMultipleModules() public {
         // Deploy second module with proxy
         TestModule testModule2Implementation = new TestModule();
-        bytes memory module2InitData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory module2InitData = abi.encodeCall(TestModule.initialize, ());
         ModuleProxy testModule2Proxy = new ModuleProxy(address(testModule2Implementation), module2InitData);
         TestModule testModule2 = TestModule(address(testModule2Proxy));
 
@@ -114,19 +129,19 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertTrue(results[1].pass);
     }
 
-    /// @notice Should skip modules that never declared the transfer check
-    function test_getTransferDetails_OmitsModules_WithoutTheTransferCheck() public {
-        MintOnlyModule mintOnlyImplementation = new MintOnlyModule();
+    /// @notice Should skip a module that is not a `RULE`, since it vets nothing
+    function test_getTransferDetails_OmitsModules_ThatAreNotRules() public {
+        TrackerOnlyModule trackerImplementation = new TrackerOnlyModule();
         bytes memory initData = abi.encodeCall(RecordingModule.initialize, ());
-        address mintOnly = address(new ModuleProxy(address(mintOnlyImplementation), initData));
+        address trackerOnly = address(new ModuleProxy(address(trackerImplementation), initData));
 
         vm.prank(deployer);
-        compliance.addModule(mintOnly);
+        compliance.addModule(trackerOnly);
 
         UtilityChecker.ComplianceCheckDetails[] memory results =
             utilityChecker.getTransferDetails(address(mockContract), alice, bob, 100);
 
-        // the mint-only module is bound, but it enforces nothing on a transfer
+        // the tracker is bound, but it enforces nothing on a transfer
         assertEq(compliance.getModules().length, 2);
         assertEq(results.length, 1);
         assertEq(keccak256(bytes(results[0].moduleName)), keccak256(bytes("TestModule")));

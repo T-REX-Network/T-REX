@@ -61,7 +61,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         address ir2 = makeAddr("ir2");
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir2 must report the storage's
         // AccessManager as its authority.
-        vm.mockCall(ir2, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager)));
+        vm.mockCall(ir2, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         storageContract.bindIdentityRegistry(ir2);
 
         address[] memory linked = storageContract.linkedIdentityRegistries();
@@ -78,7 +78,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         address ir = makeAddr("ir");
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir must report the storage's
         // AccessManager as its authority.
-        vm.mockCall(ir, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager)));
+        vm.mockCall(ir, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         storageContract.bindIdentityRegistry(ir);
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), ir, 0);
 

@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
+import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
@@ -11,11 +12,11 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
+import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
-import { SlotsModule } from "test/integration/mocks/SlotsModule.sol";
 
 /// @dev The keeper against a real suite: the derived status over time, the discard releasing a counter module,
-///      the re-issuance it enables, and every refusal, including a real `LegConfirmed` validation.
+///      the re-issuance it enables, and every refusal, including one still awaiting its mint leg.
 contract ValidationDiscardTest is InteropSuiteTest {
 
     uint256 internal constant CAP = 100;
@@ -23,7 +24,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
     bytes internal aliceSat;
     bytes internal bobSat;
-    SlotsModule internal slots;
+    CappedRecipientModule internal cappedRule;
     uint256 internal issuedAt;
     uint256 internal id;
 
@@ -33,12 +34,14 @@ contract ValidationDiscardTest is InteropSuiteTest {
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
-        slots = SlotsModule(
-            address(new ModuleProxy(address(new SlotsModule()), abi.encodeCall(SlotsModule.initialize, ())))
+        cappedRule = CappedRecipientModule(
+            address(
+                new ModuleProxy(address(new CappedRecipientModule()), abi.encodeCall(RecordingModule.initialize, ()))
+            )
         );
         vm.startPrank(deployer);
-        boundCompliance.addModule(address(slots));
-        boundCompliance.callModuleFunction(abi.encodeCall(SlotsModule.setCap, (CAP)), address(slots));
+        boundCompliance.addModule(address(cappedRule));
+        boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (CAP)), address(cappedRule));
         vm.stopPrank();
 
         issuedAt = block.timestamp;
@@ -61,28 +64,27 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
-        assertEq(uint8(boundCompliance.stateOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.validationOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
     }
 
     // ==== .discardExpiredValidations Tests ====
 
     /// @notice The keeper releases the counter, marks the id, announces it, and the cap is available again.
     function test_discardExpiredValidations_Success_WhenExpiredAndReissued() public {
-        assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
+        assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
-        vm.expectCall(address(slots), abi.encodeCall(IModule.releaseSlot, (id)), 1);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.ValidationDiscarded(id);
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(_ids(id));
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
-        assertEq(slots.heldOf(address(boundCompliance), bobSat), 0);
+        assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 0);
 
         uint256 next = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, CAP);
         assertEq(boundCompliance.validationOf(next).amountMax, CAP);
-        assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
+        assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
     /// @notice An agent, a manager or a stranger cannot discard.
@@ -113,8 +115,10 @@ contract ValidationDiscardTest is InteropSuiteTest {
     /// @notice One refused id reverts the whole batch and releases nothing.
     function test_discardExpiredValidations_RevertWhen_OneIdOfTheBatchIsPending() public {
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        bytes memory bobOther = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOtherOnPolygon"));
-        uint256 pending = _requestValidation(address(aliceIdentity), aliceSat, bobOther, 10, CAP);
+        // A second validation toward bob is impossible while the first holds his whole cap, so this one goes
+        // to another identity with a cap of its own.
+        bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
+        uint256 pending = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 10, CAP);
         uint64 pendingReleaseAt = uint64(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW);
 
         uint256[] memory ids = new uint256[](2);
@@ -125,8 +129,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         boundCompliance.discardExpiredValidations(ids);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
-        assertEq(slots.releaseCalls(), 0);
-        assertEq(slots.heldOf(address(boundCompliance), bobSat), CAP);
+        assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
     /// @notice An already discarded id and an unknown id are refused by name.
@@ -149,27 +152,35 @@ contract ValidationDiscardTest is InteropSuiteTest {
     }
 
     /// @notice A consumed leg pins the validation: no clock makes it discardable.
-    function test_discardExpiredValidations_RevertWhen_LegConfirmed() public {
+    function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLeg() public {
         ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.routeFor(polygon));
         _openEvmChain(token, OPTIMISM, address(_newTrustedGateway(OPTIMISM)));
         bytes memory bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
+        // The validation from setUp already holds bob's whole cap, and the cap is per identity, not per
+        // wallet. Raise it so this second one can be issued at all.
+        vm.prank(deployer);
+        boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (2 * CAP)), address(cappedRule));
         uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, CAP);
         vm.prank(agent);
         token.unpause();
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
         vm.warp(issuedAt + 100 * VALIDITY_WINDOW);
 
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.LegConfirmed));
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         vm.prank(keeper);
         vm.expectRevert(
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotDiscardable.selector,
                 crossChain,
-                uint8(ITransferValidation.ValidationStatus.LegConfirmed)
+                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
             )
         );
         boundCompliance.discardExpiredValidations(_ids(crossChain));
-        assertEq(slots.heldOf(address(boundCompliance), bobOptimism), CAP);
+        assertEq(
+            IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
+            2 * CAP,
+            "both validations toward bob are still outstanding"
+        );
         assertEq(token.inTransitOf(crossChain), CAP, "the burned amount stays in transit");
     }
 

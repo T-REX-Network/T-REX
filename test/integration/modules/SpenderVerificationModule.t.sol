@@ -5,10 +5,10 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { SpenderVerificationModule } from "contracts/compliance/modular/modules/SpenderVerificationModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { Countries } from "test/integration/helpers/Countries.sol";
@@ -42,9 +42,9 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
     // ============ Declaration Tests ============
 
     /// @notice Should declare the spender check and nothing else
-    function test_moduleCapabilities_DeclaresOnlyTheSpenderCheck() public view {
-        assertEq(module.moduleCapabilities(), ModuleCapabilitiesLib.CHECK_SPENDER);
-        assertEq(mc.getModuleCapabilities(address(module)), ModuleCapabilitiesLib.CHECK_SPENDER);
+    function test_moduleTypes_NamesOnlySpender() public view {
+        assertEq(uint8(module.moduleTypes()[0]), uint8(IModule.ModuleType.SPENDER));
+        assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER)[0], address(module));
     }
 
     /// @notice Should claim plug and play: the module holds no per-compliance state to set up
@@ -63,7 +63,7 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
         vm.prank(deployer);
         unbound.addModule(address(fresh));
 
-        assertEq(unbound.getModuleCapabilities(address(fresh)), ModuleCapabilitiesLib.CHECK_SPENDER);
+        assertEq(unbound.getModulesByType(IModule.ModuleType.SPENDER)[0], address(fresh));
     }
 
     // ============ Enforcement Tests ============

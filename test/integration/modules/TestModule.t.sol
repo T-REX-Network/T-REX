@@ -32,7 +32,7 @@ contract TestModuleTest is TREXSuiteTest {
         TestModule testModuleImplementation = new TestModule();
 
         // Deploy TestModule proxy with initialize using ERC1967Proxy
-        bytes memory moduleInitData = abi.encodeWithSelector(TestModule.initialize.selector);
+        bytes memory moduleInitData = abi.encodeCall(TestModule.initialize, ());
         ERC1967Proxy testModuleProxy = new ERC1967Proxy(address(testModuleImplementation), moduleInitData);
         testModule = TestModule(address(testModuleProxy));
 
@@ -264,28 +264,12 @@ contract TestModuleTest is TREXSuiteTest {
         testModule.blockModule(true);
     }
 
-    /// @notice Should revert when moduleTransferAction called from non-bound compliance
-    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_ModuleTransferAction() public {
+    /// @notice Should revert when afterTransfer is called from a non-bound compliance
+    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_AfterTransfer() public {
         address nonCompliance = makeAddr("nonCompliance3");
         vm.prank(nonCompliance);
         vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        testModule.moduleTransferAction(alice, bob, 100);
-    }
-
-    /// @notice Should revert when moduleMintAction called from non-bound compliance
-    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_ModuleMintAction() public {
-        address nonCompliance = makeAddr("nonCompliance4");
-        vm.prank(nonCompliance);
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        testModule.moduleMintAction(alice, 100);
-    }
-
-    /// @notice Should revert when moduleBurnAction called from non-bound compliance
-    function test_onlyComplianceCall_RevertWhen_NotBoundCompliance_ModuleBurnAction() public {
-        address nonCompliance = makeAddr("nonCompliance5");
-        vm.prank(nonCompliance);
-        vm.expectRevert(ErrorsLib.OnlyBoundComplianceCanCall.selector);
-        testModule.moduleBurnAction(alice, 100);
+        testModule.afterTransfer(_emptyContext());
     }
 
     // ============================================
@@ -372,6 +356,12 @@ contract TestModuleTest is TREXSuiteTest {
         vm.prank(address(compliance2));
         vm.expectRevert(ErrorsLib.OnlyComplianceContractCanCall.selector);
         testModule.unbindCompliance(address(compliance));
+    }
+
+    /// @dev A context the caller check rejects before ever reading it.
+    function _emptyContext() private pure returns (IModule.TransferContext memory ctx) {
+        ctx.amountMin = 100;
+        ctx.amountMax = 100;
     }
 
 }

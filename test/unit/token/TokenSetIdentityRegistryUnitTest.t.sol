@@ -40,9 +40,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     /// @notice A target with no ERC-165 support is refused, so a mistyped address cannot halt the token.
     function testTokenSetIdentityRegistryRevertsWhenNoERC165() public {
         address notAContract = makeAddr("NotAContract");
-        vm.mockCall(
-            notAContract, abi.encodeWithSelector(IAccessManaged.authority.selector), abi.encode(address(accessManager))
-        );
+        vm.mockCall(notAContract, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
 
         vm.expectRevert(ErrorsLib.InvalidIdentityRegistry.selector);
         token.setIdentityRegistry(notAContract);
@@ -53,9 +51,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     /// @notice A contract that is not an identity registry is refused.
     function testTokenSetIdentityRegistryRevertsWhenWrongInterface() public {
         vm.mockCall(
-            newIdentityRegistry,
-            abi.encodeWithSelector(IAccessManaged.authority.selector),
-            abi.encode(address(accessManager))
+            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643Compliance).interfaceId);
 
@@ -67,9 +63,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
 
     function testTokenSetIdentityRegistryNominal() public {
         vm.mockCall(
-            newIdentityRegistry,
-            abi.encodeWithSelector(IAccessManaged.authority.selector),
-            abi.encode(address(accessManager))
+            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, newIdentityRegistry, 1);

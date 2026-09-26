@@ -83,6 +83,18 @@ contract TREXRegistryWalletViewsUnitTest is TREXRegistryBaseUnitTest {
         assertEq(registry.isWalletVerified(nativeCharlie), registry.isVerified(charlie));
     }
 
+    /// @notice A revoked native wallet is attributed but not admitted, like a revoked satellite one.
+    function test_isWalletVerified_Success_WhenNativeWalletIsRevoked() public {
+        assertTrue(registry.isWalletVerified(nativeAlice));
+
+        vm.prank(address(aliceIdentity));
+        idFactory.revokeAccount(nativeAlice);
+
+        assertFalse(registry.isWalletVerified(nativeAlice));
+        assertEq(registry.isWalletVerified(nativeAlice), registry.isVerified(alice));
+        assertEq(address(registry.resolveIdentity(nativeAlice)), address(aliceIdentity));
+    }
+
     /// @notice A native envelope the storage does not hold is not verified.
     function test_isWalletVerified_Success_WhenNativeWalletIsUnregistered() public view {
         assertFalse(registry.isWalletVerified(InteroperableAddress.formatEvmV1(block.chainid, another)));

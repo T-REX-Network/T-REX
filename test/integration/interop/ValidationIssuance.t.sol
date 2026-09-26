@@ -75,7 +75,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(MessageTypesLib.hashValidation(burnLeg), MessageTypesLib.hashValidation(mintLeg));
         assertEq(burnLeg.reconciliationWindow, OPTIMISM_WINDOW);
 
-        ITransferValidation.ValidationRecord memory record = boundCompliance.validationOf(id);
+        ITransferValidation.Validation memory record = boundCompliance.validationOf(id);
         assertEq(record.releaseAt, record.expiry + OPTIMISM_WINDOW);
         assertEq(record.fromChainKey, polygon);
         assertEq(record.toChainKey, optimism);
@@ -193,14 +193,14 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
     function test_requestTransferValidation_Success_WhenPauseAndUnpauseRoundTrip() public {
         vm.prank(deployer);
-        boundCompliance.pauseValidationIssuance(polygon);
+        boundCompliance.setIssuancePaused(polygon, true);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
         boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 90, "");
 
         vm.prank(deployer);
-        boundCompliance.unpauseValidationIssuance(polygon);
+        boundCompliance.setIssuancePaused(polygon, false);
 
         assertEq(_requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90), 1);
         assertEq(polygonGateway.queueLength(), 1);

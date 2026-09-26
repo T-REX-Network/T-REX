@@ -11,13 +11,17 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
-import { BoundsModule } from "test/integration/mocks/BoundsModule.sol";
+import { RecordingModule, RuleOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ModularComplianceBaseUnitTest } from "test/unit/compliance/helpers/ModularComplianceBaseUnitTest.t.sol";
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
-/// @dev The three properties of the bounds engine, over random requests, balances, module rules and clamps: the
-///      issued range sits inside the request, never above the balance, and does not depend on the bind order.
-contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
+/// @dev The three properties of an issued range, over random requests, balances and rule answers: it sits
+///      inside what the caller asked for, never above what the wallet holds, and does not depend on the order
+///      the rules were bound in.
+///
+///      A rule answers one number, so it can only lower the maximum. The caller's minimum is never raised,
+///      which is the property the first assertion pins.
+contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
 
     uint256 internal constant POLYGON = 137;
 
@@ -27,8 +31,8 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
     address internal bobIdentity = makeAddr("BobIdentity");
 
     TransferValidationHarness internal reversed;
-    BoundsModule internal a;
-    BoundsModule internal b;
+    RuleOnlyModule internal a;
+    RuleOnlyModule internal b;
 
     function setUp() public override {
         super.setUp();
@@ -42,11 +46,11 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
         );
         AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(reversed), 1);
 
-        a = BoundsModule(
-            address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())))
+        a = RuleOnlyModule(
+            address(new ModuleProxy(address(new RuleOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
         );
-        b = BoundsModule(
-            address(new ModuleProxy(address(new BoundsModule()), abi.encodeCall(BoundsModule.initialize, ())))
+        b = RuleOnlyModule(
+            address(new ModuleProxy(address(new RuleOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
         );
         mc.addModule(address(a));
         mc.addModule(address(b));
@@ -70,22 +74,20 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
         uint96 requestedMin,
         uint96 requestedMax,
         uint96 balance,
-        uint96 floorA,
-        uint96 ceilingA,
-        uint96 floorB,
-        uint96 ceilingB,
-        uint96 clamp
+        uint96 allowedByA,
+        uint96 allowedByB
     ) public {
-        if (requestedMin > requestedMax) (requestedMin, requestedMax) = (requestedMax, requestedMin);
-        vm.mockCall(token, abi.encodeWithSignature("bridgedBalanceOf(bytes)", from), abi.encode(uint256(balance)));
-        _configure(mc, floorA, ceilingA, floorB, ceilingB, clamp);
-        _configure(reversed, floorA, ceilingA, floorB, ceilingB, clamp);
+        if (requestedMin > requestedMax) {
+            (requestedMin, requestedMax) = (requestedMax, requestedMin);
+        }
+        // The wallet's room is the token's now: what it can still send is its balance less any reservation.
+        vm.mockCall(token, abi.encodeWithSignature("availableOf(bytes)", from), abi.encode(uint256(balance)));
+        vm.mockCall(token, abi.encodeWithSignature("reserveForValidation(bytes,uint256)"), "");
+        a.setAllowedAmount(allowedByA);
+        b.setAllowedAmount(allowedByB);
 
-        uint256 expectedMin = _max3(requestedMin, floorA, floorB);
-        uint256 expectedMax = _min(requestedMax, balance);
-        if (ceilingA != 0) expectedMax = _min(expectedMax, ceilingA);
-        if (ceilingB != 0) expectedMax = _min(expectedMax, ceilingB);
-        if (clamp != 0) expectedMax = _min(expectedMax, clamp);
+        uint256 expectedMin = requestedMin;
+        uint256 expectedMax = _min(_min(requestedMax, balance), _min(allowedByA, allowedByB));
 
         if (expectedMin > expectedMax || expectedMax == 0) {
             bytes4 expected =
@@ -103,37 +105,16 @@ contract ValidationBoundsFuzzTest is ModularComplianceBaseUnitTest {
         uint256 id = mc.requestTransferValidation(from, to, requestedMin, requestedMax, "");
         vm.prank(aliceIdentity);
         uint256 reversedId = reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "");
-        ITransferValidation.ValidationRecord memory record = mc.validationOf(id);
-        ITransferValidation.ValidationRecord memory reversedRecord = reversed.validationOf(reversedId);
+        ITransferValidation.Validation memory validation = mc.validationOf(id);
+        ITransferValidation.Validation memory reversedValidation = reversed.validationOf(reversedId);
 
-        assertGe(record.amountMin, requestedMin);
-        assertLe(record.amountMax, requestedMax);
-        assertLe(record.amountMax, balance);
-        assertLe(record.amountMin, record.amountMax);
-        assertEq(record.amountMin, expectedMin);
-        assertEq(record.amountMax, expectedMax);
-        assertEq(reversedRecord.amountMin, record.amountMin);
-        assertEq(reversedRecord.amountMax, record.amountMax);
-    }
-
-    function _configure(
-        TransferValidationHarness compliance,
-        uint256 floorA,
-        uint256 ceilingA,
-        uint256 floorB,
-        uint256 ceilingB,
-        uint256 clamp
-    ) private {
-        compliance.callModuleFunction(abi.encodeCall(BoundsModule.setFloor, (floorA)), address(a));
-        compliance.callModuleFunction(abi.encodeCall(BoundsModule.setCeiling, (ceilingA)), address(a));
-        compliance.callModuleFunction(abi.encodeCall(BoundsModule.setFloor, (floorB)), address(b));
-        compliance.callModuleFunction(abi.encodeCall(BoundsModule.setCeiling, (ceilingB)), address(b));
-        compliance.setValidationClamp(clamp);
-    }
-
-    function _max3(uint256 x, uint256 y, uint256 z) private pure returns (uint256 m) {
-        m = x > y ? x : y;
-        m = m > z ? m : z;
+        assertEq(validation.amountMin, requestedMin, "the caller's minimum is never raised");
+        assertLe(validation.amountMax, requestedMax, "never wider than the request");
+        assertLe(validation.amountMax, balance, "never above what the wallet holds");
+        assertLe(validation.amountMin, validation.amountMax);
+        assertEq(validation.amountMax, expectedMax, "the smallest rule answer wins");
+        assertEq(reversedValidation.amountMin, validation.amountMin, "the bind order does not matter");
+        assertEq(reversedValidation.amountMax, validation.amountMax);
     }
 
     function _min(uint256 x, uint256 y) private pure returns (uint256) {

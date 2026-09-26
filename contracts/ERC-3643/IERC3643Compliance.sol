@@ -78,7 +78,7 @@ interface IERC3643Compliance {
      *  @param _from The address of the sender
      *  @param _to The address of the receiver
      *  @param _amount The amount of tokens involved in the transfer
-     *  This function calls moduleTransferAction() on each module bound to the compliance contract
+     *  This function calls afterTransfer() on each TRACKER module bound to the compliance contract
      */
     function transferred(address _from, address _to, uint256 _amount) external;
 
@@ -91,7 +91,8 @@ interface IERC3643Compliance {
      *  This function can be called ONLY by the token contract bound to the compliance
      *  @param _to The address of the receiver
      *  @param _amount The amount of tokens involved in the minting
-     *  This function calls moduleMintAction() on each module bound to the compliance contract
+     *  This function calls afterTransfer() on each TRACKER module bound to the compliance contract,
+     *  as a movement with a zero sender side
      */
     function created(address _to, uint256 _amount) external;
 
@@ -104,7 +105,8 @@ interface IERC3643Compliance {
      *  This function can be called ONLY by the token contract bound to the compliance
      *  @param _from The address on which tokens are burnt
      *  @param _amount The amount of tokens involved in the burn
-     *  This function calls moduleBurnAction() on each module bound to the compliance contract
+     *  This function calls afterTransfer() on each TRACKER module bound to the compliance contract,
+     *  as a movement with a zero recipient side
      */
     function destroyed(address _from, uint256 _amount) external;
 
@@ -116,9 +118,8 @@ interface IERC3643Compliance {
      *  @param _from The address of the sender
      *  @param _to The address of the receiver
      *  @param _amount The amount of tokens involved in the transfer
-     *  This function will call moduleCheck() on every module bound to the compliance
-     *  If each of the module checks return TRUE, this function will return TRUE as well
-     *  returns FALSE otherwise
+     *  the implementation asks every rule bound to the compliance what it allows, and returns TRUE when
+     *  `_amount` is within every answer, FALSE otherwise
      *  the token also calls this function on a mint, with `_from` set to the zero address, so that distribution
      *  rules can be enforced at issuance, following the same convention as the `Transfer` event of `ERC-20`
      *  a burn does not go through this function

@@ -1,41 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0
-//
-//                                             :+#####%%%%%%%%%%%%%%+
-//                                         .-*@@@%+.:+%@@@@@%%#***%@@%=
-//                                     :=*%@@@#=.      :#@@%       *@@@%=
-//                       .-+*%@%*-.:+%@@@@@@+.     -*+:  .=#.       :%@@@%-
-//                   :=*@@@@%%@@@@@@@@@%@@@-   .=#@@@%@%=             =@@@@#.
-//             -=+#%@@%#*=:.  :%@@@@%.   -*@@#*@@@@@@@#=:-              *@@@@+
-//            =@@%=:.     :=:   *@@@@@%#-   =%*%@@@@#+-.        =+       :%@@@%-
-//           -@@%.     .+@@@     =+=-.         @@#-           +@@@%-       =@@@@%:
-//          :@@@.    .+@@#%:                   :    .=*=-::.-%@@@+*@@=       +@@@@#.
-//          %@@:    +@%%*                         =%@@@@@@@@@@@#.  .*@%-       +@@@@*.
-//         #@@=                                .+@@@@%:=*@@@@@-      :%@%:      .*@@@@+
-//        *@@*                                +@@@#-@@%-:%@@*          +@@#.      :%@@@@-
-//       -@@%           .:-=++*##%%%@@@@@@@@@@@@*. :@+.@@@%:            .#@@+       =@@@@#:
-//      .@@@*-+*#%%%@@@@@@@@@@@@@@@@%%#**@@%@@@.   *@=*@@#                :#@%=      .#@@@@#-
-//      -%@@@@@@@@@@@@@@@*+==-:-@@@=    *@# .#@*-=*@@@@%=                 -%@@@*       =@@@@@%-
-//         -+%@@@#.   %@%%=   -@@:+@: -@@*    *@@*-::                   -%@@%=.         .*@@@@@#
-//            *@@@*  +@* *@@##@@-  #@*@@+    -@@=          .         :+@@@#:           .-+@@@%+-
-//             +@@@%*@@:..=@@@@*   .@@@*   .#@#.       .=+-       .=%@@@*.         :+#@@@@*=:
-//              =@@@@%@@@@@@@@@@@@@@@@@@@@@@%-      :+#*.       :*@@@%=.       .=#@@@@%+:
-//               .%@@=                 .....    .=#@@+.       .#@@@*:       -*%@@@@%+.
-//                 +@@#+===---:::...         .=%@@*-         +@@@+.      -*@@@@@%+.
-//                  -@@@@@@@@@@@@@@@@@@@@@@%@@@@=          -@@@+      -#@@@@@#=.
-//                    ..:::---===+++***###%%%@@@#-       .#@@+     -*@@@@@#=.
-//                                           @@@@@@+.   +@@*.   .+@@@@@%=.
-//                                          -@@@@@=   =@@%:   -#@@@@%+.
-//                                          +@@@@@. =@@@=  .+@@@@@*:
-//                                          #@@@@#:%@@#. :*@@@@#-
-//                                          @@@@@%@@@= :#@@@@+.
-//                                         :@@@@@@@#.:#@@@%-
-//                                         +@@@@@@-.*@@@*:
-//                                         #@@@@#.=@@@+.
-//                                         @@@@+-%@%=
-//                                        :@@@#%@%=
-//                                        +@@@@%-
-//                                        :#%%=
-//
 /**
  *     NOTICE
  *
@@ -63,20 +26,63 @@
 pragma solidity 0.8.30;
 
 /// @title IModule
-/// @dev Compliance module interface.
+/// @dev Everything a compliance module implements. One interface, no sub-interfaces, no bitmask.
 ///
-/// Reserve before calling out. A module that accumulates state (a cumulative cap, a running total, a
-/// per-period counter) must record the pending amount BEFORE it makes any external call, and rely on
-/// transaction rollback to undo that record if the operation later fails. A module that calls out first
-/// and records afterwards lets the callee observe accounting that omits the in-flight operation.
+/// A module says what it is through {moduleTypes}, read once at binding, and the compliance calls it only
+/// where it said so:
+/// - `RULE`: asked {allowedAmount}, the largest amount it allows; the compliance takes the minimum;
+/// - `SPENDER`: asked {moduleCheckSpender}, whether the operator named in the context may execute the movement;
+/// - `TRACKER`: told {afterTransfer} after the ledger moved.
 ///
-/// The token wraps each operation in a reentrancy guard, so a callback cannot reenter the token itself.
-/// That guard does not extend to calls a module makes to other contracts, nor to accounting a module
-/// shares with anything reachable from its own callbacks, which is why the discipline is required here
-/// rather than assumed from the guard.
+/// A module never calls another module. It reads the compliance's ledger ({IComplianceLedger}: position and
+/// pending amounts per identity) and the token's identity registry, and keeps nothing but its own settings
+/// and its own counters.
+///
+/// Reserve before calling out. A module that accumulates state in its own storage (a per-period counter, a
+/// window) must record the amount BEFORE it makes any external call, and rely on transaction rollback to undo
+/// that record if the operation later fails. The token wraps each operation in a reentrancy guard, so a
+/// callback cannot reenter the token itself. That guard does not extend to calls a module makes to other
+/// contracts, which is why the discipline is required here rather than assumed from the guard.
 interface IModule {
 
-    /// functions
+    /// @dev What a module is. A module names one, two or all three, never the same one twice.
+    enum ModuleType {
+        /// Answers {allowedAmount}.
+        RULE,
+        /// Answers {moduleCheckSpender}.
+        SPENDER,
+        /// Is told {afterTransfer}.
+        TRACKER
+    }
+
+    /// @dev Everything a module needs to know about a movement, resolved once by the compliance.
+    struct TransferContext {
+        /// The compliance asking. Modules read the ledger and their settings from it, never from
+        /// `msg.sender`, so that tooling can ask the same question from any address.
+        address compliance;
+        /// Identity of the sender. Zero on a mint.
+        address fromIdentity;
+        /// Identity of the recipient. Zero on a burn.
+        address toIdentity;
+        /// Canonical key of the sending wallet: a native address padded on the left, or `keccak256` of a
+        /// satellite envelope. Zero on a mint.
+        bytes32 fromWallet;
+        /// Canonical key of the receiving wallet. Zero on a burn.
+        bytes32 toWallet;
+        /// Inclusive lower bound of the movement. Equal to `amountMax` on a native movement.
+        uint256 amountMin;
+        /// Inclusive upper bound: the exact amount on a native movement, and the exact amount that moved
+        /// when a `TRACKER` is told about one; the requested maximum, already capped at what the sending
+        /// wallet holds, on an issuance.
+        uint256 amountMax;
+        /// True while a validation is being issued for a satellite movement.
+        bool isIssuance;
+        /// ERC-7930 envelope of who executes the movement on the sender's behalf: the caller of `transferFrom`
+        /// on a native movement, the spender named on a validation. Empty when the sender executes itself,
+        /// which is every direct transfer, mint and burn.
+        bytes spender;
+    }
+
     /**
      *  @dev binds the module to a compliance contract
      *  once the module is bound, the compliance contract can interact with the module
@@ -99,146 +105,59 @@ interface IModule {
     function unbindCompliance(address _compliance) external;
 
     /**
-     *  @dev action performed on the module during a transfer action
-     *  this function is used to update variables of the module upon transfer if it is required
-     *  if the module does not require state updates in case of transfer, this function remains empty
-     *  This function can be called ONLY by the compliance contract itself (_compliance)
-     *  This function can be called only on a compliance contract that is bound to the module
-     *  @param _from address of the transfer sender
-     *  @param _to address of the transfer receiver
-     *  @param _value amount of tokens sent
+     *  @dev the ledger moved. Called on every `TRACKER` module after the compliance updated the positions, on
+     *  a native transfer, a mint, a burn, a forced transfer, a recovery and a settled validation
+     *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, a zero
+     *  `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and `toWallet` mean a burn. That is
+     *  the convention {allowedAmount} already uses, so one function covers what three hooks used to
+     *  reverting stops the movement: a module that cannot record a move has to stop it. `forceRemoveModule`
+     *  is the escape hatch for a module that reverts everywhere
+     *  This function can be called ONLY by the compliance contract itself
+     *  @param ctx the movement, see {TransferContext}; `amountMin == amountMax`
      */
-    function moduleTransferAction(address _from, address _to, uint256 _value) external;
+    function afterTransfer(TransferContext calldata ctx) external;
 
     /**
-     *  @dev action performed on the module during a mint action
-     *  this function is used to update variables of the module upon minting if it is required
-     *  if the module does not require state updates in case of mint, this function remains empty
-     *  This function can be called ONLY by the compliance contract itself (_compliance)
-     *  This function can be called only on a compliance contract that is bound to the module
-     *  @param _to address used for minting
-     *  @param _value amount of tokens minted
+     *  @dev the largest amount this rule allows to move. Called on every `RULE` module, on a native transfer
+     *  and a mint (`canTransfer`) and on the issuance of a validation (`ctx.isIssuance` set)
+     *  the compliance takes the minimum over the declaring modules: a native movement passes when `amountMax`
+     *  is at most that minimum; an issuance narrows its range to `[amountMin, minimum]`
+     *  `type(uint256).max` means no limit, 0 means refused
+     *  the rule has to be monotonic: a smaller amount is never less acceptable than a larger one. A rule that
+     *  is not (a multiple of some unit, for instance) evaluates `ctx.amountMax` and returns `max` or 0, and
+     *  refuses an issuance whose range is not a point (`ctx.amountMin != ctx.amountMax`), since the satellite
+     *  may execute any amount inside the range
+     *  identities arrive resolved and the ledger describes the state before the move
+     *  a native movement between two wallets of one identity (`ctx.fromIdentity == ctx.toIdentity`, non-zero)
+     *  reaches this function and a rule about distribution answers `max` on it; the issuance of such a
+     *  movement does not, because it changes no position
+     *  MUST be a view: the compliance calls it under `staticcall` and a module that writes there reverts
+     *  @param ctx the movement, see {TransferContext}
+     *  @return the largest amount allowed
      */
-    function moduleMintAction(address _to, uint256 _value) external;
+    function allowedAmount(TransferContext calldata ctx) external view returns (uint256);
 
     /**
-     *  @dev action performed on the module during a burn action
-     *  this function is used to update variables of the module upon burning if it is required
-     *  if the module does not require state updates in case of burn, this function remains empty
-     *  This function can be called ONLY by the compliance contract itself (_compliance)
-     *  This function can be called only on a compliance contract that is bound to the module
-     *  @param _from address on which tokens are burnt
-     *  @param _value amount of tokens burnt
+     *  @dev whether `ctx.spender` may execute the movement on the sender's behalf. Called on every `SPENDER`
+     *  module from `canSpenderCall`, which the token runs before spending an allowance in `transferFrom`, and
+     *  at the issuance of a validation that names a spender (`ctx.isIssuance` set), since no module runs on
+     *  the satellite and issuance is the only place that spender can be refused
+     *  all declaring modules must agree. A direct transfer never reaches this path: the spender is the sender
+     *  `ctx.spender` is never empty here
+     *  MUST be a view: the compliance calls it under `staticcall`
+     *  @param ctx the movement, see {TransferContext}
+     *  @return true if the module allows the spender to execute it, false otherwise
      */
-    function moduleBurnAction(address _from, uint256 _value) external;
+    function moduleCheckSpender(TransferContext calldata ctx) external view returns (bool);
 
     /**
-     *  @dev compliance check on the module for a specific transaction on a specific compliance contract
-     *  this function is used to check if the transfer is allowed by the module
-     *  This function can be called only on a compliance contract that is bound to the module
-     *  @param _from address of the transfer sender
-     *  @param _to address of the transfer receiver
-     *  @param _value amount of tokens sent
-     *  @param _compliance address of the compliance contract concerned by the transfer action
-     *  a `_from` equal to the zero address means the transaction is a mint, following the same convention as the
-     *  `Transfer` event of `ERC-20`, and the module is expected to apply its distribution rules to that case
-     *  the module is never consulted for a burn, so `_to` is never the zero address here
-     *  a module that ignores the mint case and evaluates `_from` as a regular holder rejects every mint
-     *  the function returns TRUE if the module allows the transfer, FALSE otherwise
-     */
-    function moduleCheck(address _from, address _to, uint256 _value, address _compliance) external view returns (bool);
-
-    /**
-     *  @dev spender side compliance check on the module for a specific transaction
-     *  this function is used to check if the spender is allowed to move the tokens of another party
-     *  This function can be called only on a compliance contract that is bound to the module
-     *  modules with no rule to enforce on the spender leave the default implementation in place
-     *  @param _spender address initiating the transfer on behalf of `_from`
-     *  @param _from address of the transfer sender
-     *  @param _to address of the transfer receiver
-     *  @param _value amount of tokens sent
-     *  @param _compliance address of the compliance contract concerned by the transfer action
-     *  the function returns TRUE if the module allows the spender to call, FALSE otherwise
-     */
-    function moduleCheckSpender(address _spender, address _from, address _to, uint256 _value, address _compliance)
-        external
-        view
-        returns (bool);
-
-    /**
-     *  @dev narrows the amount range of a compliance validation for a satellite movement
-     *  called only when the module declares `BOUNDS`; receives the running range, already capped at `_from`'s
-     *  balance and narrowed by the modules before it, and must answer a range inside it (the compliance intersects
-     *  the answer anyway). Additive rules evaluate at `_currentMax`, retention rules at `_currentMin`; a module may
-     *  narrow to a point or revert to refuse
-     *  it is also where a spender policy is enforced for a satellite movement: no module runs on the satellite, so
-     *  issuance is the only place `_spender`'s authority can be checked, and a module that refuses it reverts here
-     *  This function can be called only on a compliance contract that is bound to the module
-     *  @param _from ERC-7930 interoperable address of the sender
-     *  @param _to ERC-7930 interoperable address of the recipient
-     *  @param _spender ERC-7930 interoperable address allowed to execute the movement, empty when only `_from` may
-     *  @param _currentMin inclusive lower bound of the running range
-     *  @param _currentMax inclusive upper bound of the running range
-     *  @param _compliance address of the compliance contract issuing the validation
-     *  @return min the narrowed inclusive lower bound
-     *  @return max the narrowed inclusive upper bound
-     */
-    function validationBounds(
-        bytes calldata _from,
-        bytes calldata _to,
-        bytes calldata _spender,
-        uint256 _currentMin,
-        uint256 _currentMax,
-        address _compliance
-    ) external view returns (uint256 min, uint256 max);
-
-    /**
-     *  @dev reserves the compliance slot of a validation being issued
-     *  called only when the module declares `SLOTS`, right after the validation is recorded; the module counts
-     *  the movement as executed at `_amountMax`, the worst case for any additive rule, so that a concurrent
-     *  validation is narrowed by `validationBounds` as if this one had already settled. A module that cannot
-     *  express its worst case at `_amountMax` pins the bounds in `validationBounds` so that min equals max
-     *  This function can be called ONLY by the compliance contract itself (_compliance)
-     *  @param _validationId id of the validation being issued
-     *  @param _from ERC-7930 interoperable address of the sender
-     *  @param _to ERC-7930 interoperable address of the recipient
-     *  @param _amountMax inclusive upper bound of the issued range
-     */
-    function reserveSlot(uint256 _validationId, bytes calldata _from, bytes calldata _to, uint256 _amountMax) external;
-
-    /**
-     *  @dev reconciles the module's counters to the exact amount a validation executed
-     *  called only when the module declares `SLOTS`, when the validation settles; the reservation taken at
-     *  `_amountMax`, if any, is replaced by `_executedAmount`. MUST tolerate an id it never reserved (a module
-     *  bound after issuance, or a late reconciliation after `releaseSlot`) by applying the delta anyway, so every
-     *  subsequent compliance decision sees the true state; a resulting breach stands, it is never hidden. It is
-     *  reported instead: the module returns whether the state it now holds fails its rule, which is how a late
-     *  reconciliation tells a harmless delay from one that broke a cap
-     *  This function can be called ONLY by the compliance contract itself (_compliance)
-     *  @param _validationId id of the settled validation
-     *  @param _executedAmount exact amount transferred, inside the issued range
-     *  @return breachesRule whether the state the module holds after the commit fails its rule
-     */
-    function commitSlot(uint256 _validationId, uint256 _executedAmount) external returns (bool breachesRule);
-
-    /**
-     *  @dev undoes the reservation of a validation entirely
-     *  called only when the module declares `SLOTS`, when the keeper discards an expired validation. MUST
-     *  tolerate an id it never reserved
-     *  This function can be called ONLY by the compliance contract itself (_compliance)
-     *  @param _validationId id of the discarded validation
-     */
-    function releaseSlot(uint256 _validationId) external;
-
-    /**
-     *  @dev getter for the dispatch points this module implements
-     *  the returned value is a bitmask built from the flags of `ModuleCapabilitiesLib`
-     *  the compliance reads it once, at binding time, and never calls a dispatch point whose flag is absent
+     *  @dev what this module is, see {ModuleType}
+     *  the compliance reads it once, at binding, and routes the module accordingly. A module that names none
+     *  is refused, and so is one naming the same type twice
      *  MUST be pure: a value read from storage would let the recorded routing drift from the real behaviour
-     *  a module returning zero, or a value carrying an undefined bit, cannot be bound
-     *  @return the bitmask of the dispatch points the module implements
+     *  @return the types this module implements
      */
-    function moduleCapabilities() external pure returns (uint256);
+    function moduleTypes() external pure returns (ModuleType[] memory);
 
     /**
      *  @dev getter for compliance binding status on module

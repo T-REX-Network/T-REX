@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -227,14 +228,14 @@ contract TREXRegistry is
     }
 
     /// @inheritdoc ITREXRegistry
-    /// @dev Admission lookup. Same claim check as {isVerified}, over the active binding only: a revoked satellite
-    ///  wallet keeps its position but is not eligible for new activity.
+    /// @dev Admission lookup. Same claim check as {isVerified}, over the active binding only: a revoked wallet,
+    ///  on this chain or a satellite one, keeps its position but is not eligible for new activity.
     function isWalletVerified(bytes calldata wallet) external view override returns (bool) {
         if (_getStorage().checksDisabled) return true;
 
         (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
         IIdentity userIdentity =
-            onReferenceChain ? _identityOf(userAddress) : IIdentity(_IDENTITY_FACTORY.getIdentity(wallet));
+            onReferenceChain ? _activeIdentityOf(userAddress) : IIdentity(_IDENTITY_FACTORY.getIdentity(wallet));
         return _identityIsVerified(userIdentity);
     }
 
@@ -346,6 +347,25 @@ contract TREXRegistry is
             if (!_hasValidClaimForTopic(userIdentity, requiredClaimTopics[i])) return false;
         }
         return true;
+    }
+
+    /// @dev A wallet the IdentityFactory has revoked may not act, however it was registered. Neither read it
+    ///  would otherwise pass through catches that on its own: a local binding is a plain mapping that knows
+    ///  nothing of revocation, and the storage's global fallback deliberately keeps answering for a revoked
+    ///  wallet so its holdings never lose an owner. So the status is asked of the factory directly here, and
+    ///  a wallet the factory never linked (status `None`) is unaffected.
+    ///
+    ///  `_identityOf` is left as is. Attribution and admission are separate questions: `contains`, `identity`
+    ///  and recovery keep naming who owns a revoked wallet's tokens, while this read decides who may act.
+    function _activeIdentityOf(address userAddress) internal view override returns (IIdentity) {
+        IIdentity userIdentity = _identityOf(userAddress);
+        if (address(userIdentity) == address(0)) return userIdentity;
+
+        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
+        if (_IDENTITY_FACTORY.getAccountStatus(account) == IIdentityFactory.AccountStatus.Revoked) {
+            return IIdentity(address(0));
+        }
+        return userIdentity;
     }
 
     /// @dev The eligibility kill switch short-circuits verification for every address, including one

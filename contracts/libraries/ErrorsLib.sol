@@ -87,6 +87,10 @@ library ErrorsLib {
     error EmptyString();
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
+    error TokenCirculating();
+    error NothingInTransit(uint256 validationId);
+    error ValidationNotStuck(uint256 validationId, uint8 status);
+    error ValidationNotYetResolvable(uint256 validationId, uint64 resolvableAt);
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -109,10 +113,12 @@ library ErrorsLib {
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
     error ComplianceNotSuitableForBindingToModule(address module);
-    error InvalidModuleCapabilities(uint256 capabilities);
     error MaxModulesReached(uint256 maxValue);
     error ModuleAlreadyBound();
-    error ModuleHasNoCapabilities();
+    /// @dev A module names no type at all, so the compliance would never call it.
+    error ModuleHasNoType();
+    /// @dev A module names the same type twice.
+    error DuplicateModuleType(uint8 moduleType);
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
@@ -123,8 +129,8 @@ library ErrorsLib {
     error ModuleStillBound();
     error OnlyBoundComplianceCanCall();
     error OnlyComplianceContractCanCall();
-    error SpenderAlreadyAllowed(address spender);
-    error SpenderNotListed(address spender);
+    error SpenderAlreadyAllowed(bytes spender);
+    error SpenderNotListed(bytes spender);
 
     // TREXFactory Errors
     error AuthorityMismatch();
@@ -186,12 +192,12 @@ library ErrorsLib {
     error Deprecated();
 
     // TransferValidation Errors
+    /// @dev A `SPENDER` module refused the spender named on the requested validation.
+    error ValidationSpenderRefused(bytes spender);
     /// @dev A validity or reconciliation window must be positive.
     error ZeroDuration();
     /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
     error ValidationIssuancePaused(bytes32 chainKey);
-    /// @dev Unpausing a chain that is not paused.
-    error ValidationIssuanceNotPaused(bytes32 chainKey);
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.

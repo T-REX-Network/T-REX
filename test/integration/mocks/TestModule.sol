@@ -63,7 +63,6 @@
 pragma solidity 0.8.30;
 
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ModuleCapabilitiesLib } from "contracts/libraries/ModuleCapabilitiesLib.sol";
 
 contract TestModule is AbstractModuleUpgradeable {
 
@@ -123,33 +122,14 @@ contract TestModule is AbstractModuleUpgradeable {
     }
 
     /**
-     *  @dev See {IModule-moduleCheck}.
-     *  always returns true (just a test module)
+     *  @dev See {IModule-allowedAmount}.
+     *  no limit unless the compliance blocked transfers through `blockModule` (just a test module)
      */
-    function moduleCheck(
-        address,
-        /*_from*/
-        address,
-        uint256,
-        address _compliance
-    )
-        external
-        view
-        override
-        returns (bool)
-    {
-        if (_blockedTransfers[_compliance]) {
-            return false;
+    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+        if (_blockedTransfers[ctx.compliance]) {
+            return 0;
         }
-        return true;
-    }
-
-    /**
-     *  @dev See {IModule-moduleCapabilities}.
-     *  only the transfer check is implemented, the hooks keep the base defaults
-     */
-    function moduleCapabilities() external pure returns (uint256) {
-        return ModuleCapabilitiesLib.CHECK_TRANSFER;
+        return type(uint256).max;
     }
 
     /**
@@ -185,5 +165,11 @@ contract TestModule is AbstractModuleUpgradeable {
 
     // Fallback function to accept any callData (used for testing _selector with short callData)
     fallback() external { }
+
+    /// @dev See {IModule-moduleTypes}.
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.RULE;
+    }
 
 }
