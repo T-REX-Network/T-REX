@@ -15,8 +15,8 @@ fs_permissions = [
 solc_version = "0.8.30"
 optimizer = true
 optimizer_runs = 200
-# via-IR keeps ModularCompliance under EIP-170 with the explicit validation state machine and the stuck-pair
-# exit in; the legacy pipeline leaves it a few hundred bytes over. Builds take minutes instead of seconds.
+# via-IR keeps ModularCompliance under EIP-170 with the explicit validation state machine, the stuck-pair exit
+# and the position repair all in; the legacy pipeline leaves it over. Builds take minutes instead of seconds.
 via_ir = true
 evm_version = "cancun"
 

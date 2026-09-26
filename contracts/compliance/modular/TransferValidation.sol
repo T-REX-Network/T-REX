@@ -69,6 +69,7 @@ import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedger } from "./ComplianceLedger.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
+import { TransferContextLib } from "./TransferContextLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /**
@@ -234,8 +235,15 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  identity, since relocating your own tokens changes no position and no distribution rule applies.
     function _capAtWhatTheRulesAllow(Draft memory draft, bytes calldata to) private view {
         if (_isRelocation(draft.fromIdentity, draft.toIdentity)) return;
-        IModule.TransferContext memory ctx = _buildContext(
-            draft.fromIdentity, draft.toIdentity, draft.fromKey, _walletIdOf(to), draft.amountMin, draft.amountMax, true
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            ""
         );
         uint256 allowed = _minAllowedAmount(ctx);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
@@ -247,10 +255,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  no spender and asks nobody. Asked on a relocation too: who executes is not about distribution.
     function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
         if (spender.length == 0) return;
-        IModule.TransferContext memory ctx = _buildContext(
-            draft.fromIdentity, draft.toIdentity, draft.fromKey, _walletIdOf(to), draft.amountMin, draft.amountMax, true
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            spender
         );
-        ctx.spender = spender;
         require(_spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
@@ -462,6 +476,30 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         emit EventsLib.ValidationLegConfirmed(notification.validationId, originChainKey, notification.amount);
     }
 
+    /// @dev The movement a settled validation turns out to be, as the modules are asked about it. Its own
+    ///  function because the settlement path holds enough live values without it, and the legacy pipeline runs
+    ///  out of stack there under `forge coverage`.
+    ///
+    ///  A native recipient may have changed owner since issuance, so it is resolved again here. The token has
+    ///  not been credited yet at this point, which is why nothing is adjusted for this very movement.
+    function _settledMovement(Validation storage validation, bytes memory from, bytes memory to, uint256 amount)
+        private
+        returns (IModule.TransferContext memory)
+    {
+        address toIdentity = validation.toIdentity;
+        (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
+        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
+
+        return TransferContextLib.settlement(
+            address(this),
+            validation.fromIdentity,
+            toIdentity,
+            WalletKeyLib.walletId(from),
+            WalletKeyLib.walletId(to),
+            amount
+        );
+    }
+
     /// @dev Every expected leg is in, so the movement completes: release whatever is still reserved, move the
     ///  positions and the token's ledger, mark the validation, announce it, then tell the tracker modules.
     ///
@@ -487,15 +525,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validation.executedAmount = notification.amount;
         _moveTo(validation, next, false);
 
-        IModule.TransferContext memory ctx = _buildContext(
-            validation.fromIdentity,
-            validation.toIdentity,
-            _walletIdOf(from),
-            _walletIdOf(to),
-            notification.amount,
-            notification.amount,
-            false
-        );
+        IModule.TransferContext memory ctx = _settledMovement(validation, from, to, notification.amount);
         breachesRule = late && _exceedsWhatRulesAllowNow(ctx, notification.amount);
 
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, notification.amount);
@@ -798,12 +828,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validation.status = next;
     }
 
-    /// @dev The id a wallet has in the ledger and in a module's context: a native address padded on the left, the
-    ///  canonical key otherwise. The validation keeps the canonical key of both sides for leg matching.
-    function _walletIdOf(bytes memory wallet) internal view returns (bytes32) {
-        (bool native, address addr) = WalletKeyLib.isReferenceChain(wallet);
-        if (native) return _walletIdOf(addr);
-        return WalletKeyLib.canonicalKey(wallet);
+    /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its
+    ///  mind. `adjustment` is what this very movement already did to the wallet's balance on the token, so that
+    ///  what moves is what the wallet held before it: `+amount` for a sender the token already debited,
+    ///  `-amount` for a recipient it already credited, zero when the token has not moved yet.
+    function _currentOwner(address wallet, address resolved, int256 adjustment) internal returns (address owner) {
+        address previous;
+        (owner, previous) = _followOwner(wallet, resolved);
+        if (previous == address(0)) return owner;
+        uint256 balance = uint256(int256(_boundToken().balanceOf(wallet)) + adjustment);
+        _moveWalletBalance(wallet, previous, owner, balance);
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.
