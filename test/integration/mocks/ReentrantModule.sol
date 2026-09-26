@@ -15,7 +15,8 @@ contract ReentrantModule is AbstractModuleUpgradeable {
         None,
         Transfer,
         Mint,
-        ForcedTransfer
+        ForcedTransfer,
+        Relay
     }
 
     address private _token;
@@ -45,6 +46,13 @@ contract ReentrantModule is AbstractModuleUpgradeable {
         _fired = false;
     }
 
+    function armRelay(address gateway, uint256 index) external {
+        _attack = Attack.Relay;
+        _to = gateway;
+        _value = index;
+        _fired = false;
+    }
+
     function afterTransfer(TransferContext calldata) external override onlyComplianceCall {
         _reenter();
     }
@@ -68,8 +76,12 @@ contract ReentrantModule is AbstractModuleUpgradeable {
         if (_attack == Attack.None || _fired) return;
         _fired = true;
 
+        address target = _token;
         bytes memory callData;
-        if (_attack == Attack.Transfer) {
+        if (_attack == Attack.Relay) {
+            target = _to;
+            callData = abi.encodeWithSignature("relay(uint256)", _value);
+        } else if (_attack == Attack.Transfer) {
             callData = abi.encodeWithSignature("transfer(address,uint256)", _to, _value);
         } else if (_attack == Attack.Mint) {
             callData = abi.encodeWithSignature("mint(address,uint256)", _to, _value);
@@ -77,7 +89,7 @@ contract ReentrantModule is AbstractModuleUpgradeable {
             callData = abi.encodeWithSignature("forcedTransfer(address,address,uint256)", _from, _to, _value);
         }
 
-        (bool ok, bytes memory ret) = _token.call(callData);
+        (bool ok, bytes memory ret) = target.call(callData);
         lastCallSucceeded = ok;
         lastCallReturnData = ret;
     }
