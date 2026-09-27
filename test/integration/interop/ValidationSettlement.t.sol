@@ -3,6 +3,8 @@ pragma solidity 0.8.30;
 
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
@@ -15,6 +17,7 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
+import { ReentrantModule } from "test/integration/mocks/ReentrantModule.sol";
 
 /// @dev One-leg settlements through the real messaging layer: a same-chain movement, a native sender, a native
 ///      recipient, the deadline that never refuses a leg, every mismatch that does, and the two emergencies that
@@ -233,6 +236,61 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.prank(agent);
         token.unpause();
         assertFalse(token.paused());
+    }
+
+    // ==== reentrancy Tests ====
+
+    function test_handleSettlement_RevertWhen_ATrackerRelaysAnotherSettlementFromItsHook() public {
+        ReentrantModule attacker = _bindReentrantModule();
+        uint256 first = _issue(aliceSat, bobSat, 10, 100);
+        uint256 second = _issue(aliceSat, bobSat, 10, 100);
+        uint256 outer = _liteSettles(polygonGateway, token, _settlement(first, aliceSat, bobSat, 40));
+        uint256 nested = _liteSettles(polygonGateway, token, _settlement(second, aliceSat, bobSat, 50));
+        attacker.armRelay(address(polygonGateway), nested);
+
+        polygonGateway.relay(outer);
+
+        _assertNestedRelayRejected(attacker, nested);
+        assertEq(uint8(boundCompliance.statusOf(first)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(boundCompliance.statusOf(second)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(token.bridgedBalanceOf(bobSat), 40);
+
+        polygonGateway.relay(nested);
+
+        assertEq(uint8(boundCompliance.statusOf(second)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobSat), 90);
+    }
+
+    function test_handleSettlement_RevertWhen_ATrackerRelaysASettlementFromATransferHook() public {
+        ReentrantModule attacker = _bindReentrantModule();
+        uint256 id = _issue(aliceSat, bobSat, 10, 100);
+        uint256 nested = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 40));
+        attacker.armRelay(address(polygonGateway), nested);
+
+        vm.prank(alice);
+        token.transfer(bob, 10);
+
+        _assertNestedRelayRejected(attacker, nested);
+        assertEq(token.balanceOf(bob), 10);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(token.bridgedBalanceOf(bobSat), 0);
+    }
+
+    function _bindReentrantModule() private returns (ReentrantModule attacker) {
+        attacker = ReentrantModule(
+            address(new ERC1967Proxy(address(new ReentrantModule()), abi.encodeCall(ReentrantModule.initialize, ())))
+        );
+        vm.prank(deployer);
+        boundCompliance.addModule(address(attacker));
+    }
+
+    function _assertNestedRelayRejected(ReentrantModule attacker, uint256 nested) private view {
+        assertFalse(attacker.lastCallSucceeded());
+        assertEq(
+            attacker.lastCallReturnData(),
+            abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
+        );
+        _assertNothingApplied(polygonGateway, nested);
     }
 
     function _issue(bytes memory from, bytes memory to, uint256 min, uint256 max) private returns (uint256) {

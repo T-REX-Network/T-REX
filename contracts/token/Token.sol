@@ -695,6 +695,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         internal
         override
         whenNotPaused
+        nonReentrant
     {
         bool halt = ISettlementHandler(address(_getCompliance())).handleSettlement(chainKey, notification);
         if (halt) _pause();
