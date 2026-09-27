@@ -69,6 +69,7 @@ import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
@@ -121,9 +122,10 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     function getVerifiedDetails(address _token, address _userAddress)
         public
         view
-        returns (EligibilityCheckDetails[] memory _details)
+        returns (EligibilityCheckDetails[] memory _details, IIdentityFactory.AccountStatus _walletStatus)
     {
         IERC3643IdentityRegistry identityRegistry = IERC3643(_token).identityRegistry();
+        _walletStatus = _walletStatusOf(identityRegistry, _userAddress);
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
         IIdentity identity = identityRegistry.identity(_userAddress);
 
@@ -167,6 +169,18 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
             } catch { }
         }
         return topicsRegistry.getClaimTopics();
+    }
+
+    function _walletStatusOf(IERC3643IdentityRegistry identityRegistry, address userAddress)
+        internal
+        view
+        returns (IIdentityFactory.AccountStatus)
+    {
+        try ITREXRegistry(address(identityRegistry)).identityFactory() returns (IIdentityFactory factory) {
+            return factory.getAccountStatus(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
+        } catch {
+            return IIdentityFactory.AccountStatus.None;
+        }
     }
 
     /// @dev Function splitted to avoid stack too deep error

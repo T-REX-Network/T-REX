@@ -63,6 +63,7 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 
 interface IUtilityChecker {
@@ -133,6 +134,6 @@ interface IUtilityChecker {
     function getVerifiedDetails(address _token, address _userAddress)
         external
         view
-        returns (EligibilityCheckDetails[] memory _details);
+        returns (EligibilityCheckDetails[] memory _details, IIdentityFactory.AccountStatus _walletStatus);
 
 }
