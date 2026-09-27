@@ -74,6 +74,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { RolesLib } from "../../libraries/RolesLib.sol";
+import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { Token } from "../../token/Token.sol";
@@ -81,6 +82,7 @@ import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnabl
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
+import { TransferContextLib } from "./TransferContextLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
 
@@ -239,9 +241,9 @@ contract ModularCompliance is
      */
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
-        IModule.TransferContext memory ctx = _buildNativeContext(_from, _to, _value);
-        ctx.spender = InteroperableAddress.formatEvmV1(block.chainid, _spender);
-        return _spenderAllowed(ctx);
+        return _spenderAllowed(
+            _buildNativeContext(_from, _to, _value, InteroperableAddress.formatEvmV1(block.chainid, _spender))
+        );
     }
 
     /**
@@ -278,6 +280,11 @@ contract ModularCompliance is
     /// @inheritdoc ITransferValidation
     function resolveStuckValidation(uint256 validationId) external restricted {
         _resolveStuckValidation(validationId);
+    }
+
+    /// @inheritdoc IComplianceLedger
+    function fixPosition(address from, address to, uint256 amount) external restricted {
+        _fixPosition(from, to, amount);
     }
 
     /// @inheritdoc ITransferValidation
@@ -336,22 +343,35 @@ contract ModularCompliance is
 
     /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
-        _applyMovement(_buildNativeContext(from, to, value));
+        _applyMovement(from, to, value);
     }
 
     /// @dev A mint: no sender, the recipient's position grows.
     function _created(address to, uint256 value) internal override {
-        _applyMovement(_buildNativeContext(address(0), to, value));
+        _applyMovement(address(0), to, value);
     }
 
     /// @dev A burn: no recipient, the sender's position shrinks.
     function _destroyed(address from, uint256 value) internal override {
-        _applyMovement(_buildNativeContext(from, address(0), value));
+        _applyMovement(from, address(0), value);
     }
 
-    /// @dev Moves the positions and tells the trackers. The absent side of a mint or a burn is already zero
-    ///  in the context, so one function serves all three hooks.
-    function _applyMovement(IModule.TransferContext memory ctx) private {
+    /// @dev Moves the positions and tells the trackers. One function serves all three hooks: the absent side of
+    ///  a mint or a burn is a zero wallet and stays a zero identity.
+    ///
+    ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
+    ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
+    ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
+    ///  to the new owner here, before the movement itself is counted.
+    function _applyMovement(address from, address to, uint256 value) private {
+        ITREXRegistry registry = _boundRegistry();
+        address fromIdentity;
+        address toIdentity;
+        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), int256(value));
+        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
+
+        IModule.TransferContext memory ctx =
+            TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, "");
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         _callAfterTransfer(ctx);
     }
@@ -361,22 +381,22 @@ contract ModularCompliance is
     function _buildNativeContext(address from, address to, uint256 value)
         private
         view
-        returns (IModule.TransferContext memory ctx)
+        returns (IModule.TransferContext memory)
+    {
+        return _buildNativeContext(from, to, value, "");
+    }
+
+    function _buildNativeContext(address from, address to, uint256 value, bytes memory spender)
+        private
+        view
+        returns (IModule.TransferContext memory)
     {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
         if (from != address(0)) fromIdentity = address(registry.identity(from));
         if (to != address(0)) toIdentity = address(registry.identity(to));
-        return _buildContext(
-            fromIdentity,
-            toIdentity,
-            from == address(0) ? bytes32(0) : _walletIdOf(from),
-            to == address(0) ? bytes32(0) : _walletIdOf(to),
-            value,
-            value,
-            false
-        );
+        return TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, spender);
     }
 
     /* ----- What the validation layer needs ----- */
