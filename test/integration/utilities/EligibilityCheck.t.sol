@@ -2,9 +2,11 @@
 pragma solidity 0.8.30;
 
 import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -62,7 +64,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
         vm.prank(agent);
         identityRegistry.registerIdentity(charlie, charlieIdentity, 0);
 
-        UtilityChecker.EligibilityCheckDetails[] memory results =
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
             utilityChecker.getVerifiedDetails(address(token), charlie);
 
         assertEq(results.length, 1);
@@ -84,7 +86,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
             claimTopicsRegistry.removeClaimTopic(topics[i]);
         }
 
-        UtilityChecker.EligibilityCheckDetails[] memory results =
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
             utilityChecker.getVerifiedDetails(address(token), charlie);
 
         assertEq(results.length, 0);
@@ -92,7 +94,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
     /// @notice Should return true because alice has claims
     function test_getVerifiedDetails_ReturnsTrue_AfterFixture() public view {
-        UtilityChecker.EligibilityCheckDetails[] memory results =
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
             utilityChecker.getVerifiedDetails(address(token), alice);
 
         assertEq(results.length, 1);
@@ -136,7 +138,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
             aliceIdentity, claimTopic3, claimData, newClaimIssuerSigningKeyPrivateKey, address(newclaimIssuer), alice
         );
 
-        UtilityChecker.EligibilityCheckDetails[] memory results =
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
             utilityChecker.getVerifiedDetails(address(token), alice);
 
         assertEq(results.length, 3);
@@ -180,7 +182,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
         aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", trickyData, "");
 
         // getVerifiedDetails should handle the error and return false
-        UtilityChecker.EligibilityCheckDetails[] memory results =
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
             utilityChecker.getVerifiedDetails(address(token), alice);
 
         assertEq(results.length, 1);
@@ -212,7 +214,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
         vm.stopPrank();
 
         // The corporate set replaces the default one: KYC passes, KYB is missing.
-        UtilityChecker.EligibilityCheckDetails[] memory results =
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
             utilityChecker.getVerifiedDetails(address(token), business);
         assertEq(results.length, 2);
         assertTrue(results[0].pass, "KYC claim must pass for the corporate investor");
@@ -221,7 +223,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertFalse(identityRegistry.isVerified(business));
 
         // alice is a natural person: still on the default KYC-only set, unaffected by the override.
-        UtilityChecker.EligibilityCheckDetails[] memory aliceResults =
+        (UtilityChecker.EligibilityCheckDetails[] memory aliceResults,) =
             utilityChecker.getVerifiedDetails(address(token), alice);
         assertEq(aliceResults.length, 1);
         assertEq(aliceResults[0].topic, CLAIM_TOPIC_1);
@@ -230,12 +232,46 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         // With the KYB claim attached, the corporate row passes and diagnostics agree with isVerified.
         _addClaim(businessIdentity, claimTopicKyb, "KYB data", claimIssuerSigner.key, address(claimIssuer), business);
-        results = utilityChecker.getVerifiedDetails(address(token), business);
+        (results,) = utilityChecker.getVerifiedDetails(address(token), business);
         assertEq(results.length, 2);
         assertEq(address(results[1].issuer), address(claimIssuer));
         assertEq(results[1].topic, claimTopicKyb);
         assertTrue(results[1].pass);
         assertTrue(identityRegistry.isVerified(business));
+    }
+
+    function test_getVerifiedDetails_ReportsActive_WhenTheWalletIsLinked() public view {
+        (UtilityChecker.EligibilityCheckDetails[] memory results, IIdentityFactory.AccountStatus walletStatus) =
+            utilityChecker.getVerifiedDetails(address(token), alice);
+
+        assertTrue(results[0].pass);
+        assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.Active));
+        assertTrue(identityRegistry.isVerified(alice));
+    }
+
+    function test_getVerifiedDetails_ReportsRevoked_WhenTheInvestorRevokedTheWallet() public {
+        _revokeWallet(aliceIdentity, InteroperableAddress.formatEvmV1(block.chainid, alice));
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results, IIdentityFactory.AccountStatus walletStatus) =
+            utilityChecker.getVerifiedDetails(address(token), alice);
+
+        assertEq(results.length, 1);
+        assertTrue(results[0].pass);
+        assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.Revoked));
+        assertFalse(identityRegistry.isVerified(alice));
+    }
+
+    function test_getVerifiedDetails_ReportsNone_WhenTheFactoryNeverLinkedTheWallet() public {
+        address unlinked = makeAddr("unlinked");
+        vm.prank(agent);
+        identityRegistry.registerIdentity(unlinked, aliceIdentity, Countries.FRANCE);
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results, IIdentityFactory.AccountStatus walletStatus) =
+            utilityChecker.getVerifiedDetails(address(token), unlinked);
+
+        assertTrue(results[0].pass);
+        assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.None));
+        assertTrue(identityRegistry.isVerified(unlinked));
     }
 
 }

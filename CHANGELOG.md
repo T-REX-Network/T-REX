@@ -50,6 +50,9 @@ All notable changes to this project will be documented in this file.
     used, so `identity` and `contains` keep attributing a revoked wallet's holdings and the ledger
     debits the right position on a burn, a recovery or a forced transfer. Admission is unchanged:
     `isVerified` still refuses a revoked wallet (#69).
+  - `UtilityChecker.getVerifiedDetails` also returns the wallet's `IIdentityFactory.AccountStatus`, so a
+    revoked wallet whose identity passes every claim reads `Revoked` instead of looking verified. A
+    registry without an IdentityFactory reports `None`. Callers decode a second return value.
   - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
     refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
   - `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` report a movement
