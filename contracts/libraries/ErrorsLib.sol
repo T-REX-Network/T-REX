@@ -91,6 +91,8 @@ library ErrorsLib {
     error NothingInTransit(uint256 validationId);
     error ValidationNotStuck(uint256 validationId, uint8 status);
     error ValidationNotYetResolvable(uint256 validationId, uint64 resolvableAt);
+    error InsufficientPosition(address identity, uint256 held, uint256 amount);
+    error FromAndToAreTheSame();
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();

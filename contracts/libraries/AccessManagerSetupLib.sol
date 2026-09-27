@@ -185,7 +185,7 @@ library AccessManagerSetupLib {
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](13);
+        table = new SelectorRole[](14);
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.forceRemoveModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
@@ -199,6 +199,7 @@ library AccessManagerSetupLib {
         table[10] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
         table[11] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
         table[12] = SelectorRole(ModularCompliance.resolveStuckValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
+        table[13] = SelectorRole(ModularCompliance.fixPosition.selector, RolesLib.Role.OWNER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {

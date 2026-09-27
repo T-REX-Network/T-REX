@@ -52,10 +52,27 @@ All notable changes to this project will be documented in this file.
     `isVerified` still refuses a revoked wallet (#69).
   - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
     refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
-  - `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` report a movement
-    whose wallet resolves to no identity, or a debit past what the identity held; neither reverts. After
-    the above, only an agent deleting the local entry of a wallet that holds tokens and has no global
-    link can produce one. `LedgerAttribution.t.sol` pins the separation of the two reads, and the ledger
+  - The ledger follows the registry on its own. It remembers which identity it credited each native
+    wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
+    balance to the new owner before counting the movement (`WalletOwnerChanged`), and a wallet the
+    registry no longer names keeps its remembered owner. No owner call, no underflow, no stale position.
+  - What no lookup can place is counted, not floored away. `positionGap()` is signed: a
+    credit that lands on no identity adds to it, a debit that finds no identity or too small a position
+    subtracts from it, so `sum(positions) + positionGap == totalSupply` holds through any registry
+    change. `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` name the
+    amount, and `fixPosition(from, to, amount)`, owner only, moves it, a zero side being the pool.
+    The ledger invariant harness holds the pool to zero under every transition that is not an agent
+    action. One rule now governs the ledger's writes: the compliance's own bookkeeping reverts, a write
+    the registry made impossible is counted for repair.
+  - `refundValidation(validationId)`, keeper only, is the way out of a two-leg validation of which one
+    leg never came, a second reconciliation window past `releaseAt`. Burn leg in: the held amount goes
+    back to the wallet it left through `Token.returnInTransit`, the reservation is released, the status is
+    `Refunded`, and a mint leg arriving afterwards halts the token as a replay would. Mint leg in: the
+    chain that owes the burn is paused for issuance and `ValidationStuck` is emitted, since nothing on
+    this chain can be returned.
+  - `TransferContextLib` builds the three shapes a movement takes, `native`, `issuance` and
+    `settlement`, each filled where it is built. The ledger no longer knows modules exist.
+    `WalletKeyLib.walletId` is the one place a wallet's ledger id is computed. `LedgerAttribution.t.sol` pins the separation of the two reads, and the ledger
     invariant harness now revokes native wallets mid-sequence, so the fuzzer explores movements out of a
     revoked wallet rather than only registry-stable ones.
   - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`RULE`, `SPENDER`, `TRACKER`),
@@ -547,6 +564,10 @@ All notable changes to this project will be documented in this file.
 - **Breaking, interface ids**: `type(IModule).interfaceId`, `type(IModularCompliance).interfaceId`,
   `type(ITransferValidation).interfaceId`, `type(IUtilityChecker).interfaceId` and
   `type(IComplianceLedger).interfaceId` change with the above.
+- **Build**: `via_ir = true` in the default and mutation profiles, and `solc_via_ir` in the Certora
+  confs. It is what keeps `ModularCompliance` under EIP-170 with the validation refund and the position
+  repair in; the legacy pipeline leaves it about 550 bytes over. `Token` grows by about 700 bytes under
+  it and was already over the limit.
 - `ModularCompliance` holds its bound modules in one `EnumerableSet.AddressSet` plus one per type, so
   a dispatch is a loop over exactly the modules that answer it. Ordering follows binding order within a
   type. Binding validates fully before writing state, so `canComplianceBind` sees the module as not
