@@ -1,18 +1,11 @@
 #!/bin/bash
-# Fails when a deployable contract under contracts/ is over the EVM's code-size limits:
-# EIP-170 (24,576 bytes of runtime code) or EIP-3860 (49,152 bytes of init code).
-#
-# `forge build --sizes` cannot be the gate here: it also counts test harnesses, some of which
-# inherit a production contract and are over the limit by design, so it would fail for the wrong
-# reason. This reads the build artifacts instead and keeps only what is compiled from contracts/.
-#
-# Run after `forge build`. Usage: .github/scripts/check_contract_sizes.sh [out-dir]
+# Fails when a contract under contracts/ exceeds EIP-170 (runtime) or EIP-3860 (initcode).
+# Usage, after forge build: .github/scripts/check_contract_sizes.sh [out-dir]
 set -euo pipefail
 
 OUT_DIR="${1:-out}"
 RUNTIME_LIMIT=24576
 INITCODE_LIMIT=49152
-# Warn before the wall is hit: a contract with less than this many bytes left cannot take a fix.
 HEADROOM_WARNING=512
 
 if [ ! -d "$OUT_DIR" ]; then
@@ -20,9 +13,6 @@ if [ ! -d "$OUT_DIR" ]; then
     exit 1
 fi
 
-# One line per deployable contract compiled from contracts/: "<runtime> <initcode> <name> <source>".
-# Interfaces and abstract contracts have no bytecode and are left out. Link placeholders have the
-# length of the address they stand for, so an unlinked artifact measures the same as a linked one.
 ROWS=$(find "$OUT_DIR" -name '*.json' -not -path '*/build-info/*' -print0 | xargs -0 jq -r '
     select(.metadata.settings.compilationTarget != null)
     | (.metadata.settings.compilationTarget | to_entries[0]) as $target
@@ -30,7 +20,7 @@ ROWS=$(find "$OUT_DIR" -name '*.json' -not -path '*/build-info/*' -print0 | xarg
     | ((.deployedBytecode.object // "0x" | ltrimstr("0x") | length) / 2) as $runtime
     | ((.bytecode.object // "0x" | ltrimstr("0x") | length) / 2) as $init
     | select($runtime > 0)
-    | "\($runtime) \($init) \($target.value) \($target.key)"
+    | "\($runtime) \($init) \(input_filename | split("/") | last | rtrimstr(".json")) \($target.key)"
 ' | sort -rn | uniq)
 
 if [ -z "$ROWS" ]; then
@@ -53,9 +43,8 @@ while read -r runtime init name source; do
         status="⚠️"
         WARNED=1
     fi
-    # Only the contracts worth reading: the offenders, the near-misses and the ten largest.
     printf "%-34s %10s %10s %10s %s\n" "$name" "$runtime" "$margin" "$init" "$status"
-done < <(echo "$ROWS" | head -10; echo "$ROWS" | tail -n +11 | awk -v limit="$RUNTIME_LIMIT" -v warn="$HEADROOM_WARNING" '$1 > limit - warn')
+done < <(echo "$ROWS" | head -10; echo "$ROWS" | tail -n +11 | awk -v limit="$RUNTIME_LIMIT" -v warn="$HEADROOM_WARNING" -v initlimit="$INITCODE_LIMIT" '$1 > limit - warn || $2 > initlimit')
 echo "========================================"
 
 if [ "$WARNED" -eq 1 ]; then

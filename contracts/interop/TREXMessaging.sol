@@ -146,7 +146,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
             TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
 
-        // The library admits these two types and reverts on any other.
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _handleSettlement(chainKey, body);
         } else {

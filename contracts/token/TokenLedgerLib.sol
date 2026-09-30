@@ -63,6 +63,8 @@
 
 pragma solidity 0.8.30;
 
+import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
@@ -217,9 +219,14 @@ library TokenLedgerLib {
     }
 
     /// @dev The bridged half of every native-to-bridged transition: a bridged credit, `totalBridged` up. The
-    ///  token burns `amount` from the holder around it and names the movement. Emits nothing.
-    function creditFromNative(bytes calldata toWallet, uint256 amount) external returns (bytes32 toKey) {
+    ///  token burns `amount` from `holder` afterwards and names the movement. Emits nothing.
+    /// @param freeBalance `holder`'s free native balance, read by the token; `amount` may not exceed it
+    function creditFromNative(address holder, bytes calldata toWallet, uint256 amount, uint256 freeBalance)
+        external
+        returns (bytes32 toKey)
+    {
         toKey = WalletKeyLib.satelliteKey(toWallet);
+        require(amount <= freeBalance, IERC20Errors.ERC20InsufficientBalance(holder, freeBalance, amount));
 
         TokenStorage storage s = layout();
         s.bridgedBalance[toKey] += amount;

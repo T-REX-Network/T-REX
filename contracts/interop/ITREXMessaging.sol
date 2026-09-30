@@ -66,14 +66,6 @@ import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 
 interface ITREXMessaging {
 
-    /* ----- Events and errors of the messaging layer ----- */
-
-    // The messaging layer runs in a linked library, so the token's own bytecode never names these and
-    // the compiler would leave them out of its ABI, although the token is what emits and reverts with
-    // them. They are declared here, identical to `EventsLib` and `ErrorsLib`, so that indexers and
-    // clients decoding against the token's ABI keep seeing them. Declarations only: no bytecode.
-    // `test/unit/interop/TREXMessagingAbiUnitTest.t.sol` pins each one to its library definition.
-
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
     event RouteSet(bytes32 indexed chainKey, address indexed gateway);
@@ -98,7 +90,6 @@ interface ITREXMessaging {
     error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
     error UnsupportedMessageVersion(uint8 messageVersion);
 
-    // Raised by the OpenZeppelin code the library parses and formats ERC-7930 addresses with.
     error InteroperableAddressParsingError(bytes);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);

@@ -17,6 +17,7 @@ jobs:
   compare_gas_reports:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       pull-requests: write
     steps:
@@ -32,8 +33,6 @@ jobs:
       - name: Install dependencies
         run: forge soldeer install
 
-      # The seed is pinned to the base commit so a pull request and its base fuzz the same inputs,
-      # and the diff shows what the change costs rather than what a different random run found.
       - name: Run tests
         run: forge test --gas-report > gasreport.ansi
         env:

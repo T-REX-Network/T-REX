@@ -7,10 +7,9 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { IToken } from "contracts/token/IToken.sol";
 
-/// @dev The bridged ledger and the recovery preconditions run in `TokenLedgerLib` and `TokenRecoveryLib`,
-///  so the events and errors they raise are redeclared on `IToken` to stay in the token's ABI. A
-///  redeclaration that drifts from the library definition would put a signature in the ABI that the token
-///  never produces; this pins every one of them to the definition the libraries actually use.
+/// @dev Events and errors raised inside `TokenLedgerLib`, `TokenRecoveryLib` and `TokenGuardsLib` are
+///  redeclared on `IToken` to stay in the token's ABI. This pins each redeclaration to the definition
+///  the libraries actually use.
 contract TokenLibrariesAbiUnitTest is Test {
 
     function test_events_MatchTheLibraryDefinitions() public pure {
@@ -31,6 +30,10 @@ contract TokenLibrariesAbiUnitTest is Test {
         assertEq(IToken.NoTokenToRecover.selector, ErrorsLib.NoTokenToRecover.selector);
         assertEq(IToken.RecoveryNotPossible.selector, ErrorsLib.RecoveryNotPossible.selector);
         assertEq(IToken.SameWalletRecovery.selector, ErrorsLib.SameWalletRecovery.selector);
+        assertEq(IToken.TokenCirculating.selector, ErrorsLib.TokenCirculating.selector);
+        assertEq(IToken.InvalidIdentityRegistry.selector, ErrorsLib.InvalidIdentityRegistry.selector);
+        assertEq(IToken.InvalidCompliance.selector, ErrorsLib.InvalidCompliance.selector);
+        assertEq(IToken.ComplianceAlreadyBoundToToken.selector, ErrorsLib.ComplianceAlreadyBoundToToken.selector);
     }
 
 }

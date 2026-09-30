@@ -73,15 +73,6 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 ///  leg has not landed is held in transit against that validation: no wallet holds it, its sender still owns it.
 interface IToken is IERC3643 {
 
-    /* ----- Events and errors of the linked libraries ----- */
-
-    // The bridged ledger and the recovery preconditions run in `TokenLedgerLib` and `TokenRecoveryLib`,
-    // so the token's own bytecode never names these and the compiler would leave them out of its ABI,
-    // although the token is what emits and reverts with them. They are declared here, identical to
-    // `EventsLib` and `ErrorsLib`, so that indexers and clients decoding against the token's ABI keep
-    // seeing them. Declarations only: no bytecode. `test/unit/token/TokenLibrariesAbiUnitTest.t.sol` pins
-    // each one to its library definition.
-
     event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
     event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
     event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
@@ -104,6 +95,10 @@ interface IToken is IERC3643 {
     error NoTokenToRecover();
     error RecoveryNotPossible();
     error SameWalletRecovery();
+    error TokenCirculating();
+    error InvalidIdentityRegistry();
+    error InvalidCompliance();
+    error ComplianceAlreadyBoundToToken();
 
     /// @notice Returns the part of a wallet's balance that is movable on this chain: `balanceOf` minus frozen.
     /// @param wallet the wallet to read
@@ -176,5 +171,28 @@ interface IToken is IERC3643 {
 
     /// @dev Gives back `amount` of what was reserved against `wallet`. Callable by the bound compliance alone.
     function releaseFromValidation(bytes calldata wallet, uint256 amount) external;
+
+    /// @dev Initializes a token behind its beacon proxy. Called once, by the factory.
+    function init(
+        string calldata tokenName,
+        string calldata tokenSymbol,
+        uint8 tokenDecimals,
+        address identityRegistryAddress,
+        address complianceAddress,
+        address trustedGatewayRegistryAddress,
+        address onchainIdAddress,
+        address accessManagerAddress
+    ) external;
+
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
+    function dispatchComplianceValidation(bytes32 chainKey, uint256 validationId, bytes calldata body)
+        external
+        returns (bytes32);
+
+    /// @dev Sends a delegation-out mint instruction to this token's peer on `chainKey`.
+    function dispatchMintInstruction(bytes32 chainKey, bytes calldata body) external returns (bytes32);
+
+    /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
+    function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external returns (bytes32);
 
 }

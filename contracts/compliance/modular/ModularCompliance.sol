@@ -77,7 +77,6 @@ import { RolesLib } from "../../libraries/RolesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
-import { Token } from "../../token/Token.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
@@ -452,7 +451,7 @@ contract ModularCompliance is
     /// @inheritdoc TransferValidation
     /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
     function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
-        Token(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
+        IToken(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
     }
 
     /// @inheritdoc TransferValidation

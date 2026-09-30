@@ -70,15 +70,11 @@ import {
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
-import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
-
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
-import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
@@ -92,6 +88,7 @@ import {
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
 import { IToken } from "./IToken.sol";
+import { TokenGuardsLib } from "./TokenGuardsLib.sol";
 import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 import { TokenRecoveryLib } from "./TokenRecoveryLib.sol";
 
@@ -102,9 +99,6 @@ import { TokenRecoveryLib } from "./TokenRecoveryLib.sol";
 contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgradeable, TREXMessaging, IToken {
 
     string internal constant VERSION = "5.0.0";
-
-    // The token's own namespace, `erc3643.storage.TREXToken`, is declared in {TokenLedgerLib}, which is
-    // what reads and writes the bridged part of it.
 
     constructor() {
         _disableInitializers();
@@ -369,13 +363,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  Relocation of one identity's own position, so ownership does not move: the calling flow checks pause,
     ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
     ///  the buckets and the envelope only. It is the only way a native position reaches a satellite.
-    /// @dev The checks run in the order they always did (holder, envelope, free balance); the bridged credit
-    ///  being written before the native burn is not observable, since either reverting undoes both.
     function _delegateOut(address holder, bytes memory toWallet, uint256 amount) internal {
         require(holder != address(0), ErrorsLib.ZeroAddress());
-        bytes32 toKey = TokenLedgerLib.creditFromNative(toWallet, amount);
-        uint256 freeBalance = freeBalanceOf(holder);
-        require(amount <= freeBalance, IERC20Errors.ERC20InsufficientBalance(holder, freeBalance, amount));
+        bytes32 toKey = TokenLedgerLib.creditFromNative(holder, toWallet, amount, freeBalanceOf(holder));
         ERC20Upgradeable._update(holder, address(0), amount);
 
         emit EventsLib.DelegatedOut(holder, toKey, toWallet, amount);
@@ -468,11 +458,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         override
         onlySharedAuthority(identityRegistryAddress)
     {
-        require(address(_getIdentityRegistry()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
-        require(
-            ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
-            ErrorsLib.InvalidIdentityRegistry()
-        );
+        TokenGuardsLib.checkIdentityRegistry(address(_getIdentityRegistry()), identityRegistryAddress, totalSupply());
 
         super._setIdentityRegistry(identityRegistryAddress);
     }
@@ -486,21 +472,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  rule over the ledger would be wrong from the first transfer. A circulating token's compliance is
     ///  upgraded in place through its beacon, or changed through its modules.
     function _setCompliance(address complianceAddress) internal override onlySharedAuthority(complianceAddress) {
-        require(address(_getCompliance()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
-
-        // Checked before getTokenBound() so a wrong contract gives a named error.
-        require(
-            ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),
-            ErrorsLib.InvalidCompliance()
-        );
-
-        address boundToken = IModularCompliance(complianceAddress).getTokenBound();
-        require(boundToken == address(0), ErrorsLib.ComplianceAlreadyBoundToToken());
-
-        IERC3643Compliance current = _getCompliance();
-        if (address(current) != address(0)) {
-            current.unbindToken(address(this));
-        }
+        TokenGuardsLib.prepareCompliance(address(_getCompliance()), complianceAddress, totalSupply());
 
         // The event lands after the bind so that it only ever reports a binding that succeeded.
         _writeCompliance(complianceAddress);
