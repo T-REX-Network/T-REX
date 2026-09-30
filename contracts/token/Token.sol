@@ -81,9 +81,9 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
+import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
@@ -684,20 +684,16 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @inheritdoc TREXMessaging
     /// @dev The destination is structural: the bound compliance owns the slot lifecycle, so an attributed
-    ///      settlement goes there and nowhere else. It is forwarded as decoded; classifying it against
-    ///      the stored validation is the compliance's business, not the token's.
+    ///      settlement goes there and nowhere else. It is forwarded as decoded, by the linked messaging
+    ///      library and with the token as the caller; classifying it against the stored validation is the
+    ///      compliance's business, not the token's.
     ///
     ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
     ///      incident under investigation settles nothing. When the compliance reports a replayed or a never-issued
     ///      settlement, the token halts itself through its pause: the interop layer is misbehaving and every
     ///      notification is suspect until an agent has investigated, resolved and called `unpause`.
-    function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
-        internal
-        override
-        whenNotPaused
-        nonReentrant
-    {
-        bool halt = ISettlementHandler(address(_getCompliance())).handleSettlement(chainKey, notification);
+    function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
+        bool halt = TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body);
         if (halt) _pause();
     }
 
@@ -709,10 +705,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// The identity link and the call into the ledger arrive with the movement types; until then the
     /// proof is attributed, checked for a destination, and announced with its fields intact, without
     /// touching the ledger.
-    function _handleBurnProof(bytes32 chainKey, MessageTypesLib.BurnProof memory proof) internal virtual override {
-        require(proof.nativeWallet != address(0), ErrorsLib.ZeroAddress());
-
-        emit EventsLib.BurnProofReceived(chainKey, proof.burnedWallet, proof.nativeWallet, proof.amount);
+    function _handleBurnProof(bytes32 chainKey, bytes memory body) internal virtual override {
+        TREXMessagingLib.announceBurnProof(chainKey, body);
     }
 
     /// @inheritdoc ERC3643Token

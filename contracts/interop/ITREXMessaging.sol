@@ -62,7 +62,46 @@
 
 pragma solidity 0.8.30;
 
+import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
+
 interface ITREXMessaging {
+
+    /* ----- Events and errors of the messaging layer ----- */
+
+    // The messaging layer runs in a linked library, so the token's own bytecode never names these and
+    // the compiler would leave them out of its ABI, although the token is what emits and reverts with
+    // them. They are declared here, identical to `EventsLib` and `ErrorsLib`, so that indexers and
+    // clients decoding against the token's ABI keep seeing them. Declarations only: no bytecode.
+    // `test/unit/interop/TREXMessagingAbiUnitTest.t.sol` pins each one to its library definition.
+
+    event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
+    event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
+    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event PeerSet(bytes32 indexed chainKey, bytes peer);
+    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
+    event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
+    event BurnProofReceived(
+        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
+    );
+
+    error ChainNotOpen(bytes32 chainKey);
+    error ChainNotRegistered(bytes32 chainKey);
+    error GatewayNotRouted(address gateway, bytes32 chainKey);
+    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
+    error GatewayNotTrusted(address gateway);
+    error InvalidChainReference(bytes2 chainType, bytes chainReference);
+    error InvalidPeer(bytes peer);
+    error MessageAlreadyReceived(address gateway, bytes32 receiveId);
+    error MessageTypeNotInbound(MessageTypesLib.Message messageType);
+    error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
+    error SenderNotPeer(bytes32 chainKey, bytes sender);
+    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
+    error UnsupportedMessageVersion(uint8 messageVersion);
+
+    // Raised by the OpenZeppelin code the library parses and formats ERC-7930 addresses with.
+    error InteroperableAddressParsingError(bytes);
+    error InteroperableAddressEmptyReferenceAndAddress();
+    error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
 
     /// @dev Routes this token's traffic to and from a chain through `gateway`.
     ///
