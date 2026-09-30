@@ -73,6 +73,38 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 ///  leg has not landed is held in transit against that validation: no wallet holds it, its sender still owns it.
 interface IToken is IERC3643 {
 
+    /* ----- Events and errors of the linked libraries ----- */
+
+    // The bridged ledger and the recovery preconditions run in `TokenLedgerLib` and `TokenRecoveryLib`,
+    // so the token's own bytecode never names these and the compiler would leave them out of its ABI,
+    // although the token is what emits and reverts with them. They are declared here, identical to
+    // `EventsLib` and `ErrorsLib`, so that indexers and clients decoding against the token's ABI keep
+    // seeing them. Declarations only: no bytecode. `test/unit/token/TokenLibrariesAbiUnitTest.t.sol` pins
+    // each one to its library definition.
+
+    event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
+    event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
+    event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
+    event HeldInTransit(bytes32 indexed fromKey, uint256 indexed validationId, bytes fromWallet, uint256 amount);
+    event BridgedTransfer(
+        bytes32 indexed fromKey,
+        bytes32 indexed toKey,
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        uint256 amount
+    );
+
+    error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
+    error NonCanonicalInteroperableAddress(bytes envelope);
+    error NotASatelliteWallet(bytes wallet);
+    error NothingInTransit(uint256 validationId);
+    error TransitAlreadyHeld(uint256 validationId);
+    error TransitAmountMismatch(uint256 validationId, uint256 held, uint256 amount);
+    error NoTokenToRecover();
+    error RecoveryNotPossible();
+    error SameWalletRecovery();
+
     /// @notice Returns the part of a wallet's balance that is movable on this chain: `balanceOf` minus frozen.
     /// @param wallet the wallet to read
     function freeBalanceOf(address wallet) external view returns (uint256);
