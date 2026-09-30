@@ -27,6 +27,7 @@ pragma solidity 0.8.30;
 
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 
 /**
@@ -54,25 +55,6 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * lets the owner move it to where it belongs.
  */
 abstract contract ComplianceLedger is IComplianceLedger {
-
-    /// @custom:storage-location erc7201:erc3643.storage.ComplianceLedger
-    struct Ledger {
-        /// What each identity owns over every wallet and every chain.
-        mapping(address identity => uint256 amount) position;
-        /// What open validations promise to each identity.
-        mapping(address identity => uint256 amount) pendingIn;
-        /// What open validations promise out of each identity.
-        mapping(address identity => uint256 amount) pendingOut;
-        /// The gap between the positions and the supply: credits that landed on nobody add to it,
-        /// debits that found nobody or found too little subtract from it. Zero while the registry is stable.
-        int256 gap;
-        /// The identity each native wallet was last credited to, so a relink is noticed and followed.
-        mapping(address wallet => address identity) ownerOf;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ComplianceLedger")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant LEDGER_STORAGE_LOCATION =
-        0x37065f79446a9096383af794d27f19e665b7dd5afcf9e812ca702bcc08bee600;
 
     /// @inheritdoc IComplianceLedger
     function positionOf(address identity) external view returns (uint256) {
@@ -126,21 +108,7 @@ abstract contract ComplianceLedger is IComplianceLedger {
     ///  the supply, so this can give tokens that landed on nobody their owner, or take a stale position off an
     ///  identity a relink left too high.
     function _fixPosition(address from, address to, uint256 amount) internal {
-        require(from != to, ErrorsLib.FromAndToAreTheSame());
-        Ledger storage ledger = _ledger();
-
-        if (from == address(0)) {
-            ledger.gap -= int256(amount);
-        } else {
-            uint256 held = ledger.position[from];
-            require(held >= amount, ErrorsLib.InsufficientPosition(from, held, amount));
-            ledger.position[from] = held - amount;
-        }
-
-        if (to == address(0)) ledger.gap += int256(amount);
-        else ledger.position[to] += amount;
-
-        emit EventsLib.PositionFixed(from, to, amount);
+        ComplianceLedgerLib.fixPosition(from, to, amount);
     }
 
     /// @dev Moves `amount` of position from one identity to the other: one side loses it, the other gains it.
@@ -167,7 +135,7 @@ abstract contract ComplianceLedger is IComplianceLedger {
     ///  the repair harder. What could not be debited leaves the positions over the supply, so it comes off
     ///  the gap, and the event names it for the owner who will `fixPosition` it.
     function _debitPosition(address identity, bytes32 wallet, uint256 amount) private {
-        Ledger storage ledger = _ledger();
+        ComplianceLedgerLib.Ledger storage ledger = _ledger();
         if (identity == address(0)) {
             ledger.gap -= int256(amount);
             emit EventsLib.PositionUnresolved(wallet, amount);
@@ -186,7 +154,7 @@ abstract contract ComplianceLedger is IComplianceLedger {
     /// @dev Adds `amount` to an identity's position. A wallet that resolves to nobody is credited to the gap
     ///  instead, which leaves the positions short of the supply by exactly that amount.
     function _creditPosition(address identity, bytes32 wallet, uint256 amount) private {
-        Ledger storage ledger = _ledger();
+        ComplianceLedgerLib.Ledger storage ledger = _ledger();
         if (identity == address(0)) {
             ledger.gap += int256(amount);
             emit EventsLib.PositionUnresolved(wallet, amount);
@@ -195,26 +163,10 @@ abstract contract ComplianceLedger is IComplianceLedger {
         ledger.position[identity] += amount;
     }
 
-    /// @dev Counts an issued validation as pending at `amountMax`, the worst case for any additive rule. Only
-    ///  when ownership really moves: relocating tokens between two wallets of one identity never eats that
-    ///  identity's own room. What the sending wallet may still send is the token's to track, beside the balance
-    ///  it reserves against.
-    /// @return identitiesReserved whether anything was written, which the caller records on the validation
-    function _reservePending(address fromIdentity, address toIdentity, bytes32 fromWallet, uint256 amountMax)
-        internal
-        returns (bool identitiesReserved)
-    {
-        Ledger storage ledger = _ledger();
-        if (_isRelocation(fromIdentity, toIdentity)) return false;
-        ledger.pendingOut[fromIdentity] += amountMax;
-        ledger.pendingIn[toIdentity] += amountMax;
-        return true;
-    }
-
-    /// @dev Undoes the identities' half of {_reservePending}, once the movement is over: the validation
+    /// @dev Undoes the identities' half of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation
     ///  settled, or the keeper discarded it.
     function _releasePendingOfIdentities(address fromIdentity, address toIdentity, uint256 amountMax) internal {
-        Ledger storage ledger = _ledger();
+        ComplianceLedgerLib.Ledger storage ledger = _ledger();
         ledger.pendingOut[fromIdentity] -= amountMax;
         ledger.pendingIn[toIdentity] -= amountMax;
     }
@@ -224,10 +176,8 @@ abstract contract ComplianceLedger is IComplianceLedger {
         return fromIdentity != address(0) && fromIdentity == toIdentity;
     }
 
-    function _ledger() internal pure returns (Ledger storage ledger) {
-        assembly ("memory-safe") {
-            ledger.slot := LEDGER_STORAGE_LOCATION
-        }
+    function _ledger() internal pure returns (ComplianceLedgerLib.Ledger storage) {
+        return ComplianceLedgerLib.layout();
     }
 
 }
