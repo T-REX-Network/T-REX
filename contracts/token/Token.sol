@@ -70,30 +70,27 @@ import {
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
-import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
-
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
-import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
+import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
-import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
-import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
 import { IToken } from "./IToken.sol";
+import { TokenGuardsLib } from "./TokenGuardsLib.sol";
+import { TokenLedgerLib } from "./TokenLedgerLib.sol";
+import { TokenRecoveryLib } from "./TokenRecoveryLib.sol";
 
 /// @title Token
 /// @dev The T-REX security token: {ERC3643Token} plus AccessManager authorization, validation on the
@@ -102,31 +99,6 @@ import { IToken } from "./IToken.sol";
 contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgradeable, TREXMessaging, IToken {
 
     string internal constant VERSION = "5.0.0";
-
-    /// @custom:storage-location erc7201:erc3643.storage.TREXToken
-    struct TokenStorage {
-        uint8 decimals;
-        /// @dev Positions delegated to satellites, keyed by the canonical ERC-7930 wallet key. Separate from the
-        ///  native mapping, which stays OpenZeppelin's.
-        mapping(bytes32 walletKey => uint256) bridgedBalance;
-        /// @dev Sum of every bridged position, kept so `totalSupply` counts it in O(1).
-        uint256 totalBridged;
-        /// @dev Amounts a satellite burned for a cross-chain validation whose mint leg has not landed, keyed by
-        ///  the validation. Debited from the sender's position, still counted in `totalBridged`, still owned by
-        ///  the sender the validation names.
-        mapping(uint256 validationId => uint256) inTransit;
-        /// @dev Sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
-        uint256 totalInTransit;
-        /// @dev What open validations may still draw from each satellite wallet. Kept here, beside the balance
-        ///  it reserves against, so `availableOf` is one subtraction rather than two contracts agreeing: the
-        ///  compliance reserves at issuance and gives back at settlement or discard, and `holdInTransit` turns a
-        ///  reservation straight into a hold, which is why nothing has to be released in between.
-        mapping(bytes32 walletKey => uint256) reservedForValidations;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXToken")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant TOKEN_STORAGE_LOCATION =
-        0x05378669fd58b6f9251e6d5461e60e18b8b3fdf11d70481ba6f9fc72a4bfc600;
 
     constructor() {
         _disableInitializers();
@@ -155,7 +127,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         __Pausable_init();
         __AccessManaged_init(accessManagerAddress);
 
-        _tokenStorage().decimals = tokenDecimals;
+        TokenLedgerLib.layout().decimals = tokenDecimals;
         _initERC3643(identityRegistryAddress, complianceAddress, onchainIdAddress);
 
         // The network's registry, fixed for the token's lifetime: no role can move it afterwards.
@@ -170,7 +142,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev {IToken} re-declares the ERC-3643 surface, so `IERC20Metadata` reaches this contract by a
     ///  second path and has to be named among the overridden bases.
     function decimals() public view override(ERC3643Token, ERC20Upgradeable, IERC20Metadata) returns (uint8) {
-        return _tokenStorage().decimals;
+        return TokenLedgerLib.layout().decimals;
     }
 
     /// @inheritdoc IERC3643
@@ -235,12 +207,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
 
-        (bool toNative, address recipient) = WalletKeyLib.isReferenceChain(to);
-        if (toNative) {
-            _settleToNative(from, recipient, amount, validationId);
-            return;
-        }
-        _bridgedTransfer(from, to, amount, validationId);
+        (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, validationId);
+        if (toNative) _creditSettledToNative(fromKey, from, recipient, amount, validationId);
     }
 
     /// @inheritdoc IToken
@@ -249,7 +217,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
     {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        _holdInTransit(from, amount, validationId, reserved);
+        TokenLedgerLib.holdInTransit(from, amount, validationId, reserved);
     }
 
     /* ----- Ledger Views ----- */
@@ -269,7 +237,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
     ///  `totalBridged` to the positions, whichever transition moved it.
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
-        return super.totalSupply() + _tokenStorage().totalBridged;
+        return super.totalSupply() + TokenLedgerLib.layout().totalBridged;
     }
 
     /// @inheritdoc IToken
@@ -279,27 +247,23 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @inheritdoc IToken
     function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256) {
-        return _tokenStorage().bridgedBalance[WalletKeyLib.canonicalKey(wallet)];
+        return TokenLedgerLib.bridgedBalanceOf(wallet);
     }
 
     /// @inheritdoc IToken
     function returnHeldInTransit(bytes calldata to, uint256 validationId) external whenNotPaused {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        _returnHeldInTransit(to, validationId);
+        TokenLedgerLib.returnHeldInTransit(to, validationId);
     }
 
     /// @inheritdoc IToken
     function reservedOf(bytes calldata wallet) external view returns (uint256) {
-        return _tokenStorage().reservedForValidations[WalletKeyLib.canonicalKey(wallet)];
+        return TokenLedgerLib.reservedOf(wallet);
     }
 
     /// @inheritdoc IToken
     function availableOf(bytes calldata wallet) public view returns (uint256) {
-        TokenStorage storage s = _tokenStorage();
-        bytes32 key = WalletKeyLib.canonicalKey(wallet);
-        uint256 balance = s.bridgedBalance[key];
-        uint256 reserved = s.reservedForValidations[key];
-        return reserved < balance ? balance - reserved : 0;
+        return TokenLedgerLib.availableOf(wallet);
     }
 
     /// @inheritdoc IToken
@@ -308,10 +272,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  token would issue validations with nothing held against the wallet they draw from.
     function reserveForValidation(bytes calldata wallet, uint256 amount) external {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        bytes32 key = WalletKeyLib.satelliteKey(wallet);
-        _tokenStorage().reservedForValidations[key] += amount;
-
-        emit EventsLib.ReservedForValidation(key, wallet, amount);
+        TokenLedgerLib.reserve(wallet, amount);
     }
 
     /// @inheritdoc IToken
@@ -319,22 +280,22 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  must still give the wallet its room back.
     function releaseFromValidation(bytes calldata wallet, uint256 amount) external {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-        _releaseFromValidation(WalletKeyLib.canonicalKey(wallet), wallet, amount);
+        TokenLedgerLib.release(wallet, amount);
     }
 
     /// @inheritdoc IToken
     function totalBridged() external view returns (uint256) {
-        return _tokenStorage().totalBridged;
+        return TokenLedgerLib.layout().totalBridged;
     }
 
     /// @inheritdoc IToken
     function inTransitOf(uint256 validationId) external view returns (uint256) {
-        return _tokenStorage().inTransit[validationId];
+        return TokenLedgerLib.layout().inTransit[validationId];
     }
 
     /// @inheritdoc IToken
     function totalInTransit() external view returns (uint256) {
-        return _tokenStorage().totalInTransit;
+        return TokenLedgerLib.layout().totalInTransit;
     }
 
     /* ----- Transfer Functions ----- */
@@ -403,7 +364,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
     ///  the buckets and the envelope only. It is the only way a native position reaches a satellite.
     function _delegateOut(address holder, bytes memory toWallet, uint256 amount) internal {
-        bytes32 toKey = _moveNativeToBridged(holder, toWallet, amount);
+        require(holder != address(0), ErrorsLib.ZeroAddress());
+        bytes32 toKey = TokenLedgerLib.creditFromNative(holder, toWallet, amount, freeBalanceOf(holder));
+        ERC20Upgradeable._update(holder, address(0), amount);
 
         emit EventsLib.DelegatedOut(holder, toKey, toWallet, amount);
     }
@@ -413,80 +376,16 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  consumed burn proof; the flow checks that `holder` belongs to the burned wallet's identity, so ownership
     ///  does not move here either. A settlement leg that crosses identities is {_settleToNative}.
     function _recall(bytes memory fromWallet, address holder, uint256 amount) internal {
-        bytes32 fromKey = _moveBridgedToNative(fromWallet, holder, amount);
+        bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, holder, amount);
+        ERC20Upgradeable._update(address(0), holder, amount);
 
         emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
     }
 
-    /// @dev Takes `amount` out of `fromWallet`'s bridged position and holds it against `validationId`: the burn
-    ///  leg of a cross-chain validation landed, the mint leg has not. The amount stays bridged and stays the
-    ///  sender's; only the wallet no longer holds it, so nothing can be issued or recalled against tokens the
-    ///  satellite already burned. One hold per validation.
-    /// @dev Turns what a validation reserved against the wallet into an in-transit hold, in one step: the
-    ///  tokens leave the wallet, so the reservation that was standing in for them is given back at the same
-    ///  time and there is nothing to release separately.
-    /// @param reserved what this validation had reserved against the wallet, released as the hold is taken
-    function _holdInTransit(bytes memory fromWallet, uint256 amount, uint256 validationId, uint256 reserved) internal {
-        bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
-
-        TokenStorage storage s = _tokenStorage();
-        require(s.inTransit[validationId] == 0, ErrorsLib.TransitAlreadyHeld(validationId));
-        if (reserved != 0) _releaseFromValidation(fromKey, fromWallet, reserved);
-        _debitBridged(s, fromWallet, fromKey, amount);
-        s.inTransit[validationId] = amount;
-        s.totalInTransit += amount;
-
-        emit EventsLib.HeldInTransit(fromKey, validationId, fromWallet, amount);
-    }
-
-    /// @dev Puts a held amount back on the wallet it was burned from. The mirror of {_holdInTransit}: the
-    ///  movement is unwound where it started instead of completed, so `totalSupply` and `totalBridged` do not
-    ///  move, only the hold becomes a balance again.
-    function _returnHeldInTransit(bytes memory toWallet, uint256 validationId) internal {
-        TokenStorage storage s = _tokenStorage();
-        uint256 held = s.inTransit[validationId];
-        require(held != 0, ErrorsLib.NothingInTransit(validationId));
-
-        bytes32 toKey = WalletKeyLib.satelliteKey(toWallet);
-        delete s.inTransit[validationId];
-        s.totalInTransit -= held;
-        s.bridgedBalance[toKey] += held;
-
-        emit EventsLib.ReturnedInTransit(toKey, validationId, toWallet, held);
-    }
-
-    /// @dev Gives back what a validation reserved against a wallet. Floors at zero rather than reverting: the
-    ///  compliance is the only caller and releases each reservation once, so a shortfall would mean its own
-    ///  bookkeeping is wrong, and blocking a settlement over it would strand the movement.
-    function _releaseFromValidation(bytes32 key, bytes memory wallet, uint256 amount) private {
-        mapping(bytes32 => uint256) storage reserved = _tokenStorage().reservedForValidations;
-        uint256 held = reserved[key];
-        uint256 released = held < amount ? held : amount;
-        reserved[key] = held - released;
-
-        emit EventsLib.ReleasedFromValidation(key, wallet, released);
-    }
-
     /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
-    ///  touch: `from` down, `to` up, nothing native. `validationId` is the validation the settlement consumed.
-    ///  When its burn leg already moved the amount in transit, the hold is what `to` is credited from, and it
-    ///  must be the settled amount exactly.
+    ///  touch. See {TokenLedgerLib-bridgedTransfer}.
     function _bridgedTransfer(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal {
-        bytes32 fromKey = WalletKeyLib.satelliteKey(from);
-        bytes32 toKey = WalletKeyLib.satelliteKey(to);
-
-        TokenStorage storage s = _tokenStorage();
-        uint256 held = s.inTransit[validationId];
-        if (held != 0) {
-            require(held == amount, ErrorsLib.TransitAmountMismatch(validationId, held, amount));
-            delete s.inTransit[validationId];
-            s.totalInTransit -= amount;
-        } else {
-            _debitBridged(s, from, fromKey, amount);
-        }
-        s.bridgedBalance[toKey] += amount;
-
-        emit EventsLib.BridgedTransfer(fromKey, toKey, validationId, from, to, amount);
+        TokenLedgerLib.bridgedTransfer(from, to, amount, validationId);
     }
 
     /// @dev Applies the settled leg of a validation whose sender is on a satellite and whose receiver is on the
@@ -496,47 +395,21 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  envelope only. There is no mirror leaving a native wallet: the compliance issues no validation whose
     ///  sender is native, so the satellite executing one always holds the position it moves.
     function _settleToNative(bytes memory fromWallet, address to, uint256 amount, uint256 validationId) internal {
-        bytes32 fromKey = _moveBridgedToNative(fromWallet, to, amount);
+        bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, to, amount);
+        _creditSettledToNative(fromKey, fromWallet, to, amount, validationId);
+    }
+
+    /// @dev The native half of {_settleToNative}, once the ledger has debited the satellite position.
+    function _creditSettledToNative(
+        bytes32 fromKey,
+        bytes memory fromWallet,
+        address to,
+        uint256 amount,
+        uint256 validationId
+    ) private {
+        ERC20Upgradeable._update(address(0), to, amount);
 
         emit EventsLib.SettledToNative(fromKey, to, validationId, fromWallet, amount);
-    }
-
-    /// @dev The bucket arithmetic every native-to-bridged transition shares: a native burn and a bridged credit,
-    ///  `totalSupply` unmoved. Emits nothing; the caller names the movement.
-    function _moveNativeToBridged(address holder, bytes memory toWallet, uint256 amount)
-        private
-        returns (bytes32 toKey)
-    {
-        require(holder != address(0), ErrorsLib.ZeroAddress());
-        toKey = WalletKeyLib.satelliteKey(toWallet);
-        uint256 freeBalance = freeBalanceOf(holder);
-        require(amount <= freeBalance, IERC20Errors.ERC20InsufficientBalance(holder, freeBalance, amount));
-
-        TokenStorage storage s = _tokenStorage();
-        ERC20Upgradeable._update(holder, address(0), amount);
-        s.bridgedBalance[toKey] += amount;
-        s.totalBridged += amount;
-    }
-
-    /// @dev The bucket arithmetic every bridged-to-native transition shares: a bridged debit and a native mint.
-    ///  Emits nothing; the caller names the movement.
-    function _moveBridgedToNative(bytes memory fromWallet, address holder, uint256 amount)
-        private
-        returns (bytes32 fromKey)
-    {
-        require(holder != address(0), ErrorsLib.ZeroAddress());
-        fromKey = WalletKeyLib.satelliteKey(fromWallet);
-
-        TokenStorage storage s = _tokenStorage();
-        _debitBridged(s, fromWallet, fromKey, amount);
-        s.totalBridged -= amount;
-        ERC20Upgradeable._update(address(0), holder, amount);
-    }
-
-    function _debitBridged(TokenStorage storage s, bytes memory wallet, bytes32 key, uint256 amount) private {
-        uint256 balance = s.bridgedBalance[key];
-        require(amount <= balance, ErrorsLib.InsufficientBridgedBalance(wallet, balance, amount));
-        s.bridgedBalance[key] = balance - amount;
     }
 
     /* ----- Utility Functions ----- */
@@ -585,11 +458,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         override
         onlySharedAuthority(identityRegistryAddress)
     {
-        require(address(_getIdentityRegistry()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
-        require(
-            ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
-            ErrorsLib.InvalidIdentityRegistry()
-        );
+        TokenGuardsLib.checkIdentityRegistry(address(_getIdentityRegistry()), identityRegistryAddress, totalSupply());
 
         super._setIdentityRegistry(identityRegistryAddress);
     }
@@ -603,21 +472,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  rule over the ledger would be wrong from the first transfer. A circulating token's compliance is
     ///  upgraded in place through its beacon, or changed through its modules.
     function _setCompliance(address complianceAddress) internal override onlySharedAuthority(complianceAddress) {
-        require(address(_getCompliance()) == address(0) || totalSupply() == 0, ErrorsLib.TokenCirculating());
-
-        // Checked before getTokenBound() so a wrong contract gives a named error.
-        require(
-            ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),
-            ErrorsLib.InvalidCompliance()
-        );
-
-        address boundToken = IModularCompliance(complianceAddress).getTokenBound();
-        require(boundToken == address(0), ErrorsLib.ComplianceAlreadyBoundToToken());
-
-        IERC3643Compliance current = _getCompliance();
-        if (address(current) != address(0)) {
-            current.unbindToken(address(this));
-        }
+        TokenGuardsLib.prepareCompliance(address(_getCompliance()), complianceAddress, totalSupply());
 
         // The event lands after the bind so that it only ever reports a binding that succeeded.
         _writeCompliance(complianceAddress);
@@ -633,14 +488,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         override
         returns (bool)
     {
-        require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
-        require(balanceOf(lostWallet) != 0, ErrorsLib.NoTokenToRecover());
-
-        IERC3643IdentityRegistry registry = _getIdentityRegistry();
-        require(registry.contains(lostWallet) || registry.contains(newWallet), ErrorsLib.RecoveryNotPossible());
-        require(
-            !registry.contains(newWallet) || registry.identity(newWallet) == IIdentity(investorOnchainId),
-            ErrorsLib.RecoveryNotPossible()
+        TokenRecoveryLib.checkRecovery(
+            _getIdentityRegistry(), lostWallet, newWallet, investorOnchainId, balanceOf(lostWallet)
         );
 
         return super._recoveryAddress(lostWallet, newWallet, investorOnchainId);
@@ -675,29 +524,23 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         override
         returns (bool)
     {
-        IERC3643IdentityRegistry registry = _getIdentityRegistry();
-        if (!registry.contains(newWallet)) {
-            registry.registerIdentity(newWallet, IIdentity(investorOnchainID), 0);
-        }
-        return ITREXRegistry(address(registry)).isLocallyRegistered(lostWallet);
+        return TokenRecoveryLib.registerRecoveredWallet(
+            _getIdentityRegistry(), lostWallet, newWallet, investorOnchainID
+        );
     }
 
     /// @inheritdoc TREXMessaging
     /// @dev The destination is structural: the bound compliance owns the slot lifecycle, so an attributed
-    ///      settlement goes there and nowhere else. It is forwarded as decoded; classifying it against
-    ///      the stored validation is the compliance's business, not the token's.
+    ///      settlement goes there and nowhere else. It is forwarded as decoded, by the linked messaging
+    ///      library and with the token as the caller; classifying it against the stored validation is the
+    ///      compliance's business, not the token's.
     ///
     ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
     ///      incident under investigation settles nothing. When the compliance reports a replayed or a never-issued
     ///      settlement, the token halts itself through its pause: the interop layer is misbehaving and every
     ///      notification is suspect until an agent has investigated, resolved and called `unpause`.
-    function _handleSettlement(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
-        internal
-        override
-        whenNotPaused
-        nonReentrant
-    {
-        bool halt = ISettlementHandler(address(_getCompliance())).handleSettlement(chainKey, notification);
+    function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
+        bool halt = TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body);
         if (halt) _pause();
     }
 
@@ -709,10 +552,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// The identity link and the call into the ledger arrive with the movement types; until then the
     /// proof is attributed, checked for a destination, and announced with its fields intact, without
     /// touching the ledger.
-    function _handleBurnProof(bytes32 chainKey, MessageTypesLib.BurnProof memory proof) internal virtual override {
-        require(proof.nativeWallet != address(0), ErrorsLib.ZeroAddress());
-
-        emit EventsLib.BurnProofReceived(chainKey, proof.burnedWallet, proof.nativeWallet, proof.amount);
+    function _handleBurnProof(bytes32 chainKey, bytes memory body) internal virtual override {
+        TREXMessagingLib.announceBurnProof(chainKey, body);
     }
 
     /// @inheritdoc ERC3643Token
@@ -722,12 +563,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     function _EIP712Name() internal view override returns (string memory) {
         return name();
-    }
-
-    function _tokenStorage() private pure returns (TokenStorage storage $) {
-        assembly ("memory-safe") {
-            $.slot := TOKEN_STORAGE_LOCATION
-        }
     }
 
 }

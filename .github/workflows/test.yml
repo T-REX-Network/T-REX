@@ -40,6 +40,14 @@ jobs:
         run: "! grep -rn 'msg\\.data' contracts/"
         id: msg-data
 
+      - name: Run build
+        run: forge build
+        id: build
+
+      - name: Check contract sizes
+        run: .github/scripts/check_contract_sizes.sh
+        id: sizes
+
       - name: Run tests
         run: forge test --gas-report
         id: test
