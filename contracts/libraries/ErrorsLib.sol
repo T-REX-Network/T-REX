@@ -138,6 +138,7 @@ library ErrorsLib {
     error AuthorityMismatch();
     error StorageAuthorityMismatch(address identityRegistryStorage, address expected, address actual);
     error AccessManagerNotAContract(address accessManager);
+    error SuiteProfileNotAContract(address suiteProfile);
     error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
@@ -169,6 +170,8 @@ library ErrorsLib {
     error PendingDelayChange(address account, uint64 role);
     error PendingRoleGrant(address account, uint64 role);
     error RoleNotHeld(address account, uint64 role);
+    error SuiteDeployerCannotGovernFactory();
+    error PlatformRoleCannotBePublic();
 
     // RolesLib Errors
     error InvalidDomain();

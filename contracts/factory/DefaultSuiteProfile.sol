@@ -61,85 +61,22 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-import { ErrorsLib } from "./ErrorsLib.sol";
+import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
+import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
+import { ISuiteProfile } from "./ISuiteProfile.sol";
 
-library RolesLib {
+/// @title DefaultSuiteProfile
+/// @notice The profile T-REX ships: the {AccessManagerSetupLib} tables. A platform that wants a different
+///         default deploys another profile and points the factory at it.
+/// @dev Deliberately open: the call only has an effect on a manager that granted this contract
+///      `ADMIN_ROLE`, which the factory does for the duration of one deploy.
+contract DefaultSuiteProfile is ISuiteProfile {
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
-
-    // ---- Suite roles. A role id is a domain id in the upper 32 bits and a role number below ----
-
-    enum Role {
-        OWNER,
-        AGENT,
-        AGENT_MINTER,
-        AGENT_BURNER,
-        AGENT_PARTIAL_FREEZER,
-        AGENT_ADDRESS_FREEZER,
-        AGENT_RECOVERY_ADDRESS,
-        AGENT_FORCED_TRANSFER,
-        AGENT_PAUSER,
-        TOKEN_MANAGER,
-        IDENTITY_MANAGER,
-        AGENT_ADMIN,
-        SUITE_ADMIN,
-        IRS_BINDER,
-        IRS_WRITER,
-        COMPLIANCE_MANAGER,
-        VALIDATION_KEEPER
-    }
-
-    // ---- Platform roles: factory, implementation authority and identity factory governance ----
-
-    enum PlatformRole {
-        OWNER,
-        VERSION_MANAGER,
-        ASSET_DEPLOYER,
-        INTEROP_MANAGER
-    }
-
-    uint32 constant PLATFORM_DOMAIN = type(uint32).max;
-
-    // Role numbers start at 1 so no standard role packs to a zero role number.
-    uint32 constant ROLE_NUMBER_OFFSET = 1;
-
-    // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
-    uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
-
-    function forDomain(uint32 domainId, Role role) internal pure returns (uint64) {
-        return _packSuite(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
-    }
-
-    function forDomain(uint32 domainId, bytes32 customName) internal pure returns (uint64) {
-        return _packSuite(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
-    }
-
-    function platform(PlatformRole role) internal pure returns (uint64) {
-        return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
-    }
-
-    /// Platform roles governance names itself, with no release: the name hashes into the role number the
-    /// same way a custom suite role does, so it can never collide with a {PlatformRole} entry.
-    function platform(bytes32 customName) internal pure returns (uint64) {
-        return _pack(PLATFORM_DOMAIN, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
-    }
-
-    function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
-        domainId = uint32(roleId >> 32);
-        custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;
-        roleNumber = uint32(roleId) & ~CUSTOM_ROLE_FLAG;
-    }
-
-    function _packSuite(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
-        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
-        return _pack(domainId, roleNumber);
-    }
-
-    function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
-        require(domainId != 0, ErrorsLib.InvalidDomain());
-        return (uint64(domainId) << 32) | roleNumber;
+    /// @inheritdoc ISuiteProfile
+    function applyTo(TREXAccessManager accessManager, address token) external {
+        AccessManagerSetupLib.setupSuite(accessManager, token);
     }
 
 }

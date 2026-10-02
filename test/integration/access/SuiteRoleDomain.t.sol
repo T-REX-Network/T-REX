@@ -105,6 +105,20 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertNotEq(RolesLib.platform(RolesLib.PlatformRole.OWNER), RolesLib.forDomain(DOMAIN_A, RolesLib.Role.OWNER));
     }
 
+    function test_platform_CustomRoleIsFlaggedAndDistinctFromEnumRoles() public pure {
+        uint64 custom = RolesLib.platform(bytes32("TOKEN_ISSUER"));
+        (uint32 domainId, uint32 role, bool isCustom) = RolesLib.decode(custom);
+        assertEq(domainId, RolesLib.PLATFORM_DOMAIN);
+        assertTrue(isCustom);
+        assertEq(role, uint32(uint256(keccak256(abi.encode(bytes32("TOKEN_ISSUER"))))) & ~RolesLib.CUSTOM_ROLE_FLAG);
+        for (uint8 i = 0; i <= uint8(type(RolesLib.PlatformRole).max); i++) {
+            assertNotEq(custom, RolesLib.platform(RolesLib.PlatformRole(i)));
+        }
+        assertEq(custom, RolesLib.platform(bytes32("TOKEN_ISSUER")));
+        assertNotEq(custom, RolesLib.platform(bytes32("VERSION_MANAGER")));
+        assertNotEq(custom, RolesLib.forDomain(DOMAIN_A, bytes32("TOKEN_ISSUER")));
+    }
+
     function packExternally(uint32 domainId, RolesLib.Role role) external pure returns (uint64) {
         return RolesLib.forDomain(domainId, role);
     }
@@ -114,8 +128,8 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_AgentOfAOperatesAOnly() public {
-        _commission(tokenA, DOMAIN_A);
-        _commission(tokenB, DOMAIN_B);
+        _setupSuite(tokenA, DOMAIN_A);
+        _setupSuite(tokenB, DOMAIN_B);
         _grantAllAgentRoles(accessManager, agentA, DOMAIN_A);
 
         vm.startPrank(agentA);
@@ -143,8 +157,8 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_AgentOfBOperatesBOnly() public {
-        _commission(tokenA, DOMAIN_A);
-        _commission(tokenB, DOMAIN_B);
+        _setupSuite(tokenA, DOMAIN_A);
+        _setupSuite(tokenB, DOMAIN_B);
         _grantAllAgentRoles(accessManager, agentB, DOMAIN_B);
 
         vm.startPrank(agentB);
@@ -158,8 +172,8 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_TwoTokensInOneDomainShareOneTeam() public {
-        _commissionIntoTeam(tokenA);
-        _commissionIntoTeam(tokenB);
+        _setupSuiteInTeam(tokenA);
+        _setupSuiteInTeam(tokenB);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
 
         IERC3643IdentityRegistry registryB = tokenB.identityRegistry();
@@ -185,7 +199,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_MapsEverySuiteContractIntoTheDomain() public {
-        _commission(tokenA, DOMAIN_A);
+        _setupSuite(tokenA, DOMAIN_A);
         address suiteRegistry = address(tokenA.identityRegistry());
         address irs = address(tokenA.identityRegistry().identityStorage());
         address mc = address(tokenA.compliance());
@@ -218,7 +232,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_MapsEveryTableEntry() public {
-        _commission(tokenA, DOMAIN_A);
+        _setupSuite(tokenA, DOMAIN_A);
         _assertTableMapped(address(tokenA), AccessManagerSetupLib.tokenTable(), DOMAIN_A);
         _assertTableMapped(address(tokenA.identityRegistry()), AccessManagerSetupLib.registryTable(), DOMAIN_A);
         _assertTableMapped(
@@ -240,7 +254,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_StorageWriterStaysUnderAdminRole() public {
-        _commission(tokenA, DOMAIN_A);
+        _setupSuite(tokenA, DOMAIN_A);
         uint64 writer = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER);
         uint64 agentAdmin = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_ADMIN);
         accessManager.grantRole(agentAdmin, agentA, 0);
@@ -253,13 +267,13 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         accessManager.grantRole(writer, agentB, 0);
     }
 
-    function test_registry_CommissionUsesTheAssignedDomain() public {
+    function test_registry_SetupUsesTheAssignedDomain() public {
         Token fundToken = _deployBare("fund-a", address(0), address(registry));
         uint32 fund = registry.createDomain("Fund A");
         registry.assign(fund, address(fundToken));
         address irs = address(fundToken.identityRegistry().identityStorage());
 
-        AccessManagerSetupLib.commissionSuite(registry, address(fundToken));
+        AccessManagerSetupLib.setupSuite(registry, address(fundToken));
 
         assertEq(registry.domainName(fund), "Fund A");
         assertEq(registry.domainOf(irs), fund);
@@ -285,7 +299,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         uint32 oldFund = registry.createDomain("Old fund");
         uint32 newFund = registry.createDomain("New fund");
         registry.assign(oldFund, address(fundToken));
-        AccessManagerSetupLib.commissionSuite(registry, address(fundToken));
+        AccessManagerSetupLib.setupSuite(registry, address(fundToken));
         _grantAllAgentRoles(registry, agentA, oldFund);
 
         AccessManagerSetupLib.moveSuitesToDomains(
@@ -315,11 +329,11 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         Token fundToken = _deployBare("fund-x", address(0), address(registry));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAssigned.selector, address(fundToken)));
-        this.commissionExternally(address(fundToken));
+        this.setupSuiteExternally(address(fundToken));
     }
 
-    function commissionExternally(address token) external {
-        AccessManagerSetupLib.commissionSuite(registry, token);
+    function setupSuiteExternally(address token) external {
+        AccessManagerSetupLib.setupSuite(registry, token);
     }
 
     function test_registry_ShareClassesOfOneFundShareOneTeam() public {
@@ -329,9 +343,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         uint32 fund = registry.createDomain("Fund");
         registry.assign(fund, address(classA));
         registry.assign(fund, address(classB));
-        AccessManagerSetupLib.commissionSuite(registry, address(classA));
+        AccessManagerSetupLib.setupSuite(registry, address(classA));
         _grantStorageBinder(registry, fund);
-        AccessManagerSetupLib.commissionSuite(registry, address(classB));
+        AccessManagerSetupLib.setupSuite(registry, address(classB));
         _grantAllAgentRoles(registry, agentA, fund);
 
         vm.startPrank(agentA);
@@ -358,9 +372,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         uint32 fundY = registry.createDomain("Fund Y");
         registry.assign(fundX, address(tokenX));
         registry.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(registry, address(tokenX));
+        AccessManagerSetupLib.setupSuite(registry, address(tokenX));
         _grantStorageBinder(registry, fundX);
-        AccessManagerSetupLib.commissionSuite(registry, address(tokenY));
+        AccessManagerSetupLib.setupSuite(registry, address(tokenY));
 
         assertEq(registry.domainOf(address(irs)), fundX);
         assertEq(
@@ -395,22 +409,22 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         uint32 fundY = registry.createDomain("Fund Y");
         registry.assign(fundX, address(tokenX));
         registry.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(registry, address(tokenX));
+        AccessManagerSetupLib.setupSuite(registry, address(tokenX));
         registry.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.AGENT_ADMIN), address(this), 0);
         assertFalse(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
-        this.commissionExternally(address(tokenY));
+        this.setupSuiteExternally(address(tokenY));
         assertEq(registry.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
 
         registry.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.IRS_BINDER), address(this), 0);
-        AccessManagerSetupLib.commissionSuite(registry, address(tokenY));
+        AccessManagerSetupLib.setupSuite(registry, address(tokenY));
         assertTrue(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
     }
 
     function test_migrate_Success_LocksAgentsOfAOutOfBOnASharedTeam() public {
-        _commissionIntoTeam(tokenA);
-        _commissionIntoTeam(tokenB);
+        _setupSuiteInTeam(tokenA);
+        _setupSuiteInTeam(tokenB);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
 
@@ -443,8 +457,8 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_Success_PartialMigrationKeepsTheTeamRolesForAnUnmigratedSibling() public {
-        _commissionIntoTeam(tokenA);
-        _commissionIntoTeam(tokenB);
+        _setupSuiteInTeam(tokenA);
+        _setupSuiteInTeam(tokenB);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
 
@@ -481,7 +495,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_Success_ExplicitRevocationRemovesTheSourceRoleAndKeepsTheNewOne() public {
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER), agentA, 0);
         accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_BURNER), agentA, 0);
 
@@ -504,8 +518,8 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_Success_SameAccountDifferentRolesOnDifferentSuites() public {
-        _commissionIntoTeam(tokenA);
-        _commissionIntoTeam(tokenB);
+        _setupSuiteInTeam(tokenA);
+        _setupSuiteInTeam(tokenB);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
 
         AccessManagerSetupLib.RoleAssignment[] memory assignments = new AccessManagerSetupLib.RoleAssignment[](6);
@@ -537,7 +551,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_Success_KeepsStructuralGrantsAndExecutionDelays() public {
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER), agentA, 1 hours);
         address suiteRegistry = address(tokenA.identityRegistry());
 
@@ -569,9 +583,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     function test_migrate_Success_LeavesASharedStorageAloneSoBothRegistriesKeepWriting() public {
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenA.identityRegistry().identityStorage()));
         Token tokenC = _deployBare("batch-c", address(irs), address(accessManager));
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         _grantStorageBinder(accessManager, TEAM);
-        _commissionIntoTeam(tokenC);
+        _setupSuiteInTeam(tokenC);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         _grantAllAgentRoles(accessManager, agentB, TEAM);
 
@@ -602,7 +616,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_RevertWhen_AssignmentIsNotHeld() public {
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         AccessManagerSetupLib.RoleAssignment[] memory one = new AccessManagerSetupLib.RoleAssignment[](1);
         one[0] = _assign(agentB, RolesLib.Role.AGENT_MINTER, DOMAIN_A);
 
@@ -615,7 +629,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_RevertWhen_AHolderHasAPendingGrant() public {
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         uint64 teamMinter = RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER);
         accessManager.setGrantDelay(teamMinter, 1 days);
         vm.warp(block.timestamp + 6 days);
@@ -628,7 +642,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_RevertWhen_AHolderHasAPendingDelayChange() public {
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         uint64 teamMinter = RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_MINTER);
         accessManager.grantRole(teamMinter, agentA, 1 hours);
         accessManager.grantRole(teamMinter, agentA, 0);
@@ -640,7 +654,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_RevertWhen_TokenHoldsNoAgentRoleInTheSourceDomain() public {
-        _commission(tokenA, DOMAIN_A);
+        _setupSuite(tokenA, DOMAIN_A);
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -651,7 +665,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_migrate_RevertWhen_ARevocationFailsLate_LeavesNothingChanged() public {
-        _commissionIntoTeam(tokenA);
+        _setupSuiteInTeam(tokenA);
         _grantAllAgentRoles(accessManager, agentA, TEAM);
         uint64 teamAgentAdmin = RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_ADMIN);
         accessManager.revokeRole(teamAgentAdmin, address(this));
@@ -830,12 +844,12 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
-    function _commission(Token target, uint32 domainId) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), domainId, domainId);
+    function _setupSuite(Token target, uint32 domainId) private {
+        AccessManagerSetupLib.setupSuite(accessManager, address(target), domainId, domainId);
     }
 
-    function _commissionIntoTeam(Token target) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), TEAM, TEAM);
+    function _setupSuiteInTeam(Token target) private {
+        AccessManagerSetupLib.setupSuite(accessManager, address(target), TEAM, TEAM);
         accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_ADMIN), address(this), 0);
     }
 
