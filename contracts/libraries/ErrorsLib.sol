@@ -170,7 +170,7 @@ library ErrorsLib {
     error PendingRoleGrant(address account, uint64 role);
     error RoleNotHeld(address account, uint64 role);
     error FactoryRolesMustDiffer();
-    error FactoryRoleCannotBePublic();
+    error PlatformRoleCannotBePublic();
 
     // RolesLib Errors
     error InvalidDomain();

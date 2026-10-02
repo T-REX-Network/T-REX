@@ -310,7 +310,8 @@ library AccessManagerSetupLib {
         uint64 governanceRole
     ) internal {
         require(deployRole != governanceRole, ErrorsLib.FactoryRolesMustDiffer());
-        require(deployRole != PUBLIC_ROLE && governanceRole != PUBLIC_ROLE, ErrorsLib.FactoryRoleCannotBePublic());
+        _requireClosed(deployRole);
+        _requireClosed(governanceRole);
 
         bytes4[] memory deploys = new bytes4[](2);
         deploys[0] = ITREXFactory.deployTREXSuite.selector;
@@ -324,21 +325,25 @@ library AccessManagerSetupLib {
         accessManager.setTargetFunctionRole(trexFactory, governance, governanceRole);
     }
 
-    function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {
+    /// @notice Maps `setTrustedGateway` to `interopRole`, the role governance picks for interop configuration.
+    function setupTrustedGatewayRegistryRoles(
+        IAccessManager accessManager,
+        address trustedGatewayRegistry,
+        uint64 interopRole
+    ) internal {
+        _requireClosed(interopRole);
         bytes4[] memory functions = new bytes4[](1);
         functions[0] = TrustedGatewayRegistry.setTrustedGateway.selector;
-        accessManager.setTargetFunctionRole(
-            trustedGatewayRegistry, functions, RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
-        );
+        accessManager.setTargetFunctionRole(trustedGatewayRegistry, functions, interopRole);
     }
 
     /// @notice Wires the two prerequisites the {TREXFactory} auto-mint path needs, so a deployer does
     ///         not have to rediscover them. Without both, `deployTREXSuite` reverts with
     ///         `NotAuthorizedForIdentityType` whenever `TokenDetails.ONCHAINID` is left at zero.
     /// @dev Call order does not matter, but both must land before the first auto-mint deploy.
-    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind the platform ASSET_DEPLOYER
-    ///         role and with self-deploy off: only a registered factory mints token OIDs, and a token
-    ///         must not be able to sign one for itself.
+    ///      1. Register the `ASSET` type on the IdentityFactory, gated behind `assetDeployerRole` and with
+    ///         self-deploy off: only a registered factory mints token OIDs, and a token must not be able
+    ///         to sign one for itself.
     ///      2. Grant that role to the TREX factory.
     /// @dev `accessManager` MUST be the IdentityFactory's own authority, which is not necessarily the
     ///      suite AccessManager: `createIdentityFor` resolves the role against `authority()` on the
@@ -352,27 +357,38 @@ library AccessManagerSetupLib {
     /// @param accessManager The IdentityFactory's authority, where the role is resolved
     /// @param identityFactory The ONCHAINID IdentityFactory that mints token OIDs
     /// @param trexFactory The TREX factory that calls `createIdentityFor` on the auto-mint path
+    /// @param assetDeployerRole The role governance picks for minting ASSET identities; meant for the
+    ///        factory contract, not for people, since any holder can bind an ASSET identity to any address
     function setupIdentityFactoryPolicy(
         IAccessManager accessManager,
         IIdentityFactory identityFactory,
-        address trexFactory
+        address trexFactory,
+        uint64 assetDeployerRole
     ) internal {
-        uint64 assetDeployer = RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER);
+        _requireClosed(assetDeployerRole);
         // ASSET is single-binding: a token OID binds to exactly one token and cannot be re-linked.
-        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, assetDeployer, false, true);
-        accessManager.grantRole(assetDeployer, trexFactory, 0);
+        identityFactory.setIdentityTypePolicy(IdentityTypes.ASSET, assetDeployerRole, false, true);
+        accessManager.grantRole(assetDeployerRole, trexFactory, 0);
     }
 
-    function setupTREXImplementationAuthorityRoles(IAccessManager accessManager, address trexImplementationAuthority)
-        internal
-    {
+    /// @notice Maps `publish`, `upgrade` and `publishAndUpgrade` to `versionRole`, the role governance picks
+    ///         for publishing suite versions.
+    function setupTREXImplementationAuthorityRoles(
+        IAccessManager accessManager,
+        address trexImplementationAuthority,
+        uint64 versionRole
+    ) internal {
+        _requireClosed(versionRole);
         bytes4[] memory functions = new bytes4[](3);
         functions[0] = TREXImplementationAuthority.publish.selector;
         functions[1] = TREXImplementationAuthority.upgrade.selector;
         functions[2] = TREXImplementationAuthority.publishAndUpgrade.selector;
-        accessManager.setTargetFunctionRole(
-            trexImplementationAuthority, functions, RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER)
-        );
+        accessManager.setTargetFunctionRole(trexImplementationAuthority, functions, versionRole);
+    }
+
+    /// @dev Every platform function configures something all suites depend on; none may be open to anyone.
+    function _requireClosed(uint64 role) private pure {
+        require(role != PUBLIC_ROLE, ErrorsLib.PlatformRoleCannotBePublic());
     }
 
     function setupRoleAdmins(IAccessManager accessManager, uint32 domainId) internal {

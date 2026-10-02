@@ -268,7 +268,9 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         // Network-level, shared by every suite. Deployed before the factory, which wires it into every token.
         trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
-        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(trustedGatewayRegistry));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(trustedGatewayRegistry), _interopManagerRole()
+        );
         _grantInteropManagerRole(address(this));
 
         trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));

@@ -739,7 +739,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
         accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
-        AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            accessManager, idFactory, address(trexFactory), _assetDeployerRole()
+        );
 
         (uint64 roleId, bool selfDeployable,,) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
         assertEq(
@@ -779,7 +781,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
         // factory's real authority), but the grant is stranded on this manager.
         AccessManager foreignManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupIdentityFactoryPolicy(foreignManager, idFactory, address(trexFactory));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            foreignManager, idFactory, address(trexFactory), _assetDeployerRole()
+        );
 
         (bool isMemberOnForeign,) =
             foreignManager.hasRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
@@ -1226,7 +1230,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_setupTREXImplementationAuthorityRoles_MapsSelectorsToVersionManager() public {
         address authority = address(trexImplementationAuthority);
 
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority, _versionManagerRole());
 
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector),
@@ -1283,10 +1287,42 @@ contract TREXFactoryTest is TREXSuiteTest {
     }
 
     function test_setupTREXFactoryRoles_RevertWhen_EitherRoleIsPublic() public {
-        vm.expectRevert(ErrorsLib.FactoryRoleCannotBePublic.selector);
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
         this.setupFactoryRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE, _factoryGovernanceRole());
-        vm.expectRevert(ErrorsLib.FactoryRoleCannotBePublic.selector);
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
         this.setupFactoryRolesExternally(_suiteDeployRole(), AccessManagerSetupLib.PUBLIC_ROLE);
+    }
+
+    /// @notice Every platform setup function takes its role as data and refuses the public role.
+    function test_platformSetupFunctions_RevertWhen_RoleIsPublic() public {
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupIARolesExternally(AccessManagerSetupLib.PUBLIC_ROLE);
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupGatewayRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE);
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupIdentityFactoryPolicyExternally(AccessManagerSetupLib.PUBLIC_ROLE);
+    }
+
+    /// @notice A platform may pick any id, including a role it names itself.
+    function test_platformSetupFunctions_AcceptNamedRoles() public {
+        uint64 publisher = RolesLib.platform(bytes32("RELEASE_MANAGER"));
+        uint64 bridgeOps = RolesLib.platform(bytes32("BRIDGE_OPS"));
+        address authority = address(trexImplementationAuthority);
+
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority, publisher);
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(trustedGatewayRegistry), bridgeOps
+        );
+
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector), publisher
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(
+                address(trustedGatewayRegistry), TrustedGatewayRegistry.setTrustedGateway.selector
+            ),
+            bridgeOps
+        );
     }
 
     /// @notice An account holding only the deploy role deploys through both entry points and is refused
@@ -1355,6 +1391,24 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function setupFactoryRolesExternally(uint64 deployRole, uint64 governanceRole) external {
         AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, address(trexFactory), deployRole, governanceRole);
+    }
+
+    function setupIARolesExternally(uint64 versionRole) external {
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(
+            accessManager, address(trexImplementationAuthority), versionRole
+        );
+    }
+
+    function setupGatewayRolesExternally(uint64 interopRole) external {
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(trustedGatewayRegistry), interopRole
+        );
+    }
+
+    function setupIdentityFactoryPolicyExternally(uint64 assetDeployerRole) external {
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            accessManager, idFactory, address(trexFactory), assetDeployerRole
+        );
     }
 
     // ============ deployTREXSuite() branch Tests ============
