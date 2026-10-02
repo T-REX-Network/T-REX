@@ -65,18 +65,18 @@ pragma solidity 0.8.30;
 
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 
-/// @title ISuiteCommissioner
-/// @notice Turns a freshly deployed suite into an operable one: maps every privileged selector of the
-///         suite's contracts to a role of `accessManager` and wires the role hierarchy.
-/// @dev The {TREXFactory} calls this once per suite it deploys with its own manager, while the
-///      commissioner temporarily holds `ADMIN_ROLE` on that manager. Which selector lands on which role
-///      is therefore the commissioner's decision, not the factory's: governance replaces the commissioner
-///      to change the default profile of future suites, without redeploying the factory. A commissioner
-///      is trusted platform code, like the implementation authority.
-interface ISuiteCommissioner {
+/// @title ISuiteProfile
+/// @notice What a freshly deployed suite looks like: which role gates each privileged selector of the
+///         suite's contracts, and who administers which role. Applying it makes the suite operable.
+/// @dev The {TREXFactory} applies the configured profile once per suite it deploys with its own
+///      manager, while the profile temporarily holds `ADMIN_ROLE` on that manager. Which selector
+///      lands on which role is therefore the profile's decision, not the factory's: governance swaps
+///      the profile to change what future suites look like, without redeploying the factory. A
+///      profile is trusted platform code, like the implementation authority.
+interface ISuiteProfile {
 
-    /// @param accessManager The suite's manager; the caller has granted the commissioner `ADMIN_ROLE` on it
+    /// @param accessManager The suite's manager; the caller has granted this profile `ADMIN_ROLE` on it
     /// @param token The suite's token, already assigned to a domain of `accessManager`
-    function commission(TREXAccessManager accessManager, address token) external;
+    function applyTo(TREXAccessManager accessManager, address token) external;
 
 }

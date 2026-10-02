@@ -30,10 +30,10 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
-import { SuiteCommissioner } from "contracts/factory/SuiteCommissioner.sol";
+import { DefaultSuiteProfile } from "contracts/factory/DefaultSuiteProfile.sol";
 import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
-import { NoOpSuiteCommissioner } from "test/integration/mocks/NoOpSuiteCommissioner.sol";
+import { NoOpSuiteProfile } from "test/integration/mocks/NoOpSuiteProfile.sol";
 import { TestModule } from "test/integration/mocks/TestModule.sol";
 import { TestTREXFactory } from "test/integration/mocks/TestTREXFactory.sol";
 
@@ -1020,14 +1020,14 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(trustedGatewayRegistry),
-            address(suiteCommissioner),
+            address(suiteProfile),
             address(0)
         );
     }
 
-    function test_constructor_RevertWhen_SuiteCommissionerHasNoCode() public {
+    function test_constructor_RevertWhen_SuiteProfileHasNoCode() public {
         address noCode = makeAddr("noCode");
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteCommissionerNotAContract.selector, noCode));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteProfileNotAContract.selector, noCode));
         new TREXFactory(
             address(trexImplementationAuthority),
             address(idFactory),
@@ -1043,7 +1043,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(0),
-            address(suiteCommissioner),
+            address(suiteProfile),
             address(accessManager)
         );
     }
@@ -1082,7 +1082,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(trustedGatewayRegistry),
-            address(suiteCommissioner),
+            address(suiteProfile),
             address(accessManager)
         );
 
@@ -1276,44 +1276,44 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
     }
 
-    // ============ setSuiteCommissioner() Tests ============
+    // ============ setSuiteProfile() Tests ============
 
-    function test_setSuiteCommissioner_RevertWhen_NoCode() public {
+    function test_setSuiteProfile_RevertWhen_NoCode() public {
         address noCode = makeAddr("noCode");
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteCommissionerNotAContract.selector, noCode));
-        trexFactory.setSuiteCommissioner(noCode);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteProfileNotAContract.selector, noCode));
+        trexFactory.setSuiteProfile(noCode);
     }
 
-    /// @notice The commissioner shapes every later suite, so only the factory governor may replace it.
-    function test_setSuiteCommissioner_RevertWhen_OnlySuiteDeployer() public {
+    /// @notice The profile shapes every later suite, so only the factory governor may replace it.
+    function test_setSuiteProfile_RevertWhen_OnlySuiteDeployer() public {
         address issuer = makeAddr("issuer");
         _grantSuiteDeployerRole(issuer);
-        NoOpSuiteCommissioner other = new NoOpSuiteCommissioner();
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
 
         vm.prank(issuer);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
-        trexFactory.setSuiteCommissioner(address(other));
+        trexFactory.setSuiteProfile(address(other));
     }
 
-    function test_setSuiteCommissioner_Success() public {
-        NoOpSuiteCommissioner other = new NoOpSuiteCommissioner();
+    function test_setSuiteProfile_Success() public {
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
 
         vm.expectEmit(false, false, false, true, address(trexFactory));
-        emit EventsLib.SuiteCommissionerSet(address(other));
+        emit EventsLib.SuiteProfileSet(address(other));
         vm.prank(deployer);
-        trexFactory.setSuiteCommissioner(address(other));
+        trexFactory.setSuiteProfile(address(other));
 
-        assertEq(trexFactory.getSuiteCommissioner(), address(other), "commissioner must be replaced");
+        assertEq(trexFactory.getSuiteProfile(), address(other), "profile must be replaced");
     }
 
-    /// @notice The suite profile is the commissioner's, not the factory's: with a commissioner that maps
+    /// @notice The suite profile is the profile's, not the factory's: with a profile that maps
     ///         nothing, the suite deploys with no role wiring, while the domain, the admin hand-over and
-    ///         the clean-up of the commissioner's transient admin still happen.
-    function test_deployTREXSuite_DelegatesTheProfileToTheCommissioner() public {
-        NoOpSuiteCommissioner other = new NoOpSuiteCommissioner();
+    ///         the clean-up of the profile's transient admin still happen.
+    function test_deployTREXSuite_DelegatesTheProfile() public {
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
         vm.prank(deployer);
-        trexFactory.setSuiteCommissioner(address(other));
+        trexFactory.setSuiteProfile(address(other));
 
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         tokenDetails.accessManager = address(0);
@@ -1323,21 +1323,21 @@ contract TREXFactoryTest is TREXSuiteTest {
         Token token = Token(trexFactory.getToken("own-manager-noop"));
         TREXAccessManager manager = TREXAccessManager(token.authority());
 
-        assertEq(other.calls(), 1, "factory must call the configured commissioner once");
-        assertEq(address(other.lastManager()), address(manager), "commissioner must receive the suite manager");
-        assertEq(other.lastToken(), address(token), "commissioner must receive the suite token");
+        assertEq(other.calls(), 1, "factory must call the configured profile once");
+        assertEq(address(other.lastManager()), address(manager), "profile must receive the suite manager");
+        assertEq(other.lastToken(), address(token), "profile must receive the suite token");
         assertNotEq(manager.domainOf(address(token)), 0, "factory still assigns the domain");
         assertEq(
             manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
             AccessManagerSetupLib.ADMIN_ROLE,
-            "a commissioner that maps nothing leaves mint on ADMIN_ROLE"
+            "a profile that maps nothing leaves mint on ADMIN_ROLE"
         );
         _assertOnlyAdminIs(manager, alice, address(other));
     }
 
-    /// @notice With the default commissioner the suite is operable on deploy and the commissioner keeps
+    /// @notice With the default profile the suite is operable on deploy and the profile keeps
     ///         nothing of the admin it held during the call.
-    function test_deployTREXSuite_DefaultCommissionerAppliesTheDefaultProfile() public {
+    function test_deployTREXSuite_DefaultProfileIsApplied() public {
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         tokenDetails.accessManager = address(0);
         tokenDetails.accessManagerAdmin = alice;
@@ -1352,15 +1352,15 @@ contract TREXFactoryTest is TREXSuiteTest {
             RolesLib.forDomain(domainId, RolesLib.Role.AGENT_MINTER),
             "default profile maps mint to AGENT_MINTER of the suite domain"
         );
-        _assertOnlyAdminIs(manager, alice, address(suiteCommissioner));
+        _assertOnlyAdminIs(manager, alice, address(suiteProfile));
     }
 
-    function _assertOnlyAdminIs(TREXAccessManager manager, address admin, address commissioner) private view {
+    function _assertOnlyAdminIs(TREXAccessManager manager, address admin, address profile) private view {
         (bool adminHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, admin);
-        (bool commissionerHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, commissioner);
+        (bool profileHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, profile);
         (bool factoryHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, address(trexFactory));
         assertTrue(adminHolds, "accessManagerAdmin must hold ADMIN_ROLE");
-        assertFalse(commissionerHolds, "commissioner must not keep ADMIN_ROLE");
+        assertFalse(profileHolds, "profile must not keep ADMIN_ROLE");
         assertFalse(factoryHolds, "factory must not keep ADMIN_ROLE");
     }
 
@@ -1395,9 +1395,9 @@ contract TREXFactoryTest is TREXSuiteTest {
             "setTrustedGatewayRegistry must be mapped to the factory governor role"
         );
         assertEq(
-            accessManager.getTargetFunctionRole(factory, ITREXFactory.setSuiteCommissioner.selector),
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setSuiteProfile.selector),
             _factoryGovernorRole(),
-            "setSuiteCommissioner must be mapped to the factory governor role"
+            "setSuiteProfile must be mapped to the factory governor role"
         );
     }
 

@@ -65,17 +65,17 @@ pragma solidity 0.8.30;
 
 import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
-import { ISuiteCommissioner } from "./ISuiteCommissioner.sol";
+import { ISuiteProfile } from "./ISuiteProfile.sol";
 
-/// @title SuiteCommissioner
-/// @notice The default suite profile: applies the {AccessManagerSetupLib} tables. A platform that wants a
-///         different default deploys another commissioner and points the factory at it.
+/// @title DefaultSuiteProfile
+/// @notice The profile T-REX ships: the {AccessManagerSetupLib} tables. A platform that wants a different
+///         default deploys another profile and points the factory at it.
 /// @dev Deliberately open: the call only has an effect on a manager that granted this contract
 ///      `ADMIN_ROLE`, which the factory does for the duration of one deploy.
-contract SuiteCommissioner is ISuiteCommissioner {
+contract DefaultSuiteProfile is ISuiteProfile {
 
-    /// @inheritdoc ISuiteCommissioner
-    function commission(TREXAccessManager accessManager, address token) external {
+    /// @inheritdoc ISuiteProfile
+    function applyTo(TREXAccessManager accessManager, address token) external {
         AccessManagerSetupLib.commissionSuite(accessManager, token);
     }
 

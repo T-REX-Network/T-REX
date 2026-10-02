@@ -137,16 +137,16 @@ interface ITREXFactory {
     function setTrustedGatewayRegistry(address _trustedGatewayRegistry) external;
 
     /**
-     *  @dev setter for the suite commissioner
-     *  the commissioner decides which role gates which function of a suite the factory deploys with
-     *  its own AccessManager (see {ISuiteCommissioner}); replacing it changes the default profile of
+     *  @dev setter for the suite profile
+     *  the profile decides which role gates which function of a suite the factory deploys with
+     *  its own AccessManager (see {ISuiteProfile}); replacing it changes the default profile of
      *  every later suite without redeploying the factory
      *  Restricted to the factory governor role chosen at setup
      *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the suite deployer role.
-     *  emits `SuiteCommissionerSet` event
-     *  @param _suiteCommissioner The address of the suite commissioner contract
+     *  emits `SuiteProfileSet` event
+     *  @param _suiteProfile The address of the suite profile contract
      */
-    function setSuiteCommissioner(address _suiteCommissioner) external;
+    function setSuiteProfile(address _suiteProfile) external;
 
     /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
@@ -228,9 +228,9 @@ interface ITREXFactory {
     function getTrustedGatewayRegistry() external view returns (address);
 
     /**
-     *  @dev getter for the suite commissioner the factory hands a fresh AccessManager to
+     *  @dev getter for the suite profile the factory hands a fresh AccessManager to
      */
-    function getSuiteCommissioner() external view returns (address);
+    function getSuiteProfile() external view returns (address);
 
     /**
      *  @dev getter for token address corresponding to salt string

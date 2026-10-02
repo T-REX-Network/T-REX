@@ -162,7 +162,7 @@ library EventsLib {
 
     event Deployed(address indexed addr);
     event IdFactorySet(address idFactory);
-    event SuiteCommissionerSet(address suiteCommissioner);
+    event SuiteProfileSet(address suiteProfile);
 
     event TREXSuiteDeployed(address indexed token, address registry, address irs, address mc, string salt);
     event IsolatedSuiteDeployed(address indexed token, ITREXImplementationAuthority.SuiteBeacons beacons);

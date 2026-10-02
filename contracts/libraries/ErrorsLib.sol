@@ -138,7 +138,7 @@ library ErrorsLib {
     error AuthorityMismatch();
     error StorageAuthorityMismatch(address identityRegistryStorage, address expected, address actual);
     error AccessManagerNotAContract(address accessManager);
-    error SuiteCommissionerNotAContract(address suiteCommissioner);
+    error SuiteProfileNotAContract(address suiteProfile);
     error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();

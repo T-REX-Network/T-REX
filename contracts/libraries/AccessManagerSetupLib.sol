@@ -297,7 +297,7 @@ library AccessManagerSetupLib {
 
     /// @notice Maps the factory's two concerns to two roles governance picks. `suiteDeployerRole` deploys suites;
     ///         `factoryGovernorRole` repoints the implementation authority, the identity factory, the gateway
-    ///         registry and the suite commissioner, which every later suite is wired to or shaped by. The ids are data, not constants: any role of
+    ///         registry and the suite profile, which every later suite is wired to or shaped by. The ids are data, not constants: any role of
     ///         the manager works, a {RolesLib.PlatformRole}, a name through {RolesLib.platform(bytes32)} or
     ///         a raw id.
     /// @dev Refuses the two shapes that recreate the problem the split exists for: one role for both, so
@@ -322,7 +322,7 @@ library AccessManagerSetupLib {
         governSelectors[0] = ITREXFactory.setImplementationAuthority.selector;
         governSelectors[1] = ITREXFactory.setIdFactory.selector;
         governSelectors[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
-        governSelectors[3] = ITREXFactory.setSuiteCommissioner.selector;
+        governSelectors[3] = ITREXFactory.setSuiteProfile.selector;
         accessManager.setTargetFunctionRole(trexFactory, governSelectors, factoryGovernorRole);
     }
 

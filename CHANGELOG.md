@@ -501,14 +501,14 @@ All notable changes to this project will be documented in this file.
   `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.commissionSuite` from inside the factory, so
   the selector-to-role tables and the role-admin table of every future suite were a constant of the
   factory's bytecode, and changing a default meant a new factory and a new CREATE3 address space. The
-  factory now hands the fresh `TREXAccessManager` to an `ISuiteCommissioner`: it grants the commissioner
-  `ADMIN_ROLE`, calls `commission(accessManager, token)`, revokes the role and only then hands
-  `ADMIN_ROLE` to `accessManagerAdmin`. `SuiteCommissioner` is the default profile and simply applies
-  the library tables; governance replaces it through the new `setSuiteCommissioner` (factory governor
-  role, `SuiteCommissionerSet`, `SuiteCommissionerNotAContract`) to change what every later suite looks
+  factory now hands the fresh `TREXAccessManager` to an `ISuiteProfile`: it grants the profile
+  `ADMIN_ROLE`, calls `applyTo(accessManager, token)`, revokes the role and only then hands
+  `ADMIN_ROLE` to `accessManagerAdmin`. `DefaultSuiteProfile` is the default profile and simply applies
+  the library tables; governance replaces it through the new `setSuiteProfile` (factory governor
+  role, `SuiteProfileSet`, `SuiteProfileNotAContract`) to change what every later suite looks
   like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
-  **Breaking**: the `TREXFactory` constructor takes the commissioner as its fourth argument, before the
-  access manager, and `getSuiteCommissioner` is added to `ITREXFactory`. The factory no longer links
+  **Breaking**: the `TREXFactory` constructor takes the profile as its fourth argument, before the
+  access manager, and `getSuiteProfile` is added to `ITREXFactory`. The factory no longer links
   `AccessManagerSetupLib`.
 - **`UtilityChecker` is gated by the AccessManager, not by a single owner** (#103). It was the only
   upgradeable contract of the suite on `OwnableUpgradeable`. It is now `AccessManagedOwnableUpgradeable`
