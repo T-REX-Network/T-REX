@@ -61,7 +61,7 @@ abstract contract AccessManagerHelper is Test {
     }
 
     /// @notice Wires the TREXImplementationAuthority version selectors to the version manager role for `ia`.
-    function _authorizeIAGovernance(address ia) internal {
+    function _setupImplementationAuthorityRoles(address ia) internal {
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia, _versionManagerRole());
     }
 
@@ -127,7 +127,7 @@ abstract contract AccessManagerHelper is Test {
 
     /// @notice Grants ASSET_DEPLOYER, which the ONCHAINID IdentityFactory resolves when minting
     ///         IdentityTypes.ASSET identities (the TREXFactory token-OID auto-mint path).
-    function _grantTokenOidMinterRole(address account) internal {
+    function _grantAssetDeployerRole(address account) internal {
         accessManager.grantRole(_assetDeployerRole(), account, NO_EXECUTION_DELAY);
     }
 

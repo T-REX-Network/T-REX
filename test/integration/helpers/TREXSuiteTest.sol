@@ -286,7 +286,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         // The IdentityFactory gates ASSET minting on ASSET_DEPLOYER, resolved against its own
         // authority (the suite AccessManager here). Without this the auto-mint path reverts.
-        _grantTokenOidMinterRole(address(trexFactory));
+        _grantAssetDeployerRole(address(trexFactory));
 
         _setupFactoryRoles(address(trexFactory));
     }
@@ -299,7 +299,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             address(accessManager), VersionLib.pack(5, 0, 0), _suiteImplementations()
         );
 
-        _authorizeIAGovernance(address(ia));
+        _setupImplementationAuthorityRoles(address(ia));
         _grantOwnerRole(deployer);
         _grantVersionManagerRole(deployer);
 

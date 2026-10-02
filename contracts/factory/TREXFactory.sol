@@ -130,10 +130,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
      *  @dev See {ITREXFactory-deployTREXSuite}.
      *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
      *  domain named after the token, assigns the token and its storage, lets the configured
-     *  {ISuiteProfile} commission the suite and hands `ADMIN_ROLE` to
+     *  {ISuiteProfile} set the suite up and hands `ADMIN_ROLE` to
      *  `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls it: the suite
-     *  deploys with no role wiring and is not operable until the issuer commissions it (for the default
-     *  profile, `AccessManagerSetupLib.commissionSuite`).
+     *  deploys with no role wiring and is not operable until the issuer sets it up (for the default
+     *  profile, `AccessManagerSetupLib.setupSuite`).
      */
     function deployTREXSuite(string memory salt, TokenDetails calldata tokenDetails, ClaimDetails calldata claimDetails)
         external
@@ -150,10 +150,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
      *  @dev See {ITREXFactory-deployTREXSuiteIsolated}.
      *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
      *  domain named after the token, assigns the token and its storage, lets the configured
-     *  {ISuiteProfile} commission the suite and hands `ADMIN_ROLE` to
+     *  {ISuiteProfile} set the suite up and hands `ADMIN_ROLE` to
      *  `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls it: the suite
-     *  deploys with no role wiring and is not operable until the issuer commissions it (for the default
-     *  profile, `AccessManagerSetupLib.commissionSuite`).
+     *  deploys with no role wiring and is not operable until the issuer sets it up (for the default
+     *  profile, `AccessManagerSetupLib.setupSuite`).
      */
     function deployTREXSuiteIsolated(
         string memory salt,

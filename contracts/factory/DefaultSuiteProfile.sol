@@ -76,7 +76,7 @@ contract DefaultSuiteProfile is ISuiteProfile {
 
     /// @inheritdoc ISuiteProfile
     function applyTo(TREXAccessManager accessManager, address token) external {
-        AccessManagerSetupLib.commissionSuite(accessManager, token);
+        AccessManagerSetupLib.setupSuite(accessManager, token);
     }
 
 }

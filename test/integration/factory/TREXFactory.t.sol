@@ -688,7 +688,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // A second holder of ASSET_DEPLOYER binds the predicted address before the suite deploys.
         address squatter = makeAddr("Squatter");
-        _grantTokenOidMinterRole(squatter);
+        _grantAssetDeployerRole(squatter);
         Structs.KeyParam[] memory squatterKeys = new Structs.KeyParam[](1);
         squatterKeys[0] = _ecdsaKey(squatter, KeyPurposes.MANAGEMENT);
         vm.prank(squatter);
@@ -710,7 +710,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         string memory salt = "prebound-token-salt";
         address predictedToken = _predictSuiteAddress(salt, "Token");
 
-        _grantTokenOidMinterRole(address(this));
+        _grantAssetDeployerRole(address(this));
         Structs.KeyParam[] memory ownerKeys = new Structs.KeyParam[](1);
         ownerKeys[0] = _ecdsaKey(address(this), KeyPurposes.MANAGEMENT);
         address boundIdentity =

@@ -220,7 +220,7 @@ library AccessManagerSetupLib {
         table[12] = RoleAdmin(RolesLib.Role.COMPLIANCE_MANAGER, RolesLib.Role.SUITE_ADMIN);
     }
 
-    function commissionSuite(TREXAccessManager accessManager, address token) internal {
+    function setupSuite(TREXAccessManager accessManager, address token) internal {
         uint32 domainId = accessManager.domainOf(token);
         require(domainId != 0, ErrorsLib.NotAssigned(token));
         address registry = _registryOf(token);
@@ -230,14 +230,12 @@ library AccessManagerSetupLib {
             accessManager.assign(domainId, identityRegistryStorage);
             storageDomainId = domainId;
         }
-        _commission(accessManager, token, registry, identityRegistryStorage, domainId, storageDomainId);
+        _setupSuite(accessManager, token, registry, identityRegistryStorage, domainId, storageDomainId);
     }
 
-    function commissionSuite(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId)
-        internal
-    {
+    function setupSuite(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId) internal {
         address registry = _registryOf(token);
-        _commission(accessManager, token, registry, _storageOf(registry), domainId, storageDomainId);
+        _setupSuite(accessManager, token, registry, _storageOf(registry), domainId, storageDomainId);
     }
 
     function moveSuitesToDomains(
@@ -313,17 +311,17 @@ library AccessManagerSetupLib {
         _requireNotPublicRole(suiteDeployerRole);
         _requireNotPublicRole(factoryGovernorRole);
 
-        bytes4[] memory deploySelectors = new bytes4[](2);
-        deploySelectors[0] = ITREXFactory.deployTREXSuite.selector;
-        deploySelectors[1] = ITREXFactory.deployTREXSuiteIsolated.selector;
-        accessManager.setTargetFunctionRole(trexFactory, deploySelectors, suiteDeployerRole);
+        bytes4[] memory deployFunctions = new bytes4[](2);
+        deployFunctions[0] = ITREXFactory.deployTREXSuite.selector;
+        deployFunctions[1] = ITREXFactory.deployTREXSuiteIsolated.selector;
+        accessManager.setTargetFunctionRole(trexFactory, deployFunctions, suiteDeployerRole);
 
-        bytes4[] memory governSelectors = new bytes4[](4);
-        governSelectors[0] = ITREXFactory.setImplementationAuthority.selector;
-        governSelectors[1] = ITREXFactory.setIdFactory.selector;
-        governSelectors[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
-        governSelectors[3] = ITREXFactory.setSuiteProfile.selector;
-        accessManager.setTargetFunctionRole(trexFactory, governSelectors, factoryGovernorRole);
+        bytes4[] memory governFunctions = new bytes4[](4);
+        governFunctions[0] = ITREXFactory.setImplementationAuthority.selector;
+        governFunctions[1] = ITREXFactory.setIdFactory.selector;
+        governFunctions[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
+        governFunctions[3] = ITREXFactory.setSuiteProfile.selector;
+        accessManager.setTargetFunctionRole(trexFactory, governFunctions, factoryGovernorRole);
     }
 
     /// @notice Maps `setTrustedGateway` to `interopManagerRole`, the role governance picks for interop configuration.
@@ -401,7 +399,7 @@ library AccessManagerSetupLib {
         }
     }
 
-    function _commission(
+    function _setupSuite(
         IAccessManager accessManager,
         address token,
         address registry,
