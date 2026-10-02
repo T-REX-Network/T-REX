@@ -497,6 +497,26 @@ All notable changes to this project will be documented in this file.
   `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. Existing
   deployments need no redeploy: remap the two deploy selectors with `setTargetFunctionRole`, grant the
   suite deployer role to current deployers and revoke the platform `OWNER` from them.
+- **The suite role profile is no longer compiled into the factory** (#102). `deployTREXSuite` and
+  `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.commissionSuite` from inside the factory, so
+  the selector-to-role tables and the role-admin table of every future suite were a constant of the
+  factory's bytecode, and changing a default meant a new factory and a new CREATE3 address space. The
+  factory now hands the fresh `TREXAccessManager` to an `ISuiteCommissioner`: it grants the commissioner
+  `ADMIN_ROLE`, calls `commission(accessManager, token)`, revokes the role and only then hands
+  `ADMIN_ROLE` to `accessManagerAdmin`. `SuiteCommissioner` is the default profile and simply applies
+  the library tables; governance replaces it through the new `setSuiteCommissioner` (factory governor
+  role, `SuiteCommissionerSet`, `SuiteCommissionerNotAContract`) to change what every later suite looks
+  like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
+  **Breaking**: the `TREXFactory` constructor takes the commissioner as its fourth argument, before the
+  access manager, and `getSuiteCommissioner` is added to `ITREXFactory`. The factory no longer links
+  `AccessManagerSetupLib`.
+- **`UtilityChecker` is gated by the AccessManager, not by a single owner** (#103). It was the only
+  upgradeable contract of the suite on `OwnableUpgradeable`. It is now `AccessManagedOwnableUpgradeable`
+  like the compliance modules: `initialize(address accessManager)` replaces `initialize()`,
+  `_authorizeUpgrade` is `restricted`, and `owner()` reports the authority. `DeployUtilityChecker`
+  reads the manager from the manifest's `accessManager` key (override with
+  `UTILITY_CHECKER_ACCESS_MANAGER`) and, on `upgrade()`, checks that the deployer may call
+  `upgradeToAndCall` through that manager instead of comparing owners.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

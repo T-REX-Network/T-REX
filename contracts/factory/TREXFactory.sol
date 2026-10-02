@@ -77,7 +77,6 @@ import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
-import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
@@ -86,6 +85,7 @@ import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { Token } from "../token/Token.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
+import { ISuiteCommissioner } from "./ISuiteCommissioner.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
@@ -99,15 +99,23 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// the network's trusted gateway registry, wired into every token this factory deploys
     address private _trustedGatewayRegistry;
 
+    /// the commissioner that turns a suite deployed with its own manager into an operable one (see
+    /// {ISuiteCommissioner}); the profile it applies is its own, never this contract's
+    address private _suiteCommissioner;
+
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
     string private constant ACCESS_MANAGER = "AccessManager";
 
+    /// The manager's own admin role, which a fresh suite manager starts with this factory holding.
+    uint64 private constant ADMIN_ROLE = 0;
+
     constructor(
         address implementationAuthority,
         address idFactory,
         address trustedGatewayRegistry,
+        address suiteCommissioner,
         address accessManager
     ) AccessManagedOwnable(accessManager) {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
@@ -115,15 +123,17 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
         _setTrustedGatewayRegistry(trustedGatewayRegistry);
+        _setSuiteCommissioner(suiteCommissioner);
     }
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuite}.
      *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
-     *  domain named after the token, assigns the token and its storage, commissions the suite and hands
-     *  `ADMIN_ROLE` to `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls
-     *  it: the suite deploys with no role wiring and is not operable until the issuer commissions it with
-     *  `AccessManagerSetupLib.commissionSuite`.
+     *  domain named after the token, assigns the token and its storage, lets the configured
+     *  {ISuiteCommissioner} commission the suite and hands `ADMIN_ROLE` to
+     *  `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls it: the suite
+     *  deploys with no role wiring and is not operable until the issuer commissions it (for the default
+     *  profile, `AccessManagerSetupLib.commissionSuite`).
      */
     function deployTREXSuite(string memory salt, TokenDetails calldata tokenDetails, ClaimDetails calldata claimDetails)
         external
@@ -139,10 +149,11 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /**
      *  @dev See {ITREXFactory-deployTREXSuiteIsolated}.
      *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
-     *  domain named after the token, assigns the token and its storage, commissions the suite and hands
-     *  `ADMIN_ROLE` to `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls
-     *  it: the suite deploys with no role wiring and is not operable until the issuer commissions it with
-     *  `AccessManagerSetupLib.commissionSuite`.
+     *  domain named after the token, assigns the token and its storage, lets the configured
+     *  {ISuiteCommissioner} commission the suite and hands `ADMIN_ROLE` to
+     *  `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls it: the suite
+     *  deploys with no role wiring and is not operable until the issuer commissions it (for the default
+     *  profile, `AccessManagerSetupLib.commissionSuite`).
      */
     function deployTREXSuiteIsolated(
         string memory salt,
@@ -229,11 +240,12 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
+        // The suite exists here; what follows is role wiring by the commissioner, an external contract,
+        // so the log is written before that call rather than after it.
+        emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
         if (tokenDetails.accessManager == address(0)) {
             _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token, tokenDetails.name);
         }
-
-        emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
         return token;
     }
 
@@ -303,6 +315,29 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /**
+     *  @dev See {ITREXFactory-getSuiteCommissioner}.
+     */
+    function getSuiteCommissioner() external view returns (address) {
+        return _suiteCommissioner;
+    }
+
+    /**
+     *  @dev See {ITREXFactory-setSuiteCommissioner}.
+     */
+    function setSuiteCommissioner(address suiteCommissionerAddress) public restricted {
+        _setSuiteCommissioner(suiteCommissionerAddress);
+    }
+
+    /// internal setter for the suite commissioner, see {ITREXFactory-setSuiteCommissioner}
+    function _setSuiteCommissioner(address suiteCommissionerAddress) internal {
+        require(
+            suiteCommissionerAddress.code.length != 0, ErrorsLib.SuiteCommissionerNotAContract(suiteCommissionerAddress)
+        );
+        _suiteCommissioner = suiteCommissionerAddress;
+        emit EventsLib.SuiteCommissionerSet(suiteCommissionerAddress);
+    }
+
+    /**
      *  @dev See {ITREXFactory-setTrustedGatewayRegistry}.
      */
     function setTrustedGatewayRegistry(address trustedGatewayRegistryAddress) public restricted {
@@ -364,13 +399,18 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         );
     }
 
+    /// @dev The commissioner holds `ADMIN_ROLE` for exactly one call: granted before, revoked after, so the
+    ///      profile it applies lands as the manager's admin and nothing of it outlives the deploy.
     function _handOverAccessManager(address manager, address admin, address token, string memory name) private {
         TREXAccessManager accessManager = TREXAccessManager(manager);
         uint32 domainId = accessManager.createDomain(name);
         accessManager.assign(domainId, token);
-        AccessManagerSetupLib.commissionSuite(accessManager, token);
-        accessManager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, admin, 0);
-        accessManager.renounceRole(AccessManagerSetupLib.ADMIN_ROLE, address(this));
+        address commissioner = _suiteCommissioner;
+        accessManager.grantRole(ADMIN_ROLE, commissioner, 0);
+        ISuiteCommissioner(commissioner).commission(accessManager, token);
+        accessManager.revokeRole(ADMIN_ROLE, commissioner);
+        accessManager.grantRole(ADMIN_ROLE, admin, 0);
+        accessManager.renounceRole(ADMIN_ROLE, address(this));
     }
 
     function _deployTREXRegistry(

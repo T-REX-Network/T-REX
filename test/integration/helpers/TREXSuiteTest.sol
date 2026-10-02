@@ -16,6 +16,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { SuiteCommissioner } from "contracts/factory/SuiteCommissioner.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
@@ -61,6 +62,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // Factories
     TREXFactory public trexFactory;
+    SuiteCommissioner public suiteCommissioner;
     TREXImplementationAuthority public trexImplementationAuthority;
 
     // TREX Suite
@@ -145,8 +147,15 @@ contract TREXSuiteTest is AccessManagerHelper {
         returns (TREXFactory factory)
     {
         vm.startPrank(deployer);
+        if (address(suiteCommissioner) == address(0)) {
+            suiteCommissioner = new SuiteCommissioner();
+        }
         factory = new TREXFactory(
-            implementationAuthority, address(idFactory), address(trustedGatewayRegistry), accessManagerAddress
+            implementationAuthority,
+            address(idFactory),
+            address(trustedGatewayRegistry),
+            address(suiteCommissioner),
+            accessManagerAddress
         );
         vm.stopPrank();
     }
