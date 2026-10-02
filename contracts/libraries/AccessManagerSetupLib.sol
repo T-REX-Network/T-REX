@@ -111,6 +111,7 @@ library AccessManagerSetupLib {
     }
 
     uint64 internal constant ADMIN_ROLE = 0;
+    uint64 internal constant PUBLIC_ROLE = type(uint64).max;
 
     function setupTokenRoles(IAccessManager accessManager, address token, uint32 domainId) internal {
         _apply(accessManager, token, tokenTable(), domainId);
@@ -294,14 +295,33 @@ library AccessManagerSetupLib {
         }
     }
 
-    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
-        bytes4[] memory functions = new bytes4[](5);
-        functions[0] = ITREXFactory.setImplementationAuthority.selector;
-        functions[1] = ITREXFactory.setIdFactory.selector;
-        functions[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
-        functions[3] = ITREXFactory.deployTREXSuite.selector;
-        functions[4] = ITREXFactory.deployTREXSuiteIsolated.selector;
-        accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.platform(RolesLib.PlatformRole.OWNER));
+    /// @notice Maps the factory's two concerns to two roles governance picks. `deployRole` deploys suites;
+    ///         `governanceRole` repoints the implementation authority, the identity factory and the gateway
+    ///         registry, which every later suite is wired to. The ids are data, not constants: any role of
+    ///         the manager works, a {RolesLib.PlatformRole}, a name through {RolesLib.platform(bytes32)} or
+    ///         a raw id.
+    /// @dev Refuses the two shapes that recreate the problem the split exists for: one role for both, so
+    ///      every account allowed to deploy a token could reconfigure the factory for everyone, and the
+    ///      public role for either, so anyone could.
+    function setupTREXFactoryRoles(
+        IAccessManager accessManager,
+        address trexFactory,
+        uint64 deployRole,
+        uint64 governanceRole
+    ) internal {
+        require(deployRole != governanceRole, ErrorsLib.FactoryRolesMustDiffer());
+        require(deployRole != PUBLIC_ROLE && governanceRole != PUBLIC_ROLE, ErrorsLib.FactoryRoleCannotBePublic());
+
+        bytes4[] memory deploys = new bytes4[](2);
+        deploys[0] = ITREXFactory.deployTREXSuite.selector;
+        deploys[1] = ITREXFactory.deployTREXSuiteIsolated.selector;
+        accessManager.setTargetFunctionRole(trexFactory, deploys, deployRole);
+
+        bytes4[] memory governance = new bytes4[](3);
+        governance[0] = ITREXFactory.setImplementationAuthority.selector;
+        governance[1] = ITREXFactory.setIdFactory.selector;
+        governance[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
+        accessManager.setTargetFunctionRole(trexFactory, governance, governanceRole);
     }
 
     function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {

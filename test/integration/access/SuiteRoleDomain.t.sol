@@ -105,6 +105,20 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertNotEq(RolesLib.platform(RolesLib.PlatformRole.OWNER), RolesLib.forDomain(DOMAIN_A, RolesLib.Role.OWNER));
     }
 
+    function test_platform_CustomRoleIsFlaggedAndDistinctFromEnumRoles() public pure {
+        uint64 custom = RolesLib.platform(bytes32("TOKEN_ISSUER"));
+        (uint32 domainId, uint32 role, bool isCustom) = RolesLib.decode(custom);
+        assertEq(domainId, RolesLib.PLATFORM_DOMAIN);
+        assertTrue(isCustom);
+        assertEq(role, uint32(uint256(keccak256(abi.encode(bytes32("TOKEN_ISSUER"))))) & ~RolesLib.CUSTOM_ROLE_FLAG);
+        for (uint8 i = 0; i <= uint8(type(RolesLib.PlatformRole).max); i++) {
+            assertNotEq(custom, RolesLib.platform(RolesLib.PlatformRole(i)));
+        }
+        assertEq(custom, RolesLib.platform(bytes32("TOKEN_ISSUER")));
+        assertNotEq(custom, RolesLib.platform(bytes32("VERSION_MANAGER")));
+        assertNotEq(custom, RolesLib.forDomain(DOMAIN_A, bytes32("TOKEN_ISSUER")));
+    }
+
     function packExternally(uint32 domainId, RolesLib.Role role) external pure returns (uint64) {
         return RolesLib.forDomain(domainId, role);
     }

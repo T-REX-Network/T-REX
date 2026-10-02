@@ -106,7 +106,8 @@ interface ITREXFactory {
      *  the implementation authority contract contains the addresses of all implementation contracts
      *  the proxies created by the factory will use the different implementations available
      *  in the implementation authority contract
-     *  Restricted to the configured AccessManager role (OWNER).
+     *  Restricted to the factory governance role chosen at setup
+     *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the suite deploy role.
      *  emits `ImplementationAuthoritySet` event
      *  @param _implementationAuthority The address of the implementation authority smart contract
      */
@@ -116,7 +117,8 @@ interface ITREXFactory {
      *  @dev setter for identity factory contract address
      *  the identity factory contract is used by the TREX Factory to deploy the ONCHAINID
      *  of the token in case the ONCHAINID is not specified
-     *  Restricted to the configured AccessManager role (OWNER).
+     *  Restricted to the factory governance role chosen at setup
+     *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the suite deploy role.
      *  emits `IdFactorySet` event
      *  @param _idFactory The address of the identity factory contract
      */
@@ -127,7 +129,8 @@ interface ITREXFactory {
      *  the registry is the network's vetted gateway set; every token deployed by the factory is
      *  pointed at it at deployment and carries no setter of its own, so gateway trust stays a
      *  network-level decision. Tokens already deployed keep the registry they were deployed with.
-     *  Restricted to the configured AccessManager role (OWNER).
+     *  Restricted to the factory governance role chosen at setup
+     *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the suite deploy role.
      *  emits `TrustedGatewayRegistrySet` event
      *  @param _trustedGatewayRegistry The address of the trusted gateway registry contract
      */
@@ -152,7 +155,8 @@ interface ITREXFactory {
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
-     *  Restricted to the configured AccessManager role (OWNER).
+     *  Restricted to the suite deploy role chosen at setup
+     *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the factory governance role.
      *  emits `TREXSuiteDeployed` event
      *  @param _salt the salt used to make the contracts deployments with CREATE2
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)
@@ -183,7 +187,8 @@ interface ITREXFactory {
      *  suite and hands `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
      *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
      *  commissions it (`AccessManagerSetupLib.commissionSuite`).
-     *  Restricted to the configured AccessManager role (OWNER).
+     *  Restricted to the suite deploy role chosen at setup
+     *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the factory governance role.
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events
      *  @param _salt the salt used to make the contracts deployments with CREATE3
      *  @param _tokenDetails The details of the token to deploy (see struct TokenDetails for more details)

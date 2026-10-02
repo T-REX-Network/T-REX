@@ -1245,6 +1245,118 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
     }
 
+    // ============ AccessManagerSetupLib.setupTREXFactoryRoles() Tests ============
+
+    /// @notice The two deploy selectors land on the deploy role, the three setters on the governance role.
+    function test_setupTREXFactoryRoles_SplitsDeploymentFromGovernance() public view {
+        address factory = address(trexFactory);
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuite.selector),
+            _suiteDeployRole(),
+            "deployTREXSuite must be mapped to the deploy role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuiteIsolated.selector),
+            _suiteDeployRole(),
+            "deployTREXSuiteIsolated must be mapped to the deploy role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setImplementationAuthority.selector),
+            _factoryGovernanceRole(),
+            "setImplementationAuthority must be mapped to the governance role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setIdFactory.selector),
+            _factoryGovernanceRole(),
+            "setIdFactory must be mapped to the governance role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setTrustedGatewayRegistry.selector),
+            _factoryGovernanceRole(),
+            "setTrustedGatewayRegistry must be mapped to the governance role"
+        );
+    }
+
+    function test_setupTREXFactoryRoles_RevertWhen_OneRoleForBoth() public {
+        vm.expectRevert(ErrorsLib.FactoryRolesMustDiffer.selector);
+        this.setupFactoryRolesExternally(_factoryGovernanceRole(), _factoryGovernanceRole());
+    }
+
+    function test_setupTREXFactoryRoles_RevertWhen_EitherRoleIsPublic() public {
+        vm.expectRevert(ErrorsLib.FactoryRoleCannotBePublic.selector);
+        this.setupFactoryRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE, _factoryGovernanceRole());
+        vm.expectRevert(ErrorsLib.FactoryRoleCannotBePublic.selector);
+        this.setupFactoryRolesExternally(_suiteDeployRole(), AccessManagerSetupLib.PUBLIC_ROLE);
+    }
+
+    /// @notice An account holding only the deploy role deploys through both entry points and is refused
+    ///         on every factory setter.
+    function test_setupTREXFactoryRoles_DeployRoleDeploysButCannotReconfigure() public {
+        address issuer = makeAddr("issuer");
+        _grantSuiteDeployRole(issuer);
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        vm.prank(issuer);
+        trexFactory.deployTREXSuite("issuer-shared", tokenDetails, claimDetails);
+        assertNotEq(trexFactory.getToken("issuer-shared"), address(0), "deploy role must deploy a shared suite");
+
+        vm.prank(issuer);
+        trexFactory.deployTREXSuiteIsolated("issuer-isolated", tokenDetails, claimDetails);
+        assertNotEq(trexFactory.getToken("issuer-isolated"), address(0), "deploy role must deploy an isolated suite");
+
+        // Deploy the replacements first: a `new` inside the gated call would absorb the expected revert.
+        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
+        IdentityFactory newIdFactory = _newIdentityFactory();
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(accessManager));
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setImplementationAuthority(address(newIA));
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setIdFactory(address(newIdFactory));
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+    }
+
+    /// @notice An account holding only the governance role reconfigures the factory and is refused on
+    ///         both deploy entry points.
+    function test_setupTREXFactoryRoles_GovernanceRoleReconfiguresButCannotDeploy() public {
+        address governor = makeAddr("governor");
+        _grantFactoryGovernanceRole(governor);
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
+        IdentityFactory newIdFactory = _newIdentityFactory();
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(accessManager));
+
+        vm.startPrank(governor);
+        trexFactory.setImplementationAuthority(address(newIA));
+        trexFactory.setIdFactory(address(newIdFactory));
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+        vm.stopPrank();
+        assertEq(trexFactory.getImplementationAuthority(), address(newIA), "governance role must set the IA");
+        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "governance role must set the ID factory");
+        assertEq(trexFactory.getTrustedGatewayRegistry(), address(newRegistry), "governance role must set the registry");
+
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, governor));
+        trexFactory.deployTREXSuite("governor-shared", tokenDetails, claimDetails);
+
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, governor));
+        trexFactory.deployTREXSuiteIsolated("governor-isolated", tokenDetails, claimDetails);
+    }
+
+    function setupFactoryRolesExternally(uint64 deployRole, uint64 governanceRole) external {
+        AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, address(trexFactory), deployRole, governanceRole);
+    }
+
     // ============ deployTREXSuite() branch Tests ============
 
     /// @notice Should revert when tokenDetails.accessManager is the zero address

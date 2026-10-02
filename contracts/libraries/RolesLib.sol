@@ -120,6 +120,12 @@ library RolesLib {
         return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
     }
 
+    /// Platform roles governance names itself, with no release: the name hashes into the role number the
+    /// same way a custom suite role does, so it can never collide with a {PlatformRole} entry.
+    function platform(bytes32 customName) internal pure returns (uint64) {
+        return _pack(PLATFORM_DOMAIN, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
+    }
+
     function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
         domainId = uint32(roleId >> 32);
         custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;

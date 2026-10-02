@@ -30,9 +30,22 @@ abstract contract AccessManagerHelper is Test {
         return accessManager;
     }
 
-    /// @notice Wires the factory selectors (deployTREXSuite, setters) to the OWNER role.
+    /// @notice The two factory roles the tests pick. The deploy role is a named platform role, which is
+    ///         how a platform mints one without a release; governance stays on the platform OWNER.
+    function _suiteDeployRole() internal pure returns (uint64) {
+        return RolesLib.platform(bytes32("TOKEN_ISSUER"));
+    }
+
+    function _factoryGovernanceRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.OWNER);
+    }
+
+    /// @notice Wires the two deploy selectors to the suite deploy role and the three setters to the
+    ///         factory governance role.
     function _setupFactoryRoles(address trexFactory) internal {
-        AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, trexFactory);
+        AccessManagerSetupLib.setupTREXFactoryRoles(
+            accessManager, trexFactory, _suiteDeployRole(), _factoryGovernanceRole()
+        );
     }
 
     /// @notice Wires the TREXImplementationAuthority governance selectors to the OWNER role for `ia`.
@@ -53,9 +66,19 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.forDomain(DOMAIN, role);
     }
 
+    /// @notice Full-powers test account: suite OWNER, factory governance and suite deployment.
     function _grantOwnerRole(address account) internal {
         accessManager.grantRole(_role(RolesLib.Role.OWNER), account, NO_EXECUTION_DELAY);
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.OWNER), account, NO_EXECUTION_DELAY);
+        _grantFactoryGovernanceRole(account);
+        _grantSuiteDeployRole(account);
+    }
+
+    function _grantSuiteDeployRole(address account) internal {
+        accessManager.grantRole(_suiteDeployRole(), account, NO_EXECUTION_DELAY);
+    }
+
+    function _grantFactoryGovernanceRole(address account) internal {
+        accessManager.grantRole(_factoryGovernanceRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantStorageWriterRole(address account) internal {
