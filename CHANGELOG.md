@@ -486,8 +486,8 @@ All notable changes to this project will be documented in this file.
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
   could also repoint the factory's implementation authority, identity factory or trusted gateway
   registry, which every later suite is wired to. The function now takes two role ids chosen by
-  governance: a deploy role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a governance role
-  for the three setters. It refuses one role for both (`FactoryRolesMustDiffer`). The three other platform
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory governor role
+  for the three setters. It refuses one role for both (`SuiteDeployerCannotGovernFactory`). The three other platform
   setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
   `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
   instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
@@ -496,7 +496,7 @@ All notable changes to this project will be documented in this file.
   `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles do. The
   `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. Existing
   deployments need no redeploy: remap the two deploy selectors with `setTargetFunctionRole`, grant the
-  deploy role to current deployers and revoke the platform `OWNER` from them.
+  suite deployer role to current deployers and revoke the platform `OWNER` from them.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

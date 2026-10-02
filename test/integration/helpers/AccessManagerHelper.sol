@@ -30,13 +30,13 @@ abstract contract AccessManagerHelper is Test {
         return accessManager;
     }
 
-    /// @notice The two factory roles the tests pick. The deploy role is a named platform role, which is
+    /// @notice The two factory roles the tests pick. The suite deployer role is a named platform role, which is
     ///         how a platform mints one without a release; governance stays on the platform OWNER.
-    function _suiteDeployRole() internal pure returns (uint64) {
+    function _suiteDeployerRole() internal pure returns (uint64) {
         return RolesLib.platform(bytes32("TOKEN_ISSUER"));
     }
 
-    function _factoryGovernanceRole() internal pure returns (uint64) {
+    function _factoryGovernorRole() internal pure returns (uint64) {
         return RolesLib.platform(RolesLib.PlatformRole.OWNER);
     }
 
@@ -52,11 +52,11 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER);
     }
 
-    /// @notice Wires the two deploy selectors to the suite deploy role and the three setters to the
-    ///         factory governance role.
+    /// @notice Wires the two deploy selectors to the suite deployer role and the three setters to the
+    ///         factory governor role.
     function _setupFactoryRoles(address trexFactory) internal {
         AccessManagerSetupLib.setupTREXFactoryRoles(
-            accessManager, trexFactory, _suiteDeployRole(), _factoryGovernanceRole()
+            accessManager, trexFactory, _suiteDeployerRole(), _factoryGovernorRole()
         );
     }
 
@@ -81,16 +81,16 @@ abstract contract AccessManagerHelper is Test {
     /// @notice Full-powers test account: suite OWNER, factory governance and suite deployment.
     function _grantOwnerRole(address account) internal {
         accessManager.grantRole(_role(RolesLib.Role.OWNER), account, NO_EXECUTION_DELAY);
-        _grantFactoryGovernanceRole(account);
-        _grantSuiteDeployRole(account);
+        _grantFactoryGovernorRole(account);
+        _grantSuiteDeployerRole(account);
     }
 
-    function _grantSuiteDeployRole(address account) internal {
-        accessManager.grantRole(_suiteDeployRole(), account, NO_EXECUTION_DELAY);
+    function _grantSuiteDeployerRole(address account) internal {
+        accessManager.grantRole(_suiteDeployerRole(), account, NO_EXECUTION_DELAY);
     }
 
-    function _grantFactoryGovernanceRole(address account) internal {
-        accessManager.grantRole(_factoryGovernanceRole(), account, NO_EXECUTION_DELAY);
+    function _grantFactoryGovernorRole(address account) internal {
+        accessManager.grantRole(_factoryGovernorRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantStorageWriterRole(address account) internal {
