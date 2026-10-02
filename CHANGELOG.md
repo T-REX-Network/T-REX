@@ -513,6 +513,15 @@ All notable changes to this project will be documented in this file.
   and uri to the claim signature), `createIdentityFor` no longer takes a module bundle (modules are
   registered per identity type on the IdentityFactory via `setIdentityTypeModules`), and
   `setIdentityTypePolicy` gained a `singleBinding` flag (ASSET registers as single-binding).
+- **An identity resolves to itself** (ONCHAINID dependency repinned to the merge of
+  T-REX-Network/ONCHAINID#97). The registry attributes positions through
+  `getIdentityIncludingRevoked`, which previously answered nothing for an identity's own address, so
+  an identity could not hold the token on that address: `identity()`, `contains()` and `isVerified()`
+  returned the zero identity and a mint or transfer to it reverted with `UnverifiedIdentity`. The
+  factory now answers `(identity, Active)` on every resolution view, so an identity is attributed and
+  admitted on its own address with no local registration, and `getVerifiedDetails` reports it as
+  `Active`. Ripple absorbed here: ONCHAINID folded `addClaimByTrustedIssuer` into `addClaim`, so the
+  test module bundle drops that selector.
 - **`TREXFactory` module plumbing removed**: identity module configuration now belongs to the
   ONCHAINID IdentityFactory, so `setIdentityModules` / `getIdentityModules`, the constructor's
   module parameters, the `IdentityModulesSet` event and the `IdentityModulesLib` library are gone.
