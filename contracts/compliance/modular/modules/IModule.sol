@@ -75,12 +75,20 @@ interface IModule {
         /// when a `TRACKER` is told about one; the requested maximum, already capped at what the sending
         /// wallet holds, on an issuance.
         uint256 amountMax;
+        /// What produced the movement: one of the `MovementKindLib` constants. A number and not an enum, so a
+        /// kind this module was not written for decodes instead of reverting; such a kind is reported, never
+        /// refused.
+        uint8 kind;
         /// True while a validation is being issued for a satellite movement.
         bool isIssuance;
         /// ERC-7930 envelope of who executes the movement on the sender's behalf: the caller of `transferFrom`
         /// on a native movement, the spender named on a validation. Empty when the sender executes itself,
         /// which is every direct transfer, mint and burn.
         bytes spender;
+        /// Room for what a later compliance has to say that this struct does not carry yet. Empty today. A
+        /// module decodes it only when it knows the compliance that fills it, and ignores it otherwise, so
+        /// a new fact reaches new modules without an ABI change for the old ones.
+        bytes data;
     }
 
     /**
@@ -107,9 +115,10 @@ interface IModule {
     /**
      *  @dev the ledger moved. Called on every `TRACKER` module after the compliance updated the positions, on
      *  a native transfer, a mint, a burn, a forced transfer, a recovery and a settled validation
-     *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, a zero
-     *  `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and `toWallet` mean a burn. That is
-     *  the convention {allowedAmount} already uses, so one function covers what three hooks used to
+     *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, `ctx.kind` says
+     *  what produced it, a zero `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and
+     *  `toWallet` mean a burn. That is the convention {allowedAmount} already uses, so one function covers
+     *  what three hooks used to
      *  reverting stops the movement: a module that cannot record a move has to stop it. `forceRemoveModule`
      *  is the escape hatch for a module that reverts everywhere
      *  This function can be called ONLY by the compliance contract itself

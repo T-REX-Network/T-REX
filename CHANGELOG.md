@@ -87,9 +87,21 @@ All notable changes to this project will be documented in this file.
     with a zero recipient side, the convention `allowedAmount` already used, so the tracker sorts them
     itself and the compliance keeps one dispatch loop.
   - `IModule.TransferContext`: the compliance asking, both identities resolved once, both wallet keys,
-    `amountMin` / `amountMax`, `isIssuance` and `spender`. Every rule, spender policy and tracker receives
-    it, built in one place, so a module never resolves a wallet itself. On an action `amountMax` is the
-    exact amount that moved, so there is no second amount beside it.
+    `amountMin` / `amountMax`, `kind`, `isIssuance`, `spender` and `data`. Every rule, spender policy and
+    tracker receives it, built in one place, so a module never resolves a wallet itself. On an action
+    `amountMax` is the exact amount that moved, so there is no second amount beside it.
+  - `TransferContext.kind` says what produced the movement, a `MovementKindLib` constant: `TRANSFER`,
+    `MINT`, `BURN`, `FORCED_TRANSFER`, `RECOVERY` or `CROSS_CHAIN`. The zero sides already told a mint and
+    a burn apart; a forced transfer and a recovery looked exactly like a transfer, so a tracker counting an
+    investor's own activity counted an agent's intervention too. The token now reports those two through
+    `IModularCompliance.agentTransferred(from, to, amount, kind)`, bound token only, instead of
+    `transferred`; `ERC3643Token` exposes `_notifyForcedTransfer` and `_notifyRecovery` for that, defaulting
+    to the standard hook. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
+    calldata decoding, so a module compiled against today's kinds would revert on one added later and block
+    every movement of that kind until upgraded.
+  - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
+    not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
+    and no deployed module needs an upgrade for it.
   - A recipient that resolves to no identity is refused while a `RULE` is bound: a distribution rule keys
     on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
     registry with eligibility checks disabled reaches that path.

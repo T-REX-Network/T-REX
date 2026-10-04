@@ -62,10 +62,29 @@ struct TransferContext {
     bytes32 toWallet;       // zero on a burn
     uint256 amountMin;      // equal to amountMax on a native movement
     uint256 amountMax;      // the amount that moved, or the requested maximum on an issuance
+    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
+    bytes   data;           // empty today; room for a later compliance to say more without an ABI change
 }
 ```
+
+`kind` says what produced the movement. The zero sides already tell a mint and a burn apart, but a forced
+transfer and a recovery move between two non-zero wallets exactly like a transfer does, and only the token
+knows the difference: it reports them to the compliance through `agentTransferred`, with the kind, instead
+of `transferred`. A tracker that counts an investor's own activity, a monthly transfer limit for instance,
+reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. No rule is ever asked about those two, so a
+`RULE` only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+
+`kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
+module compiled against today's kinds would revert on a kind added later and block every movement of that
+kind until it was upgraded. With a number, a module that meets a kind it was not written for sees an
+unfamiliar value and handles it as such. A module never reverts on a kind it does not know.
+
+`data` is empty and reserved. When a future compliance has a fact to pass that this struct does not carry,
+it fills `data`, new modules decode it, and old modules keep ignoring it: the struct does not change shape,
+so no deployed module needs an upgrade. A module decodes `data` only when it knows which compliance filled
+it.
 
 A `SPENDER` module answers about `ctx.spender`, a wallet on this chain or on a satellite, so one
 policy covers `transferFrom` here and a validation a satellite operator will execute. The shipped
@@ -76,8 +95,8 @@ Identities arrive resolved, so a module never calls the registry to find out who
 ledger describes the state before the move.
 
 One context, one convention, everywhere. A mint has no sender, so `fromIdentity` and `fromWallet` are zero;
-a burn has no recipient, so `toIdentity` and `toWallet` are zero. A `TRACKER` reads that to tell the three
-apart, which is why it needs one function and not three.
+a burn has no recipient, so `toIdentity` and `toWallet` are zero. A `TRACKER` reads that, and `kind`, to
+tell every movement apart, which is why it needs one function and not three.
 
 A recipient that resolves to no identity is refused before any rule is asked, whenever a rule is bound. A
 distribution rule keys on the identity and would read a zero one as a burn, so the tokens would land where

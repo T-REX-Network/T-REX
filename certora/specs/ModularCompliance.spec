@@ -70,6 +70,11 @@ rule onlyBoundedTokenNotifiesDestroyed(env e, address from, uint256 value) {
     destroyed@withrevert(e, from, value);
     assert lastReverted, "non-bound caller drove destroyed()";
 }
+rule onlyBoundedTokenNotifiesAgentTransfer(env e, address from, address to, uint256 value, uint8 kind) {
+    require e.msg.sender != getTokenBound();
+    agentTransferred@withrevert(e, from, to, value, kind);
+    assert lastReverted, "non-bound caller drove agentTransferred()";
+}
 
 /* MC-3 (AV-1): the restricted admin surface requires AccessManager authorisation. */
 rule restrictedAdminRequiresAuthorisation(method f, env e, calldataarg args)

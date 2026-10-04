@@ -82,6 +82,7 @@ import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnabl
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
+import { MovementKindLib } from "./MovementKindLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
@@ -131,7 +132,8 @@ contract ModularCompliance is
         address[] calldata modules,
         bytes[] calldata moduleSettings
     ) external initializer {
-        require(tokenAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        // `_bindToken` refuses a zero token with the same error, so only the manager is checked here.
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         require(modules.length >= moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
 
         __AccessManaged_init(accessManagerAddress);
@@ -343,17 +345,24 @@ contract ModularCompliance is
 
     /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
-        _applyMovement(from, to, value);
+        _applyMovement(from, to, value, MovementKindLib.TRANSFER);
     }
 
     /// @dev A mint: no sender, the recipient's position grows.
     function _created(address to, uint256 value) internal override {
-        _applyMovement(address(0), to, value);
+        _applyMovement(address(0), to, value, MovementKindLib.MINT);
     }
 
     /// @dev A burn: no recipient, the sender's position shrinks.
     function _destroyed(address from, uint256 value) internal override {
-        _applyMovement(from, address(0), value);
+        _applyMovement(from, address(0), value, MovementKindLib.BURN);
+    }
+
+    /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
+    ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
+    function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
+        _requireWalletToWallet(from, to, amount);
+        _applyMovement(from, to, amount, kind);
     }
 
     /// @dev Moves the positions and tells the trackers. One function serves all three hooks: the absent side of
@@ -363,7 +372,7 @@ contract ModularCompliance is
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
     ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
-    function _applyMovement(address from, address to, uint256 value) private {
+    function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
@@ -371,7 +380,7 @@ contract ModularCompliance is
         if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
 
         IModule.TransferContext memory ctx =
-            TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, "");
+            TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         _callAfterTransfer(ctx);
     }
@@ -396,7 +405,9 @@ contract ModularCompliance is
         address toIdentity;
         if (from != address(0)) fromIdentity = address(registry.identity(from));
         if (to != address(0)) toIdentity = address(registry.identity(to));
-        return TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, spender);
+        // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
+        uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
+        return TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, spender);
     }
 
     /* ----- What the validation layer needs ----- */

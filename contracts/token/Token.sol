@@ -81,6 +81,7 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
@@ -661,8 +662,21 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
-        _getCompliance().transferred(from, to, amount);
+        _notifyForcedTransfer(from, to, amount);
         return true;
+    }
+
+    /// @dev The bound compliance is modular, so an agent's movement is reported as what it is and the
+    ///  trackers can leave it out of what they count against the investor.
+    function _notifyForcedTransfer(address from, address to, uint256 amount) internal override {
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
+    }
+
+    /// @inheritdoc ERC3643Token
+    function _notifyRecovery(address lostWallet, address newWallet, uint256 amount) internal override {
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(lostWallet, newWallet, amount, MovementKindLib.RECOVERY);
     }
 
     /// @dev The new wallet is registered only when it resolves nowhere, so a wallet the global registry

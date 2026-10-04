@@ -411,7 +411,7 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
     {
         require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
-        _getCompliance().transferred(from, to, amount);
+        _notifyForcedTransfer(from, to, amount);
         return true;
     }
 
@@ -440,7 +440,7 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
 
-        _getCompliance().transferred(lostWallet, newWallet, investorTokens);
+        _notifyRecovery(lostWallet, newWallet, investorTokens);
 
         if (migrateIdentity) _getIdentityRegistry().deleteIdentity(lostWallet);
 
@@ -518,6 +518,18 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         if (isMint) _getCompliance().created(to, value);
         else if (isBurn) _getCompliance().destroyed(from, value);
         else _getCompliance().transferred(from, to, value);
+    }
+
+    /// @dev Tells compliance that an agent forced a transfer. The standard compliance has one hook for every
+    ///  wallet-to-wallet movement, so this reports it as `transferred`; a token whose compliance can tell an
+    ///  agent's movement apart overrides this and reports it there.
+    function _notifyForcedTransfer(address from, address to, uint256 amount) internal virtual {
+        _getCompliance().transferred(from, to, amount);
+    }
+
+    /// @dev Tells compliance that an agent recovered a wallet. Same reasoning as {_notifyForcedTransfer}.
+    function _notifyRecovery(address lostWallet, address newWallet, uint256 amount) internal virtual {
+        _getCompliance().transferred(lostWallet, newWallet, amount);
     }
 
     /// @dev Moves tokens bypassing {_update}: no pause, freeze, identity or compliance check, and no

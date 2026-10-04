@@ -6,8 +6,9 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
+import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
@@ -124,7 +125,9 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
 
         vm.expectCall(
             compliance,
-            abi.encodeWithSelector(IERC3643Compliance.transferred.selector, lostWallet, newWallet, mintAmount)
+            abi.encodeCall(
+                IModularCompliance.agentTransferred, (lostWallet, newWallet, mintAmount, MovementKindLib.RECOVERY)
+            )
         );
         vm.prank(agent);
         token.recoveryAddress(lostWallet, newWallet, investorOnchainId);
