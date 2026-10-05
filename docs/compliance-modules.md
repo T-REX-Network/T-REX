@@ -39,12 +39,6 @@ The order on a native movement is: `canTransfer` asks the `CHECK` modules; the t
 the positions; the `AFTER` modules are told. A settlement follows the same order from `BEFORE` on. The
 issuance of a validation asks `CHECK` and `SPENDER` only: nothing moves there.
 
-A refused transfer reverts with `ComplianceRefused(module, allowed)`: the `CHECK` module that refused and
-the largest amount it would have allowed. A wallet reads the module's `name()` and shows the investor the
-rule and the room left. The same answer is available without a transaction from
-`transferVerdict(from, to, amount)`. A zero module is the compliance itself refusing a wallet that resolves
-to no identity. The standard `canTransfer` keeps answering yes or no.
-
 Which to pick. A bound on how much may move is a `CHECK`: it returns a number, so it narrows a cross-chain
 issuance as well. A veto on the state a movement leaves behind is an `AFTER` module that reverts, with its
 own error; the movement and the ledger move are undone together. A counter that must be checked and then

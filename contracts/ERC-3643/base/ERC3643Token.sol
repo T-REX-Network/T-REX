@@ -512,7 +512,7 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
 
         if (!isBurn) {
             require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
-            _requireCompliantTransfer(from, to, value);
+            require(_getCompliance().canTransfer(from, to, value), ERC3643ErrorsLib.ComplianceNotFollowed());
         }
 
         _notifyBeforeTransfer(from, to, value);
@@ -521,13 +521,6 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         if (isMint) _getCompliance().created(to, value);
         else if (isBurn) _getCompliance().destroyed(from, value);
         else _getCompliance().transferred(from, to, value);
-    }
-
-    /// @dev Asks compliance whether the movement may happen and reverts when it may not. The standard answer
-    ///  is `canTransfer`, a yes or no; a token whose compliance can say which module refused and how much it
-    ///  would have allowed overrides this and reverts with that.
-    function _requireCompliantTransfer(address from, address to, uint256 value) internal view virtual {
-        require(_getCompliance().canTransfer(from, to, value), ERC3643ErrorsLib.ComplianceNotFollowed());
     }
 
     /// @dev Called right before the balances move, after every check passed, on a transfer, a mint or a burn.

@@ -5,7 +5,6 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
-import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -52,14 +51,13 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenMintRevertsWhenComplianceNotFollowed() public {
-        address module = makeAddr("refusingModule");
         vm.mockCall(
             compliance,
-            abi.encodeWithSelector(IModularCompliance.transferVerdict.selector, address(0), user1, mintAmount),
-            abi.encode(false, module, 0)
+            abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector, address(0), user1, mintAmount),
+            abi.encode(false)
         );
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, module, 0));
+        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
         vm.prank(agent);
         token.mint(user1, mintAmount);
     }

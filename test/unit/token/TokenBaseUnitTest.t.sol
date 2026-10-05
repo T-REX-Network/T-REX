@@ -75,11 +75,6 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.unbindToken.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector), abi.encode(true));
-        vm.mockCall(
-            compliance,
-            abi.encodeWithSelector(IModularCompliance.transferVerdict.selector),
-            abi.encode(true, address(0), type(uint256).max)
-        );
         vm.mockCall(compliance, abi.encodeWithSelector(IModularCompliance.canSpenderCall.selector), abi.encode(true));
 
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.created.selector), "");

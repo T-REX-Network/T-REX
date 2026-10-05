@@ -674,15 +674,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
             .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
     }
 
-    /// @dev A refused movement says why: the module that refused and the largest amount it would have allowed,
-    ///  so a wallet can read the module's `name()` and show the investor what blocked them. A zero module is
-    ///  the compliance itself refusing a wallet it cannot attribute to an identity.
-    function _requireCompliantTransfer(address from, address to, uint256 value) internal view override {
-        (bool ok, address module, uint256 allowed) =
-            IModularCompliance(address(_getCompliance())).transferVerdict(from, to, value);
-        require(ok, ErrorsLib.ComplianceRefused(module, allowed));
-    }
-
     /// @dev The compliance is told before the balances move, so a `BEFORE` module sees the state the
     ///  movement starts from. The kind is what the zero sides say: no sender is a mint, no recipient a burn.
     function _notifyBeforeTransfer(address from, address to, uint256 value) internal override {

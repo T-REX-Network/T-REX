@@ -108,7 +108,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
 
         // Locked before the revocation.
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(lockup), 0));
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
         token.transfer(bob, 1);
 
         _revokeAlice();
@@ -117,7 +117,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(lockup.check(_contextFrom(aliceIdentity)), 0, "the rule still refuses the sender");
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(lockup), 0));
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
         token.transfer(bob, 1);
     }
 
@@ -146,9 +146,8 @@ contract LedgerAttributionTest is TREXSuiteTest {
         );
         assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
 
-        // The compliance itself refuses, before any rule is asked: a zero module says so.
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(0), 0));
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
         token.transfer(bob, 1);
     }
 

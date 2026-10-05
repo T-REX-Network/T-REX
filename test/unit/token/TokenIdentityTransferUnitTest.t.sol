@@ -9,7 +9,6 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
-import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
@@ -215,14 +214,9 @@ contract TokenIdentityTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenIdentityTransferRevertsWhenComplianceRefuses() public {
-        address module = makeAddr("refusingModule");
-        vm.mockCall(
-            compliance,
-            abi.encodeWithSelector(IModularCompliance.transferVerdict.selector),
-            abi.encode(false, module, 0)
-        );
+        vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector), abi.encode(false));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, module, 0));
+        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
         vm.prank(identity);
         token.identityTransfer(from, to, transferAmount);
     }
