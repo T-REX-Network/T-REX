@@ -76,6 +76,7 @@ import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegi
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
@@ -258,6 +259,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
         ctx.amountMin = _value;
         ctx.amountMax = _value;
+        // The same kind the compliance gives `canTransfer`, so a rule that reads it answers the same here.
+        ctx.kind = _from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
     }
 
     function _authorizeUpgrade(

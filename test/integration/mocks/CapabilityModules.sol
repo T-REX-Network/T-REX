@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 
@@ -115,6 +116,24 @@ contract TrackBeforeOnlyModule is RecordingModule {
 
     function name() external pure override returns (string memory) {
         return "TrackBeforeOnlyModule";
+    }
+
+}
+
+/// @dev A `CHECK` that reads `kind`: it refuses every mint and allows everything else.
+contract NoMintModule is RecordingModule {
+
+    function check(TransferContext calldata ctx) external pure override returns (uint256) {
+        return ctx.kind == MovementKindLib.MINT ? 0 : type(uint256).max;
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.CHECK;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "NoMintModule";
     }
 
 }

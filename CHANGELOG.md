@@ -95,8 +95,8 @@ All notable changes to this project will be documented in this file.
     a burn apart; a forced transfer and a recovery looked exactly like a transfer, so a tracker counting an
     investor's own activity counted an agent's intervention too. The token now reports those two through
     `IModularCompliance.agentTransferred(from, to, amount, kind)`, bound token only, instead of
-    `transferred`; `ERC3643Token` exposes `_notifyForcedTransfer` and `_notifyRecovery` for that, defaulting
-    to the standard hook. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
+    `transferred`. `Token` reports a forced transfer directly from its own `_forcedTransfer`; for a recovery
+    `ERC3643Token` exposes `_notifyRecovery`, defaulting to the standard hook. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
     calldata decoding, so a module compiled against today's kinds would revert on one added later and block
     every movement of that kind until upgraded.
   - Module types are the four methods every module implements, as in v4, and a type says which the compliance

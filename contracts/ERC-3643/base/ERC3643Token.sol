@@ -411,7 +411,7 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
     {
         require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
-        _notifyForcedTransfer(from, to, amount);
+        _getCompliance().transferred(from, to, amount);
         return true;
     }
 
@@ -520,14 +520,9 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         else _getCompliance().transferred(from, to, value);
     }
 
-    /// @dev Tells compliance that an agent forced a transfer. The standard compliance has one hook for every
+    /// @dev Tells compliance that an agent recovered a wallet. The standard compliance has one hook for every
     ///  wallet-to-wallet movement, so this reports it as `transferred`; a token whose compliance can tell an
     ///  agent's movement apart overrides this and reports it there.
-    function _notifyForcedTransfer(address from, address to, uint256 amount) internal virtual {
-        _getCompliance().transferred(from, to, amount);
-    }
-
-    /// @dev Tells compliance that an agent recovered a wallet. Same reasoning as {_notifyForcedTransfer}.
     function _notifyRecovery(address lostWallet, address newWallet, uint256 amount) internal virtual {
         _getCompliance().transferred(lostWallet, newWallet, amount);
     }

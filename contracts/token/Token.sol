@@ -662,18 +662,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
-        _notifyForcedTransfer(from, to, amount);
+        // Reported as an agent's movement, so a module counting what the investor does can leave it out.
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
         return true;
     }
 
-    /// @dev The bound compliance is modular, so an agent's movement is reported as what it is and the
-    ///  trackers can leave it out of what they count against the investor.
-    function _notifyForcedTransfer(address from, address to, uint256 amount) internal override {
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
-    }
-
-    /// @inheritdoc ERC3643Token
+    /// @dev The bound compliance is modular, so a recovery is reported as an agent's movement and the trackers
+    ///  can leave it out of what they count against the investor.
     function _notifyRecovery(address lostWallet, address newWallet, uint256 amount) internal override {
         IModularCompliance(address(_getCompliance()))
             .agentTransferred(lostWallet, newWallet, amount, MovementKindLib.RECOVERY);
