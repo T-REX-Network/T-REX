@@ -102,11 +102,10 @@ All notable changes to this project will be documented in this file.
   - Module types are the four methods every module implements, as in v4, and a type says which the compliance
     calls: `CHECK` (`check(ctx)`, the largest amount allowed, was `RULE` / `allowedAmount`), `SPENDER`
     (`checkSpender`, was `moduleCheckSpender`), `BEFORE` (`beforeTransfer(ctx)`, told right before the
-    balances move, new) and `AFTER` (`afterTransfer`, was `TRACKER`). A check on the state a movement leaves
-    behind is an `AFTER` module that reverts. The token tells the compliance before every native move through
-    `IModularCompliance.beforeTransferred(from, to, amount, kind)`, bound token only; `ERC3643Token` exposes
-    `_notifyBeforeTransfer`, `_notifyBeforeForcedTransfer` and `_notifyBeforeRecovery`, no-ops by default.
-    The issuance of a validation reaches `CHECK` and `SPENDER` only; a settlement runs before, move, after.
+    positions move, new) and `AFTER` (`afterTransfer`, was `TRACKER`). A check on the state a movement leaves
+    behind is an `AFTER` module that reverts. `BEFORE` needs no token change: the compliance tells those
+    modules inside the hook the token already calls, before it moves the positions. The issuance of a
+    validation reaches `CHECK` and `SPENDER` only; a settlement runs before, move, after.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.

@@ -28,24 +28,24 @@ answers. The compliance calls a module only where it said so.
 |---|---|---|---|
 | `CHECK` | `check(ctx)` view | before a transfer or a mint, and when a cross-chain validation is issued | the ledger before the move |
 | `SPENDER` | `checkSpender(ctx)` view | before an allowance is spent in `transferFrom`, and when a validation names a spender | who executes |
-| `BEFORE` | `beforeTransfer(ctx)` | right before the token moves the balances; native movements and settlements | the ledger before the move |
+| `BEFORE` | `beforeTransfer(ctx)` | right before the positions move; native movements and settlements | the ledger before the move |
 | `AFTER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated | the ledger after the move |
 
 A module may name any combination. It inherits `AbstractModuleUpgradeable`, which answers every question
 neutrally, and overrides only the methods its types cover.
 
-The order on a native movement is: `canTransfer` asks the `CHECK` modules; the token tells
-`beforeTransferred`, which reaches the `BEFORE` modules; the token moves the balances; the compliance moves
-the positions; the `AFTER` modules are told. A settlement follows the same order from `BEFORE` on. The
-issuance of a validation asks `CHECK` and `SPENDER` only: nothing moves there.
+The order on a native movement is: `canTransfer` asks the `CHECK` modules; the token moves the balances and
+calls the compliance; the compliance tells the `BEFORE` modules, moves the positions, and tells the `AFTER`
+modules. A settlement follows the same order from `BEFORE` on. The issuance of a validation asks `CHECK`
+and `SPENDER` only: nothing moves there. A `BEFORE` module sees the ledger before the move; on a native
+movement the balances have already moved, which is one more reason a module reads the ledger and never the
+balances.
 
 Which to pick. A bound on how much may move is a `CHECK`: it returns a number, so it narrows a cross-chain
 issuance as well. A veto on the state a movement leaves behind is an `AFTER` module that reverts, with its
 own error; the movement and the ledger move are undone together. A counter that must be checked and then
 recorded is `CHECK` plus `AFTER` on the same storage. A record of what was true before the move, such as
-whether the recipient held anything, is a `BEFORE`; the same fact is also the after-state adjusted by
-`ctx.amountMax`, with one exception: a wallet an agent relinked to another identity has its balance
-reassigned by the ledger during the move, which only the after side sees.
+whether the recipient held anything, is a `BEFORE`.
 
 ## check
 

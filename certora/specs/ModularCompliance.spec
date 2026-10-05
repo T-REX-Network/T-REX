@@ -71,11 +71,6 @@ rule onlyBoundedTokenNotifiesDestroyed(env e, address from, uint256 value) {
     destroyed@withrevert(e, from, value);
     assert lastReverted, "non-bound caller drove destroyed()";
 }
-rule onlyBoundedTokenNotifiesBeforeTransfer(env e, address from, address to, uint256 value, uint8 kind) {
-    require e.msg.sender != getTokenBound();
-    beforeTransferred@withrevert(e, from, to, value, kind);
-    assert lastReverted, "non-bound caller drove beforeTransferred()";
-}
 rule onlyBoundedTokenNotifiesAgentTransfer(env e, address from, address to, uint256 value, uint8 kind) {
     require e.msg.sender != getTokenBound();
     agentTransferred@withrevert(e, from, to, value, kind);

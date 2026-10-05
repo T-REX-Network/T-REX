@@ -660,7 +660,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         returns (bool)
     {
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
-        _notifyBeforeForcedTransfer(from, to, amount);
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
         _notifyForcedTransfer(from, to, amount);
@@ -672,27 +671,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     function _notifyForcedTransfer(address from, address to, uint256 amount) internal override {
         IModularCompliance(address(_getCompliance()))
             .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
-    }
-
-    /// @dev The compliance is told before the balances move, so a `BEFORE` module sees the state the
-    ///  movement starts from. The kind is what the zero sides say: no sender is a mint, no recipient a burn.
-    function _notifyBeforeTransfer(address from, address to, uint256 value) internal override {
-        uint8 kind = MovementKindLib.TRANSFER;
-        if (from == address(0)) kind = MovementKindLib.MINT;
-        if (to == address(0)) kind = MovementKindLib.BURN;
-        IModularCompliance(address(_getCompliance())).beforeTransferred(from, to, value, kind);
-    }
-
-    /// @inheritdoc ERC3643Token
-    function _notifyBeforeForcedTransfer(address from, address to, uint256 amount) internal override {
-        IModularCompliance(address(_getCompliance()))
-            .beforeTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
-    }
-
-    /// @inheritdoc ERC3643Token
-    function _notifyBeforeRecovery(address lostWallet, address newWallet, uint256 amount) internal override {
-        IModularCompliance(address(_getCompliance()))
-            .beforeTransferred(lostWallet, newWallet, amount, MovementKindLib.RECOVERY);
     }
 
     /// @inheritdoc ERC3643Token

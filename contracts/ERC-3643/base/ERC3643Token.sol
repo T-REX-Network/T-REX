@@ -410,7 +410,6 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         returns (bool)
     {
         require(_getIdentityRegistry().isVerified(to), ERC3643ErrorsLib.UnverifiedIdentity());
-        _notifyBeforeForcedTransfer(from, to, amount);
         _forceUpdate(from, to, amount);
         _notifyForcedTransfer(from, to, amount);
         return true;
@@ -437,7 +436,6 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         // receive the tokens. A module keyed by identity can then debit and credit through the registry.
         bool migrateIdentity = _registerRecoveredWallet(lostWallet, newWallet, investorOnchainID);
 
-        _notifyBeforeRecovery(lostWallet, newWallet, investorTokens);
         _forceUpdate(lostWallet, newWallet, investorTokens);
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
@@ -515,27 +513,12 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
             require(_getCompliance().canTransfer(from, to, value), ERC3643ErrorsLib.ComplianceNotFollowed());
         }
 
-        _notifyBeforeTransfer(from, to, value);
         super._update(from, to, value);
 
         if (isMint) _getCompliance().created(to, value);
         else if (isBurn) _getCompliance().destroyed(from, value);
         else _getCompliance().transferred(from, to, value);
     }
-
-    /// @dev Called right before the balances move, after every check passed, on a transfer, a mint or a burn.
-    ///  The standard compliance has no hook here, so this does nothing; a token whose compliance tracks the
-    ///  state a movement starts from overrides it.
-    // solhint-disable-next-line no-empty-blocks
-    function _notifyBeforeTransfer(address from, address to, uint256 value) internal virtual { }
-
-    /// @dev Called right before a forced transfer moves the balances. Same reasoning as {_notifyBeforeTransfer}.
-    // solhint-disable-next-line no-empty-blocks
-    function _notifyBeforeForcedTransfer(address from, address to, uint256 amount) internal virtual { }
-
-    /// @dev Called right before a recovery moves the balances, once the new wallet resolves. Same reasoning.
-    // solhint-disable-next-line no-empty-blocks
-    function _notifyBeforeRecovery(address lostWallet, address newWallet, uint256 amount) internal virtual { }
 
     /// @dev Tells compliance that an agent forced a transfer. The standard compliance has one hook for every
     ///  wallet-to-wallet movement, so this reports it as `transferred`; a token whose compliance can tell an

@@ -33,7 +33,7 @@ pragma solidity 0.8.30;
 /// - `CHECK`: asked {check}, the largest amount it allows; the compliance takes the minimum. A view, so it is
 ///   also what `canTransfer` previews and what narrows a cross-chain issuance;
 /// - `SPENDER`: asked {checkSpender}, whether the operator named in the context may execute the movement;
-/// - `BEFORE`: told {beforeTransfer} right before the token moves the balances;
+/// - `BEFORE`: told {beforeTransfer} right before the positions move;
 /// - `AFTER`: told {afterTransfer} once the ledger moved. A module that refuses the state a movement left
 ///   behind reverts here, with its own error, and the movement is undone.
 ///
@@ -55,7 +55,7 @@ interface IModule {
         CHECK,
         /// Answers {checkSpender}.
         SPENDER,
-        /// Is told {beforeTransfer} before the balances move.
+        /// Is told {beforeTransfer} before the positions move.
         BEFORE,
         /// Is told {afterTransfer} after the ledger moved.
         AFTER
@@ -119,11 +119,11 @@ interface IModule {
     function unbindCompliance(address _compliance) external;
 
     /**
-     *  @dev the tokens are about to move. Called on every `BEFORE` module before the token moves the
-     *  balances and before the compliance moves the positions, on a native transfer, a mint, a burn, a forced
-     *  transfer and a recovery, and on a settlement right before the positions move. Not called at the issuance
-     *  of a validation: nothing moves there
-     *  the ledger describes the state before the move. `ctx` is the same struct {afterTransfer} receives for
+     *  @dev the positions are about to move. Called on every `BEFORE` module right before the compliance moves
+     *  the positions, on a native transfer, a mint, a burn, a forced transfer, a recovery and a settlement. Not
+     *  called at the issuance of a validation: nothing moves there
+     *  the ledger describes the state before the move. On a native movement the token has already moved the
+     *  balances, which is why a module reads the ledger and never the balances. `ctx` is the same struct {afterTransfer} receives for
      *  the same movement, so a module naming both can pair the two
      *  reverting stops the movement. The token guards its own reentrancy: a module that calls back into the
      *  token from here reverts. Record before calling out, as everywhere

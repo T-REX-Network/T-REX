@@ -161,7 +161,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice A tracker told before the move sees the ledger as it was: the recipient's position does not yet
     ///         include the amount, and the context is the one the after-tracker receives for the same movement.
-    function test_beforeTransferred_Success_WhenTheTrackerSeesThePreState() public {
+    function test_beforeTransfer_Success_WhenTheTrackerSeesThePreState() public {
         RecordingModule before = RecordingModule(_deploy(address(new TrackBeforeOnlyModule())));
         vm.prank(deployer);
         mc.addModule(address(before));
@@ -180,7 +180,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice Every native path tells the before-tracker: a mint, a burn, a forced transfer and a recovery, each
     ///         under its own kind. The after-tracker is told the same number of times.
-    function test_beforeTransferred_Success_WhenEveryNativePathIsReported() public {
+    function test_beforeTransfer_Success_WhenEveryNativePathIsReported() public {
         RecordingModule before = RecordingModule(_deploy(address(new TrackBeforeOnlyModule())));
         vm.prank(deployer);
         mc.addModule(address(before));
@@ -234,12 +234,6 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.expectCall(address(veto), abi.encodeWithSelector(IModule.afterTransfer.selector), 0);
         _requestValidation(address(aliceIdentity), from, to, 10, 100);
         assertEq(before.beforeActionCalls(), 0);
-    }
-
-    /// @notice Nobody but the bound token may announce a movement.
-    function test_beforeTransferred_RevertWhen_CallerIsNotTheBoundToken() public {
-        vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
-        mc.beforeTransferred(alice, bob, 100, MovementKindLib.TRANSFER);
     }
 
     function _lastKind() private view returns (uint8 kind) {

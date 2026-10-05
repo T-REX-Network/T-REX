@@ -360,14 +360,6 @@ contract ModularCompliance is
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
     }
 
-    /// @dev See {IModularCompliance-beforeTransferred}. The identities are resolved as `canTransfer` resolves
-    ///  them, not through the ledger's remembered owner: nothing moves here, so nothing is relinked here.
-    function beforeTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
-        require(amount > 0, ErrorsLib.ZeroValue());
-        if (_moduleSet().byType[IModule.ModuleType.BEFORE].length() == 0) return;
-        _callBeforeTransfer(_buildNativeContext(from, to, amount, kind, ""));
-    }
-
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
     ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
@@ -375,8 +367,12 @@ contract ModularCompliance is
         _applyMovement(from, to, amount, kind);
     }
 
-    /// @dev Moves the positions and tells the trackers. One function serves all three hooks: the absent side of
-    ///  a mint or a burn is a zero wallet and stays a zero identity.
+    /// @dev Tells the `BEFORE` modules, moves the positions, then tells the `AFTER` modules. One function serves
+    ///  all three hooks: the absent side of a mint or a burn is a zero wallet and stays a zero identity.
+    ///
+    ///  The `BEFORE` modules are told here, after the token moved the balances but before the positions move.
+    ///  Modules read the ledger, not the balances, so the ledger they see is the state the movement starts from,
+    ///  and the token needs no hook of its own before the move.
     ///
     ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
@@ -391,6 +387,7 @@ contract ModularCompliance is
 
         IModule.TransferContext memory ctx =
             TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");
+        _callBeforeTransfer(ctx);
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         _callAfterTransfer(ctx);
     }

@@ -193,19 +193,6 @@ interface IModularCompliance is IERC3643Compliance {
     function agentTransferred(address _from, address _to, uint256 _amount, uint8 _kind) external;
 
     /**
-     *  @dev function called by the token right before it moves the balances, on every native path: transfer,
-     *  mint (zero `_from`), burn (zero `_to`), forced transfer and recovery, with the `MovementKindLib` kind
-     *  the standard hooks all fire after the move; this is the one that lets a `BEFORE` module see the
-     *  state the movement starts from. Only the trackers are told: every check runs in `canTransfer` or after
-     *  This function can be called ONLY by the token bound to the compliance
-     *  @param _from address of the wallet the tokens will leave, zero on a mint
-     *  @param _to address of the wallet the tokens will land on, zero on a burn
-     *  @param _amount amount of tokens about to move
-     *  @param _kind what produces the movement, a `MovementKindLib` constant
-     */
-    function beforeTransferred(address _from, address _to, uint256 _amount, uint8 _kind) external;
-
-    /**
      *  @dev getter for the bound modules of one type, in the order they were bound
      *  @param moduleType which modules to list, see {IModule-ModuleType}
      *  a module that named several types appears in each of their lists
