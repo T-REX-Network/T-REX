@@ -192,6 +192,15 @@ contract ModularCompliance is
         _addToItsTypeLists(moduleSet, _module);
     }
 
+    /// @inheritdoc IModularCompliance
+    function transferVerdict(address from, address to, uint256 value)
+        external
+        view
+        returns (bool ok, address module, uint256 allowed)
+    {
+        return _verdict(from, to, value);
+    }
+
     /// @inheritdoc ISettlementHandler
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
@@ -338,11 +347,25 @@ contract ModularCompliance is
     ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
     ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
-        if (_moduleSet().byType[IModule.ModuleType.CHECK].length() == 0) return true;
+        (bool ok,,) = _verdict(from, to, value);
+        return ok;
+    }
+
+    /// @dev See {IModularCompliance-transferVerdict}: `_canTransfer` with the module and the amount kept.
+    function _verdict(address from, address to, uint256 value)
+        private
+        view
+        returns (bool ok, address module, uint256 allowed)
+    {
+        if (_moduleSet().byType[IModule.ModuleType.CHECK].length() == 0) {
+            return (true, address(0), type(uint256).max);
+        }
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
-        if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        if (to != address(0) && ctx.toIdentity == address(0)) return false;
-        return value <= _minAllowedAmount(ctx);
+        if (from != address(0) && ctx.fromIdentity == address(0)) return (false, address(0), 0);
+        if (to != address(0) && ctx.toIdentity == address(0)) return (false, address(0), 0);
+        (allowed, module) = _smallestCheck(ctx);
+        ok = value <= allowed;
+        if (ok) module = address(0);
     }
 
     /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
@@ -442,12 +465,18 @@ contract ModularCompliance is
     /// @dev The smallest answer of the `CHECK` modules. `check` is a view on the interface, so each
     ///  call is a `staticcall` and a module that writes there reverts.
     function _minAllowedAmount(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
+        (allowed,) = _smallestCheck(ctx);
+    }
+
+    /// @dev The smallest answer of the `CHECK` modules and the module that gave it, zero when none was asked.
+    function _smallestCheck(IModule.TransferContext memory ctx) private view returns (uint256 allowed, address module) {
         allowed = type(uint256).max;
         EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.CHECK];
         uint256 length = rules.length();
         for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).check(ctx);
-            if (answer < allowed) allowed = answer;
+            address rule = rules.at(i);
+            uint256 answer = IModule(rule).check(ctx);
+            if (answer < allowed) (allowed, module) = (answer, rule);
         }
     }
 

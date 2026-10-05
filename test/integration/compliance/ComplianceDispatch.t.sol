@@ -2,10 +2,12 @@
 pragma solidity 0.8.30;
 
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
+import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
@@ -236,6 +238,44 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertEq(before.beforeActionCalls(), 0);
     }
 
+    /// @notice Every move calls the compliance once before the balances move, whether or not a `BEFORE` module
+    ///         is bound; with none bound the compliance loops over nothing.
+    function test_beforeTransferred_Success_WhenEveryMoveCallsTheComplianceOnce() public {
+        vm.expectCall(address(mc), abi.encodeWithSelector(IModularCompliance.beforeTransferred.selector), 1);
+        vm.prank(alice);
+        token.transfer(bob, 100);
+    }
+
+    // ==== The verdict ====
+
+    /// @notice A refused transfer says which module refused and how much it would have allowed, so a wallet
+    ///         can show the investor the rule and the room left rather than a bare failure.
+    function test_transferVerdict_Success_WhenARuleRefusesItNamesItselfAndTheRoom() public {
+        rule.setAllowedAmount(50);
+
+        (bool ok, address module, uint256 allowed) = mc.transferVerdict(alice, bob, 100);
+        assertFalse(ok);
+        assertEq(module, address(rule));
+        assertEq(allowed, 50);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(rule), 50));
+        token.transfer(bob, 100);
+    }
+
+    /// @notice An accepted transfer names no module and reports the smallest amount the rules allow, and the
+    ///         standard `canTransfer` agrees with the verdict either way.
+    function test_transferVerdict_Success_WhenTheRulesAccept() public {
+        rule.setAllowedAmount(50);
+
+        (bool ok, address module, uint256 allowed) = mc.transferVerdict(alice, bob, 10);
+        assertTrue(ok);
+        assertEq(module, address(0));
+        assertEq(allowed, 50);
+        assertTrue(mc.canTransfer(alice, bob, 10));
+        assertFalse(mc.canTransfer(alice, bob, 100));
+    }
+
     /// @notice Nobody but the bound token may announce a movement.
     function test_beforeTransferred_RevertWhen_CallerIsNotTheBoundToken() public {
         vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
@@ -318,7 +358,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertFalse(mc.canTransfer(alice, unregistered, 1), "an unattributable recipient is refused");
 
         vm.prank(alice);
-        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(0), 0));
         token.transfer(unregistered, 1);
     }
 

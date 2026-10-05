@@ -134,7 +134,7 @@ contract TokenTransferTest is TREXSuiteTest {
 
         // bob is verified but compliance blocks transfer (covers isVerified=true && canTransfer=false branch)
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(testModule), 0));
         token.transfer(bob, 100);
     }
 
@@ -261,7 +261,7 @@ contract TokenTransferTest is TREXSuiteTest {
 
         // bob is verified but compliance blocks transfer (covers isVerified=true && canTransfer=false branch)
         vm.prank(alice);
-        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(testModule), 0));
         token.transferFrom(alice, bob, 100);
     }
 

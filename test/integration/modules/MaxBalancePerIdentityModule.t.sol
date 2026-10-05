@@ -80,7 +80,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(rule.maxBalanceOf(address(boundCompliance)), 0);
 
         vm.prank(agent);
-        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(rule), 0));
         token.mint(alice, 1);
     }
 
@@ -100,7 +100,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(_position(address(bobIdentity)), CAP);
 
         vm.prank(agent);
-        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(rule), 0));
         token.mint(bob, 1);
     }
 
@@ -118,7 +118,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(_position(address(bobIdentity)), CAP);
 
         vm.prank(charlie);
-        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, address(rule), 0));
         token.transfer(bob, 1);
     }
 

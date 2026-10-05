@@ -107,6 +107,11 @@ All notable changes to this project will be documented in this file.
     `IModularCompliance.beforeTransferred(from, to, amount, kind)`, bound token only; `ERC3643Token` exposes
     `_notifyBeforeTransfer`, `_notifyBeforeForcedTransfer` and `_notifyBeforeRecovery`, no-ops by default.
     The issuance of a validation reaches `CHECK` and `SPENDER` only; a settlement runs before, move, after.
+  - A refused transfer reverts with `ErrorsLib.ComplianceRefused(module, allowed)`, the `CHECK` module that
+    refused and the largest amount it would have allowed, in place of the bare `ComplianceNotFollowed`.
+    `IModularCompliance.transferVerdict(from, to, amount)` returns the same `(ok, module, allowed)` as a view.
+    A zero module is the compliance itself refusing a wallet that resolves to no identity. `canTransfer` is
+    unchanged for the standard.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.

@@ -177,6 +177,24 @@ interface IModularCompliance is IERC3643Compliance {
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool);
 
     /**
+     *  @dev what `canTransfer` answers, with the reason: whether the movement may happen, which module
+     *  refused it, and the largest amount that module would have allowed
+     *  the token asks this instead of `canTransfer` so that a refused transfer reverts with
+     *  `ComplianceRefused(module, allowed)`, and a wallet can read the module's `name()` and show the
+     *  investor what blocked them and how much would pass
+     *  `ok` true comes with a zero module and the smallest amount the `CHECK` modules allow. `ok` false with
+     *  a zero module is the compliance itself refusing: one of the wallets resolves to no identity, so no
+     *  rule could be asked about it
+     *  @param _from address of the transfer sender, zero on a mint
+     *  @param _to address of the transfer receiver
+     *  @param _value amount of tokens to move
+     */
+    function transferVerdict(address _from, address _to, uint256 _value)
+        external
+        view
+        returns (bool ok, address module, uint256 allowed);
+
+    /**
      *  @dev function called whenever an agent moves tokens: a forced transfer or a recovery
      *  the standard `transferred` cannot say who moved the tokens, and a module counting an investor's own
      *  activity must leave an agent's intervention out, so the token reports an agent's movement here with

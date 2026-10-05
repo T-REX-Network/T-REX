@@ -85,13 +85,14 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenTransferRevertsWhenComplianceNotFollowed() public {
+        address module = makeAddr("refusingModule");
         vm.mockCall(
             compliance,
-            abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector, from, to, transferAmount),
-            abi.encode(false)
+            abi.encodeWithSelector(IModularCompliance.transferVerdict.selector, from, to, transferAmount),
+            abi.encode(false, module, 0)
         );
 
-        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, module, 0));
         vm.prank(from);
         token.transfer(to, transferAmount);
     }
@@ -171,13 +172,14 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
         vm.prank(from);
         token.approve(spender, transferAmount);
 
+        address module = makeAddr("refusingModule");
         vm.mockCall(
             compliance,
-            abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector, from, to, transferAmount),
-            abi.encode(false)
+            abi.encodeWithSelector(IModularCompliance.transferVerdict.selector, from, to, transferAmount),
+            abi.encode(false, module, 0)
         );
 
-        vm.expectRevert(ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ComplianceRefused.selector, module, 0));
         vm.prank(spender);
         token.transferFrom(from, to, transferAmount);
     }

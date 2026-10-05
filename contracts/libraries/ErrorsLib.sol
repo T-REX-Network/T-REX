@@ -83,6 +83,7 @@ library ErrorsLib {
     // Token Errors
     error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
     error ComplianceNotFollowed();
+    error ComplianceRefused(address module, uint256 allowed);
     error DecimalsOutOfRange(uint256 decimals);
     error EmptyString();
     error FrozenWallet(address user);
