@@ -120,7 +120,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         boundCompliance.addModule(tracker);
 
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
-        vm.expectCall(tracker, abi.encodeWithSelector(IModule.allowedAmount.selector), 0);
+        vm.expectCall(tracker, abi.encodeWithSelector(IModule.check.selector), 0);
         (uint256 min, uint256 max) = _issue(10, 200);
 
         assertEq(min, 10);
@@ -164,7 +164,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         boundCompliance.addModule(address(policy));
 
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
-        vm.expectCall(address(policy), abi.encodeWithSelector(IModule.moduleCheckSpender.selector), 0);
+        vm.expectCall(address(policy), abi.encodeWithSelector(IModule.checkSpender.selector), 0);
         vm.prank(address(aliceIdentity));
         uint256 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "");
 
@@ -178,7 +178,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         bytes memory aliceOther = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOtherOnPolygon"));
 
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
-        vm.expectCall(address(first), abi.encodeWithSelector(IModule.allowedAmount.selector), 0);
+        vm.expectCall(address(first), abi.encodeWithSelector(IModule.check.selector), 0);
         vm.prank(address(aliceIdentity));
         uint256 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, 200, "");
 

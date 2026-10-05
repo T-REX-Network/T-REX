@@ -43,9 +43,9 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
 
         assertTrue(mc.isModuleBound(module));
         assertEq(mc.getModules().length, 1);
-        _assertListed(IModule.ModuleType.RULE, module);
+        _assertListed(IModule.ModuleType.CHECK, module);
         assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER).length, 0);
-        assertEq(mc.getModulesByType(IModule.ModuleType.TRACKER).length, 0);
+        assertEq(mc.getModulesByType(IModule.ModuleType.AFTER).length, 0);
     }
 
     /// @notice Each module lands only in the lists of the types it named.
@@ -59,9 +59,9 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         _bind(tracker);
 
         assertEq(mc.getModules().length, 3);
-        _assertListed(IModule.ModuleType.RULE, rule);
+        _assertListed(IModule.ModuleType.CHECK, rule);
         _assertListed(IModule.ModuleType.SPENDER, spender);
-        _assertListed(IModule.ModuleType.TRACKER, tracker);
+        _assertListed(IModule.ModuleType.AFTER, tracker);
     }
 
     /// @notice A module naming several types is filed under each of them, and appears once in `getModules`.
@@ -71,8 +71,8 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         _bind(ruleAndTracker);
 
         assertEq(mc.getModules().length, 1, "listed once overall");
-        _assertListed(IModule.ModuleType.RULE, ruleAndTracker);
-        _assertListed(IModule.ModuleType.TRACKER, ruleAndTracker);
+        _assertListed(IModule.ModuleType.CHECK, ruleAndTracker);
+        _assertListed(IModule.ModuleType.AFTER, ruleAndTracker);
         assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER).length, 0);
     }
 
@@ -82,9 +82,9 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
 
         _bind(everything);
 
-        _assertListed(IModule.ModuleType.RULE, everything);
+        _assertListed(IModule.ModuleType.CHECK, everything);
         _assertListed(IModule.ModuleType.SPENDER, everything);
-        _assertListed(IModule.ModuleType.TRACKER, everything);
+        _assertListed(IModule.ModuleType.AFTER, everything);
     }
 
     /// @notice A module the compliance would never call is refused rather than bound and ignored.
@@ -103,7 +103,7 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         address module = _deploy(address(new DuplicateTypeModule()));
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DuplicateModuleType.selector, uint8(IModule.ModuleType.RULE)));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DuplicateModuleType.selector, uint8(IModule.ModuleType.CHECK)));
         mc.addModule(module);
 
         assertFalse(mc.isModuleBound(module));
@@ -120,7 +120,7 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
 
         _bind(module);
         assertTrue(mc.isModuleBound(module));
-        _assertListed(IModule.ModuleType.RULE, module);
+        _assertListed(IModule.ModuleType.CHECK, module);
     }
 
     // ==== .getModulesByType Tests ====
@@ -135,12 +135,12 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         _bind(rule);
         _bind(everything);
 
-        address[] memory trackers = mc.getModulesByType(IModule.ModuleType.TRACKER);
+        address[] memory trackers = mc.getModulesByType(IModule.ModuleType.AFTER);
         assertEq(trackers.length, 2);
         assertEq(trackers[0], tracker);
         assertEq(trackers[1], everything);
 
-        address[] memory rules = mc.getModulesByType(IModule.ModuleType.RULE);
+        address[] memory rules = mc.getModulesByType(IModule.ModuleType.CHECK);
         assertEq(rules.length, 2);
         assertEq(rules[0], rule);
         assertEq(rules[1], everything);
@@ -167,8 +167,8 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         assertFalse(mc.isModuleBound(middle));
         assertTrue(mc.isModuleBound(last));
         assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER).length, 0, "dropped from its type list");
-        _assertListed(IModule.ModuleType.RULE, first);
-        _assertListed(IModule.ModuleType.TRACKER, last);
+        _assertListed(IModule.ModuleType.CHECK, first);
+        _assertListed(IModule.ModuleType.AFTER, last);
     }
 
     /// @notice A module naming several types leaves all of their lists at once.
@@ -180,9 +180,9 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         mc.removeModule(everything);
 
         assertEq(mc.getModules().length, 0);
-        assertEq(mc.getModulesByType(IModule.ModuleType.RULE).length, 0);
+        assertEq(mc.getModulesByType(IModule.ModuleType.CHECK).length, 0);
         assertEq(mc.getModulesByType(IModule.ModuleType.SPENDER).length, 0);
-        assertEq(mc.getModulesByType(IModule.ModuleType.TRACKER).length, 0);
+        assertEq(mc.getModulesByType(IModule.ModuleType.AFTER).length, 0);
     }
 
     function test_removeModule_Success_WhenRemovingTheOnlyModule() public {
@@ -203,15 +203,15 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
     function test_resyncModuleTypes_Success_WhenTheDeclarationChanged() public {
         address module = _deploy(address(new RuleOnlyModule()));
         _bind(module);
-        _assertListed(IModule.ModuleType.RULE, module);
+        _assertListed(IModule.ModuleType.CHECK, module);
 
         RecordingModule(module).upgradeToAndCall(address(new TrackerOnlyModule()), "");
 
         vm.prank(deployer);
         mc.resyncModuleTypes(module);
 
-        assertEq(mc.getModulesByType(IModule.ModuleType.RULE).length, 0, "no longer a rule");
-        _assertListed(IModule.ModuleType.TRACKER, module);
+        assertEq(mc.getModulesByType(IModule.ModuleType.CHECK).length, 0, "no longer a rule");
+        _assertListed(IModule.ModuleType.AFTER, module);
         assertTrue(mc.isModuleBound(module), "still bound, so its settings survive");
     }
 
@@ -228,8 +228,8 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
 
         assertEq(mc.getModules().length, 2);
         _assertListed(IModule.ModuleType.SPENDER, first);
-        _assertListed(IModule.ModuleType.TRACKER, second);
-        assertEq(mc.getModulesByType(IModule.ModuleType.RULE).length, 0);
+        _assertListed(IModule.ModuleType.AFTER, second);
+        assertEq(mc.getModulesByType(IModule.ModuleType.CHECK).length, 0);
     }
 
     function test_resyncModuleTypes_Success_WhenNothingChanged() public {
@@ -239,7 +239,7 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         vm.prank(deployer);
         mc.resyncModuleTypes(module);
 
-        _assertListed(IModule.ModuleType.RULE, module);
+        _assertListed(IModule.ModuleType.CHECK, module);
         assertEq(mc.getModules().length, 1);
     }
 

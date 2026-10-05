@@ -34,9 +34,10 @@ methods {
     function moduleCount()          external returns (uint256) envfree;
 
     // ----- IModule callbacks: opaque -----
+    function _.beforeTransfer(IModule.TransferContext)       external => NONDET;
     function _.afterTransfer(IModule.TransferContext)        external => NONDET;
-    function _.allowedAmount(IModule.TransferContext)        external => ALWAYS(max_uint256);
-    function _.moduleCheckSpender(IModule.TransferContext)   external => ALWAYS(true);
+    function _.check(IModule.TransferContext)        external => ALWAYS(max_uint256);
+    function _.checkSpender(IModule.TransferContext)   external => ALWAYS(true);
     // what a module names is opaque here: binding files it under the types it returns
     function _.moduleTypes()                                 external => NONDET;
     function _.bindCompliance(address)                       external => NONDET;
@@ -69,6 +70,11 @@ rule onlyBoundedTokenNotifiesDestroyed(env e, address from, uint256 value) {
     require e.msg.sender != getTokenBound();
     destroyed@withrevert(e, from, value);
     assert lastReverted, "non-bound caller drove destroyed()";
+}
+rule onlyBoundedTokenNotifiesBeforeTransfer(env e, address from, address to, uint256 value, uint8 kind) {
+    require e.msg.sender != getTokenBound();
+    beforeTransferred@withrevert(e, from, to, value, kind);
+    assert lastReverted, "non-bound caller drove beforeTransferred()";
 }
 rule onlyBoundedTokenNotifiesAgentTransfer(env e, address from, address to, uint256 value, uint8 kind) {
     require e.msg.sender != getTokenBound();

@@ -14,8 +14,10 @@ import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol"
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import {
     RecordingModule,
+    RevertingAfterModule,
     RuleOnlyModule,
     SpenderOnlyModule,
+    TrackBeforeOnlyModule,
     TrackerOnlyModule,
     UndeclaredRuleModule
 } from "test/integration/mocks/CapabilityModules.sol";
@@ -153,6 +155,91 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.expectRevert(ERC3643ErrorsLib.ZeroValue.selector);
         mc.agentTransferred(alice, bob, 0, MovementKindLib.RECOVERY);
         vm.stopPrank();
+    }
+
+    // ==== BEFORE and a refusing AFTER ====
+
+    /// @notice A tracker told before the move sees the ledger as it was: the recipient's position does not yet
+    ///         include the amount, and the context is the one the after-tracker receives for the same movement.
+    function test_beforeTransferred_Success_WhenTheTrackerSeesThePreState() public {
+        RecordingModule before = RecordingModule(_deploy(address(new TrackBeforeOnlyModule())));
+        vm.prank(deployer);
+        mc.addModule(address(before));
+        uint256 bobBefore = mc.positionOf(address(bobIdentity));
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+
+        assertEq(before.beforeActionCalls(), 1);
+        assertEq(before.lastPositionBefore(), bobBefore, "the position before the move");
+        assertEq(mc.positionOf(address(bobIdentity)), bobBefore + 100, "and the move still landed");
+        (,,,,,, uint256 amountMax, uint8 kind,,,) = before.lastContext();
+        assertEq(amountMax, 100);
+        assertEq(kind, MovementKindLib.TRANSFER);
+    }
+
+    /// @notice Every native path tells the before-tracker: a mint, a burn, a forced transfer and a recovery, each
+    ///         under its own kind. The after-tracker is told the same number of times.
+    function test_beforeTransferred_Success_WhenEveryNativePathIsReported() public {
+        RecordingModule before = RecordingModule(_deploy(address(new TrackBeforeOnlyModule())));
+        vm.prank(deployer);
+        mc.addModule(address(before));
+
+        vm.startPrank(agent);
+        token.mint(bob, 100);
+        token.burn(alice, 100);
+        token.forcedTransfer(alice, bob, 100);
+        vm.stopPrank();
+
+        assertEq(before.beforeActionCalls(), 3);
+        assertEq(tracker.totalHookCalls(), 3);
+        (,,,,,,, uint8 kind,,,) = before.lastContext();
+        assertEq(kind, MovementKindLib.FORCED_TRANSFER);
+    }
+
+    /// @notice A post-state veto is an `AFTER` module that reverts: the movement is undone with the module's own
+    ///         error, the balances are untouched, and the compliance adds no error of its own.
+    function test_afterTransfer_RevertWhen_AnAfterModuleRefusesThePostState() public {
+        RecordingModule veto = RecordingModule(_deploy(address(new RevertingAfterModule())));
+        vm.prank(deployer);
+        mc.addModule(address(veto));
+        veto.setAllow(false);
+        uint256 aliceBalance = token.balanceOf(alice);
+        uint256 bobPosition = mc.positionOf(address(bobIdentity));
+
+        vm.prank(alice);
+        vm.expectRevert(RevertingAfterModule.AfterRefused.selector);
+        token.transfer(bob, 100);
+
+        assertEq(token.balanceOf(alice), aliceBalance);
+        assertEq(mc.positionOf(address(bobIdentity)), bobPosition, "the ledger move was undone with the transfer");
+    }
+
+    /// @notice Neither a `BEFORE` nor an `AFTER` module is reached at the issuance of a validation: nothing has
+    ///         moved yet, so there is nothing to record on either side.
+    function test_requestTransferValidation_Success_WhenBeforeAndAfterModulesAreNotAsked() public {
+        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        bytes memory from = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceSat"), 1000);
+        bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobSat"));
+
+        RecordingModule before = RecordingModule(_deploy(address(new TrackBeforeOnlyModule())));
+        RecordingModule veto = RecordingModule(_deploy(address(new RevertingAfterModule())));
+        vm.startPrank(deployer);
+        mc.addModule(address(before));
+        mc.addModule(address(veto));
+        vm.stopPrank();
+        veto.setAllow(false);
+
+        vm.expectCall(address(before), abi.encodeWithSelector(IModule.beforeTransfer.selector), 0);
+        vm.expectCall(address(veto), abi.encodeWithSelector(IModule.afterTransfer.selector), 0);
+        _requestValidation(address(aliceIdentity), from, to, 10, 100);
+        assertEq(before.beforeActionCalls(), 0);
+    }
+
+    /// @notice Nobody but the bound token may announce a movement.
+    function test_beforeTransferred_RevertWhen_CallerIsNotTheBoundToken() public {
+        vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
+        mc.beforeTransferred(alice, bob, 100, MovementKindLib.TRANSFER);
     }
 
     function _lastKind() private view returns (uint8 kind) {
@@ -336,8 +423,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             spender: "",
             data: ""
         });
-        vm.expectCall(address(firstRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
-        vm.expectCall(address(secondRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
+        vm.expectCall(address(firstRule), abi.encodeCall(IModule.check, (expected)), 1);
+        vm.expectCall(address(secondRule), abi.encodeCall(IModule.check, (expected)), 1);
         _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(tracker.totalHookCalls(), 0, "no tracker is told: nothing moved yet");

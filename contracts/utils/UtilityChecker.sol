@@ -227,13 +227,13 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
-        // Only the `RULE` modules are consulted, matching what the compliance actually calls. Listing the
+        // Only the `CHECK` modules are consulted, matching what the compliance actually calls. Listing the
         // others would report a pass they never gave.
-        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
+        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.CHECK);
         IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
-            uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
+            uint256 allowed = IModule(rules[i]).check(ctx);
             _details[i] = ComplianceCheckDetails({
                 moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed
             });

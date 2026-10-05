@@ -19,22 +19,37 @@ numbers itself, from the hooks the token already calls, and modules read them in
 They are declared in `IComplianceLedger`. Nothing outside the compliance writes them. A movement between
 two wallets of one identity changes none of them: relocating your own tokens is not a change of ownership.
 
-## The three kinds of module
+## The four kinds of module
 
-A module says what it is in `moduleTypes()`, and the compliance calls it only where it said so.
+Every module implements the same four methods, as in T-REX v4, and names in `moduleTypes()` the ones it
+answers. The compliance calls a module only where it said so.
 
-| Type | Function | When |
-|---|---|---|
-| `RULE` | `allowedAmount(ctx)` | before a transfer or a mint, and when a cross-chain validation is issued |
-| `SPENDER` | `moduleCheckSpender(ctx)` | before an allowance is spent in `transferFrom`, and when a validation names a spender |
-| `TRACKER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated |
+| Type | Method | When | Sees |
+|---|---|---|---|
+| `CHECK` | `check(ctx)` view | before a transfer or a mint, and when a cross-chain validation is issued | the ledger before the move |
+| `SPENDER` | `checkSpender(ctx)` view | before an allowance is spent in `transferFrom`, and when a validation names a spender | who executes |
+| `BEFORE` | `beforeTransfer(ctx)` | right before the token moves the balances; native movements and settlements | the ledger before the move |
+| `AFTER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated | the ledger after the move |
 
-A module may name one, two or all three. It inherits `AbstractModuleUpgradeable`, which answers every
-question neutrally, and overrides only the ones its types cover.
+A module may name any combination. It inherits `AbstractModuleUpgradeable`, which answers every question
+neutrally, and overrides only the methods its types cover.
 
-## allowedAmount
+The order on a native movement is: `canTransfer` asks the `CHECK` modules; the token tells
+`beforeTransferred`, which reaches the `BEFORE` modules; the token moves the balances; the compliance moves
+the positions; the `AFTER` modules are told. A settlement follows the same order from `BEFORE` on. The
+issuance of a validation asks `CHECK` and `SPENDER` only: nothing moves there.
 
-A rule answers one question: what is the largest amount you allow to move? `type(uint256).max` means no
+Which to pick. A bound on how much may move is a `CHECK`: it returns a number, so it narrows a cross-chain
+issuance as well. A veto on the state a movement leaves behind is an `AFTER` module that reverts, with its
+own error; the movement and the ledger move are undone together. A counter that must be checked and then
+recorded is `CHECK` plus `AFTER` on the same storage. A record of what was true before the move, such as
+whether the recipient held anything, is a `BEFORE`; the same fact is also the after-state adjusted by
+`ctx.amountMax`, with one exception: a wallet an agent relinked to another identity has its balance
+reassigned by the ledger during the move, which only the after side sees.
+
+## check
+
+A `CHECK` module answers one question: what is the largest amount you allow to move? `type(uint256).max` means no
 limit, `0` means refused. The compliance keeps the smallest answer over the bound rules.
 
 That one answer serves both worlds. On a native transfer the amount must be at most the minimum. On a
@@ -117,7 +132,7 @@ extend to calls your module makes.
 `MaxBalancePerIdentityModule` caps what one identity may own, over every wallet and every chain:
 
 ```solidity
-function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+function check(TransferContext calldata ctx) external view override returns (uint256) {
     if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
     IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
     uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);

@@ -528,6 +528,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         IModule.TransferContext memory ctx = _settledMovement(validation, from, to, notification.amount);
         breachesRule = late && _exceedsWhatRulesAllowNow(ctx, notification.amount);
 
+        _callBeforeTransfer(ctx);
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, notification.amount);
         _settleOnToken(from, to, notification.amount, notification.validationId);
 
@@ -702,7 +703,10 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  modules are called under `staticcall`.
     function _spenderAllowed(IModule.TransferContext memory ctx) internal view virtual returns (bool);
 
-    /// @dev Calls `afterTransfer` on every `TRACKER` module, once the positions have been updated.
+    /// @dev Calls `beforeTransfer` on every `BEFORE` module, before the positions move.
+    function _callBeforeTransfer(IModule.TransferContext memory ctx) internal virtual;
+
+    /// @dev Calls `afterTransfer` on every `AFTER` module, once the positions have been updated.
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal virtual;
 
     /// @dev Sends one leg of a validation toward `chainKey`, through the token.

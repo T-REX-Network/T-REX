@@ -244,7 +244,9 @@ contract ModularCompliance is
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
         return _spenderAllowed(
-            _buildNativeContext(_from, _to, _value, InteroperableAddress.formatEvmV1(block.chainid, _spender))
+            _buildNativeContext(
+                _from, _to, _value, MovementKindLib.TRANSFER, InteroperableAddress.formatEvmV1(block.chainid, _spender)
+            )
         );
     }
 
@@ -336,7 +338,7 @@ contract ModularCompliance is
     ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
     ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
-        if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
+        if (_moduleSet().byType[IModule.ModuleType.CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
         if (to != address(0) && ctx.toIdentity == address(0)) return false;
@@ -356,6 +358,14 @@ contract ModularCompliance is
     /// @dev A burn: no recipient, the sender's position shrinks.
     function _destroyed(address from, uint256 value) internal override {
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
+    }
+
+    /// @dev See {IModularCompliance-beforeTransferred}. The identities are resolved as `canTransfer` resolves
+    ///  them, not through the ledger's remembered owner: nothing moves here, so nothing is relinked here.
+    function beforeTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
+        require(amount > 0, ErrorsLib.ZeroValue());
+        if (_moduleSet().byType[IModule.ModuleType.BEFORE].length() == 0) return;
+        _callBeforeTransfer(_buildNativeContext(from, to, amount, kind, ""));
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
@@ -392,10 +402,12 @@ contract ModularCompliance is
         view
         returns (IModule.TransferContext memory)
     {
-        return _buildNativeContext(from, to, value, "");
+        // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
+        uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
+        return _buildNativeContext(from, to, value, kind, "");
     }
 
-    function _buildNativeContext(address from, address to, uint256 value, bytes memory spender)
+    function _buildNativeContext(address from, address to, uint256 value, uint8 kind, bytes memory spender)
         private
         view
         returns (IModule.TransferContext memory)
@@ -405,8 +417,6 @@ contract ModularCompliance is
         address toIdentity;
         if (from != address(0)) fromIdentity = address(registry.identity(from));
         if (to != address(0)) toIdentity = address(registry.identity(to));
-        // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
-        uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
         return TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, spender);
     }
 
@@ -429,14 +439,14 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The smallest answer of the `RULE` modules. `allowedAmount` is a view on the interface, so each
+    /// @dev The smallest answer of the `CHECK` modules. `check` is a view on the interface, so each
     ///  call is a `staticcall` and a module that writes there reverts.
     function _minAllowedAmount(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
         allowed = type(uint256).max;
-        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.RULE];
+        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.CHECK];
         uint256 length = rules.length();
         for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).allowedAmount(ctx);
+            uint256 answer = IModule(rules.at(i)).check(ctx);
             if (answer < allowed) allowed = answer;
         }
     }
@@ -446,14 +456,23 @@ contract ModularCompliance is
         EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
         uint256 length = spenderRules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(spenderRules.at(i)).moduleCheckSpender(ctx)) return false;
+            if (!IModule(spenderRules.at(i)).checkSpender(ctx)) return false;
         }
         return true;
     }
 
     /// @inheritdoc TransferValidation
+    function _callBeforeTransfer(IModule.TransferContext memory ctx) internal override {
+        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.BEFORE];
+        uint256 length = trackers.length();
+        for (uint256 i = 0; i < length; i++) {
+            IModule(trackers.at(i)).beforeTransfer(ctx);
+        }
+    }
+
+    /// @inheritdoc TransferValidation
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal override {
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
+        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.AFTER];
         uint256 length = trackers.length();
         for (uint256 i = 0; i < length; i++) {
             IModule(trackers.at(i)).afterTransfer(ctx);

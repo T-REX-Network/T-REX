@@ -61,7 +61,7 @@ This branch diverged from the spec's original target. The following were changed
 - The IdentityRegistry harness/spec needed no surface changes — every referenced function, selector and the IR
   `checksDisabled` ERC-7201 slot/offset were verified against the current contracts.
 - `ModularCompliance.spec` follows the typed module interface: `afterTransfer`, `allowedAmount` and
-  `moduleCheckSpender` take one `TransferContext`, `moduleTypes` replaces the capability bitmask, and the
+  `checkSpender` take one `TransferContext`, `moduleTypes` replaces the capability bitmask, and the
   restricted selector set includes `setIssuancePaused` and `discardExpiredValidations`. It has not been
   re-run since that change.
 
@@ -71,7 +71,7 @@ This branch diverged from the spec's original target. The following were changed
   (`IdentityRegistry.isVerified`, `ModularCompliance.canTransfer`, the `IModule` callbacks, the downstream
   registries) are summarised permissively so each spec isolates the contract under test. Those gates are
   proved on their own contracts and exercised end-to-end by the Foundry invariant suite (INV-5/INV-6).
-  `IModule.allowedAmount` is summarised as no limit and `moduleCheckSpender` as `true`, and `moduleTypes`
+  `IModule.check` is summarised as no limit and `checkSpender` as `true`, and `moduleTypes`
   is left non-deterministic. Type routing is covered by the Foundry dispatch suite instead.
 - **AccessManager is ghost-modelled.** `authority().canCall(...)` / `hasRole(...)` are summarised with a
   ghost, so the access-control rules assert "deny ⇒ revert" without instantiating a full `AccessManager`.

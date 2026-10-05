@@ -33,7 +33,7 @@ All notable changes to this project will be documented in this file.
   - New events: `ClaimTopicAddedForIdentityType`, `ClaimTopicRemovedForIdentityType`. New custom
     error: `InvalidIdentityType`.
 - **Compliance ledger and typed modules** (#81, PR #83): the compliance keeps the numbers every
-  distribution rule needs, once, and a module is one of three kinds.
+  distribution rule needs, once, and a module is one of four kinds.
   - `IComplianceLedger` on `ModularCompliance`: `positionOf(identity)` (free, frozen and bridged over
     every linked wallet), `pendingInOf(identity)` and `pendingOutOf(identity)` (what open validations
     promise to and from it, at `amountMax`), `pendingOutOfWallet(walletKey)` (what open validations may
@@ -80,9 +80,9 @@ All notable changes to this project will be documented in this file.
     revoked wallet rather than only registry-stable ones.
   - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`RULE`, `SPENDER`, `TRACKER`),
     read once at binding. `ModularCompliance` keeps one list per type and dispatches to it only:
-    `RULE` answers `allowedAmount(ctx)`, the largest amount it allows, and the compliance keeps the
+    `RULE` answers `check(ctx)`, the largest amount it allows, and the compliance keeps the
     smallest answer (`type(uint256).max` is no limit, 0 is refused; the rule must be monotonic);
-    `SPENDER` answers `moduleCheckSpender`, all must agree; `TRACKER` is told `afterTransfer(ctx)` after
+    `SPENDER` answers `checkSpender`, all must agree; `TRACKER` is told `afterTransfer(ctx)` after
     the positions moved. One action, not three: a mint is a movement with a zero sender side and a burn one
     with a zero recipient side, the convention `allowedAmount` already used, so the tracker sorts them
     itself and the compliance keeps one dispatch loop.
@@ -99,6 +99,14 @@ All notable changes to this project will be documented in this file.
     to the standard hook. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
     calldata decoding, so a module compiled against today's kinds would revert on one added later and block
     every movement of that kind until upgraded.
+  - Module types are the four methods every module implements, as in v4, and a type says which the compliance
+    calls: `CHECK` (`check(ctx)`, the largest amount allowed, was `RULE` / `allowedAmount`), `SPENDER`
+    (`checkSpender`, was `moduleCheckSpender`), `BEFORE` (`beforeTransfer(ctx)`, told right before the
+    balances move, new) and `AFTER` (`afterTransfer`, was `TRACKER`). A check on the state a movement leaves
+    behind is an `AFTER` module that reverts. The token tells the compliance before every native move through
+    `IModularCompliance.beforeTransferred(from, to, amount, kind)`, bound token only; `ERC3643Token` exposes
+    `_notifyBeforeTransfer`, `_notifyBeforeForcedTransfer` and `_notifyBeforeRecovery`, no-ops by default.
+    The issuance of a validation reaches `CHECK` and `SPENDER` only; a settlement runs before, move, after.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.
@@ -115,7 +123,7 @@ All notable changes to this project will be documented in this file.
   - `UtilityChecker.getTransferDetails` reports each `RULE` module's `allowedAmount` next to the
     pass verdict (`ComplianceCheckDetails.allowedAmount`).
   - `docs/compliance-modules.md` is the one-page guide to writing a module.
-- **Spender compliance check**: `IModule.moduleCheckSpender(ctx)` and
+- **Spender compliance check**: `IModule.checkSpender(ctx)` and
   `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules naming
   `SPENDER`. The spender travels in `TransferContext.spender` as an ERC-7930 envelope, so one policy
   covers the caller of `transferFrom` and the operator a validation names on a satellite.
@@ -561,7 +569,7 @@ All notable changes to this project will be documented in this file.
   empty set, so stripping an issuer of every topic means `removeTrustedIssuer`.
 - `batchRegisterIdentity` is `restricted` and bound to AGENT. No role was bound to its selector
   before, so the AccessManager fell back to admin-only on a function meant for agents.
-- **Breaking, `IModule`**: `moduleTypes()` replaces `moduleCapabilities()`, `allowedAmount(ctx)`
+- **Breaking, `IModule`**: `moduleTypes()` replaces `moduleCapabilities()`, `check(ctx)`
   replaces `moduleCheck` and `validationBounds`, and one `afterTransfer(ctx)` replaces
   `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
   `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.
