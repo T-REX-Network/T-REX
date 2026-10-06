@@ -86,7 +86,7 @@ contract MaxBalancePerIdentityModule is AbstractModuleUpgradeable, AccessManaged
     /// @dev The room left under the cap for the recipient: the cap less what the identity owns and what is
     ///  already promised to it by validations that have not settled. No limit on a burn or on a relocation
     ///  between one identity's wallets, which changes no position.
-    function check(TransferContext calldata ctx) external view override returns (uint256) {
+    function beforeTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
         IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
         uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);
@@ -97,7 +97,7 @@ contract MaxBalancePerIdentityModule is AbstractModuleUpgradeable, AccessManaged
     /// @inheritdoc IModule
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.CHECK;
+        types[0] = ModuleType.BEFORE;
     }
 
     /// @inheritdoc IModule

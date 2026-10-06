@@ -40,17 +40,16 @@ contract ModuleTypesUnitTest is Test {
 
     function test_moduleTypes_Success_WhenAFixtureNamesSeveral() public {
         IModule.ModuleType[] memory ruleAndTracker = new IModule.ModuleType[](2);
-        ruleAndTracker[0] = IModule.ModuleType.CHECK;
+        ruleAndTracker[0] = IModule.ModuleType.BEFORE;
         ruleAndTracker[1] = IModule.ModuleType.AFTER;
 
         _assertTypes(_deploy(address(new RuleAndTrackerModule())), ruleAndTracker);
         _assertTypes(_deploy(address(new CappedRecipientModule())), ruleAndTracker);
 
-        IModule.ModuleType[] memory all = new IModule.ModuleType[](4);
-        all[0] = IModule.ModuleType.CHECK;
+        IModule.ModuleType[] memory all = new IModule.ModuleType[](3);
+        all[0] = IModule.ModuleType.BEFORE;
         all[1] = IModule.ModuleType.SPENDER;
-        all[2] = IModule.ModuleType.BEFORE;
-        all[3] = IModule.ModuleType.AFTER;
+        all[2] = IModule.ModuleType.AFTER;
         _assertTypes(_deploy(address(new AllTypesModule())), all);
     }
 
@@ -81,7 +80,7 @@ contract ModuleTypesUnitTest is Test {
     function test_defaults_Success_WhenTheQuestionsAreNotOverridden() public {
         IModule module = IModule(_deploy(address(new TrackerOnlyModule())));
 
-        assertEq(module.check(_context(1)), type(uint256).max, "no limit by default");
+        assertEq(module.beforeTransfer(_context(1)), type(uint256).max, "no limit by default");
         assertTrue(module.checkSpender(_context(1)), "allowed by default");
     }
 
@@ -136,7 +135,7 @@ contract ModuleTypesUnitTest is Test {
 
     function _rule() private pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](1);
-        types[0] = IModule.ModuleType.CHECK;
+        types[0] = IModule.ModuleType.BEFORE;
     }
 
     function _spender() private pure returns (IModule.ModuleType[] memory types) {

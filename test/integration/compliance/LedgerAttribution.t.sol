@@ -114,7 +114,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         _revokeAlice();
 
         // Still locked after it, and locked by the rule: the module answers zero for this very identity.
-        assertEq(lockup.check(_contextFrom(aliceIdentity)), 0, "the rule still refuses the sender");
+        assertEq(lockup.beforeTransfer(_contextFrom(aliceIdentity)), 0, "the rule still refuses the sender");
 
         vm.prank(alice);
         vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
@@ -128,7 +128,9 @@ contract LedgerAttributionTest is TREXSuiteTest {
     function test_allowedAmount_NoLimit_WhenTheSenderCannotBeAttributed() public {
         LockedSenderModule lockup = _bindLockup(address(aliceIdentity));
 
-        assertEq(lockup.check(_contextFrom(IIdentity(address(0)))), type(uint256).max, "a zero sender is a mint");
+        assertEq(
+            lockup.beforeTransfer(_contextFrom(IIdentity(address(0)))), type(uint256).max, "a zero sender is a mint"
+        );
     }
 
     /// @notice A sender the registry cannot attribute is refused outright while a rule is bound, as an

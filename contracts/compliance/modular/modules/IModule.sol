@@ -29,11 +29,11 @@ pragma solidity 0.8.30;
 /// @dev Everything a compliance module implements. One interface, no sub-interfaces, no bitmask.
 ///
 /// A module says what it is through {moduleTypes}, read once at binding, and the compliance calls it only
-/// where it said so. One method per type, the same four for every module, as in T-REX v4:
-/// - `CHECK`: asked {check}, the largest amount it allows; the compliance takes the minimum. A view, so it is
-///   also what `canTransfer` previews and what narrows a cross-chain issuance;
+/// where it said so. One method per type, named by when it runs, the same three for every module:
+/// - `BEFORE`: asked {beforeTransfer} before anything moves, the largest amount it allows; the compliance
+///   takes the minimum. A view, so it is also what `canTransfer` previews and what narrows a cross-chain
+///   issuance;
 /// - `SPENDER`: asked {checkSpender}, whether the operator named in the context may execute the movement;
-/// - `BEFORE`: told {beforeTransfer} right before the positions move;
 /// - `AFTER`: told {afterTransfer} once the ledger moved. A module that refuses the state a movement left
 ///   behind reverts here, with its own error, and the movement is undone.
 ///
@@ -48,15 +48,13 @@ pragma solidity 0.8.30;
 /// contracts, which is why the discipline is required here rather than assumed from the guard.
 interface IModule {
 
-    /// @dev What a module is: which of the four methods the compliance calls on it. A module names any
+    /// @dev What a module is: which of the three methods the compliance calls on it. A module names any
     ///  combination, never the same one twice.
     enum ModuleType {
-        /// Answers {check} before the move. The only check asked at a cross-chain issuance.
-        CHECK,
+        /// Answers {beforeTransfer} before the move. The only question asked at a cross-chain issuance.
+        BEFORE,
         /// Answers {checkSpender}.
         SPENDER,
-        /// Is told {beforeTransfer} before the positions move.
-        BEFORE,
         /// Is told {afterTransfer} after the ledger moved.
         AFTER
     }
@@ -78,7 +76,7 @@ interface IModule {
         /// Inclusive lower bound of the movement. Equal to `amountMax` on a native movement.
         uint256 amountMin;
         /// Inclusive upper bound: the exact amount on a native movement, and the exact amount that moved
-        /// when a `TRACKER` is told about one; the requested maximum, already capped at what the sending
+        /// when an `AFTER` module is told about one; the requested maximum, already capped at what the sending
         /// wallet holds, on an issuance.
         uint256 amountMax;
         /// What produced the movement: one of the `MovementKindLib` constants. A number and not an enum, so a
@@ -119,26 +117,13 @@ interface IModule {
     function unbindCompliance(address _compliance) external;
 
     /**
-     *  @dev the positions are about to move. Called on every `BEFORE` module right before the compliance moves
-     *  the positions, on a native transfer, a mint, a burn, a forced transfer, a recovery and a settlement. Not
-     *  called at the issuance of a validation: nothing moves there
-     *  the ledger describes the state before the move. On a native movement the token has already moved the
-     *  balances, which is why a module reads the ledger and never the balances. `ctx` is the same struct {afterTransfer} receives for
-     *  the same movement, so a module naming both can pair the two
-     *  reverting stops the movement. The token guards its own reentrancy: a module that calls back into the
-     *  token from here reverts. Record before calling out, as everywhere
-     *  This function can be called ONLY by the compliance contract itself
-     *  @param ctx the movement, see {TransferContext}; `amountMin == amountMax`
-     */
-    function beforeTransfer(TransferContext calldata ctx) external;
-
-    /**
      *  @dev the ledger moved. Called on every `AFTER` module after the compliance updated the positions, on
      *  a native transfer, a mint, a burn, a forced transfer, a recovery and a settled validation
      *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, `ctx.kind` says
      *  what produced it, a zero `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and
-     *  `toWallet` mean a burn. That is the convention {check} already uses, so one function covers
-     *  what three hooks used to
+     *  `toWallet` mean a burn. That is the convention {beforeTransfer} already uses, so one function covers
+     *  what three hooks used to. The ledger describes the state after the move; what it was before is this
+     *  state plus or minus `ctx.amountMax`
      *  reverting stops the movement: a module that cannot record a move has to stop it, and a module that
      *  judges the state the movement left behind refuses it the same way, with its own error. `forceRemoveModule`
      *  is the escape hatch for a module that reverts everywhere
@@ -148,8 +133,10 @@ interface IModule {
     function afterTransfer(TransferContext calldata ctx) external;
 
     /**
-     *  @dev the largest amount this rule allows to move. Called on every `CHECK` module, on a native transfer
-     *  and a mint (`canTransfer`) and on the issuance of a validation (`ctx.isIssuance` set)
+     *  @dev the largest amount this rule allows to move. Asked, never told: a view, called on every `BEFORE`
+     *  module before anything moves, on a native transfer and a mint (`canTransfer`) and on the issuance of a
+     *  validation (`ctx.isIssuance` set). Nothing can be recorded here; a module that counts does so in
+     *  {afterTransfer}
      *  the compliance takes the minimum over the declaring modules: a native movement passes when `amountMax`
      *  is at most that minimum; an issuance narrows its range to `[amountMin, minimum]`
      *  `type(uint256).max` means no limit, 0 means refused
@@ -165,7 +152,7 @@ interface IModule {
      *  @param ctx the movement, see {TransferContext}
      *  @return the largest amount allowed
      */
-    function check(TransferContext calldata ctx) external view returns (uint256);
+    function beforeTransfer(TransferContext calldata ctx) external view returns (uint256);
 
     /**
      *  @dev whether `ctx.spender` may execute the movement on the sender's behalf. Called on every `SPENDER`

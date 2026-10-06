@@ -160,13 +160,6 @@ abstract contract AbstractModuleUpgradeable is
     }
 
     /**
-     *  @dev See {IModule-beforeTransfer}.
-     *  Default no-op: a module overrides it only when it names `BEFORE`.
-     */
-    // solhint-disable-next-line no-empty-blocks
-    function beforeTransfer(TransferContext calldata) external virtual onlyComplianceCall { }
-
-    /**
      *  @dev See {IModule-afterTransfer}.
      *  Default no-op: a module overrides it only when it names `AFTER`.
      */
@@ -174,10 +167,10 @@ abstract contract AbstractModuleUpgradeable is
     function afterTransfer(TransferContext calldata) external virtual onlyComplianceCall { }
 
     /**
-     *  @dev See {IModule-check}.
-     *  Default no limit: a module overrides it only when it names `CHECK`.
+     *  @dev See {IModule-beforeTransfer}.
+     *  Default no limit: a module overrides it only when it names `BEFORE`.
      */
-    function check(TransferContext calldata) external view virtual returns (uint256) {
+    function beforeTransfer(TransferContext calldata) external view virtual returns (uint256) {
         return type(uint256).max;
     }
 

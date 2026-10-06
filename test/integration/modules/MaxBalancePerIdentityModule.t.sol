@@ -52,8 +52,8 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
     function test_moduleTypes_NamesOnlyRule() public view {
         assertEq(rule.moduleTypes().length, 1);
-        assertEq(uint8(rule.moduleTypes()[0]), uint8(IModule.ModuleType.CHECK));
-        assertEq(boundCompliance.getModulesByType(IModule.ModuleType.CHECK)[0], address(rule));
+        assertEq(uint8(rule.moduleTypes()[0]), uint8(IModule.ModuleType.BEFORE));
+        assertEq(boundCompliance.getModulesByType(IModule.ModuleType.BEFORE)[0], address(rule));
         assertTrue(rule.isPlugAndPlay());
         assertEq(rule.name(), "MaxBalancePerIdentityModule");
     }
