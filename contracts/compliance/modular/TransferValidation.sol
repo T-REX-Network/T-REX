@@ -70,6 +70,7 @@ import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedger } from "./ComplianceLedger.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
+import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /**
@@ -91,21 +92,6 @@ import { IModule } from "./modules/IModule.sol";
  */
 abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
-    /// @custom:storage-location erc7201:erc3643.storage.TransferValidation
-    struct ValidationStorage {
-        /// Added to the issuance timestamp to compute `expiry`. Zero blocks issuance.
-        uint64 defaultValidityWindow;
-        /// Per-chain worst-case reconciliation latency. Zero blocks issuance toward that chain.
-        mapping(bytes32 chainKey => uint64 window) reconciliationWindows;
-        /// Per-chain issuance pause, set by the manager or a breaching late reconciliation, lifted by the manager
-        /// only.
-        mapping(bytes32 chainKey => bool paused) issuancePaused;
-        /// The last id issued. Ids start at 1.
-        uint256 lastValidationId;
-        /// Every issued validation, kept forever.
-        mapping(uint256 validationId => Validation validation) validations;
-    }
-
     /// @dev A leg is one satellite chain's half of a movement, and the notification it sends back once it has
     ///  executed.
     ///
@@ -125,24 +111,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         Mint
     }
 
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant VALIDATION_STORAGE_LOCATION =
-        0x518dcda4927033bd42da8dd6047b92b4a950cebbc5bdd8461a5e9bb9c0545400;
-
-    /// @dev What issuance works out before the first write, in memory so the flow stays one function.
-    struct Draft {
-        bytes32 fromChainKey;
-        bytes32 toChainKey;
-        bool twoLegs;
-        address fromIdentity;
-        address toIdentity;
-        bytes32 fromKey;
-        uint256 amountMin;
-        uint256 amountMax;
-        uint64 expiry;
-        uint64 reconciliationWindow;
-    }
-
     /* ----- Issuance ----- */
 
     /// @inheritdoc ITransferValidation
@@ -157,7 +125,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ) external returns (uint256 validationId) {
         require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
 
-        Draft memory draft;
+        TransferValidationLib.Draft memory draft;
         draft.amountMin = requestedMin;
         draft.amountMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
@@ -172,10 +140,12 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
     ///  two when the wallets are on two different satellite chains. The spender is parsed here and judged in
     ///  {_requireSpenderAllowed}, once the range is known.
-    function _resolveRoute(Draft memory draft, bytes calldata from, bytes calldata to, bytes calldata spender)
-        private
-        view
-    {
+    function _resolveRoute(
+        TransferValidationLib.Draft memory draft,
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender
+    ) private view {
         (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
         require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
         (bool toNative,) = WalletKeyLib.isReferenceChain(to);
@@ -188,7 +158,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Who may ask: the identity the sending wallet is linked to, or an address the AccessManager
     ///  authorised for this selector. A satellite wallet never matches its own bytes, so a wallet can never
     ///  request a validation for itself; its identity does that.
-    function _requireCallerOwnsTheWallet(Draft memory draft, bytes calldata from) private view {
+    function _requireCallerOwnsTheWallet(TransferValidationLib.Draft memory draft, bytes calldata from) private view {
         draft.fromIdentity = address(_boundRegistry().resolveIdentity(from));
         require(draft.fromIdentity != address(0), ErrorsLib.UnverifiedWallet(from));
         require(
@@ -199,8 +169,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
     ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
-    function _setExpiryAndRelease(Draft memory draft) private view {
-        ValidationStorage storage store = _validationStorage();
+    function _setExpiryAndRelease(TransferValidationLib.Draft memory draft) private view {
+        TransferValidationLib.ValidationStorage storage store = _validationStorage();
         require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
         draft.reconciliationWindow = _openChainWindow(store, draft.fromChainKey);
         if (draft.twoLegs) {
@@ -212,7 +182,10 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
     ///  then to the smallest amount the rules allow.
-    function _narrowAmountRange(Draft memory draft, bytes calldata from, bytes calldata to) private view {
+    function _narrowAmountRange(TransferValidationLib.Draft memory draft, bytes calldata from, bytes calldata to)
+        private
+        view
+    {
         ITREXRegistry registry = _boundRegistry();
         require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
         draft.toIdentity = address(registry.resolveIdentity(to));
@@ -225,7 +198,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Caps the range at what the sending wallet can still send: its bridged balance less what earlier
     ///  validations may still draw from it.
-    function _capAtWhatTheWalletCanSend(Draft memory draft, bytes calldata from) private view {
+    function _capAtWhatTheWalletCanSend(TransferValidationLib.Draft memory draft, bytes calldata from) private view {
         uint256 free = _boundToken().availableOf(from);
         if (free < draft.amountMax) draft.amountMax = free;
         require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
@@ -233,7 +206,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Caps the range at the smallest amount the rules allow. Skipped when both wallets belong to one
     ///  identity, since relocating your own tokens changes no position and no distribution rule applies.
-    function _capAtWhatTheRulesAllow(Draft memory draft, bytes calldata to) private view {
+    function _capAtWhatTheRulesAllow(TransferValidationLib.Draft memory draft, bytes calldata to) private view {
         if (_isRelocation(draft.fromIdentity, draft.toIdentity)) return;
         IModule.TransferContext memory ctx = TransferContextLib.issuance(
             address(this),
@@ -253,7 +226,10 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Who may execute: every `SPENDER` module must accept the named spender, since no module runs on the
     ///  satellite and this is the only place it can be refused. A validation the sender executes itself names
     ///  no spender and asks nobody. Asked on a relocation too: who executes is not about distribution.
-    function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
+    function _requireSpenderAllowed(TransferValidationLib.Draft memory draft, bytes calldata to, bytes calldata spender)
+        private
+        view
+    {
         if (spender.length == 0) return;
         IModule.TransferContext memory ctx = TransferContextLib.issuance(
             address(this),
@@ -268,76 +244,19 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         require(_spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
-    /// @dev Turns a settled draft into an issued validation: take the next id, build the object the satellite
-    ///  will execute against, keep its terms, reserve the amount, then announce it and send one leg per
-    ///  satellite chain involved.
-    function _issueValidation(bytes calldata from, bytes calldata to, bytes calldata spender, Draft memory draft)
-        private
-        returns (uint256 validationId)
-    {
-        validationId = ++_validationStorage().lastValidationId;
-
-        MessageTypesLib.ComplianceValidation memory issued =
-            _buildIssuedValidation(validationId, from, to, spender, draft);
-        _recordValidation(validationId, issued, from, to, draft);
-
-        emit EventsLib.TransferValidationIssued(
-            validationId, from, to, spender, draft.amountMin, draft.amountMax, draft.expiry, draft.reconciliationWindow
-        );
-
-        bytes memory body = abi.encode(issued);
-        _dispatchLeg(draft.fromChainKey, validationId, body);
-        if (draft.twoLegs) _dispatchLeg(draft.toChainKey, validationId, body);
-    }
-
-    /// @dev The object a satellite executes against, and the one this contract hashes: the terms of the
-    ///  movement plus the token they belong to.
-    function _buildIssuedValidation(
-        uint256 validationId,
+    /// @dev Turns a settled draft into an issued validation, see {TransferValidationLib-issue}, then sends
+    ///  one leg per satellite chain involved.
+    function _issueValidation(
         bytes calldata from,
         bytes calldata to,
         bytes calldata spender,
-        Draft memory draft
-    ) private view returns (MessageTypesLib.ComplianceValidation memory) {
-        return MessageTypesLib.ComplianceValidation({
-            validationId: validationId,
-            from: from,
-            to: to,
-            spender: spender,
-            amountMin: draft.amountMin,
-            amountMax: draft.amountMax,
-            expiry: draft.expiry,
-            reconciliationWindow: draft.reconciliationWindow,
-            token: address(_boundToken())
-        });
-    }
+        TransferValidationLib.Draft memory draft
+    ) private returns (uint256 validationId) {
+        bytes memory body;
+        (validationId, body) = TransferValidationLib.issue(from, to, spender, draft, address(_boundToken()));
 
-    /// @dev Keeps the validation forever and reserves its amount. Everything written here is the issuance half
-    ///  of {Validation}; the lifecycle half stays at its zero value until a settlement or a discard moves it.
-    function _recordValidation(
-        uint256 validationId,
-        MessageTypesLib.ComplianceValidation memory issued,
-        bytes calldata from,
-        bytes calldata to,
-        Draft memory draft
-    ) private {
-        Validation storage stored = _validationStorage().validations[validationId];
-        stored.hash = MessageTypesLib.hashValidation(issued);
-        stored.amountMin = draft.amountMin;
-        stored.amountMax = draft.amountMax;
-        stored.expiry = draft.expiry;
-        stored.releaseAt = draft.expiry + draft.reconciliationWindow;
-        stored.fromChainKey = draft.fromChainKey;
-        stored.toChainKey = draft.toChainKey;
-        stored.fromKey = draft.fromKey;
-        stored.fromWallet = from;
-        stored.toKey = WalletKeyLib.canonicalKey(to);
-        stored.twoLegs = draft.twoLegs;
-        stored.fromIdentity = draft.fromIdentity;
-        stored.toIdentity = draft.toIdentity;
-        // `_reservePending` returns whether it reserved against the identities; it does not on a relocation.
-        stored.relocation = !_reservePending(draft.fromIdentity, draft.toIdentity, draft.fromKey, draft.amountMax);
-        _reserveOnToken(from, draft.amountMax);
+        _dispatchLeg(draft.fromChainKey, validationId, body);
+        if (draft.twoLegs) _dispatchLeg(draft.toChainKey, validationId, body);
     }
 
     /* ----- Settlement ----- */
@@ -350,7 +269,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         internal
         returns (bool halt)
     {
-        ValidationStorage storage store = _validationStorage();
+        TransferValidationLib.ValidationStorage storage store = _validationStorage();
         if (!_isIssued(store, notification.validationId)) {
             emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
             return true;
@@ -576,7 +495,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  that owes the burn stops being issued to instead and an operator investigates. Either way the
     ///  validation ends in `Resolved`, where any leg arriving afterwards halts the token.
     function _resolveStuckValidation(uint256 validationId) internal {
-        ValidationStorage storage store = _validationStorage();
+        TransferValidationLib.ValidationStorage storage store = _validationStorage();
         require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
         require(
@@ -600,7 +519,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     }
 
     function _discardExpiredValidations(uint256[] calldata validationIds) internal {
-        ValidationStorage storage store = _validationStorage();
+        TransferValidationLib.ValidationStorage storage store = _validationStorage();
         for (uint256 i = 0; i < validationIds.length; i++) {
             uint256 validationId = validationIds[i];
             require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
@@ -649,7 +568,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @inheritdoc ITransferValidation
     function statusOf(uint256 validationId) public view returns (ValidationStatus) {
-        ValidationStorage storage store = _validationStorage();
+        TransferValidationLib.ValidationStorage storage store = _validationStorage();
         require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
         // `Expired` is the one status never stored: it is `Pending` once the clock has passed `releaseAt`. Every
@@ -676,7 +595,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Idempotent: the same state again changes nothing and emits nothing.
     function _setIssuancePaused(bytes32 chainKey, bool paused) internal {
-        ValidationStorage storage store = _validationStorage();
+        TransferValidationLib.ValidationStorage storage store = _validationStorage();
         if (store.issuancePaused[chainKey] == paused) return;
         store.issuancePaused[chainKey] = paused;
         if (paused) emit EventsLib.ValidationIssuancePaused(chainKey);
@@ -715,9 +634,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  the burn leg of a two-leg validation lands before the mint leg. `reserved` is what this validation had
     ///  reserved against the wallet, which the token gives back as it takes the hold.
     function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId, uint256 reserved) internal virtual;
-
-    /// @dev Reserves part of a satellite wallet's bridged balance for a validation being issued, on the token.
-    function _reserveOnToken(bytes memory wallet, uint256 amount) internal virtual;
 
     /// @dev Gives back what this validation reserved against a satellite wallet, on the token.
     function _releaseOnToken(bytes memory wallet, uint256 amount) internal virtual;
@@ -841,7 +757,11 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.
-    function _openChainWindow(ValidationStorage storage store, bytes32 chainKey) private view returns (uint64 window) {
+    function _openChainWindow(TransferValidationLib.ValidationStorage storage store, bytes32 chainKey)
+        private
+        view
+        returns (uint64 window)
+    {
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         window = store.reconciliationWindows[chainKey];
         require(window != 0, ErrorsLib.ReconciliationWindowNotSet(chainKey));
@@ -853,14 +773,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     }
 
     /// @dev Ids start at 1 and `lastValidationId` is the last one issued.
-    function _isIssued(ValidationStorage storage store, uint256 validationId) private view returns (bool) {
+    function _isIssued(TransferValidationLib.ValidationStorage storage store, uint256 validationId)
+        private
+        view
+        returns (bool)
+    {
         return validationId != 0 && validationId <= store.lastValidationId;
     }
 
-    function _validationStorage() internal pure returns (ValidationStorage storage $) {
-        assembly ("memory-safe") {
-            $.slot := VALIDATION_STORAGE_LOCATION
-        }
+    function _validationStorage() internal pure returns (TransferValidationLib.ValidationStorage storage) {
+        return TransferValidationLib.layout();
     }
 
 }
