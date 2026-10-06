@@ -299,9 +299,14 @@ library AccessManagerSetupLib {
     ///         registry and the suite profile, which every later suite is wired to or shaped by. The ids are data, not constants: any role of
     ///         the manager works, a {RolesLib.PlatformRole}, a name through {RolesLib.platform(bytes32)} or
     ///         a raw id.
-    /// @dev Refuses the two shapes that recreate the problem the split exists for: one role for both, so
-    ///      every account allowed to deploy a token could reconfigure the factory for everyone, and the
-    ///      public role for either, so anyone could.
+    /// @dev Refuses the three shapes that recreate the problem the split exists for: one role for both, so
+    ///      every account allowed to deploy a token could reconfigure the factory for everyone; `ADMIN_ROLE`
+    ///      as the suite deployer, so every deployer could remap the governor selectors or grant itself the
+    ///      governor role; and the public role for either, so anyone could. `ADMIN_ROLE` as the governor is
+    ///      fine, since admins can do everything anyway.
+    /// @dev This is a check on the ids, not a separation guarantee: the role hierarchy the manager keeps
+    ///      (`getRoleAdmin`) can later make the suite deployer role the admin of the governor role, and
+    ///      nothing here can prevent that.
     function setupTREXFactoryRoles(
         IAccessManager accessManager,
         address trexFactory,
@@ -309,6 +314,7 @@ library AccessManagerSetupLib {
         uint64 factoryGovernorRole
     ) internal {
         require(suiteDeployerRole != factoryGovernorRole, ErrorsLib.SuiteDeployerCannotGovernFactory());
+        require(suiteDeployerRole != ADMIN_ROLE, ErrorsLib.SuiteDeployerCannotGovernFactory());
         _requireNotPublicRole(suiteDeployerRole);
         _requireNotPublicRole(factoryGovernorRole);
 

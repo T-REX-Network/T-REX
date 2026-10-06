@@ -30,6 +30,7 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { DefaultSuiteProfile } from "contracts/factory/DefaultSuiteProfile.sol";
 import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -1355,6 +1356,45 @@ contract TREXFactoryTest is TREXSuiteTest {
         _assertOnlyAdminIs(manager, alice, address(suiteProfile));
     }
 
+    /// @notice The profile is shared. An issuer who grants it `ADMIN_ROLE` on their own manager, to
+    ///         apply the default setup themselves, must not let an outsider apply it in their place.
+    function test_defaultProfile_applyTo_RevertWhen_CallerIsNotAnAdminOfTheManager() public {
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
+        vm.prank(deployer);
+        trexFactory.setSuiteProfile(address(other));
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.accessManager = address(0);
+        tokenDetails.accessManagerAdmin = alice;
+        _deploySuite("own-manager-shared-profile", tokenDetails, _createEmptyClaimDetails());
+        Token token = Token(trexFactory.getToken("own-manager-shared-profile"));
+        TREXAccessManager manager = TREXAccessManager(token.authority());
+
+        vm.prank(alice);
+        manager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, address(suiteProfile), 0);
+
+        address outsider = makeAddr("outsider");
+        vm.prank(outsider);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessManager.AccessManagerUnauthorizedAccount.selector, outsider, AccessManagerSetupLib.ADMIN_ROLE
+            )
+        );
+        suiteProfile.applyTo(manager, address(token));
+        assertEq(
+            manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
+            AccessManagerSetupLib.ADMIN_ROLE,
+            "an outsider must not set the issuer's suite up"
+        );
+
+        vm.prank(alice);
+        suiteProfile.applyTo(manager, address(token));
+        assertEq(
+            manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
+            RolesLib.forDomain(manager.domainOf(address(token)), RolesLib.Role.AGENT_MINTER),
+            "the issuer, an admin, applies the default profile"
+        );
+    }
+
     function _assertOnlyAdminIs(TREXAccessManager manager, address admin, address profile) private view {
         (bool adminHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, admin);
         (bool profileHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, profile);
@@ -1404,6 +1444,26 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_setupTREXFactoryRoles_RevertWhen_OneRoleForBoth() public {
         vm.expectRevert(ErrorsLib.SuiteDeployerCannotGovernFactory.selector);
         this.setupFactoryRolesExternally(_factoryGovernorRole(), _factoryGovernorRole());
+    }
+
+    /// @notice A suite deployer that is a manager admin could remap the governor selectors or grant
+    ///         itself the governor role, which is the one-role shape with an extra step.
+    function test_setupTREXFactoryRoles_RevertWhen_SuiteDeployerIsAdmin() public {
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotGovernFactory.selector);
+        this.setupFactoryRolesExternally(AccessManagerSetupLib.ADMIN_ROLE, _factoryGovernorRole());
+    }
+
+    /// @notice An admin can do everything anyway, so the governor may be the admin role.
+    function test_setupTREXFactoryRoles_AcceptsAdminAsGovernor() public {
+        this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.ADMIN_ROLE);
+        assertEq(
+            accessManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.setSuiteProfile.selector),
+            AccessManagerSetupLib.ADMIN_ROLE
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.deployTREXSuite.selector),
+            _suiteDeployerRole()
+        );
     }
 
     function test_setupTREXFactoryRoles_RevertWhen_EitherRoleIsPublic() public {

@@ -66,16 +66,21 @@ pragma solidity 0.8.30;
 import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ISuiteProfile } from "./ISuiteProfile.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 
 /// @title DefaultSuiteProfile
 /// @notice The profile T-REX ships: the {AccessManagerSetupLib} tables. A platform that wants a different
 ///         default deploys another profile and points the factory at it.
-/// @dev Deliberately open: the call only has an effect on a manager that granted this contract
-///      `ADMIN_ROLE`, which the factory does for the duration of one deploy.
+/// @dev Only an admin of `accessManager` may apply it. The factory is one for the duration of a deploy.
+///      The profile is a shared contract, so an issuer who grants it `ADMIN_ROLE` on their own manager to
+///      apply the default setup themselves, and does not revoke it, must not let anyone apply it in
+///      their place.
 contract DefaultSuiteProfile is ISuiteProfile {
 
     /// @inheritdoc ISuiteProfile
     function applyTo(TREXAccessManager accessManager, address token) external {
+        (bool isAdmin,) = accessManager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, msg.sender);
+        require(isAdmin, IAccessManager.AccessManagerUnauthorizedAccount(msg.sender, AccessManagerSetupLib.ADMIN_ROLE));
         AccessManagerSetupLib.setupSuite(accessManager, token);
     }
 

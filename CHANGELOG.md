@@ -487,16 +487,19 @@ All notable changes to this project will be documented in this file.
   could also repoint the factory's implementation authority, identity factory or trusted gateway
   registry, which every later suite is wired to. The function now takes two role ids chosen by
   governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory governor role
-  for the three setters. It refuses one role for both (`SuiteDeployerCannotGovernFactory`). The three other platform
+  for the four setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
+  role (`SuiteDeployerCannotGovernFactory`). The three other platform
   setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
   `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
   instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
   (`PlatformRoleCannotBePublic`). No role is hardcoded at the platform layer any more: a platform picks
   any id of its manager, including a named platform role through the new
   `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles do. The
-  `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. Existing
-  deployments need no redeploy: remap the two deploy selectors with `setTargetFunctionRole`, grant the
-  suite deployer role to current deployers and revoke the platform `OWNER` from them.
+  `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
+  platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
+  The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
+  `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
+  `OWNER` from them. The suite profile below does need a new factory.
 - **The suite role profile is no longer compiled into the factory** (#102). `deployTREXSuite` and
   `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.setupSuite` from inside the factory, so
   the selector-to-role tables and the role-admin table of every future suite were a constant of the
@@ -504,7 +507,9 @@ All notable changes to this project will be documented in this file.
   factory now hands the fresh `TREXAccessManager` to an `ISuiteProfile`: it grants the profile
   `ADMIN_ROLE`, calls `applyTo(accessManager, token)`, revokes the role and only then hands
   `ADMIN_ROLE` to `accessManagerAdmin`. `DefaultSuiteProfile` is the default profile and simply applies
-  the library tables; governance replaces it through the new `setSuiteProfile` (factory governor
+  the library tables; only an admin of the manager may call its `applyTo`
+  (`AccessManagerUnauthorizedAccount`), so an issuer who keeps the shared profile as an admin of their
+  own manager does not let anyone else apply it. Governance replaces it through the new `setSuiteProfile` (factory governor
   role, `SuiteProfileSet`, `SuiteProfileNotAContract`) to change what every later suite looks
   like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
   **Breaking**: the `TREXFactory` constructor takes the profile as its fourth argument, before the
