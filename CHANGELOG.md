@@ -177,7 +177,9 @@ All notable changes to this project will be documented in this file.
     the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
     already shared with another domain is passed with the domain it lives in and is not
     remapped. Every other suite `setup*` function takes a `domainId` and is pure. Suite setup is
-    idempotent: re-running re-applies the standard tables. Suite setup needs `ADMIN_ROLE`: it maps
+    idempotent for a caller that also holds `AGENT_ADMIN` in the domain: re-running re-applies the
+    standard tables, and the token's `AGENT` grant is gated by that role once the role-admin table is
+    in place. Suite setup needs `ADMIN_ROLE`: it maps
     selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
     governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
     for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's

@@ -1386,6 +1386,18 @@ contract TREXFactoryTest is TREXSuiteTest {
             "an outsider must not set the issuer's suite up"
         );
 
+        // An admin with an execution delay must not skip that delay by acting through the profile.
+        address delayedAdmin = makeAddr("delayedAdmin");
+        vm.prank(alice);
+        manager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, delayedAdmin, 1 days);
+        vm.prank(delayedAdmin);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, AccessManagerSetupLib.ADMIN_ROLE
+            )
+        );
+        suiteProfile.applyTo(manager, address(token));
+
         vm.prank(alice);
         suiteProfile.applyTo(manager, address(token));
         assertEq(

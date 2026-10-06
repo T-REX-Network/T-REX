@@ -71,16 +71,20 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 /// @title DefaultSuiteProfile
 /// @notice The profile T-REX ships: the {AccessManagerSetupLib} tables. A platform that wants a different
 ///         default deploys another profile and points the factory at it.
-/// @dev Only an admin of `accessManager` may apply it. The factory is one for the duration of a deploy.
-///      The profile is a shared contract, so an issuer who grants it `ADMIN_ROLE` on their own manager to
-///      apply the default setup themselves, and does not revoke it, must not let anyone apply it in
-///      their place.
+/// @dev Only an admin of `accessManager` with no execution delay may apply it. The factory is one for the
+///      duration of a deploy. The profile is a shared contract, so an issuer who grants it `ADMIN_ROLE` on
+///      their own manager to apply the default setup themselves, and does not revoke it, must not let
+///      anyone apply it in their place, and must not let a delayed admin use the profile to perform
+///      admin operations right away.
 contract DefaultSuiteProfile is ISuiteProfile {
 
     /// @inheritdoc ISuiteProfile
     function applyTo(TREXAccessManager accessManager, address token) external {
-        (bool isAdmin,) = accessManager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, msg.sender);
-        require(isAdmin, IAccessManager.AccessManagerUnauthorizedAccount(msg.sender, AccessManagerSetupLib.ADMIN_ROLE));
+        (bool isAdmin, uint32 executionDelay) = accessManager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, msg.sender);
+        require(
+            isAdmin && executionDelay == 0,
+            IAccessManager.AccessManagerUnauthorizedAccount(msg.sender, AccessManagerSetupLib.ADMIN_ROLE)
+        );
         AccessManagerSetupLib.setupSuite(accessManager, token);
     }
 

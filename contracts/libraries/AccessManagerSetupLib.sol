@@ -112,7 +112,7 @@ library AccessManagerSetupLib {
     }
 
     uint64 internal constant ADMIN_ROLE = 0;
-    uint64 internal constant PUBLIC_ROLE = type(uint64).max;
+    uint64 internal constant PUBLIC_ROLE = RolesLib.PUBLIC_ROLE;
 
     function setupTokenRoles(IAccessManager accessManager, address token, uint32 domainId) internal {
         _apply(accessManager, token, tokenTable(), domainId);
