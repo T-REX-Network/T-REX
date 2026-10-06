@@ -11,6 +11,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
+import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
@@ -29,7 +30,11 @@ import { IdentityRegistryStorage } from "contracts/registry/implementation/Ident
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+import { DefaultSuiteProfile } from "contracts/factory/DefaultSuiteProfile.sol";
+import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
+import { NoOpSuiteProfile } from "test/integration/mocks/NoOpSuiteProfile.sol";
 import { TestModule } from "test/integration/mocks/TestModule.sol";
 import { TestTREXFactory } from "test/integration/mocks/TestTREXFactory.sol";
 
@@ -684,7 +689,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         // A second holder of ASSET_DEPLOYER binds the predicted address before the suite deploys.
         address squatter = makeAddr("Squatter");
-        _grantTokenOidMinterRole(squatter);
+        _grantAssetDeployerRole(squatter);
         Structs.KeyParam[] memory squatterKeys = new Structs.KeyParam[](1);
         squatterKeys[0] = _ecdsaKey(squatter, KeyPurposes.MANAGEMENT);
         vm.prank(squatter);
@@ -706,7 +711,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         string memory salt = "prebound-token-salt";
         address predictedToken = _predictSuiteAddress(salt, "Token");
 
-        _grantTokenOidMinterRole(address(this));
+        _grantAssetDeployerRole(address(this));
         Structs.KeyParam[] memory ownerKeys = new Structs.KeyParam[](1);
         ownerKeys[0] = _ecdsaKey(address(this), KeyPurposes.MANAGEMENT);
         address boundIdentity =
@@ -739,7 +744,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         idFactory.removeIdentityTypePolicy(IdentityTypes.ASSET);
         accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
-        AccessManagerSetupLib.setupIdentityFactoryPolicy(accessManager, idFactory, address(trexFactory));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            accessManager, idFactory, address(trexFactory), _assetDeployerRole()
+        );
 
         (uint64 roleId, bool selfDeployable,,) = idFactory.getIdentityTypePolicy(IdentityTypes.ASSET);
         assertEq(
@@ -779,7 +786,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         // Not the IdentityFactory's authority. The policy write still lands (that call is routed by the
         // factory's real authority), but the grant is stranded on this manager.
         AccessManager foreignManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupIdentityFactoryPolicy(foreignManager, idFactory, address(trexFactory));
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            foreignManager, idFactory, address(trexFactory), _assetDeployerRole()
+        );
 
         (bool isMemberOnForeign,) =
             foreignManager.hasRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
@@ -1009,13 +1018,35 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_constructor_RevertWhen_AccessManagerZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new TREXFactory(
-            address(trexImplementationAuthority), address(idFactory), address(trustedGatewayRegistry), address(0)
+            address(trexImplementationAuthority),
+            address(idFactory),
+            address(trustedGatewayRegistry),
+            address(suiteProfile),
+            address(0)
+        );
+    }
+
+    function test_constructor_RevertWhen_SuiteProfileHasNoCode() public {
+        address noCode = makeAddr("noCode");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteProfileNotAContract.selector, noCode));
+        new TREXFactory(
+            address(trexImplementationAuthority),
+            address(idFactory),
+            address(trustedGatewayRegistry),
+            noCode,
+            address(accessManager)
         );
     }
 
     function test_constructor_RevertWhen_TrustedGatewayRegistryZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(0), address(accessManager));
+        new TREXFactory(
+            address(trexImplementationAuthority),
+            address(idFactory),
+            address(0),
+            address(suiteProfile),
+            address(accessManager)
+        );
     }
 
     // ============ setImplementationAuthority() Tests ============
@@ -1052,6 +1083,7 @@ contract TREXFactoryTest is TREXSuiteTest {
             address(trexImplementationAuthority),
             address(idFactory),
             address(trustedGatewayRegistry),
+            address(suiteProfile),
             address(accessManager)
         );
 
@@ -1226,7 +1258,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     function test_setupTREXImplementationAuthorityRoles_MapsSelectorsToVersionManager() public {
         address authority = address(trexImplementationAuthority);
 
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority, _versionManagerRole());
 
         assertEq(
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector),
@@ -1242,6 +1274,336 @@ contract TREXFactoryTest is TREXSuiteTest {
             accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publishAndUpgrade.selector),
             RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER),
             "publishAndUpgrade must be mapped to VERSION_MANAGER"
+        );
+    }
+
+    // ============ setSuiteProfile() Tests ============
+
+    function test_setSuiteProfile_RevertWhen_NoCode() public {
+        address noCode = makeAddr("noCode");
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteProfileNotAContract.selector, noCode));
+        trexFactory.setSuiteProfile(noCode);
+    }
+
+    /// @notice The profile shapes every later suite, so only the factory governor may replace it.
+    function test_setSuiteProfile_RevertWhen_OnlySuiteDeployer() public {
+        address issuer = makeAddr("issuer");
+        _grantSuiteDeployerRole(issuer);
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setSuiteProfile(address(other));
+    }
+
+    function test_setSuiteProfile_Success() public {
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
+
+        vm.expectEmit(false, false, false, true, address(trexFactory));
+        emit EventsLib.SuiteProfileSet(address(other));
+        vm.prank(deployer);
+        trexFactory.setSuiteProfile(address(other));
+
+        assertEq(trexFactory.getSuiteProfile(), address(other), "profile must be replaced");
+    }
+
+    /// @notice The suite profile is the profile's, not the factory's: with a profile that maps
+    ///         nothing, the suite deploys with no role wiring, while the domain, the admin hand-over and
+    ///         the clean-up of the profile's transient admin still happen.
+    function test_deployTREXSuite_DelegatesTheProfile() public {
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
+        vm.prank(deployer);
+        trexFactory.setSuiteProfile(address(other));
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.accessManager = address(0);
+        tokenDetails.accessManagerAdmin = alice;
+        _deploySuite("own-manager-noop", tokenDetails, _createEmptyClaimDetails());
+
+        Token token = Token(trexFactory.getToken("own-manager-noop"));
+        TREXAccessManager manager = TREXAccessManager(token.authority());
+
+        assertEq(other.calls(), 1, "factory must call the configured profile once");
+        assertEq(address(other.lastManager()), address(manager), "profile must receive the suite manager");
+        assertEq(other.lastToken(), address(token), "profile must receive the suite token");
+        assertNotEq(manager.domainOf(address(token)), 0, "factory still assigns the domain");
+        assertEq(
+            manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
+            AccessManagerSetupLib.ADMIN_ROLE,
+            "a profile that maps nothing leaves mint on ADMIN_ROLE"
+        );
+        _assertOnlyAdminIs(manager, alice, address(other));
+    }
+
+    /// @notice With the default profile the suite is operable on deploy and the profile keeps
+    ///         nothing of the admin it held during the call.
+    function test_deployTREXSuite_DefaultProfileIsApplied() public {
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.accessManager = address(0);
+        tokenDetails.accessManagerAdmin = alice;
+        _deploySuite("own-manager-default", tokenDetails, _createEmptyClaimDetails());
+
+        Token token = Token(trexFactory.getToken("own-manager-default"));
+        TREXAccessManager manager = TREXAccessManager(token.authority());
+        uint32 domainId = manager.domainOf(address(token));
+
+        assertEq(
+            manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
+            RolesLib.forDomain(domainId, RolesLib.Role.AGENT_MINTER),
+            "default profile maps mint to AGENT_MINTER of the suite domain"
+        );
+        _assertOnlyAdminIs(manager, alice, address(suiteProfile));
+    }
+
+    /// @notice The profile is shared. An issuer who grants it `ADMIN_ROLE` on their own manager, to
+    ///         apply the default setup themselves, must not let an outsider apply it in their place.
+    function test_defaultProfile_applyTo_RevertWhen_CallerIsNotAnAdminOfTheManager() public {
+        NoOpSuiteProfile other = new NoOpSuiteProfile();
+        vm.prank(deployer);
+        trexFactory.setSuiteProfile(address(other));
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.accessManager = address(0);
+        tokenDetails.accessManagerAdmin = alice;
+        _deploySuite("own-manager-shared-profile", tokenDetails, _createEmptyClaimDetails());
+        Token token = Token(trexFactory.getToken("own-manager-shared-profile"));
+        TREXAccessManager manager = TREXAccessManager(token.authority());
+
+        vm.prank(alice);
+        manager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, address(suiteProfile), 0);
+
+        address outsider = makeAddr("outsider");
+        vm.prank(outsider);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessManager.AccessManagerUnauthorizedAccount.selector, outsider, AccessManagerSetupLib.ADMIN_ROLE
+            )
+        );
+        suiteProfile.applyTo(manager, address(token));
+        assertEq(
+            manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
+            AccessManagerSetupLib.ADMIN_ROLE,
+            "an outsider must not set the issuer's suite up"
+        );
+
+        // An admin with an execution delay must not skip that delay by acting through the profile.
+        address delayedAdmin = makeAddr("delayedAdmin");
+        vm.prank(alice);
+        manager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, delayedAdmin, 1 days);
+        vm.prank(delayedAdmin);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessManager.AccessManagerUnauthorizedAccount.selector, delayedAdmin, AccessManagerSetupLib.ADMIN_ROLE
+            )
+        );
+        suiteProfile.applyTo(manager, address(token));
+
+        vm.prank(alice);
+        suiteProfile.applyTo(manager, address(token));
+        assertEq(
+            manager.getTargetFunctionRole(address(token), IERC3643.mint.selector),
+            RolesLib.forDomain(manager.domainOf(address(token)), RolesLib.Role.AGENT_MINTER),
+            "the issuer, an admin, applies the default profile"
+        );
+    }
+
+    function _assertOnlyAdminIs(TREXAccessManager manager, address admin, address profile) private view {
+        (bool adminHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, admin);
+        (bool profileHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, profile);
+        (bool factoryHolds,) = manager.hasRole(AccessManagerSetupLib.ADMIN_ROLE, address(trexFactory));
+        assertTrue(adminHolds, "accessManagerAdmin must hold ADMIN_ROLE");
+        assertFalse(profileHolds, "profile must not keep ADMIN_ROLE");
+        assertFalse(factoryHolds, "factory must not keep ADMIN_ROLE");
+    }
+
+    // ============ AccessManagerSetupLib.setupTREXFactoryRoles() Tests ============
+
+    /// @notice The two deploy selectors land on the suite deployer role, the three setters on the factory governor role.
+    function test_setupTREXFactoryRoles_SplitsDeploymentFromGovernance() public view {
+        address factory = address(trexFactory);
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuite.selector),
+            _suiteDeployerRole(),
+            "deployTREXSuite must be mapped to the suite deployer role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuiteIsolated.selector),
+            _suiteDeployerRole(),
+            "deployTREXSuiteIsolated must be mapped to the suite deployer role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setImplementationAuthority.selector),
+            _factoryGovernorRole(),
+            "setImplementationAuthority must be mapped to the factory governor role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setIdFactory.selector),
+            _factoryGovernorRole(),
+            "setIdFactory must be mapped to the factory governor role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setTrustedGatewayRegistry.selector),
+            _factoryGovernorRole(),
+            "setTrustedGatewayRegistry must be mapped to the factory governor role"
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(factory, ITREXFactory.setSuiteProfile.selector),
+            _factoryGovernorRole(),
+            "setSuiteProfile must be mapped to the factory governor role"
+        );
+    }
+
+    function test_setupTREXFactoryRoles_RevertWhen_OneRoleForBoth() public {
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotGovernFactory.selector);
+        this.setupFactoryRolesExternally(_factoryGovernorRole(), _factoryGovernorRole());
+    }
+
+    /// @notice A suite deployer that is a manager admin could remap the governor selectors or grant
+    ///         itself the governor role, which is the one-role shape with an extra step.
+    function test_setupTREXFactoryRoles_RevertWhen_SuiteDeployerIsAdmin() public {
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotGovernFactory.selector);
+        this.setupFactoryRolesExternally(AccessManagerSetupLib.ADMIN_ROLE, _factoryGovernorRole());
+    }
+
+    /// @notice An admin can do everything anyway, so the governor may be the admin role.
+    function test_setupTREXFactoryRoles_AcceptsAdminAsGovernor() public {
+        this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.ADMIN_ROLE);
+        assertEq(
+            accessManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.setSuiteProfile.selector),
+            AccessManagerSetupLib.ADMIN_ROLE
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.deployTREXSuite.selector),
+            _suiteDeployerRole()
+        );
+    }
+
+    function test_setupTREXFactoryRoles_RevertWhen_EitherRoleIsPublic() public {
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupFactoryRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE, _factoryGovernorRole());
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.PUBLIC_ROLE);
+    }
+
+    /// @notice Every platform setup function takes its role as data and refuses the public role.
+    function test_platformSetupFunctions_RevertWhen_RoleIsPublic() public {
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupIARolesExternally(AccessManagerSetupLib.PUBLIC_ROLE);
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupGatewayRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE);
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupIdentityFactoryPolicyExternally(AccessManagerSetupLib.PUBLIC_ROLE);
+    }
+
+    /// @notice A platform may pick any id, including a role it names itself.
+    function test_platformSetupFunctions_AcceptNamedRoles() public {
+        uint64 publisher = RolesLib.platform(bytes32("RELEASE_MANAGER"));
+        uint64 bridgeOps = RolesLib.platform(bytes32("BRIDGE_OPS"));
+        address authority = address(trexImplementationAuthority);
+
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, authority, publisher);
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(trustedGatewayRegistry), bridgeOps
+        );
+
+        assertEq(
+            accessManager.getTargetFunctionRole(authority, TREXImplementationAuthority.publish.selector), publisher
+        );
+        assertEq(
+            accessManager.getTargetFunctionRole(
+                address(trustedGatewayRegistry), TrustedGatewayRegistry.setTrustedGateway.selector
+            ),
+            bridgeOps
+        );
+    }
+
+    /// @notice An account holding only the suite deployer role deploys through both entry points and is refused
+    ///         on every factory setter.
+    function test_setupTREXFactoryRoles_SuiteDeployerDeploysButCannotGovern() public {
+        address issuer = makeAddr("issuer");
+        _grantSuiteDeployerRole(issuer);
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        vm.prank(issuer);
+        trexFactory.deployTREXSuite("issuer-shared", tokenDetails, claimDetails);
+        assertNotEq(trexFactory.getToken("issuer-shared"), address(0), "suite deployer must deploy a shared suite");
+
+        vm.prank(issuer);
+        trexFactory.deployTREXSuiteIsolated("issuer-isolated", tokenDetails, claimDetails);
+        assertNotEq(trexFactory.getToken("issuer-isolated"), address(0), "suite deployer must deploy an isolated suite");
+
+        // Deploy the replacements first: a `new` inside the gated call would absorb the expected revert.
+        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
+        IdentityFactory newIdFactory = _newIdentityFactory();
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(accessManager));
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setImplementationAuthority(address(newIA));
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setIdFactory(address(newIdFactory));
+
+        vm.prank(issuer);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, issuer));
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+    }
+
+    /// @notice An account holding only the factory governor role reconfigures the factory and is refused on
+    ///         both deploy entry points.
+    function test_setupTREXFactoryRoles_FactoryGovernorGovernsButCannotDeploy() public {
+        address governor = makeAddr("governor");
+        _grantFactoryGovernorRole(governor);
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
+
+        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
+        IdentityFactory newIdFactory = _newIdentityFactory();
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(accessManager));
+
+        vm.startPrank(governor);
+        trexFactory.setImplementationAuthority(address(newIA));
+        trexFactory.setIdFactory(address(newIdFactory));
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+        vm.stopPrank();
+        assertEq(trexFactory.getImplementationAuthority(), address(newIA), "factory governor must set the IA");
+        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "factory governor must set the ID factory");
+        assertEq(
+            trexFactory.getTrustedGatewayRegistry(), address(newRegistry), "factory governor must set the registry"
+        );
+
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, governor));
+        trexFactory.deployTREXSuite("governor-shared", tokenDetails, claimDetails);
+
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, governor));
+        trexFactory.deployTREXSuiteIsolated("governor-isolated", tokenDetails, claimDetails);
+    }
+
+    function setupFactoryRolesExternally(uint64 suiteDeployerRole, uint64 factoryGovernorRole) external {
+        AccessManagerSetupLib.setupTREXFactoryRoles(
+            accessManager, address(trexFactory), suiteDeployerRole, factoryGovernorRole
+        );
+    }
+
+    function setupIARolesExternally(uint64 versionManagerRole) external {
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(
+            accessManager, address(trexImplementationAuthority), versionManagerRole
+        );
+    }
+
+    function setupGatewayRolesExternally(uint64 interopManagerRole) external {
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(trustedGatewayRegistry), interopManagerRole
+        );
+    }
+
+    function setupIdentityFactoryPolicyExternally(uint64 assetDeployerRole) external {
+        AccessManagerSetupLib.setupIdentityFactoryPolicy(
+            accessManager, idFactory, address(trexFactory), assetDeployerRole
         );
     }
 

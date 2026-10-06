@@ -10,6 +10,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 import { TokenBaseUnitTest } from "test/unit/token/TokenBaseUnitTest.t.sol";
 
@@ -41,7 +42,9 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
         // The network's registry the token was deployed against; the token exposes no way to move it.
         registry = trustedGatewayRegistry;
-        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(registry));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(registry), RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
+        );
 
         _grantManagerRoles(identityManager);
         _grantInteropManagerRole(interopManager);

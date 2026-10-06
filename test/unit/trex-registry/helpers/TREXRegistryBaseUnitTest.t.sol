@@ -114,7 +114,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         // bindIdentityRegistry is gated on the transient IRS_BINDER role, not OWNER.
         _grantIRSBinderRole(deployer);
         // The registry writes to the IRS, whose mutators are IRS_WRITER-gated. `bindIdentityRegistry`
-        // does not confer that role, so grant it here exactly as commissioning does for a deployed IR.
+        // does not confer that role, so grant it here exactly as setupSuite does for a deployed IR.
         _grantStorageWriterRole(address(registry));
 
         // Bind the registry as an "identity registry" of the IRS so it can write to it.
