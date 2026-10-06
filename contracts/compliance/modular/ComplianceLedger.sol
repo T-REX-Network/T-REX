@@ -171,9 +171,9 @@ abstract contract ComplianceLedger is IComplianceLedger {
         ledger.pendingIn[toIdentity] -= amountMax;
     }
 
-    /// @dev One identity on both sides. Two wallets that resolve to nobody are not that.
+    /// @dev See {ComplianceLedgerLib-isRelocation}.
     function _isRelocation(address fromIdentity, address toIdentity) internal pure returns (bool) {
-        return fromIdentity != address(0) && fromIdentity == toIdentity;
+        return ComplianceLedgerLib.isRelocation(fromIdentity, toIdentity);
     }
 
     function _ledger() internal pure returns (ComplianceLedgerLib.Ledger storage) {

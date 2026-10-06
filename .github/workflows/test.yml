@@ -46,7 +46,7 @@ jobs:
         id: build
 
       - name: Run tests
-        run: forge test --gas-report
+        run: forge test
         id: test
 
       - name: Run coverage

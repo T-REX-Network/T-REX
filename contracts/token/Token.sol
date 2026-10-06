@@ -206,9 +206,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
     {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
-
-        (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, validationId);
-        if (toNative) _creditSettledToNative(fromKey, from, recipient, amount, validationId);
+        _settle(from, to, amount, validationId);
     }
 
     /// @inheritdoc IToken
@@ -374,7 +372,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev Brings `amount` back from `fromWallet`, a wallet on a satellite chain, onto `holder`'s free balance:
     ///  a bridged debit and a native mint (`Transfer(0x0, holder)`). The mirror of {_delegateOut}, applied on a
     ///  consumed burn proof; the flow checks that `holder` belongs to the burned wallet's identity, so ownership
-    ///  does not move here either. A settlement leg that crosses identities is {_settleToNative}.
+    ///  does not move here either. A settlement leg that crosses identities is {_settle}.
     function _recall(bytes memory fromWallet, address holder, uint256 amount) internal {
         bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, holder, amount);
         ERC20Upgradeable._update(address(0), holder, amount);
@@ -382,34 +380,21 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
     }
 
-    /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
-    ///  touch. See {TokenLedgerLib-bridgedTransfer}.
-    function _bridgedTransfer(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal {
-        TokenLedgerLib.bridgedTransfer(from, to, amount, validationId);
-    }
+    /// @dev Applies the settled leg of a validation: `from`'s satellite position down, and either `to`'s free
+    ///  balance up when `to` is on the reference chain (a native mint, `Transfer(0x0, to)`, and a distinct event
+    ///  because ownership moves between identities), or `to`'s satellite position up otherwise (a bridged
+    ///  transfer, nothing native). `validationId` is the validation the settlement consumed. The calling flow
+    ///  owns the lifecycle; the ledger checks the buckets and the envelopes only. There is no mirror leaving a
+    ///  native wallet: the compliance issues no validation whose sender is native, so the satellite executing
+    ///  one always holds the position it moves. The one path every settlement takes, {settleValidation} adding
+    ///  only the caller and pause checks.
+    function _settle(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) internal {
+        (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, validationId);
+        if (!toNative) return;
 
-    /// @dev Applies the settled leg of a validation whose sender is on a satellite and whose receiver is on the
-    ///  reference chain: the satellite position down, `to`'s free balance up. Same bucket arithmetic as {_recall}
-    ///  and a distinct event, because ownership moves between identities here. `validationId` is the validation
-    ///  the settlement consumed. The calling flow owns the lifecycle; the ledger checks the buckets and the
-    ///  envelope only. There is no mirror leaving a native wallet: the compliance issues no validation whose
-    ///  sender is native, so the satellite executing one always holds the position it moves.
-    function _settleToNative(bytes memory fromWallet, address to, uint256 amount, uint256 validationId) internal {
-        bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, to, amount);
-        _creditSettledToNative(fromKey, fromWallet, to, amount, validationId);
-    }
+        ERC20Upgradeable._update(address(0), recipient, amount);
 
-    /// @dev The native half of {_settleToNative}, once the ledger has debited the satellite position.
-    function _creditSettledToNative(
-        bytes32 fromKey,
-        bytes memory fromWallet,
-        address to,
-        uint256 amount,
-        uint256 validationId
-    ) private {
-        ERC20Upgradeable._update(address(0), to, amount);
-
-        emit EventsLib.SettledToNative(fromKey, to, validationId, fromWallet, amount);
+        emit EventsLib.SettledToNative(fromKey, recipient, validationId, from, amount);
     }
 
     /* ----- Utility Functions ----- */

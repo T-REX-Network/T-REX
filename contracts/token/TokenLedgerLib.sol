@@ -188,7 +188,7 @@ library TokenLedgerLib {
     /// @dev Routes a settled validation leg. A receiver on this chain is the token's to credit, so only the
     ///  bridged half is applied here: the sender's position is debited and `toNative` tells the token to mint
     ///  `amount` to `recipient` and name the movement. Any other receiver is a movement between two satellite
-    ///  wallets and is applied whole, see {bridgedTransfer}.
+    ///  wallets and is applied whole, see {_bridgedTransfer}.
     /// @return toNative Whether the receiver is a wallet on this chain.
     /// @return recipient That wallet, when `toNative`.
     /// @return fromKey The sender's key, when `toNative`.
@@ -202,11 +202,6 @@ library TokenLedgerLib {
         } else {
             _bridgedTransfer(from, to, amount, validationId);
         }
-    }
-
-    /// @dev Applies a settled movement between two satellite wallets. See {_bridgedTransfer}.
-    function bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
-        _bridgedTransfer(from, to, amount, validationId);
     }
 
     /// @dev The bridged half of every bridged-to-native transition: a bridged debit, `totalBridged` down. The

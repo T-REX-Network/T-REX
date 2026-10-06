@@ -124,11 +124,17 @@ library ComplianceLedgerLib {
         internal
         returns (bool identitiesReserved)
     {
-        if (fromIdentity != address(0) && fromIdentity == toIdentity) return false;
+        if (isRelocation(fromIdentity, toIdentity)) return false;
         Ledger storage ledger = layout();
         ledger.pendingOut[fromIdentity] += amountMax;
         ledger.pendingIn[toIdentity] += amountMax;
         return true;
+    }
+
+    /// @dev One identity on both sides. Two wallets that resolve to nobody are not that. The one definition of
+    ///  a relocation, for the ledger and the validation flow alike.
+    function isRelocation(address fromIdentity, address toIdentity) internal pure returns (bool) {
+        return fromIdentity != address(0) && fromIdentity == toIdentity;
     }
 
     function layout() internal pure returns (Ledger storage ledger) {
