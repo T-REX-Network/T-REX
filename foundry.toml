@@ -18,6 +18,13 @@ optimizer_runs = 200
 via_ir = false
 evm_version = "cancun"
 
+# Bytecode metadata: don't append the CBOR-encoded metadata (and its IPFS/swarm hash) to the
+# runtime bytecode. The deployed bytecode then depends only on the compiled code, not on comments,
+# file paths or formatting, which keeps builds reproducible (stable CREATE2 addresses, easier
+# verification) and saves a few bytes on contracts close to the EIP-170 size limit.
+cbor_metadata = false
+bytecode_hash = "none"
+
 [profile.default.fuzz]
 runs = 2000
 
