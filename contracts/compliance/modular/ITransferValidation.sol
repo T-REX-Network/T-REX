@@ -71,6 +71,17 @@ pragma solidity 0.8.30;
  */
 interface ITransferValidation {
 
+    event TransferValidationIssued(
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        bytes spender,
+        uint256 amountMin,
+        uint256 amountMax,
+        uint64 expiry,
+        uint64 reconciliationWindow
+    );
+
     /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
     /// the keeper gave up, and what is still reserved are all read off this one value.
     ///
