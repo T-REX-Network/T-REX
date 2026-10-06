@@ -30,14 +30,39 @@ abstract contract AccessManagerHelper is Test {
         return accessManager;
     }
 
-    /// @notice Wires the factory selectors (deployTREXSuite, setters) to the OWNER role.
-    function _setupFactoryRoles(address trexFactory) internal {
-        AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, trexFactory);
+    /// @notice The two factory roles the tests pick. The suite deployer role is a named platform role, which is
+    ///         how a platform mints one without a release; governance stays on the platform OWNER.
+    function _suiteDeployerRole() internal pure returns (uint64) {
+        return RolesLib.platform(bytes32("TOKEN_ISSUER"));
     }
 
-    /// @notice Wires the TREXImplementationAuthority governance selectors to the OWNER role for `ia`.
-    function _authorizeIAGovernance(address ia) internal {
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia);
+    function _factoryGovernorRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.OWNER);
+    }
+
+    function _versionManagerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER);
+    }
+
+    function _interopManagerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER);
+    }
+
+    function _assetDeployerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER);
+    }
+
+    /// @notice Wires the two deploy selectors to the suite deployer role and the three setters to the
+    ///         factory governor role.
+    function _setupFactoryRoles(address trexFactory) internal {
+        AccessManagerSetupLib.setupTREXFactoryRoles(
+            accessManager, trexFactory, _suiteDeployerRole(), _factoryGovernorRole()
+        );
+    }
+
+    /// @notice Wires the TREXImplementationAuthority version selectors to the version manager role for `ia`.
+    function _setupImplementationAuthorityRoles(address ia) internal {
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia, _versionManagerRole());
     }
 
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
@@ -53,9 +78,19 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.forDomain(DOMAIN, role);
     }
 
+    /// @notice Full-powers test account: suite OWNER, factory governance and suite deployment.
     function _grantOwnerRole(address account) internal {
         accessManager.grantRole(_role(RolesLib.Role.OWNER), account, NO_EXECUTION_DELAY);
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.OWNER), account, NO_EXECUTION_DELAY);
+        _grantFactoryGovernorRole(account);
+        _grantSuiteDeployerRole(account);
+    }
+
+    function _grantSuiteDeployerRole(address account) internal {
+        accessManager.grantRole(_suiteDeployerRole(), account, NO_EXECUTION_DELAY);
+    }
+
+    function _grantFactoryGovernorRole(address account) internal {
+        accessManager.grantRole(_factoryGovernorRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantStorageWriterRole(address account) internal {
@@ -68,11 +103,11 @@ abstract contract AccessManagerHelper is Test {
 
     /// @notice Grants VERSION_MANAGER, which gates publish/upgrade on the TREXImplementationAuthority.
     function _grantVersionManagerRole(address account) internal {
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), account, NO_EXECUTION_DELAY);
+        accessManager.grantRole(_versionManagerRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantInteropManagerRole(address account) internal {
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER), account, NO_EXECUTION_DELAY);
+        accessManager.grantRole(_interopManagerRole(), account, NO_EXECUTION_DELAY);
     }
 
     /// @notice Grants VALIDATION_KEEPER, which gates the discard of expired validations on ModularCompliance.
@@ -92,8 +127,8 @@ abstract contract AccessManagerHelper is Test {
 
     /// @notice Grants ASSET_DEPLOYER, which the ONCHAINID IdentityFactory resolves when minting
     ///         IdentityTypes.ASSET identities (the TREXFactory token-OID auto-mint path).
-    function _grantTokenOidMinterRole(address account) internal {
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), account, NO_EXECUTION_DELAY);
+    function _grantAssetDeployerRole(address account) internal {
+        accessManager.grantRole(_assetDeployerRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantAgentAdminRole(address account) internal {
