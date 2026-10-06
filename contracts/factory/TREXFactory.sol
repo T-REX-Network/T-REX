@@ -82,7 +82,7 @@ import { EventsLib } from "../libraries/EventsLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { IdentityRegistryStorage } from "../registry/implementation/IdentityRegistryStorage.sol";
 import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
-import { Token } from "../token/Token.sol";
+import { IToken } from "../token/IToken.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ISuiteProfile } from "./ISuiteProfile.sol";
@@ -546,7 +546,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return _beaconProxyBytecode(
             tokenBeacon,
             abi.encodeCall(
-                Token.init,
+                IToken.init,
                 (
                     tokenDetails.name,
                     tokenDetails.symbol,
