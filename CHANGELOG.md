@@ -513,15 +513,30 @@ All notable changes to this project will be documented in this file.
   and uri to the claim signature), `createIdentityFor` no longer takes a module bundle (modules are
   registered per identity type on the IdentityFactory via `setIdentityTypeModules`), and
   `setIdentityTypePolicy` gained a `singleBinding` flag (ASSET registers as single-binding).
-- **An identity resolves to itself** (ONCHAINID dependency repinned to the merge of
-  T-REX-Network/ONCHAINID#97). The registry attributes positions through
+- **An identity resolves to itself** (ONCHAINID dependency repinned from `edcc9f3` to `4c6d074`, the
+  merge of T-REX-Network/ONCHAINID#97). The registry attributes positions through
   `getIdentityIncludingRevoked`, which previously answered nothing for an identity's own address, so
   an identity could not hold the token on that address: `identity()`, `contains()` and `isVerified()`
   returned the zero identity and a mint or transfer to it reverted with `UnverifiedIdentity`. The
   factory now answers `(identity, Active)` on every resolution view, so an identity is attributed and
   admitted on its own address with no local registration, and `getVerifiedDetails` reports it as
-  `Active`. Ripple absorbed here: ONCHAINID folded `addClaimByTrustedIssuer` into `addClaim`, so the
-  test module bundle drops that selector.
+  `Active`. The self-resolution entry is seeded outside the identity's account set, so it can never be
+  revoked; T-REX now pins that, since the attribution depends on it.
+  - The range is 26 commits and carries five more upstream PRs than the fix itself: ONCHAINID #88
+    (`caller` on the observability events), #89 (unused imports and errors removed), #91 (trusted
+    issuers add claims through `addClaim`), #92 (`getIdentity` self-resolution), #93 (deployment
+    tooling) and #97 (the remaining resolution views).
+  - **Event signatures break.** ONCHAINID #88 appends a `caller` (or `deployer` / `executor` /
+    `approver`) argument to the observability events, which changes their topic0: `AccountLinked`,
+    `AccountRevoked`, `IdentityTypePolicySet`, `IdentityTypePolicyRemoved`, `IdentityTypeModulesSet`,
+    `TrustedGatewaySet`, `TrustedVerifierSet`, `BeaconInitialized`, `PendingCrossChainLinkProposed`
+    (also gains `gateway` and `receiveId`), `BeaconUpgraded` (also gains `version`), `ClaimRevoked`,
+    `ClaimAddedTo`, `TopicAdded` / `TopicUpdated` / `TopicRemoved`, `Approved` and `Executed`.
+    `IdentityDeployed` is new. No T-REX contract consumes these, so nothing here changed, but the
+    Identity SDK and any indexer do: a filter built against the old signatures silently stops matching
+    rather than failing. Rebuild those filters when taking this version.
+  - Ripple absorbed here: ONCHAINID folded `addClaimByTrustedIssuer` into `addClaim`, so the test
+    module bundle drops that selector.
 - **`TREXFactory` module plumbing removed**: identity module configuration now belongs to the
   ONCHAINID IdentityFactory, so `setIdentityModules` / `getIdentityModules`, the constructor's
   module parameters, the `IdentityModulesSet` event and the `IdentityModulesLib` library are gone.
