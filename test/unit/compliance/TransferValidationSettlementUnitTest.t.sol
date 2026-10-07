@@ -6,6 +6,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -345,6 +346,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(toWallet, WalletKeyLib.canonicalKey(toSat));
         assertEq(amountMin, 50);
         assertEq(amountMax, 50);
+        assertEq(kind, MovementKindLib.CROSS_CHAIN, "a settlement is the cross-chain kind a tracker sees");
         assertFalse(issuance);
     }
 
