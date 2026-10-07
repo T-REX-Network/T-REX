@@ -156,7 +156,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
         assertTrue(_isManager(oid, manager));
         assertFalse(_isManager(oid, address(trexFactory)));
-        assertFalse(_isManager(oid, address(accessManager)));
+        assertFalse(_isManager(oid, address(suiteManager)));
 
         vm.prank(issuerAdmin);
         TREXAccessManager(manager).execute(oid, _addKeyCall(another));
@@ -296,20 +296,20 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         vm.recordLogs();
         vm.prank(deployer);
         trexFactory.deployTREXSuiteIsolated(
-            "isolated-supplied", _details(address(accessManager), address(0)), _noClaims()
+            "isolated-supplied", _details(address(suiteManager), address(0)), _noClaims()
         );
         ITREXImplementationAuthority.SuiteBeacons memory beacons = _isolatedBeacons();
 
         assertEq(beacons.accessManagerBeacon, address(0));
-        assertEq(IERC173(trexFactory.getToken("isolated-supplied")).owner(), address(accessManager));
+        assertEq(IERC173(trexFactory.getToken("isolated-supplied")).owner(), address(suiteManager));
     }
 
     function test_deployTREXSuite_Success_SuppliedManagerIsUsedAsIs() public {
         vm.prank(deployer);
-        trexFactory.deployTREXSuite("supplied", _details(address(accessManager), issuerAdmin), _noClaims());
+        trexFactory.deployTREXSuite("supplied", _details(address(suiteManager), issuerAdmin), _noClaims());
 
-        assertEq(IERC173(trexFactory.getToken("supplied")).owner(), address(accessManager));
-        (bool issuerIsAdmin,) = accessManager.hasRole(accessManager.ADMIN_ROLE(), issuerAdmin);
+        assertEq(IERC173(trexFactory.getToken("supplied")).owner(), address(suiteManager));
+        (bool issuerIsAdmin,) = suiteManager.hasRole(suiteManager.ADMIN_ROLE(), issuerAdmin);
         assertFalse(issuerIsAdmin);
     }
 

@@ -39,12 +39,10 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         reversed = TransferValidationHarness(
             BeaconProxyDeployer.newProxy(
                 mcBeacon,
-                abi.encodeCall(
-                    ModularCompliance.init, (token, address(accessManager), new address[](0), new bytes[](0))
-                )
+                abi.encodeCall(ModularCompliance.init, (token, address(suiteManager), new address[](0), new bytes[](0)))
             )
         );
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(reversed), 1);
+        AccessManagerSetupLib.setupModularComplianceRoles(suiteManager, address(reversed), 1);
 
         a = RuleOnlyModule(
             address(new ModuleProxy(address(new RuleOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))

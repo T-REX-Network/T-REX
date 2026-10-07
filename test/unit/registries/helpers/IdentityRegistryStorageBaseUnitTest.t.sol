@@ -21,7 +21,7 @@ import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 abstract contract IdentityRegistryStorageBaseUnitTest is Test {
 
     IdentityRegistryStorage internal irs;
-    AccessManager internal accessManager;
+    AccessManager internal suiteManager;
 
     address internal registry = makeAddr("registry");
     address internal idFactory = makeAddr("idFactory");
@@ -35,19 +35,19 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
     address internal otherIdentity = makeAddr("otherIdentity");
 
     function setUp() public virtual {
-        accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
+        suiteManager = new AccessManager(address(this));
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(
             BeaconProxyDeployer.newProxy(
-                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), address(0)))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(suiteManager, address(irs), 1);
 
-        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(registry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));
         vm.mockCall(
             idFactory,
@@ -61,7 +61,7 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
         );
 
         // A second registry built on another factory: it knows `otherWallet`, the first one does not.
-        vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(otherRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(otherIdFactory));
         vm.mockCall(
             otherIdFactory,

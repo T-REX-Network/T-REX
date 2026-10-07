@@ -122,7 +122,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
+        AccessManagerSetupLib.setupTREXRegistryRoles(suiteManager, address(registry), DOMAIN);
 
         address second = makeAddr("secondBatchUser");
 
@@ -227,7 +227,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
         registry.setIdentityRegistryStorage(address(replacement));
 
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(replacement), DOMAIN);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(suiteManager, address(replacement), DOMAIN);
         vm.prank(deployer);
         replacement.bindIdentityRegistry(address(registry));
 
@@ -244,7 +244,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
             address(
                 new ERC1967Proxy(
                     address(identityRegistryStorageImpl),
-                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), initialIR))
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), initialIR))
                 )
             )
         );

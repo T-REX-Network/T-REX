@@ -18,23 +18,31 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
     /// @dev The registry answers `topicsRegistry()` and `issuersRegistry()` with its own address,
     ///      so it is listed once. Listing it three times would make the rotation tests rotate the same
     ///      contract repeatedly, and every call after the first would come from a stale authority.
-    function _shimmedContracts() internal view returns (IERC173[] memory contractsList) {
+    /// @dev The suite contracts answer to the suite manager and the platform contracts to the platform
+    ///      manager, so each entry carries the authority a test must act as.
+    function _shimmedContracts() internal view returns (IERC173[] memory contractsList, address[] memory authorities) {
         contractsList = new IERC173[](6);
+        authorities = new address[](6);
         contractsList[0] = IERC173(address(token));
         contractsList[1] = IERC173(address(token.identityRegistry()));
         contractsList[2] = IERC173(address(token.compliance()));
         contractsList[3] = IERC173(address(token.identityRegistry().identityStorage()));
         contractsList[4] = IERC173(address(trexFactory));
         contractsList[5] = IERC173(address(trexImplementationAuthority));
+        for (uint256 i = 0; i < 4; i++) {
+            authorities[i] = address(suiteManager);
+        }
+        authorities[4] = address(platformManager);
+        authorities[5] = address(platformManager);
     }
 
     // ============ owner() Tests ============
 
     /// @notice owner() mirrors the AccessManager set as the contract authority.
     function test_owner_ReturnsAccessManager() public view {
-        IERC173[] memory contractsList = _shimmedContracts();
+        (IERC173[] memory contractsList, address[] memory authorities) = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
-            assertEq(contractsList[i].owner(), address(accessManager));
+            assertEq(contractsList[i].owner(), authorities[i]);
         }
     }
 
@@ -44,7 +52,7 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
         AccessManager newAuthority = new AccessManager(address(this));
 
         // The current authority (the AccessManager) is the only address allowed to call setAuthority.
-        vm.prank(address(accessManager));
+        vm.prank(address(suiteManager));
         IAccessManaged(address(token)).setAuthority(address(newAuthority));
 
         assertEq(IERC173(address(token)).owner(), address(newAuthority));
@@ -55,7 +63,7 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
     function test_setAuthority_RotatesNonUpgradeableContract() public {
         AccessManager newAuthority = new AccessManager(address(this));
 
-        vm.prank(address(accessManager));
+        vm.prank(address(platformManager));
         IAccessManaged(address(trexFactory)).setAuthority(address(newAuthority));
 
         assertEq(IERC173(address(trexFactory)).owner(), address(newAuthority));
@@ -67,7 +75,7 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
     ///         (the AccessManager) may drive. A call from anyone else reverts with AccessManagedUnauthorized.
     function test_transferOwnership_RevertWhen_NotAuthority() public {
         AccessManager newAuthority = new AccessManager(address(this));
-        IERC173[] memory contractsList = _shimmedContracts();
+        (IERC173[] memory contractsList,) = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
             vm.prank(deployer);
             vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, deployer));
@@ -79,9 +87,9 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
     ///         reflects the new AccessManager.
     function test_transferOwnership_Success_WhenCalledByAuthority() public {
         AccessManager newAuthority = new AccessManager(address(this));
-        IERC173[] memory contractsList = _shimmedContracts();
+        (IERC173[] memory contractsList, address[] memory authorities) = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
-            vm.prank(address(accessManager));
+            vm.prank(authorities[i]);
             contractsList[i].transferOwnership(address(newAuthority));
             assertEq(contractsList[i].owner(), address(newAuthority));
         }

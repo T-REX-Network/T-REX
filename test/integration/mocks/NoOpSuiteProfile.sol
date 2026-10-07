@@ -11,9 +11,9 @@ contract NoOpSuiteProfile is ISuiteProfile {
     TREXAccessManager public lastManager;
     address public lastToken;
 
-    function applyTo(TREXAccessManager accessManager, address token) external {
+    function applyTo(TREXAccessManager suiteManager, address token) external {
         calls++;
-        lastManager = accessManager;
+        lastManager = suiteManager;
         lastToken = token;
     }
 

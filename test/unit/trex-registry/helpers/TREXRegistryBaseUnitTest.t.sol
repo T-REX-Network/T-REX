@@ -67,7 +67,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     Account public claimIssuerSigner = makeAccount("claimIssuerSigner");
 
     function setUp() public virtual {
-        _deployAccessManager();
+        _deploySuiteManager();
 
         _deployOnchainId();
 
@@ -78,7 +78,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
                 new ERC1967Proxy(
                     address(identityRegistryStorageImpl),
                     // No initial identity registry: the registry is deployed below and bound explicitly.
-                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), address(0)))
                 )
             )
         );
@@ -93,7 +93,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
                         TREXRegistry.init,
                         (
                             address(identityRegistryStorage),
-                            address(accessManager),
+                            address(suiteManager),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)
@@ -105,7 +105,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
 
         // Wire AccessManager roles for the new contracts (this contract is the AccessManager admin).
         _setupTREXRegistryRoles(address(registry));
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(identityRegistryStorage), DOMAIN);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(suiteManager, address(identityRegistryStorage), DOMAIN);
 
         // Grant standard owner/agent roles to deployer/agent so they can drive the registry.
         _grantOwnerRole(deployer);
@@ -133,9 +133,9 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     ///      its enshrined registry immutable) -> `initializeBeacon`.
     function _deployOnchainId() internal {
         vm.startPrank(deployer);
-        idFactory = new IdentityFactory(address(accessManager));
+        idFactory = new IdentityFactory(address(suiteManager));
         keyApprovalModule = new KeyApprovalModule();
-        reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
+        reputationRegistry = new ReputationRegistry(address(suiteManager), address(idFactory));
         validatorModule = new ERC734Validator(address(idFactory), address(reputationRegistry));
         identityImplementation = new Identity(address(validatorModule), address(idFactory));
         vm.stopPrank();
@@ -154,7 +154,7 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
     ///      CLAIM_ISSUER are open for test convenience; ASSET stays gated and single-binding as in
     ///      production. Modules are registered per type on the factory; deploy callers pass none.
     function _registerIdentityTypePolicies(IdentityFactory factory) internal {
-        uint64 publicRole = accessManager.PUBLIC_ROLE();
+        uint64 publicRole = suiteManager.PUBLIC_ROLE();
         Structs.ModuleInstall[] memory standardModules =
             IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule));
 
@@ -222,14 +222,14 @@ abstract contract TREXRegistryBaseUnitTest is Test, AccessManagerHelper {
         ownerFunctions[9] = IERC3643ClaimTopicsRegistry.removeClaimTopic.selector;
         ownerFunctions[10] = TREXRegistry.addClaimTopicForIdentityType.selector;
         ownerFunctions[11] = TREXRegistry.removeClaimTopicForIdentityType.selector;
-        IAccessManager(accessManager).setTargetFunctionRole(registryAddress, ownerFunctions, _role(RolesLib.Role.OWNER));
+        IAccessManager(suiteManager).setTargetFunctionRole(registryAddress, ownerFunctions, _role(RolesLib.Role.OWNER));
 
         // ------ AGENT role ------
         bytes4[] memory agentFunctions = new bytes4[](3);
         agentFunctions[0] = IERC3643IdentityRegistry.updateIdentity.selector;
         agentFunctions[1] = IERC3643IdentityRegistry.deleteIdentity.selector;
         agentFunctions[2] = IERC3643IdentityRegistry.registerIdentity.selector;
-        IAccessManager(accessManager).setTargetFunctionRole(registryAddress, agentFunctions, _role(RolesLib.Role.AGENT));
+        IAccessManager(suiteManager).setTargetFunctionRole(registryAddress, agentFunctions, _role(RolesLib.Role.AGENT));
     }
 
     /// @notice Creates a claim signed now with no expiry and adds it to `_identity`.
