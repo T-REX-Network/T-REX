@@ -29,8 +29,8 @@ pragma solidity 0.8.30;
 /// @dev Everything a compliance module implements. One interface, no sub-interfaces, no bitmask.
 ///
 /// A module says what it is through {moduleTypes}, read once at binding, and the compliance calls it only
-/// where it said so. One method per type, named by when it runs, the same three for every module:
-/// - `BEFORE`: asked {beforeTransfer} before anything moves, the largest amount it allows; the compliance
+/// where it said so. One method per type, two questions and one notice, the same three for every module:
+/// - `TRANSFER_CHECK`: asked {checkTransfer} before anything moves, the largest amount it allows; the compliance
 ///   takes the minimum. A view, so it is also what `canTransfer` previews and what narrows a cross-chain
 ///   issuance;
 /// - `SPENDER`: asked {checkSpender}, whether the operator named in the context may execute the movement;
@@ -51,8 +51,8 @@ interface IModule {
     /// @dev What a module is: which of the three methods the compliance calls on it. A module names any
     ///  combination, never the same one twice.
     enum ModuleType {
-        /// Answers {beforeTransfer} before the move. The only question asked at a cross-chain issuance.
-        BEFORE,
+        /// Answers {checkTransfer} before the move. The only question asked at a cross-chain issuance.
+        TRANSFER_CHECK,
         /// Answers {checkSpender}.
         SPENDER,
         /// Is told {afterTransfer} after the ledger moved.
@@ -125,12 +125,14 @@ interface IModule {
      *  a native transfer, a mint, a burn, a forced transfer, a recovery and a settled validation
      *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, `ctx.kind` says
      *  what produced it, a zero `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and
-     *  `toWallet` mean a burn. That is the convention {beforeTransfer} already uses, so one function covers
+     *  `toWallet` mean a burn. That is the convention {checkTransfer} already uses, so one function covers
      *  what three hooks used to. The ledger describes the state after the move; what it was before is this
      *  state plus or minus `ctx.amountMax`
      *  reverting stops the movement: a module that cannot record a move has to stop it, and a module that
-     *  judges the state the movement left behind refuses it the same way, with its own error. `forceRemoveModule`
-     *  is the escape hatch for a module that reverts everywhere
+     *  judges the state the movement left behind refuses it the same way, with its own error. Such a veto is
+     *  for `TRANSFER` and `MINT`: on a settlement the satellite already executed, so a revert only blocks the
+     *  delivery, and a forced transfer or a recovery is the agent's override. `forceRemoveModule` is the
+     *  escape hatch for a module that reverts everywhere
      *  MUST NOT revert on a `ctx.kind` it does not know: a kind added later has to keep moving through
      *  modules deployed before it. The module decides what an unknown kind means for its own count, on
      *  purpose: left out, like an agent's movement, or recorded, like any change of ownership
@@ -140,7 +142,7 @@ interface IModule {
     function afterTransfer(TransferContext calldata ctx) external;
 
     /**
-     *  @dev the largest amount this rule allows to move. Asked, never told: a view, called on every `BEFORE`
+     *  @dev the largest amount this rule allows to move. Asked, never told: a view, called on every `TRANSFER_CHECK`
      *  module before anything moves, on a native transfer and a mint (`canTransfer`) and on the issuance of a
      *  validation (`ctx.isIssuance` set). Nothing can be recorded here; a module that counts does so in
      *  {afterTransfer}
@@ -161,7 +163,7 @@ interface IModule {
      *  @param ctx the movement, see {TransferContext}
      *  @return the largest amount allowed
      */
-    function beforeTransfer(TransferContext calldata ctx) external view returns (uint256);
+    function checkTransfer(TransferContext calldata ctx) external view returns (uint256);
 
     /**
      *  @dev whether `ctx.spender` may execute the movement on the sender's behalf. Called on every `SPENDER`

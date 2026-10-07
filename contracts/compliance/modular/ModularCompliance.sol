@@ -92,7 +92,7 @@ import { IModule } from "./modules/IModule.sol";
 /// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
-/// `BEFORE` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
+/// `TRANSFER_CHECK` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
 /// every `AFTER` module what happened. A mint and a burn are the same movement with one side missing, so the
 /// three base hooks differ only in which side they fill in. A module is kept in one list per type it named at
 /// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
@@ -310,7 +310,7 @@ contract ModularCompliance is
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
 
-    /// @dev Rule evaluation: the amount must be at most the smallest amount any `BEFORE` module allows.
+    /// @dev Rule evaluation: the amount must be at most the smallest amount any `TRANSFER_CHECK` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
     ///  A wallet that resolves to no identity is refused outright while a rule is bound, on either side. Every
@@ -319,11 +319,11 @@ contract ModularCompliance is
     ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
     ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
-        if (_moduleSet().byType[IModule.ModuleType.BEFORE].length() == 0) return true;
+        if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
         if (to != address(0) && ctx.toIdentity == address(0)) return false;
-        return value <= _callBeforeTransfer(ctx);
+        return value <= _callCheckTransfer(ctx);
     }
 
     /// @dev A transfer: the position follows the tokens, then every `AFTER` module is told.
@@ -412,14 +412,14 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The smallest answer of the `BEFORE` modules. `beforeTransfer` is a view on the interface, so each
+    /// @dev The smallest answer of the `TRANSFER_CHECK` modules. `checkTransfer` is a view on the interface, so each
     ///  call is a `staticcall` and a module that writes there reverts.
-    function _callBeforeTransfer(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
+    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
         allowed = type(uint256).max;
-        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.BEFORE];
+        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK];
         uint256 length = rules.length();
         for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).beforeTransfer(ctx);
+            uint256 answer = IModule(rules.at(i)).checkTransfer(ctx);
             if (answer < allowed) allowed = answer;
         }
     }

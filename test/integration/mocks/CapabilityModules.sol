@@ -14,7 +14,7 @@ abstract contract RecordingModule is AbstractModuleUpgradeable {
     uint256 public mintActionCalls;
     uint256 public burnActionCalls;
 
-    /// @dev What the fixture answers from `beforeTransfer`. Set in `initialize`, not through a field
+    /// @dev What the fixture answers from `checkTransfer`. Set in `initialize`, not through a field
     ///      initializer: those run in the implementation's constructor and never reach proxy storage.
     uint256 internal _allowed;
 
@@ -97,16 +97,16 @@ contract RevertingAfterModule is RecordingModule {
 
 }
 
-/// @dev A `BEFORE` that reads `kind`: it refuses every mint and allows everything else.
+/// @dev A `TRANSFER_CHECK` that reads `kind`: it refuses every mint and allows everything else.
 contract NoMintModule is RecordingModule {
 
-    function beforeTransfer(TransferContext calldata ctx) external pure override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external pure override returns (uint256) {
         return ctx.kind == MovementKindLib.MINT ? 0 : type(uint256).max;
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -118,13 +118,13 @@ contract NoMintModule is RecordingModule {
 /// @dev A rule and nothing else.
 contract RuleOnlyModule is RecordingModule {
 
-    function beforeTransfer(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -173,7 +173,7 @@ contract TrackerOnlyModule is RecordingModule {
 /// @dev Both vets a movement and keeps a count of it, the shape of a rule with a counter of its own.
 contract RuleAndTrackerModule is RecordingModule {
 
-    function beforeTransfer(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
@@ -183,7 +183,7 @@ contract RuleAndTrackerModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.AFTER;
     }
 
@@ -196,7 +196,7 @@ contract RuleAndTrackerModule is RecordingModule {
 /// @dev Names all three types, so a compliance routes every question at it.
 contract AllTypesModule is RecordingModule {
 
-    function beforeTransfer(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
@@ -210,7 +210,7 @@ contract AllTypesModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](3);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.SPENDER;
         types[2] = ModuleType.AFTER;
     }
@@ -239,8 +239,8 @@ contract DuplicateTypeModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.BEFORE;
-        types[1] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
+        types[1] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -266,14 +266,14 @@ contract WritingRuleModule {
         _bound[compliance] = false;
     }
 
-    function beforeTransfer(IModule.TransferContext calldata) external returns (uint256) {
+    function checkTransfer(IModule.TransferContext calldata) external returns (uint256) {
         writes++;
         return type(uint256).max;
     }
 
     function moduleTypes() external pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](1);
-        types[0] = IModule.ModuleType.BEFORE;
+        types[0] = IModule.ModuleType.TRANSFER_CHECK;
     }
 
     function isComplianceBound(address compliance) external view returns (bool) {
@@ -308,14 +308,14 @@ contract LockedSenderModule is RecordingModule {
         lockedOf[msg.sender][identity] = locked;
     }
 
-    function beforeTransfer(TransferContext calldata ctx) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.fromIdentity == address(0)) return type(uint256).max;
         return lockedOf[ctx.compliance][ctx.fromIdentity] ? 0 : type(uint256).max;
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -333,7 +333,7 @@ contract CappedRecipientModule is RecordingModule {
         capOf[msg.sender] = cap;
     }
 
-    function beforeTransfer(TransferContext calldata ctx) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
         uint256 cap = capOf[ctx.compliance];
         if (cap == 0) return type(uint256).max;
@@ -348,7 +348,7 @@ contract CappedRecipientModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.AFTER;
     }
 
@@ -362,7 +362,7 @@ contract CappedRecipientModule is RecordingModule {
 ///      actions stay at the base default, so a mint is the only movement it records.
 contract RuleAndMintTrackerModule is RecordingModule {
 
-    function beforeTransfer(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
@@ -372,7 +372,7 @@ contract RuleAndMintTrackerModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.AFTER;
     }
 
@@ -386,7 +386,7 @@ contract RuleAndMintTrackerModule is RecordingModule {
 ///      it for an amount. Covers the desync direction that would silently drop a rule.
 contract UndeclaredRuleModule is RecordingModule {
 
-    function beforeTransfer(TransferContext calldata) external pure override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external pure override returns (uint256) {
         return 0;
     }
 

@@ -373,8 +373,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             spender: "",
             data: ""
         });
-        vm.expectCall(address(firstRule), abi.encodeCall(IModule.beforeTransfer, (expected)), 1);
-        vm.expectCall(address(secondRule), abi.encodeCall(IModule.beforeTransfer, (expected)), 1);
+        vm.expectCall(address(firstRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
+        vm.expectCall(address(secondRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
         _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(tracker.totalHookCalls(), 0, "no tracker is told: nothing moved yet");

@@ -167,10 +167,10 @@ abstract contract AbstractModuleUpgradeable is
     function afterTransfer(TransferContext calldata) external virtual onlyComplianceCall { }
 
     /**
-     *  @dev See {IModule-beforeTransfer}.
-     *  Default no limit: a module overrides it only when it names `BEFORE`.
+     *  @dev See {IModule-checkTransfer}.
+     *  Default no limit: a module overrides it only when it names `TRANSFER_CHECK`.
      */
-    function beforeTransfer(TransferContext calldata) external view virtual returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view virtual returns (uint256) {
         return type(uint256).max;
     }
 

@@ -99,10 +99,10 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
     }
 
     /**
-     *  @dev See {IModule-beforeTransfer}.
+     *  @dev See {IModule-checkTransfer}.
      *  never limits anything (just a test module)
      */
-    function beforeTransfer(TransferContext calldata) external pure override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external pure override returns (uint256) {
         return type(uint256).max;
     }
 
@@ -133,7 +133,7 @@ contract ModuleNotPnP is AbstractModuleUpgradeable {
     /// @dev See {IModule-moduleTypes}.
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
 }

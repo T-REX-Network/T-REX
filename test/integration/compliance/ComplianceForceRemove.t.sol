@@ -113,7 +113,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.transfer(bob, 100);
 
-        _forceRemove(hostage, IModule.ModuleType.BEFORE);
+        _forceRemove(hostage, IModule.ModuleType.TRANSFER_CHECK);
 
         vm.prank(alice);
         token.transfer(bob, 100);
@@ -304,7 +304,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
 
     function _assertNoRouting(address module) private view {
         IModule.ModuleType[3] memory types =
-            [IModule.ModuleType.BEFORE, IModule.ModuleType.SPENDER, IModule.ModuleType.AFTER];
+            [IModule.ModuleType.TRANSFER_CHECK, IModule.ModuleType.SPENDER, IModule.ModuleType.AFTER];
         for (uint256 i = 0; i < types.length; i++) {
             address[] memory routed = mc.getModulesByType(types[i]);
             for (uint256 j = 0; j < routed.length; j++) {

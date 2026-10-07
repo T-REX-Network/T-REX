@@ -21,37 +21,45 @@ two wallets of one identity changes none of them: relocating your own tokens is 
 
 ## The three kinds of module
 
-Every module implements the same three methods, named by when they run, and names in `moduleTypes()` the
-ones it answers. The compliance calls a module only where it said so.
+Every module implements the same three methods, two questions and one notice, and names in `moduleTypes()`
+the ones it answers. The compliance calls a module only where it said so.
 
-Two are questions and one is a notice. `beforeTransfer` and `checkSpender` are views: the compliance asks
+Two are questions and one is a notice. `checkTransfer` and `checkSpender` are views: the compliance asks
 them under `staticcall`, before anything moves, and a module cannot record anything there. `afterTransfer`
 is the notice: it is told once the ledger moved, and that is where a module counts.
 
 | Type | Method | When | Sees |
 |---|---|---|---|
-| `BEFORE` | `beforeTransfer(ctx)` view | before a transfer or a mint, and when a cross-chain validation is issued | the ledger before the move |
+| `TRANSFER_CHECK` | `checkTransfer(ctx)` view | before a transfer or a mint, and when a cross-chain validation is issued | the ledger before the move |
 | `SPENDER` | `checkSpender(ctx)` view | before an allowance is spent in `transferFrom`, and when a validation names a spender | who executes |
 | `AFTER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated | the ledger after the move |
 
 A module may name any combination. It inherits `AbstractModuleUpgradeable`, which answers every question
 neutrally, and overrides only the methods its types cover.
 
-The order on a native movement is: `canTransfer` asks the `BEFORE` modules; the token moves the balances and
+The order on a native movement is: `canTransfer` asks the `TRANSFER_CHECK` modules; the token moves the balances and
 calls the compliance; the compliance moves the positions and tells the `AFTER` modules. A settlement asks
-nobody and tells the `AFTER` modules once the positions moved. The issuance of a validation asks `BEFORE`
+nobody and tells the `AFTER` modules once the positions moved. The issuance of a validation asks `TRANSFER_CHECK`
 and `SPENDER` only: nothing moves there.
 
-Which to pick. A bound on how much may move is a `BEFORE`: it returns a number, so it narrows a cross-chain
+Which to pick. A bound on how much may move is a `TRANSFER_CHECK`: it returns a number, so it narrows a cross-chain
 issuance as well. A veto on the state a movement leaves behind is an `AFTER` module that reverts, with its
 own error; the movement and the ledger move are undone together. A counter that must be checked and then
-recorded is `BEFORE` plus `AFTER` on the same storage. A fact about the state before the move is read in
+recorded is `TRANSFER_CHECK` plus `AFTER` on the same storage. A fact about the state before the move is read in
 `AFTER` too: the context carries the exact amount, so the position before is the position after plus or
 minus it.
 
-## beforeTransfer
+An `AFTER` veto refuses a native transfer and a mint, nothing else. `afterTransfer` also runs where a revert
+is no veto: on a settlement, where the satellite already executed, so the revert leaves the delivery
+undeliverable until `forceRemoveModule` drops the module, and with it the veto on every movement; and on a
+forced transfer and a recovery, which are the agent's override, usually the movement that has to get
+through. So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only,
+letting `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
+`checkTransfer`, which narrows the issuance before anything leaves.
 
-A `BEFORE` module answers one question: what is the largest amount you allow to move? `type(uint256).max` means no
+## checkTransfer
+
+A `TRANSFER_CHECK` module answers one question: what is the largest amount you allow to move? `type(uint256).max` means no
 limit, `0` means refused. The compliance keeps the smallest answer over the bound rules.
 
 That one answer serves both worlds. On a native transfer the amount must be at most the minimum. On a
@@ -63,7 +71,7 @@ The rule must be monotonic: a smaller amount is never less acceptable than a lar
 limits and allow lists all are. A rule that is not, "a multiple of 100" for instance, reads
 `ctx.amountMax` and answers `max` or `0`, and refuses an issuance whose range is not a point.
 
-`beforeTransfer` is a view. The compliance calls it under `staticcall`, so a module that writes there
+`checkTransfer` is a view. The compliance calls it under `staticcall`, so a module that writes there
 reverts.
 
 ## The context
@@ -91,7 +99,7 @@ transfer and a recovery move between two non-zero wallets exactly like a transfe
 knows the difference: it reports them to the compliance through `agentTransferred`, with the kind, instead
 of `transferred`. A tracker that counts an investor's own activity, a monthly transfer limit for instance,
 reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. No rule is ever asked about those two, so a
-`BEFORE` module only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+`TRANSFER_CHECK` module only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
@@ -145,7 +153,7 @@ extend to calls your module makes.
 `MaxBalancePerIdentityModule` caps what one identity may own, over every wallet and every chain:
 
 ```solidity
-function beforeTransfer(TransferContext calldata ctx) external view override returns (uint256) {
+function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
     if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
     IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
     uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);
@@ -155,7 +163,7 @@ function beforeTransfer(TransferContext calldata ctx) external view override ret
 
 function moduleTypes() external pure returns (ModuleType[] memory types) {
     types = new ModuleType[](1);
-    types[0] = ModuleType.BEFORE;
+    types[0] = ModuleType.TRANSFER_CHECK;
 }
 ```
 

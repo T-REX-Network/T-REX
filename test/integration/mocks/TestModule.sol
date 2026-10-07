@@ -122,10 +122,10 @@ contract TestModule is AbstractModuleUpgradeable {
     }
 
     /**
-     *  @dev See {IModule-beforeTransfer}.
+     *  @dev See {IModule-checkTransfer}.
      *  no limit unless the compliance blocked transfers through `blockModule` (just a test module)
      */
-    function beforeTransfer(TransferContext calldata ctx) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (_blockedTransfers[ctx.compliance]) {
             return 0;
         }
@@ -169,7 +169,7 @@ contract TestModule is AbstractModuleUpgradeable {
     /// @dev See {IModule-moduleTypes}.
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.BEFORE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
 }
