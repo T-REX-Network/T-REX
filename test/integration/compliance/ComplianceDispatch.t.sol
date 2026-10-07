@@ -166,7 +166,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     /// @notice A recovery reaches the transfer hook too. It moves the balance outside `_update`, so without an
     ///         explicit notification modules would keep crediting the lost wallet, and the lost wallet is
     ///         removed from the identity registry, so nothing could fix it afterwards.
-    function test_transferred_Success_WhenRecoveringAWallet() public {
+    function test_agentTransferred_Success_WhenRecoveringAWallet() public {
         uint256 aliceBalance = token.balanceOf(alice);
 
         // Both wallets resolve to the same identity during the hook, which is what keeps a recovery from

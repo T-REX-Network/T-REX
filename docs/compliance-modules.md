@@ -73,8 +73,10 @@ struct TransferContext {
 transfer and a recovery move between two non-zero wallets exactly like a transfer does, and only the token
 knows the difference: it reports them to the compliance through `agentTransferred`, with the kind, instead
 of `transferred`. A tracker that counts an investor's own activity, a monthly transfer limit for instance,
-reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. No rule is ever asked about those two, so a
-`RULE` only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. A tracker that follows ownership does not:
+a forced transfer always moves the position between identities, and a recovery does when the new wallet
+belongs to another identity, so a holder count or a per-identity tracker records both. No rule is ever
+asked about those two, so a `RULE` only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
