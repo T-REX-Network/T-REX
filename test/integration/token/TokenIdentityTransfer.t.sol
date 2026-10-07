@@ -109,6 +109,22 @@ contract TokenIdentityTransferTest is TREXSuiteTest {
         assertEq(token.balanceOf(bob), 100);
     }
 
+    /// @dev The identity commands its own address like any of its wallets: the position there is attributed
+    ///      to the identity by the factory's self-resolution, and the caller is the identity itself.
+    function test_identityTransfer_Success_FromTheIdentityItself() public {
+        address self = address(aliceIdentity);
+        vm.prank(agent);
+        token.mint(self, 500);
+
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.IdentityTransfer(self, self, alice, 200);
+        vm.prank(self);
+        token.identityTransfer(self, alice, 200);
+
+        assertEq(token.balanceOf(self), 300);
+        assertEq(token.balanceOf(alice), 1200);
+    }
+
     function test_identityTransfer_RevertWhen_DestinationIsNotRegistered() public {
         vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         vm.prank(address(aliceIdentity));

@@ -57,8 +57,11 @@ remappings_regenerate = false
 forge-std = "1.16.2"
 "@openzeppelin-contracts" = "5.7.0"
 "@openzeppelin-contracts-upgradeable" = "5.7.0"
-# TODO: repin to the ONCHAINID v3 release tag once it is cut.
-onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "edcc9f34fa0d326cb41bf009c1992ebca9c71723" }
+# A develop merge commit, not a release tag. The v5 audit froze T-REX at `audit-2026-09-28`, whose pin was
+# `edcc9f3`; this moves past it, so `4935eb1` (ONCHAINID #97) belongs in the diff-pass scope the auditors
+# were given, and the freeze tag needs recutting against this pin.
+# TODO: repin to the ONCHAINID v3 release tag once it is cut, and drop this note with it.
+onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "4c6d074cec62b286804519a594c91a2136fce798" }
 
 [rpc_endpoints]
 ethereum = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
