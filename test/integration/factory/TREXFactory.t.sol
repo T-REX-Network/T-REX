@@ -1274,7 +1274,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.setSuiteProfile(noCode);
     }
 
-    /// @notice The profile shapes every later suite, so only the factory governor may replace it.
+    /// @notice The profile shapes every later suite, so only the factory config role may replace it.
     function test_setSuiteProfile_RevertWhen_OnlySuiteDeployer() public {
         address issuer = makeAddr("issuer");
         _grantSuiteDeployerRole(issuer);
@@ -1406,8 +1406,8 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     // ============ AccessManagerSetupLib.setupTREXFactoryRoles() Tests ============
 
-    /// @notice The two deploy selectors land on the suite deployer role, the three setters on the factory governor role.
-    function test_setupTREXFactoryRoles_SplitsDeploymentFromGovernance() public view {
+    /// @notice The two deploy selectors land on the suite deployer role, the three setters on the factory config role.
+    function test_setupTREXFactoryRoles_SplitsDeploymentFromConfiguration() public view {
         address factory = address(trexFactory);
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuite.selector),
@@ -1421,40 +1421,40 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.setImplementationAuthority.selector),
-            _factoryGovernorRole(),
-            "setImplementationAuthority must be mapped to the factory governor role"
+            _factoryConfigRole(),
+            "setImplementationAuthority must be mapped to the factory config role"
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.setIdFactory.selector),
-            _factoryGovernorRole(),
-            "setIdFactory must be mapped to the factory governor role"
+            _factoryConfigRole(),
+            "setIdFactory must be mapped to the factory config role"
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.setTrustedGatewayRegistry.selector),
-            _factoryGovernorRole(),
-            "setTrustedGatewayRegistry must be mapped to the factory governor role"
+            _factoryConfigRole(),
+            "setTrustedGatewayRegistry must be mapped to the factory config role"
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.setSuiteProfile.selector),
-            _factoryGovernorRole(),
-            "setSuiteProfile must be mapped to the factory governor role"
+            _factoryConfigRole(),
+            "setSuiteProfile must be mapped to the factory config role"
         );
     }
 
     function test_setupTREXFactoryRoles_RevertWhen_OneRoleForBoth() public {
-        vm.expectRevert(ErrorsLib.SuiteDeployerCannotGovernFactory.selector);
-        this.setupFactoryRolesExternally(_factoryGovernorRole(), _factoryGovernorRole());
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotConfigureFactory.selector);
+        this.setupFactoryRolesExternally(_factoryConfigRole(), _factoryConfigRole());
     }
 
-    /// @notice A suite deployer that is a manager admin could remap the governor selectors or grant
-    ///         itself the governor role, which is the one-role shape with an extra step.
+    /// @notice A suite deployer that is a manager admin could remap the config selectors or grant
+    ///         itself the config role, which is the one-role shape with an extra step.
     function test_setupTREXFactoryRoles_RevertWhen_SuiteDeployerIsAdmin() public {
-        vm.expectRevert(ErrorsLib.SuiteDeployerCannotGovernFactory.selector);
-        this.setupFactoryRolesExternally(AccessManagerSetupLib.ADMIN_ROLE, _factoryGovernorRole());
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotConfigureFactory.selector);
+        this.setupFactoryRolesExternally(AccessManagerSetupLib.ADMIN_ROLE, _factoryConfigRole());
     }
 
-    /// @notice An admin can do everything anyway, so the governor may be the admin role.
-    function test_setupTREXFactoryRoles_AcceptsAdminAsGovernor() public {
+    /// @notice An admin can do everything anyway, so the config role may be the admin role.
+    function test_setupTREXFactoryRoles_AcceptsAdminAsConfigRole() public {
         this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.ADMIN_ROLE);
         assertEq(
             platformManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.setSuiteProfile.selector),
@@ -1468,7 +1468,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_setupTREXFactoryRoles_RevertWhen_EitherRoleIsPublic() public {
         vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
-        this.setupFactoryRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE, _factoryGovernorRole());
+        this.setupFactoryRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE, _factoryConfigRole());
         vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
         this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.PUBLIC_ROLE);
     }
@@ -1507,7 +1507,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     /// @notice An account holding only the suite deployer role deploys through both entry points and is refused
     ///         on every factory setter.
-    function test_setupTREXFactoryRoles_SuiteDeployerDeploysButCannotGovern() public {
+    function test_setupTREXFactoryRoles_SuiteDeployerDeploysButCannotConfigure() public {
         address issuer = makeAddr("issuer");
         _grantSuiteDeployerRole(issuer);
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
@@ -1539,11 +1539,11 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.setTrustedGatewayRegistry(address(newRegistry));
     }
 
-    /// @notice An account holding only the factory governor role reconfigures the factory and is refused on
+    /// @notice An account holding only the factory config role reconfigures the factory and is refused on
     ///         both deploy entry points.
-    function test_setupTREXFactoryRoles_FactoryGovernorGovernsButCannotDeploy() public {
-        address governor = makeAddr("governor");
-        _grantFactoryGovernorRole(governor);
+    function test_setupTREXFactoryRoles_FactoryConfigRoleConfiguresButCannotDeploy() public {
+        address configurator = makeAddr("configurator");
+        _grantFactoryConfigRole(configurator);
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
 
@@ -1551,29 +1551,29 @@ contract TREXFactoryTest is TREXSuiteTest {
         IdentityFactory newIdFactory = _newIdentityFactory();
         TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(platformManager));
 
-        vm.startPrank(governor);
+        vm.startPrank(configurator);
         trexFactory.setImplementationAuthority(address(newIA));
         trexFactory.setIdFactory(address(newIdFactory));
         trexFactory.setTrustedGatewayRegistry(address(newRegistry));
         vm.stopPrank();
-        assertEq(trexFactory.getImplementationAuthority(), address(newIA), "factory governor must set the IA");
-        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "factory governor must set the ID factory");
+        assertEq(trexFactory.getImplementationAuthority(), address(newIA), "factory config role must set the IA");
+        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "factory config role must set the ID factory");
         assertEq(
-            trexFactory.getTrustedGatewayRegistry(), address(newRegistry), "factory governor must set the registry"
+            trexFactory.getTrustedGatewayRegistry(), address(newRegistry), "factory config role must set the registry"
         );
 
-        vm.prank(governor);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, governor));
-        trexFactory.deployTREXSuite("governor-shared", tokenDetails, claimDetails);
+        vm.prank(configurator);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, configurator));
+        trexFactory.deployTREXSuite("configurator-shared", tokenDetails, claimDetails);
 
-        vm.prank(governor);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, governor));
-        trexFactory.deployTREXSuiteIsolated("governor-isolated", tokenDetails, claimDetails);
+        vm.prank(configurator);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, configurator));
+        trexFactory.deployTREXSuiteIsolated("configurator-isolated", tokenDetails, claimDetails);
     }
 
-    function setupFactoryRolesExternally(uint64 suiteDeployerRole, uint64 factoryGovernorRole) external {
+    function setupFactoryRolesExternally(uint64 suiteDeployerRole, uint64 factoryConfigRole) external {
         AccessManagerSetupLib.setupTREXFactoryRoles(
-            platformManager, address(trexFactory), suiteDeployerRole, factoryGovernorRole
+            platformManager, address(trexFactory), suiteDeployerRole, factoryConfigRole
         );
     }
 

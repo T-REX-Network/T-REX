@@ -63,7 +63,7 @@ contract PlatformSuiteSeparationTest is TREXSuiteTest {
     }
 
     /// @notice The suite OWNER decides the suite's rules and nothing about what future suites inherit.
-    function test_suiteOwner_CannotGovernThePlatform() public {
+    function test_suiteOwner_CannotConfigureThePlatform() public {
         bytes memory unauthorized =
             abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, suiteOwner);
 

@@ -294,41 +294,41 @@ library AccessManagerSetupLib {
         }
     }
 
-    /// @notice Maps the factory's two concerns to two roles governance picks. `suiteDeployerRole` deploys suites;
-    ///         `factoryGovernorRole` repoints the implementation authority, the identity factory, the gateway
-    ///         registry and the suite profile, which every later suite is wired to or shaped by. The ids are data, not constants: any role of
-    ///         the manager works, a {RolesLib.PlatformRole}, a name through {RolesLib.platform(bytes32)} or
-    ///         a raw id.
+    /// @notice Maps the factory's two concerns to two roles governance picks. `suiteDeployerRole` uses the
+    ///         factory: it deploys suites. `factoryConfigRole` configures it: it repoints the implementation
+    ///         authority, the identity factory, the gateway registry and the suite profile, the four settings
+    ///         every later suite is wired to or shaped by. The ids are data, not constants: any role of the
+    ///         manager works, a {RolesLib.PlatformRole}, a name through {RolesLib.platform(bytes32)} or a raw id.
     /// @dev Refuses the three shapes that recreate the problem the split exists for: one role for both, so
     ///      every account allowed to deploy a token could reconfigure the factory for everyone; `ADMIN_ROLE`
-    ///      as the suite deployer, so every deployer could remap the governor selectors or grant itself the
-    ///      governor role; and the public role for either, so anyone could. `ADMIN_ROLE` as the governor is
+    ///      as the suite deployer, so every deployer could remap the config selectors or grant itself the
+    ///      config role; and the public role for either, so anyone could. `ADMIN_ROLE` as the config role is
     ///      fine, since admins can do everything anyway.
     /// @dev This is a check on the ids, not a separation guarantee: the role hierarchy the manager keeps
-    ///      (`getRoleAdmin`) can later make the suite deployer role the admin of the governor role, and
+    ///      (`getRoleAdmin`) can later make the suite deployer role the admin of the config role, and
     ///      nothing here can prevent that.
     function setupTREXFactoryRoles(
         IAccessManager accessManager,
         address trexFactory,
         uint64 suiteDeployerRole,
-        uint64 factoryGovernorRole
+        uint64 factoryConfigRole
     ) internal {
-        require(suiteDeployerRole != factoryGovernorRole, ErrorsLib.SuiteDeployerCannotGovernFactory());
-        require(suiteDeployerRole != ADMIN_ROLE, ErrorsLib.SuiteDeployerCannotGovernFactory());
+        require(suiteDeployerRole != factoryConfigRole, ErrorsLib.SuiteDeployerCannotConfigureFactory());
+        require(suiteDeployerRole != ADMIN_ROLE, ErrorsLib.SuiteDeployerCannotConfigureFactory());
         _requireNotPublicRole(suiteDeployerRole);
-        _requireNotPublicRole(factoryGovernorRole);
+        _requireNotPublicRole(factoryConfigRole);
 
         bytes4[] memory deployFunctions = new bytes4[](2);
         deployFunctions[0] = ITREXFactory.deployTREXSuite.selector;
         deployFunctions[1] = ITREXFactory.deployTREXSuiteIsolated.selector;
         accessManager.setTargetFunctionRole(trexFactory, deployFunctions, suiteDeployerRole);
 
-        bytes4[] memory governFunctions = new bytes4[](4);
-        governFunctions[0] = ITREXFactory.setImplementationAuthority.selector;
-        governFunctions[1] = ITREXFactory.setIdFactory.selector;
-        governFunctions[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
-        governFunctions[3] = ITREXFactory.setSuiteProfile.selector;
-        accessManager.setTargetFunctionRole(trexFactory, governFunctions, factoryGovernorRole);
+        bytes4[] memory configFunctions = new bytes4[](4);
+        configFunctions[0] = ITREXFactory.setImplementationAuthority.selector;
+        configFunctions[1] = ITREXFactory.setIdFactory.selector;
+        configFunctions[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
+        configFunctions[3] = ITREXFactory.setSuiteProfile.selector;
+        accessManager.setTargetFunctionRole(trexFactory, configFunctions, factoryConfigRole);
     }
 
     /// @notice Maps `setTrustedGateway` to `interopManagerRole`, the role governance picks for interop configuration.

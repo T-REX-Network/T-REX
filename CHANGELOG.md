@@ -488,9 +488,9 @@ All notable changes to this project will be documented in this file.
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
   could also repoint the factory's implementation authority, identity factory or trusted gateway
   registry, which every later suite is wired to. The function now takes two role ids chosen by
-  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory governor role
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory config role
   for the four setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
-  role (`SuiteDeployerCannotGovernFactory`). The three other platform
+  role (`SuiteDeployerCannotConfigureFactory`). The three other platform
   setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
   `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
   instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
@@ -511,7 +511,7 @@ All notable changes to this project will be documented in this file.
   `ADMIN_ROLE` to `accessManagerAdmin`. `DefaultSuiteProfile` is the default profile and simply applies
   the library tables; only an admin of the manager may call its `applyTo`
   (`AccessManagerUnauthorizedAccount`), so an issuer who keeps the shared profile as an admin of their
-  own manager does not let anyone else apply it. Governance replaces it through the new `setSuiteProfile` (factory governor
+  own manager does not let anyone else apply it. Governance replaces it through the new `setSuiteProfile` (factory config
   role, `SuiteProfileSet`, `SuiteProfileNotAContract`) to change what every later suite looks
   like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
   **Breaking**: the `TREXFactory` constructor takes the profile as its fourth argument, before the

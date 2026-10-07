@@ -53,7 +53,7 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.platform(bytes32("TOKEN_ISSUER"));
     }
 
-    function _factoryGovernorRole() internal pure returns (uint64) {
+    function _factoryConfigRole() internal pure returns (uint64) {
         return RolesLib.platform(RolesLib.PlatformRole.OWNER);
     }
 
@@ -70,10 +70,10 @@ abstract contract AccessManagerHelper is Test {
     }
 
     /// @notice Wires the two deploy selectors to the suite deployer role and the three setters to the
-    ///         factory governor role.
+    ///         factory config role.
     function _setupFactoryRoles(address trexFactory) internal {
         AccessManagerSetupLib.setupTREXFactoryRoles(
-            platformManager, trexFactory, _suiteDeployerRole(), _factoryGovernorRole()
+            platformManager, trexFactory, _suiteDeployerRole(), _factoryConfigRole()
         );
     }
 
@@ -101,9 +101,9 @@ abstract contract AccessManagerHelper is Test {
         suiteManager.grantRole(_role(RolesLib.Role.OWNER), account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants factory governance and suite deployment on the platform manager.
+    /// @notice Grants factory configuration and suite deployment on the platform manager.
     function _grantPlatformRoles(address account) internal {
-        _grantFactoryGovernorRole(account);
+        _grantFactoryConfigRole(account);
         _grantSuiteDeployerRole(account);
     }
 
@@ -111,8 +111,8 @@ abstract contract AccessManagerHelper is Test {
         platformManager.grantRole(_suiteDeployerRole(), account, NO_EXECUTION_DELAY);
     }
 
-    function _grantFactoryGovernorRole(address account) internal {
-        platformManager.grantRole(_factoryGovernorRole(), account, NO_EXECUTION_DELAY);
+    function _grantFactoryConfigRole(address account) internal {
+        platformManager.grantRole(_factoryConfigRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantStorageWriterRole(address account) internal {

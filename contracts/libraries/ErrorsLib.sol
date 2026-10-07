@@ -170,7 +170,7 @@ library ErrorsLib {
     error PendingDelayChange(address account, uint64 role);
     error PendingRoleGrant(address account, uint64 role);
     error RoleNotHeld(address account, uint64 role);
-    error SuiteDeployerCannotGovernFactory();
+    error SuiteDeployerCannotConfigureFactory();
     error PlatformRoleCannotBePublic();
 
     // RolesLib Errors
