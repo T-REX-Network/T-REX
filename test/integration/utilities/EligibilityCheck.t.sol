@@ -249,6 +249,20 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertTrue(identityRegistry.isVerified(alice));
     }
 
+    /// @notice An identity's own address is a live position holder, not an unlinked wallet: the factory
+    ///         self-resolves it as Active and the claims are the identity's own.
+    function test_getVerifiedDetails_ReportsActive_WhenTheAddressIsTheIdentityItself() public view {
+        address self = address(aliceIdentity);
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results, IIdentityFactory.AccountStatus walletStatus) =
+            utilityChecker.getVerifiedDetails(address(token), self);
+
+        assertEq(results.length, 1);
+        assertTrue(results[0].pass);
+        assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.Active));
+        assertTrue(identityRegistry.isVerified(self));
+    }
+
     function test_getVerifiedDetails_ReportsRevoked_WhenTheInvestorRevokedTheWallet() public {
         _revokeWallet(aliceIdentity, InteroperableAddress.formatEvmV1(block.chainid, alice));
 
