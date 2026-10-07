@@ -95,8 +95,8 @@ All notable changes to this project will be documented in this file.
     a burn apart; a forced transfer and a recovery looked exactly like a transfer, so a tracker counting an
     investor's own activity counted an agent's intervention too. The token now reports those two through
     `IModularCompliance.agentTransferred(from, to, amount, kind)`, bound token only, instead of
-    `transferred`; `ERC3643Token` exposes `_notifyForcedTransfer` and `_notifyRecovery` for that, defaulting
-    to the standard hook. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
+    `transferred`, from its own `_forcedTransfer` and `_recoveryAddress`, which carry the base bodies with
+    the compliance call swapped; `ERC3643Token` is untouched. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
     calldata decoding, so a module compiled against today's kinds would revert on one added later and block
     every movement of that kind until upgraded.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
