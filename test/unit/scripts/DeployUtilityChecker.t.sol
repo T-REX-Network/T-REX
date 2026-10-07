@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
+import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 
 import { DeployUtilityChecker } from "scripts/DeployUtilityChecker.s.sol";
 
@@ -29,16 +30,21 @@ contract DeployUtilityCheckerTest is Test {
 
     /// @dev Mirrors the real `deployments/baseSepolia.json` shape: flat camelCase keys, two of
     ///      which are JSON numbers rather than strings.
-    string internal constant SEED_MANIFEST = "{" '"chainId":84532,'
-        '"deployer":"0x1B81EBEeec22281FF2fBCF990021B83b5204D4CE",'
-        '"accessManager":"0x1f4F25fF509a1ed0e674d202927ac1F4a5866013",'
-        '"tokenImpl":"0xfA846dfF30b2f8Ff2Bef3171094F39b420d949aa",'
-        '"implementationAuthority":"0x4cD009f688a1cC6CEc9E3bDcF407919ffE1Ab4C2",'
-        '"trexFactory":"0x003932f50f4bF38224cbd6405CE0dEe11c02941E",'
-        '"beacons":"(0xeBE4f3ba3546f3F363BF6c69D5698D2173e4FD5F, 0x4eDDE67280BcE77F3eA74cECFAaf495999053DEE)",'
-        '"deployBlock":46597470,' '"txHash":"0x7926a686ca149d767e050f522512765bb3f9b5d3d5ad77003da0a8db57316a4b"' "}";
+    /// @dev The access manager must be a real contract the deployer administers: the script initialises
+    ///      the checker against it and asks it whether the deployer may upgrade.
+    function _seedManifest() internal view returns (string memory) {
+        return string.concat(
+            "{" '"chainId":84532,' '"deployer":"0x1B81EBEeec22281FF2fBCF990021B83b5204D4CE",' '"accessManager":"',
+            vm.toString(address(accessManager)),
+            '",' '"tokenImpl":"0xfA846dfF30b2f8Ff2Bef3171094F39b420d949aa",'
+            '"implementationAuthority":"0x4cD009f688a1cC6CEc9E3bDcF407919ffE1Ab4C2",'
+            '"trexFactory":"0x003932f50f4bF38224cbd6405CE0dEe11c02941E",'
+            '"beacons":"(0xeBE4f3ba3546f3F363BF6c69D5698D2173e4FD5F, 0x4eDDE67280BcE77F3eA74cECFAaf495999053DEE)",'
+            '"deployBlock":46597470,' '"txHash":"0x7926a686ca149d767e050f522512765bb3f9b5d3d5ad77003da0a8db57316a4b"'
+            "}"
+        );
+    }
 
-    /// @dev Every key the seed manifest carries; none of them may disappear or change.
     string[9] internal SEED_KEYS = [
         "chainId",
         "deployer",
@@ -52,10 +58,12 @@ contract DeployUtilityCheckerTest is Test {
     ];
 
     DeployUtilityChecker internal deployScript;
+    AccessManager internal accessManager;
     string internal manifest;
 
     function setUp() public {
         deployScript = new DeployUtilityChecker();
+        accessManager = new AccessManager(vm.addr(DEPLOYER_KEY));
         manifest = string.concat(vm.projectRoot(), "/cache/DeployUtilityChecker.t.json");
     }
 
@@ -67,7 +75,8 @@ contract DeployUtilityCheckerTest is Test {
         vm.setEnv("DEPLOYER_PRIVATE_KEY", vm.toString(DEPLOYER_KEY));
         vm.setEnv("UTILITY_CHECKER_FORCE_REDEPLOY", "false");
         vm.setEnv("UTILITY_CHECKER_PROXY", vm.toString(address(0)));
-        vm.writeFile(manifest, SEED_MANIFEST);
+        vm.setEnv("UTILITY_CHECKER_ACCESS_MANAGER", vm.toString(address(0)));
+        vm.writeFile(manifest, _seedManifest());
 
         // --- upgrade() with nothing recorded points at the first deployment ---
         vm.expectRevert(bytes("no utilityChecker recorded for this chain: run the first deployment instead"));
@@ -84,7 +93,7 @@ contract DeployUtilityCheckerTest is Test {
         assertTrue(firstImpl != address(0), "implementation not recorded");
         assertTrue(proxy != firstImpl, "proxy and implementation must differ");
         assertEq(_implementationOf(proxy), firstImpl, "recorded impl is not the proxy's impl");
-        assertEq(UtilityChecker(proxy).owner(), vm.addr(DEPLOYER_KEY), "deployer is not the owner");
+        assertEq(UtilityChecker(proxy).owner(), address(accessManager), "authority is not the access manager");
         _assertSeedKeysIntact();
 
         // --- re-running the first deployment is refused ---
@@ -97,13 +106,14 @@ contract DeployUtilityCheckerTest is Test {
 
         // --- an upgrade cannot be pointed at a proxy the deployer does not own ---
         UtilityChecker foreignImpl = new UtilityChecker();
-        vm.prank(address(0xBEEF));
-        UtilityCheckerProxy foreign =
-            new UtilityCheckerProxy(address(foreignImpl), abi.encodeCall(UtilityChecker.initialize, ()));
-        assertEq(UtilityChecker(address(foreign)).owner(), address(0xBEEF), "foreign proxy owner mismatch");
+        AccessManager foreignManager = new AccessManager(address(0xBEEF));
+        UtilityCheckerProxy foreign = new UtilityCheckerProxy(
+            address(foreignImpl), abi.encodeCall(UtilityChecker.initialize, (address(foreignManager)))
+        );
+        assertEq(UtilityChecker(address(foreign)).owner(), address(foreignManager), "foreign proxy authority mismatch");
 
         vm.setEnv("UTILITY_CHECKER_PROXY", vm.toString(address(foreign)));
-        vm.expectRevert(bytes("deployer does not own the recorded UtilityChecker proxy"));
+        vm.expectRevert(bytes("deployer cannot upgrade the recorded UtilityChecker proxy"));
         deployScript.upgrade();
         vm.setEnv("UTILITY_CHECKER_PROXY", vm.toString(address(0)));
 
@@ -137,7 +147,7 @@ contract DeployUtilityCheckerTest is Test {
             assertTrue(vm.keyExistsJson(current, key), string.concat("key lost from manifest: ", SEED_KEYS[i]));
             assertEq(
                 keccak256(vm.parseJson(current, key)),
-                keccak256(vm.parseJson(SEED_MANIFEST, key)),
+                keccak256(vm.parseJson(_seedManifest(), key)),
                 string.concat("key value changed: ", SEED_KEYS[i])
             );
         }

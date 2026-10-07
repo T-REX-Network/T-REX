@@ -16,6 +16,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { DefaultSuiteProfile } from "contracts/factory/DefaultSuiteProfile.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
@@ -61,6 +62,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // Factories
     TREXFactory public trexFactory;
+    DefaultSuiteProfile public suiteProfile;
     TREXImplementationAuthority public trexImplementationAuthority;
 
     // TREX Suite
@@ -145,8 +147,15 @@ contract TREXSuiteTest is AccessManagerHelper {
         returns (TREXFactory factory)
     {
         vm.startPrank(deployer);
+        if (address(suiteProfile) == address(0)) {
+            suiteProfile = new DefaultSuiteProfile();
+        }
         factory = new TREXFactory(
-            implementationAuthority, address(idFactory), address(trustedGatewayRegistry), accessManagerAddress
+            implementationAuthority,
+            address(idFactory),
+            address(trustedGatewayRegistry),
+            address(suiteProfile),
+            accessManagerAddress
         );
         vm.stopPrank();
     }
@@ -268,14 +277,16 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         // Network-level, shared by every suite. Deployed before the factory, which wires it into every token.
         trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
-        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(trustedGatewayRegistry));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(trustedGatewayRegistry), _interopManagerRole()
+        );
         _grantInteropManagerRole(address(this));
 
         trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
 
         // The IdentityFactory gates ASSET minting on ASSET_DEPLOYER, resolved against its own
         // authority (the suite AccessManager here). Without this the auto-mint path reverts.
-        _grantTokenOidMinterRole(address(trexFactory));
+        _grantAssetDeployerRole(address(trexFactory));
 
         _setupFactoryRoles(address(trexFactory));
     }
@@ -288,7 +299,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             address(accessManager), VersionLib.pack(5, 0, 0), _suiteImplementations()
         );
 
-        _authorizeIAGovernance(address(ia));
+        _setupImplementationAuthorityRoles(address(ia));
         _grantOwnerRole(deployer);
         _grantVersionManagerRole(deployer);
 

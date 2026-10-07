@@ -46,7 +46,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertFalse(factoryIsAdmin);
     }
 
-    function test_deployTREXSuite_Success_FreshManagerIsCommissionedBeforeHandover() public {
+    function test_deployTREXSuite_Success_FreshManagerIsSetUpBeforeHandover() public {
         Token deployed = _deployWithFreshManager("wired");
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());

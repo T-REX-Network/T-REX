@@ -2,6 +2,8 @@
 pragma solidity 0.8.30;
 
 import { Script, console } from "@forge-std/Script.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
@@ -9,10 +11,11 @@ import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 /// @notice Deploys (or upgrades) the view-only `UtilityChecker` behind its UUPS proxy and
 ///         records the resulting addresses in the network's `deployments/*.json` manifest.
 ///
-/// `UtilityChecker` is `UUPSUpgradeable` + `OwnableUpgradeable`, sitting behind a plain
-/// `UtilityCheckerProxy` (an `ERC1967Proxy`). `initialize()` takes no arguments and makes
-/// the caller — the broadcasting deployer — the owner, which is the account authorised to
-/// run `upgradeToAndCall` later.
+/// `UtilityChecker` is `UUPSUpgradeable` + `AccessManagedOwnableUpgradeable`, sitting behind a
+/// plain `UtilityCheckerProxy` (an `ERC1967Proxy`). `initialize(accessManager)` makes that
+/// manager the authority: whoever it lets call `upgradeToAndCall` (its admin, until a narrower
+/// role is mapped) may upgrade later. The manager comes from the manifest's `accessManager`
+/// key, or from `UTILITY_CHECKER_ACCESS_MANAGER`.
 ///
 /// Two entry points, because the proxy address is the thing consumers pin:
 ///
@@ -62,10 +65,11 @@ contract DeployUtilityChecker is Script {
     /// @dev Scratch object id for the JSON cheatcode serializer.
     string internal constant JSON_OBJECT = "trexDeployments";
 
+    string internal constant ACCESS_MANAGER_KEY = "accessManager";
+
     /// @notice First deployment: implementation + proxy, then record both.
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
         string memory manifest = _manifestPath();
         string memory existing = vm.readFile(manifest);
 
@@ -83,25 +87,31 @@ contract DeployUtilityChecker is Script {
             console.log("!! consumers pinned to the old address will keep talking to the old contract");
         }
 
+        address accessManager = vm.envOr("UTILITY_CHECKER_ACCESS_MANAGER", address(0));
+        if (accessManager == address(0)) accessManager = _readRecorded(existing, ACCESS_MANAGER_KEY);
+        require(
+            accessManager != address(0), "no accessManager recorded for this chain: set UTILITY_CHECKER_ACCESS_MANAGER"
+        );
+        require(accessManager.code.length > 0, "accessManager has no code on this chain");
+
         vm.startBroadcast(deployerKey);
 
         UtilityChecker implementation = new UtilityChecker();
-        UtilityCheckerProxy proxy =
-            new UtilityCheckerProxy(address(implementation), abi.encodeCall(UtilityChecker.initialize, ()));
+        UtilityCheckerProxy proxy = new UtilityCheckerProxy(
+            address(implementation), abi.encodeCall(UtilityChecker.initialize, (accessManager))
+        );
 
         vm.stopBroadcast();
 
-        // `initialize()` runs in the proxy's constructor with the proxy as `msg.sender`'s callee,
-        // so the owner is the broadcasting deployer. Assert it rather than assume it.
         address owner = UtilityChecker(address(proxy)).owner();
-        require(owner == deployer, "UtilityChecker owner is not the deployer");
+        require(owner == accessManager, "UtilityChecker authority is not the access manager");
 
         _record(manifest, existing, address(proxy), address(implementation));
 
         console.log("chain id:                 ", block.chainid);
         console.log("UtilityChecker impl:      ", address(implementation));
         console.log("UtilityChecker proxy:     ", address(proxy));
-        console.log("UtilityChecker owner:     ", owner);
+        console.log("UtilityChecker authority: ", owner);
         console.log("recorded in:              ", manifest);
     }
 
@@ -119,11 +129,12 @@ contract DeployUtilityChecker is Script {
         require(proxy != address(0), "no utilityChecker recorded for this chain: run the first deployment instead");
         require(proxy.code.length > 0, "recorded utilityChecker has no code on this chain");
 
-        // Guard: never point an upgrade at a proxy this deployer does not own. `_authorizeUpgrade`
-        // is `onlyOwner`, so a foreign proxy would revert anyway — but only after we have paid to
-        // deploy an implementation, and with a far less obvious message.
-        address owner = UtilityChecker(proxy).owner();
-        require(owner == deployer, "deployer does not own the recorded UtilityChecker proxy");
+        // Guard: never point an upgrade at a proxy whose manager does not let this deployer upgrade it.
+        // `_authorizeUpgrade` is `restricted`, so a foreign proxy would revert anyway, but only after we
+        // have paid to deploy an implementation, and with a far less obvious message.
+        (bool canUpgrade,) = IAccessManager(UtilityChecker(proxy).owner())
+            .canCall(deployer, proxy, UUPSUpgradeable.upgradeToAndCall.selector);
+        require(canUpgrade, "deployer cannot upgrade the recorded UtilityChecker proxy");
 
         address previousImpl = _readRecorded(existing, IMPL_KEY);
 

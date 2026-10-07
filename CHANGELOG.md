@@ -172,24 +172,26 @@ All notable changes to this project will be documented in this file.
     delegated to another role with `setTargetFunctionRole` on the manager itself. No OpenZeppelin
     internal is overridden. Events `DomainCreated` and
     `DomainAssigned`. `IdentityRegistryStorage.isIdentityRegistryBound(registry)` is a new O(1) view
-    on the T-REX storage, used by commissioning to skip an already bound registry.
+    on the T-REX storage, used by `setupSuite` to skip an already bound registry.
      `domainOf` is a registry, not the authorization boundary: authorization is the
     role id on each selector and the grants behind it, and the manager never consults `domainOf`.
-    Commissioning and migration keep the two in step; `assign` alone records the domain, rewrites no
-    selector mapping and revokes nothing. Moving commissioned tokens to other domains is
+    Suite setup and migration keep the two in step; `assign` alone records the domain, rewrites no
+    selector mapping and revokes nothing. Moving set-up tokens to other domains is
     `moveSuitesToDomains(TREXAccessManager, …)`, which assigns the tokens and then runs
     `migrateSuitesToDomains`: remap the suites, grant the new domains' roles, revoke the old domain's
-    `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `commissionSuite` after a bare reassignment
+    `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `setupSuite` after a bare reassignment
     remaps but leaves the old grant in place.
-  - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
+  - Two tiers. `AccessManagerSetupLib.setupSuite(manager, token)` reads `domainOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
     the token's domain on first use and keeps a storage already assigned where it is, so a storage
     reused across domains keeps one owner and every registry bound to it writes with that
-    domain's `IRS_WRITER`. `commissionSuite(manager, token, domainId, storageDomainId)` is
+    domain's `IRS_WRITER`. `setupSuite(manager, token, domainId, storageDomainId)` is
     the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
     already shared with another domain is passed with the domain it lives in and is not
-    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Commissioning is
-    idempotent: re-running re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps
+    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Suite setup is
+    idempotent for a caller that also holds `AGENT_ADMIN` in the domain: re-running re-applies the
+    standard tables, and the token's `AGENT` grant is gated by that role once the role-admin table is
+    in place. Suite setup needs `ADMIN_ROLE`: it maps
     selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
     governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
     for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
@@ -213,7 +215,7 @@ All notable changes to this project will be documented in this file.
   ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
     suite salt, creates a domain named after the token, assigns the token and its storage to it,
-    commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
+    sets the suite up, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
     own. The admin must be a real external account (`InvalidAccessManagerAdmin`); a
     supplied manager must have code (`AccessManagerNotAContract`); a reused storage must already
     report the suite manager as its authority (`StorageAuthorityMismatch`).
@@ -232,7 +234,7 @@ All notable changes to this project will be documented in this file.
   `TokenDetails.irAgents` and `tokenAgents` are gone, a deploy against a supplied manager makes no
   call into it, and a reused storage is no longer bound by the factory. Before, any factory `OWNER`
   could name another issuer's manager and receive `AGENT` there through the factory's `AGENT_ADMIN`
-  grant. Now the issuer commissions the suite on their own manager with `commissionSuite` and grants
+  grant. Now the issuer sets the suite up on their own manager with `setupSuite` and grants
   agent roles themselves. A deploy naming a foreign manager is not rejected: it changes nothing on that
   manager. `MaxAgentsReached` is removed.
   - Rollout: this stops new grants. It does not revoke `AGENT_ADMIN` that issuers granted to earlier
@@ -493,6 +495,47 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Suite deployment is no longer gated by the role that configures the factory** (#100).
+  `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
+  to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
+  could also repoint the factory's implementation authority, identity factory or trusted gateway
+  registry, which every later suite is wired to. The function now takes two role ids chosen by
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory governor role
+  for the four setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
+  role (`SuiteDeployerCannotGovernFactory`). The three other platform
+  setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
+  `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
+  instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
+  (`PlatformRoleCannotBePublic`). No role is hardcoded at the platform layer any more: a platform picks
+  any id of its manager, including a named platform role through the new
+  `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles do. The
+  `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
+  platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
+  The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
+  `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
+  `OWNER` from them. The suite profile below does need a new factory.
+- **The suite role profile is no longer compiled into the factory** (#102). `deployTREXSuite` and
+  `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.setupSuite` from inside the factory, so
+  the selector-to-role tables and the role-admin table of every future suite were a constant of the
+  factory's bytecode, and changing a default meant a new factory and a new CREATE3 address space. The
+  factory now hands the fresh `TREXAccessManager` to an `ISuiteProfile`: it grants the profile
+  `ADMIN_ROLE`, calls `applyTo(accessManager, token)`, revokes the role and only then hands
+  `ADMIN_ROLE` to `accessManagerAdmin`. `DefaultSuiteProfile` is the default profile and simply applies
+  the library tables; only an admin of the manager may call its `applyTo`
+  (`AccessManagerUnauthorizedAccount`), so an issuer who keeps the shared profile as an admin of their
+  own manager does not let anyone else apply it. Governance replaces it through the new `setSuiteProfile` (factory governor
+  role, `SuiteProfileSet`, `SuiteProfileNotAContract`) to change what every later suite looks
+  like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
+  **Breaking**: the `TREXFactory` constructor takes the profile as its fourth argument, before the
+  access manager, and `getSuiteProfile` is added to `ITREXFactory`. The factory no longer links
+  `AccessManagerSetupLib`.
+- **`UtilityChecker` is gated by the AccessManager, not by a single owner** (#103). It was the only
+  upgradeable contract of the suite on `OwnableUpgradeable`. It is now `AccessManagedOwnableUpgradeable`
+  like the compliance modules: `initialize(address accessManager)` replaces `initialize()`,
+  `_authorizeUpgrade` is `restricted`, and `owner()` reports the authority. `DeployUtilityChecker`
+  reads the manager from the manifest's `accessManager` key (override with
+  `UTILITY_CHECKER_ACCESS_MANAGER`) and, on `upgrade()`, checks that the deployer may call
+  `upgradeToAndCall` through that manager instead of comparing owners.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same
