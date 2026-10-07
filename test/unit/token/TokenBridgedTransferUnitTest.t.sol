@@ -115,11 +115,22 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         ledger.bridgedTransfer(satellite2, satellite1, 1, VALIDATION_ID);
     }
 
-    function test_bridgedTransfer_RevertWhen_ReceiverIsOnTheReferenceChain() public {
+    /// @dev One settlement path for every receiver: a native receiver is not a bridged transfer but a credit on
+    ///  this chain, as {TokenSettleToNativeUnitTest} covers in full.
+    function test_bridgedTransfer_ToAReceiverOnTheReferenceChainSettlesToNative() public {
         bytes memory native = satelliteEnvelope(block.chainid, user2);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, native));
+        vm.expectEmit(true, true, true, true, address(token));
+        emit IERC20.Transfer(address(0), user2, 10);
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.SettledToNative(keccak256(satellite1), user2, VALIDATION_ID, satellite1, 10);
+
         vm.prank(agent);
         ledger.bridgedTransfer(satellite1, native, 10, VALIDATION_ID);
+
+        assertEq(token.bridgedBalanceOf(satellite1), 50);
+        assertEq(token.balanceOf(user2), 10);
+        assertEq(token.totalSupply(), 100, "the supply never moves on a settlement");
+        _assertPartition();
     }
 
     function test_bridgedTransfer_RevertWhen_SourceIsOnTheReferenceChain() public {

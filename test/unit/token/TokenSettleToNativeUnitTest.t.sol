@@ -160,8 +160,11 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         ledger.settleToNative(padded, user2, 10, VALIDATION_ID);
     }
 
+    /// @dev A zero address on this chain is no wallet at all: the settlement is not native, and the envelope is
+    ///  then refused as a satellite one.
     function test_settleToNative_RevertWhen_ReceiverIsZero() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        bytes memory zero = satelliteEnvelope(block.chainid, address(0));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, zero));
         vm.prank(agent);
         ledger.settleToNative(satellite1, address(0), 0, VALIDATION_ID);
     }

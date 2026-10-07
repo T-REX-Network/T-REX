@@ -67,7 +67,6 @@ import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdenti
 import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -78,18 +77,23 @@ import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssue
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
+import { AccessManagedOwnableUpgradeable } from "./AccessManagedOwnableUpgradeable.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
-contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable {
+contract UtilityChecker is IUtilityChecker, AccessManagedOwnableUpgradeable, UUPSUpgradeable {
 
     constructor() {
         _disableInitializers();
     }
 
-    function initialize() external initializer {
-        __Ownable_init(msg.sender);
+    /// @param accessManager the authority gating the implementation upgrade, like every other upgradeable
+    ///        contract of the suite
+    function initialize(address accessManager) external initializer {
+        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+        __AccessManaged_init(accessManager);
     }
 
     /// @inheritdoc IUtilityChecker
@@ -267,9 +271,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         address /*newImplementation*/
     )
         internal
-        view
         override
-        onlyOwner
+        restricted
     { }
 
 }

@@ -50,7 +50,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         // Deploy UtilityChecker via proxy
         UtilityChecker utilityCheckerImpl = new UtilityChecker();
-        bytes memory utilityCheckerInitData = abi.encodeCall(UtilityChecker.initialize, ());
+        bytes memory utilityCheckerInitData = abi.encodeCall(UtilityChecker.initialize, (address(accessManager)));
         UtilityCheckerProxy utilityCheckerProxy =
             new UtilityCheckerProxy(address(utilityCheckerImpl), utilityCheckerInitData);
         utilityChecker = UtilityChecker(address(utilityCheckerProxy));

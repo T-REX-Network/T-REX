@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
@@ -10,59 +11,40 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract UpgradeTest is TREXSuiteTest {
 
-    // EIP-1967 implementation slot
     bytes32 constant IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
-    // ============ upgradeToAndCall() Tests ============
-
-    /// @notice Should revert when calling directly (not owner)
-    function test_upgradeToAndCall_RevertWhen_NotOwner() public {
-        // Deploy implementation
+    function _deployChecker() private returns (UtilityChecker) {
         UtilityChecker implementation = new UtilityChecker();
+        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, (address(accessManager)));
+        return UtilityChecker(address(new UtilityCheckerProxy(address(implementation), initData)));
+    }
 
-        // Deploy proxy with initialization data
-        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, ());
-        UtilityCheckerProxy proxy = new UtilityCheckerProxy(address(implementation), initData);
-        UtilityChecker utilityChecker = UtilityChecker(address(proxy));
+    function test_initialize_RevertWhen_AccessManagerIsZero() public {
+        UtilityChecker implementation = new UtilityChecker();
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        new UtilityCheckerProxy(address(implementation), abi.encodeCall(UtilityChecker.initialize, (address(0))));
+    }
 
-        // Transfer ownership to deployer (proxy deployer is address(this))
-        utilityChecker.transferOwnership(deployer);
-
-        // Deploy new implementation
+    /// @notice The upgrade is gated by the AccessManager, not by a single owner: an unmapped selector
+    ///         resolves to ADMIN_ROLE, which the manager admin holds and alice does not.
+    function test_upgradeToAndCall_RevertWhen_NotAuthorized() public {
+        UtilityChecker utilityChecker = _deployChecker();
         UtilityChecker newImplementation = new UtilityChecker();
 
-        // Alice tries to upgrade (not owner)
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, alice));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
         utilityChecker.upgradeToAndCall(address(newImplementation), "");
     }
 
-    /// @notice Should upgrade proxy when calling with owner account
     function test_upgradeToAndCall_Success() public {
-        // Deploy implementation
-        UtilityChecker implementation = new UtilityChecker();
-
-        // Deploy proxy with initialization data
-        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, ());
-        UtilityCheckerProxy proxy = new UtilityCheckerProxy(address(implementation), initData);
-        UtilityChecker utilityChecker = UtilityChecker(address(proxy));
-
-        // Transfer ownership to deployer (proxy deployer is address(this))
-        utilityChecker.transferOwnership(deployer);
-
-        // Deploy new implementation
+        UtilityChecker utilityChecker = _deployChecker();
+        assertEq(utilityChecker.owner(), address(accessManager), "owner() reports the authority");
         UtilityChecker newImplementation = new UtilityChecker();
 
-        // Owner upgrades
-        vm.prank(deployer);
+        // The test contract is the manager admin (see AccessManagerHelper).
         utilityChecker.upgradeToAndCall(address(newImplementation), "");
 
-        // Read the implementation address from the EIP-1967 implementation slot
-        bytes32 slotValue = vm.load(address(proxy), IMPLEMENTATION_SLOT);
-
-        // Convert storage value to address (address is stored in last 20 bytes)
-        address actualImplementation = address(uint160(uint256(slotValue)));
-
+        address actualImplementation = address(uint160(uint256(vm.load(address(utilityChecker), IMPLEMENTATION_SLOT))));
         assertEq(actualImplementation, address(newImplementation));
     }
 

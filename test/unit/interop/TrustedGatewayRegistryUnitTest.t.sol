@@ -22,7 +22,9 @@ contract TrustedGatewayRegistryUnitTest is AccessManagerHelper {
         _deployAccessManager();
 
         registry = new TrustedGatewayRegistry(address(accessManager));
-        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(registry));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            accessManager, address(registry), RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
+        );
 
         _grantInteropManagerRole(interopManager);
     }

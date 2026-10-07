@@ -61,92 +61,55 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-import { ErrorsLib } from "./ErrorsLib.sol";
+import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
-library RolesLib {
+import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
+import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
+/**
+ * @title TokenGuardsLib
+ * @dev The checks behind the token's collaborator setters, deployed once and linked. The token reaches
+ * this by DELEGATECALL, so every contract it talks to sees the token as its caller. Unbinding the current
+ * compliance happens here; writing the new pointer, the bind and the event stay in the token.
+ */
+library TokenGuardsLib {
 
-    // ---- Suite roles. A role id is a domain id in the upper 32 bits and a role number below ----
-
-    enum Role {
-        OWNER,
-        AGENT,
-        AGENT_MINTER,
-        AGENT_BURNER,
-        AGENT_PARTIAL_FREEZER,
-        AGENT_ADDRESS_FREEZER,
-        AGENT_RECOVERY_ADDRESS,
-        AGENT_FORCED_TRANSFER,
-        AGENT_PAUSER,
-        TOKEN_MANAGER,
-        IDENTITY_MANAGER,
-        AGENT_ADMIN,
-        SUITE_ADMIN,
-        IRS_BINDER,
-        IRS_WRITER,
-        COMPLIANCE_MANAGER,
-        VALIDATION_KEEPER
+    /// @dev A token with supply keeps its registry, and the new one must advertise the standard interface.
+    ///  Reverts `TokenCirculating`, then `InvalidIdentityRegistry`.
+    /// @param current the registry the token has now, zero during initialization
+    /// @param supply the token's total supply, native and bridged
+    function checkIdentityRegistry(address current, address identityRegistryAddress, uint256 supply) external view {
+        require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
+        require(
+            ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
+            ErrorsLib.InvalidIdentityRegistry()
+        );
     }
 
-    // ---- Platform roles: factory, implementation authority and identity factory governance ----
+    /// @dev A token with supply keeps its compliance; the new one must advertise the standard interface and
+    ///  be bound to no token; the current one, if any, is unbound. The token then writes the pointer and
+    ///  binds. Reverts `TokenCirculating`, then `InvalidCompliance`, then `ComplianceAlreadyBoundToToken`.
+    /// @param current the compliance the token has now, zero during initialization
+    /// @param supply the token's total supply, native and bridged
+    function prepareCompliance(address current, address complianceAddress, uint256 supply) external {
+        require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
 
-    enum PlatformRole {
-        OWNER,
-        VERSION_MANAGER,
-        ASSET_DEPLOYER,
-        INTEROP_MANAGER
-    }
+        // Checked before getTokenBound() so a wrong contract gives a named error.
+        require(
+            ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),
+            ErrorsLib.InvalidCompliance()
+        );
 
-    uint32 constant PLATFORM_DOMAIN = type(uint32).max;
+        address boundToken = IModularCompliance(complianceAddress).getTokenBound();
+        require(boundToken == address(0), ErrorsLib.ComplianceAlreadyBoundToToken());
 
-    // The manager's open role, which no packed id may equal.
-    uint64 constant PUBLIC_ROLE = type(uint64).max;
-
-    // Role numbers start at 1 so no standard role packs to a zero role number.
-    uint32 constant ROLE_NUMBER_OFFSET = 1;
-
-    // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
-    uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
-
-    function forDomain(uint32 domainId, Role role) internal pure returns (uint64) {
-        return _packSuite(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
-    }
-
-    function forDomain(uint32 domainId, bytes32 customName) internal pure returns (uint64) {
-        return _packSuite(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
-    }
-
-    function platform(PlatformRole role) internal pure returns (uint64) {
-        return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
-    }
-
-    /// Platform roles governance names itself, with no release: the name hashes into the role number the
-    /// same way a custom suite role does, so it can never collide with a {PlatformRole} entry.
-    /// The platform domain is all ones, so a name whose hash has every low bit set would pack to the
-    /// manager's `PUBLIC_ROLE`; such a name is refused and cannot be used. Enum roles cannot reach it.
-    function platform(bytes32 customName) internal pure returns (uint64) {
-        uint64 id = _pack(PLATFORM_DOMAIN, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
-        require(id != PUBLIC_ROLE, ErrorsLib.PlatformRoleCannotBePublic());
-        return id;
-    }
-
-    function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
-        domainId = uint32(roleId >> 32);
-        custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;
-        roleNumber = uint32(roleId) & ~CUSTOM_ROLE_FLAG;
-    }
-
-    function _packSuite(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
-        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
-        return _pack(domainId, roleNumber);
-    }
-
-    function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
-        require(domainId != 0, ErrorsLib.InvalidDomain());
-        return (uint64(domainId) << 32) | roleNumber;
+        if (current != address(0)) {
+            IERC3643Compliance(current).unbindToken(address(this));
+        }
     }
 
 }

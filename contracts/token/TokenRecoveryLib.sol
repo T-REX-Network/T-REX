@@ -61,92 +61,61 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-import { ErrorsLib } from "./ErrorsLib.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
-library RolesLib {
+import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
+/**
+ * @title TokenRecoveryLib
+ * @dev The registry side of the token's wallet recovery, deployed once and linked.
+ *
+ * Recovery is rare and its registry conversation is external calls and ABI encoding the token would
+ * otherwise carry on every deployment. The token reaches this by DELEGATECALL, so the registry sees the
+ * token as its caller, exactly as before. The balance and freeze migration stays in the token, since it
+ * is the token's own ERC-20 and ERC-3643 state.
+ */
+library TokenRecoveryLib {
 
-    // ---- Suite roles. A role id is a domain id in the upper 32 bits and a role number below ----
+    /// @dev The T-REX recovery preconditions: a wallet may not be recovered onto itself, there must be
+    ///  something to recover, at least one of the two wallets must already be known to the registry, and a
+    ///  known new wallet must already belong to `investorOnchainId`. Reverts in that order.
+    /// @param lostBalance the lost wallet's current balance, read by the token
+    function checkRecovery(
+        IERC3643IdentityRegistry registry,
+        address lostWallet,
+        address newWallet,
+        address investorOnchainId,
+        uint256 lostBalance
+    ) external view {
+        require(lostWallet != newWallet, ErrorsLib.SameWalletRecovery());
+        require(lostBalance != 0, ErrorsLib.NoTokenToRecover());
 
-    enum Role {
-        OWNER,
-        AGENT,
-        AGENT_MINTER,
-        AGENT_BURNER,
-        AGENT_PARTIAL_FREEZER,
-        AGENT_ADDRESS_FREEZER,
-        AGENT_RECOVERY_ADDRESS,
-        AGENT_FORCED_TRANSFER,
-        AGENT_PAUSER,
-        TOKEN_MANAGER,
-        IDENTITY_MANAGER,
-        AGENT_ADMIN,
-        SUITE_ADMIN,
-        IRS_BINDER,
-        IRS_WRITER,
-        COMPLIANCE_MANAGER,
-        VALIDATION_KEEPER
+        require(registry.contains(lostWallet) || registry.contains(newWallet), ErrorsLib.RecoveryNotPossible());
+        require(
+            !registry.contains(newWallet) || registry.identity(newWallet) == IIdentity(investorOnchainId),
+            ErrorsLib.RecoveryNotPossible()
+        );
     }
 
-    // ---- Platform roles: factory, implementation authority and identity factory governance ----
-
-    enum PlatformRole {
-        OWNER,
-        VERSION_MANAGER,
-        ASSET_DEPLOYER,
-        INTEROP_MANAGER
-    }
-
-    uint32 constant PLATFORM_DOMAIN = type(uint32).max;
-
-    // The manager's open role, which no packed id may equal.
-    uint64 constant PUBLIC_ROLE = type(uint64).max;
-
-    // Role numbers start at 1 so no standard role packs to a zero role number.
-    uint32 constant ROLE_NUMBER_OFFSET = 1;
-
-    // Custom roles hash their name into the upper half of the role number, so a decoder can tell them apart.
-    uint32 constant CUSTOM_ROLE_FLAG = 0x80000000;
-
-    function forDomain(uint32 domainId, Role role) internal pure returns (uint64) {
-        return _packSuite(domainId, uint32(role) + ROLE_NUMBER_OFFSET);
-    }
-
-    function forDomain(uint32 domainId, bytes32 customName) internal pure returns (uint64) {
-        return _packSuite(domainId, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
-    }
-
-    function platform(PlatformRole role) internal pure returns (uint64) {
-        return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
-    }
-
-    /// Platform roles governance names itself, with no release: the name hashes into the role number the
-    /// same way a custom suite role does, so it can never collide with a {PlatformRole} entry.
-    /// The platform domain is all ones, so a name whose hash has every low bit set would pack to the
-    /// manager's `PUBLIC_ROLE`; such a name is refused and cannot be used. Enum roles cannot reach it.
-    function platform(bytes32 customName) internal pure returns (uint64) {
-        uint64 id = _pack(PLATFORM_DOMAIN, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
-        require(id != PUBLIC_ROLE, ErrorsLib.PlatformRoleCannotBePublic());
-        return id;
-    }
-
-    function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
-        domainId = uint32(roleId >> 32);
-        custom = uint32(roleId) & CUSTOM_ROLE_FLAG != 0;
-        roleNumber = uint32(roleId) & ~CUSTOM_ROLE_FLAG;
-    }
-
-    function _packSuite(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
-        require(domainId != PLATFORM_DOMAIN, ErrorsLib.InvalidDomain());
-        return _pack(domainId, roleNumber);
-    }
-
-    function _pack(uint32 domainId, uint32 roleNumber) private pure returns (uint64) {
-        require(domainId != 0, ErrorsLib.InvalidDomain());
-        return (uint64(domainId) << 32) | roleNumber;
+    /// @dev The new wallet is registered only when it resolves nowhere, so a wallet the global registry
+    ///  already binds keeps following that binding rather than a local copy. Only local entries can be
+    ///  deleted, so the lost wallet is reported for deletion only when it is locally registered. Country is
+    ///  passed as 0 rather than read from the lost wallet, because T-REX stores none.
+    /// @return lostWalletLocal whether the token must delete the lost wallet once compliance has been told
+    function registerRecoveredWallet(
+        IERC3643IdentityRegistry registry,
+        address lostWallet,
+        address newWallet,
+        address investorOnchainId
+    ) external returns (bool lostWalletLocal) {
+        if (!registry.contains(newWallet)) {
+            registry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
+        }
+        return ITREXRegistry(address(registry)).isLocallyRegistered(lostWallet);
     }
 
 }

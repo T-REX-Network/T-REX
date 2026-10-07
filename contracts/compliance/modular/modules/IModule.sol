@@ -79,9 +79,9 @@ interface IModule {
         /// when an `AFTER` module is told about one; the requested maximum, already capped at what the sending
         /// wallet holds, on an issuance.
         uint256 amountMax;
-        /// What produced the movement: one of the `MovementKindLib` constants. A number and not an enum, so a
-        /// kind this module was not written for decodes instead of reverting; such a kind is reported, never
-        /// refused.
+        /// What produced the movement: one of the `MovementKindLib` constants, never zero. A number and not an
+        /// enum, so a kind this module was not written for decodes instead of reverting. A module MUST NOT
+        /// revert on a kind it does not know; what it does with one is its own, deliberate choice.
         uint8 kind;
         /// True while a validation is being issued for a satellite movement.
         bool isIssuance;
@@ -89,9 +89,13 @@ interface IModule {
         /// on a native movement, the spender named on a validation. Empty when the sender executes itself,
         /// which is every direct transfer, mint and burn.
         bytes spender;
-        /// Room for what a later compliance has to say that this struct does not carry yet. Empty today. A
-        /// module decodes it only when it knows the compliance that fills it, and ignores it otherwise, so
-        /// a new fact reaches new modules without an ABI change for the old ones.
+        /// Room for what a later compliance has to say that this struct does not carry yet. Empty today.
+        /// This struct is a parameter of every module function, so it is part of their selectors: a field
+        /// added after modules are deployed changes the selectors and breaks every one of them. A new fact
+        /// goes here instead. The compliance that fills it documents the shape as an `abi.encode`d tuple and
+        /// only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when
+        /// a later fact is added. A module decodes `data` only when it knows the compliance that fills it,
+        /// and ignores it otherwise.
         bytes data;
     }
 
@@ -127,6 +131,9 @@ interface IModule {
      *  reverting stops the movement: a module that cannot record a move has to stop it, and a module that
      *  judges the state the movement left behind refuses it the same way, with its own error. `forceRemoveModule`
      *  is the escape hatch for a module that reverts everywhere
+     *  MUST NOT revert on a `ctx.kind` it does not know: a kind added later has to keep moving through
+     *  modules deployed before it. The module decides what an unknown kind means for its own count, on
+     *  purpose: left out, like an agent's movement, or recorded, like any change of ownership
      *  This function can be called ONLY by the compliance contract itself
      *  @param ctx the movement, see {TransferContext}; `amountMin == amountMax`
      */
@@ -149,6 +156,8 @@ interface IModule {
      *  reaches this function and a rule about distribution answers `max` on it; the issuance of such a
      *  movement does not, because it changes no position
      *  MUST be a view: the compliance calls it under `staticcall` and a module that writes there reverts
+     *  MUST NOT revert on a `ctx.kind` it does not know; it answers for it like for any kind it was not
+     *  written about
      *  @param ctx the movement, see {TransferContext}
      *  @return the largest amount allowed
      */
@@ -162,6 +171,7 @@ interface IModule {
      *  all declaring modules must agree. A direct transfer never reaches this path: the spender is the sender
      *  `ctx.spender` is never empty here
      *  MUST be a view: the compliance calls it under `staticcall`
+     *  MUST NOT revert on a `ctx.kind` it does not know
      *  @param ctx the movement, see {TransferContext}
      *  @return true if the module allows the spender to execute it, false otherwise
      */
