@@ -104,7 +104,8 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
 
     /// @inheritdoc IERC3643Compliance
     function transferred(address _from, address _to, uint256 _amount) external virtual onlyBoundToken {
-        _requireWalletToWallet(_from, _to, _amount);
+        require(_from != address(0) && _to != address(0), ERC3643ErrorsLib.ZeroAddress());
+        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _transferred(_from, _to, _amount);
     }
 
@@ -209,13 +210,6 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
         returns (bool)
     {
         return true;
-    }
-
-    /// @dev What every wallet-to-wallet notification requires: two wallets and a non-zero amount. Shared with
-    ///  the notifications an extension adds, so one copy of the checks serves all of them.
-    function _requireWalletToWallet(address _from, address _to, uint256 _amount) internal pure {
-        require(_from != address(0) && _to != address(0), ERC3643ErrorsLib.ZeroAddress());
-        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
     }
 
     function _getTokenBound() internal view virtual returns (address) {

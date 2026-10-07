@@ -344,7 +344,8 @@ contract ModularCompliance is
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
     ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
-        _requireWalletToWallet(from, to, amount);
+        require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
+        require(amount > 0, ErrorsLib.ZeroValue());
         _applyMovement(from, to, amount, kind);
     }
 
