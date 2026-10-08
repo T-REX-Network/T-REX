@@ -1645,7 +1645,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     /// @dev The `moduleTypes` answer of a plain rule, for the mocked modules above.
     function _ruleOnly() private pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](1);
-        types[0] = IModule.ModuleType.RULE;
+        types[0] = IModule.ModuleType.TRANSFER_CHECK;
     }
 
 }

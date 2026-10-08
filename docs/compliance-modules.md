@@ -21,20 +21,46 @@ two wallets of one identity changes none of them: relocating your own tokens is 
 
 ## The three kinds of module
 
-A module says what it is in `moduleTypes()`, and the compliance calls it only where it said so.
+Every module implements the same three methods, two questions and one notice, and names in `moduleTypes()`
+the ones it answers. The compliance calls a module only where it said so.
 
-| Type | Function | When |
-|---|---|---|
-| `RULE` | `allowedAmount(ctx)` | before a transfer or a mint, and when a cross-chain validation is issued |
-| `SPENDER` | `moduleCheckSpender(ctx)` | before an allowance is spent in `transferFrom`, and when a validation names a spender |
-| `TRACKER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated |
+Two are questions and one is a notice. `checkTransfer` and `checkSpender` are views: the compliance asks
+them under `staticcall`, before anything moves, and a module cannot record anything there. `afterTransfer`
+is the notice: it is told once the ledger moved, and that is where a module counts.
 
-A module may name one, two or all three. It inherits `AbstractModuleUpgradeable`, which answers every
-question neutrally, and overrides only the ones its types cover.
+| Type | Method | When | Sees |
+|---|---|---|---|
+| `TRANSFER_CHECK` | `checkTransfer(ctx)` view | before a transfer or a mint, and when a cross-chain validation is issued | the ledger before the move |
+| `SPENDER` | `checkSpender(ctx)` view | before an allowance is spent in `transferFrom`, and when a validation names a spender | who executes |
+| `AFTER` | `afterTransfer(ctx)` | after the tokens moved and the positions were updated | the ledger after the move |
 
-## allowedAmount
+A module may name any combination. It inherits `AbstractModuleUpgradeable`, which answers every question
+neutrally, and overrides only the methods its types cover.
 
-A rule answers one question: what is the largest amount you allow to move? `type(uint256).max` means no
+The order on a native movement is: `canTransfer` asks the `TRANSFER_CHECK` modules; the token moves the balances and
+calls the compliance; the compliance moves the positions and tells the `AFTER` modules. A settlement asks
+nobody and tells the `AFTER` modules once the positions moved. The issuance of a validation asks `TRANSFER_CHECK`
+and `SPENDER` only: nothing moves there.
+
+Which to pick. A bound on how much may move is a `TRANSFER_CHECK`: it returns a number, so it narrows a cross-chain
+issuance as well. A veto on the state a movement leaves behind is an `AFTER` module that reverts, with its
+own error; the movement and the ledger move are undone together. A counter that must be checked and then
+recorded is `TRANSFER_CHECK` plus `AFTER` on the same storage. A fact about the state before the move is read in
+`AFTER` too: the context carries the exact amount, so the position before is the position after plus or
+minus it.
+
+An `AFTER` veto refuses a native transfer and a mint, nothing else. `afterTransfer` also runs where a revert
+is no veto: on a settlement, where the satellite already executed, so the revert leaves the delivery
+undeliverable until `forceRemoveModule` drops the module, and with it the veto on every movement; on a
+forced transfer and a recovery, which are the agent's override, usually the movement that has to get
+through; and on a burn, which only an agent can call, so a revert there blocks a redemption the same way.
+So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only, letting
+`BURN`, `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
+`checkTransfer`, which narrows the issuance before anything leaves.
+
+## checkTransfer
+
+A `TRANSFER_CHECK` module answers one question: what is the largest amount you allow to move? `type(uint256).max` means no
 limit, `0` means refused. The compliance keeps the smallest answer over the bound rules.
 
 That one answer serves both worlds. On a native transfer the amount must be at most the minimum. On a
@@ -46,7 +72,7 @@ The rule must be monotonic: a smaller amount is never less acceptable than a lar
 limits and allow lists all are. A rule that is not, "a multiple of 100" for instance, reads
 `ctx.amountMax` and answers `max` or `0`, and refuses an issuance whose range is not a point.
 
-`allowedAmount` is a view. The compliance calls it under `staticcall`, so a module that writes there
+`checkTransfer` is a view. The compliance calls it under `staticcall`, so a module that writes there
 reverts.
 
 ## The context
@@ -76,7 +102,7 @@ of `transferred`. A tracker that counts an investor's own activity, a monthly tr
 reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. A tracker that follows ownership does not:
 a forced transfer always moves the position between identities, and a recovery does when the new wallet
 belongs to another identity, so a holder count or a per-identity tracker records both. No rule is ever
-asked about those two, so a `RULE` only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+asked about those two, so a `TRANSFER_CHECK` module only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
@@ -108,7 +134,7 @@ Identities arrive resolved, so a module never calls the registry to find out who
 ledger describes the state before the move.
 
 One context, one convention, everywhere. A mint has no sender, so `fromIdentity` and `fromWallet` are zero;
-a burn has no recipient, so `toIdentity` and `toWallet` are zero. A `TRACKER` reads that, and `kind`, to
+a burn has no recipient, so `toIdentity` and `toWallet` are zero. An `AFTER` module reads that, and `kind`, to
 tell every movement apart, which is why it needs one function and not three.
 
 A recipient that resolves to no identity is refused before any rule is asked, whenever a rule is bound. A
@@ -130,7 +156,7 @@ extend to calls your module makes.
 `MaxBalancePerIdentityModule` caps what one identity may own, over every wallet and every chain:
 
 ```solidity
-function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
     if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
     IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
     uint256 held = ledger.positionOf(ctx.toIdentity) + ledger.pendingInOf(ctx.toIdentity);
@@ -140,7 +166,7 @@ function allowedAmount(TransferContext calldata ctx) external view override retu
 
 function moduleTypes() external pure returns (ModuleType[] memory types) {
     types = new ModuleType[](1);
-    types[0] = ModuleType.RULE;
+    types[0] = ModuleType.TRANSFER_CHECK;
 }
 ```
 

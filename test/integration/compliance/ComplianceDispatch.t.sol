@@ -14,6 +14,7 @@ import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol"
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import {
     RecordingModule,
+    RevertingAfterModule,
     RuleOnlyModule,
     SpenderOnlyModule,
     TrackerOnlyModule,
@@ -153,6 +154,42 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.expectRevert(ERC3643ErrorsLib.ZeroValue.selector);
         mc.agentTransferred(alice, bob, 0, MovementKindLib.RECOVERY);
         vm.stopPrank();
+    }
+
+    // ==== A refusing AFTER ====
+
+    /// @notice A post-state veto is an `AFTER` module that reverts: the movement is undone with the module's own
+    ///         error, the balances are untouched, and the compliance adds no error of its own.
+    function test_afterTransfer_RevertWhen_AnAfterModuleRefusesThePostState() public {
+        RecordingModule veto = RecordingModule(_deploy(address(new RevertingAfterModule())));
+        vm.prank(deployer);
+        mc.addModule(address(veto));
+        veto.setAllow(false);
+        uint256 aliceBalance = token.balanceOf(alice);
+        uint256 bobPosition = mc.positionOf(address(bobIdentity));
+
+        vm.prank(alice);
+        vm.expectRevert(RevertingAfterModule.AfterRefused.selector);
+        token.transfer(bob, 100);
+
+        assertEq(token.balanceOf(alice), aliceBalance);
+        assertEq(mc.positionOf(address(bobIdentity)), bobPosition, "the ledger move was undone with the transfer");
+    }
+
+    /// @notice An `AFTER` module is not reached at the issuance of a validation: nothing has moved yet, so
+    ///         there is nothing to tell, and a veto bound there cannot block an issuance.
+    function test_requestTransferValidation_Success_WhenAfterModulesAreNotTold() public {
+        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        bytes memory from = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceSat"), 1000);
+        bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobSat"));
+
+        RecordingModule veto = RecordingModule(_deploy(address(new RevertingAfterModule())));
+        vm.prank(deployer);
+        mc.addModule(address(veto));
+        veto.setAllow(false);
+
+        vm.expectCall(address(veto), abi.encodeWithSelector(IModule.afterTransfer.selector), 0);
+        _requestValidation(address(aliceIdentity), from, to, 10, 100);
     }
 
     function _lastKind() private view returns (uint8 kind) {
@@ -336,8 +373,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             spender: "",
             data: ""
         });
-        vm.expectCall(address(firstRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
-        vm.expectCall(address(secondRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
+        vm.expectCall(address(firstRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
+        vm.expectCall(address(secondRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
         _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(tracker.totalHookCalls(), 0, "no tracker is told: nothing moved yet");

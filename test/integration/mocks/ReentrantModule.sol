@@ -99,7 +99,7 @@ contract ReentrantModule is AbstractModuleUpgradeable {
     /// @dev See {IModule-moduleTypes}.
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.TRACKER;
+        types[0] = ModuleType.AFTER;
     }
 
 }

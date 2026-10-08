@@ -75,6 +75,7 @@ import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegi
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
@@ -231,13 +232,13 @@ contract UtilityChecker is IUtilityChecker, AccessManagedOwnableUpgradeable, UUP
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
-        // Only the `RULE` modules are consulted, matching what the compliance actually calls. Listing the
+        // Only the `TRANSFER_CHECK` modules are consulted, matching what the compliance actually calls. Listing the
         // others would report a pass they never gave.
-        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
+        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.TRANSFER_CHECK);
         IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
-            uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
+            uint256 allowed = IModule(rules[i]).checkTransfer(ctx);
             _details[i] = ComplianceCheckDetails({
                 moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed
             });
@@ -262,6 +263,8 @@ contract UtilityChecker is IUtilityChecker, AccessManagedOwnableUpgradeable, UUP
         }
         ctx.amountMin = _value;
         ctx.amountMax = _value;
+        // The same kind the compliance gives `canTransfer`, so a rule that reads it answers the same here.
+        ctx.kind = _from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
     }
 
     function _authorizeUpgrade(

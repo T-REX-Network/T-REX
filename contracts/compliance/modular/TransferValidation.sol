@@ -218,7 +218,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             draft.amountMax,
             ""
         );
-        uint256 allowed = _minAllowedAmount(ctx);
+        uint256 allowed = _callCheckTransfer(ctx);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
         require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
     }
@@ -479,7 +479,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  relocation between two wallets of one identity moves no position, so no distribution rule applies to it.
     function _exceedsWhatRulesAllowNow(IModule.TransferContext memory ctx, uint256 amount) private view returns (bool) {
         if (_isRelocation(ctx.fromIdentity, ctx.toIdentity)) return false;
-        return amount > _minAllowedAmount(ctx);
+        return amount > _callCheckTransfer(ctx);
     }
 
     /* ----- Discard ----- */
@@ -613,15 +613,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Whether the AccessManager lets `caller` call `selector` on this contract now.
     function _canCallSelector(address caller, bytes4 selector) internal view virtual returns (bool);
 
-    /// @dev The smallest amount any `RULE` module allows for `ctx`, `type(uint256).max` when none is bound.
-    ///  Evaluated under `staticcall`: the ledger still describes the state before the move.
-    function _minAllowedAmount(IModule.TransferContext memory ctx) internal view virtual returns (uint256);
+    /// @dev Calls `checkTransfer` on every `TRANSFER_CHECK` module, before anything moves, and returns the smallest
+    ///  amount they allow for `ctx`, `type(uint256).max` when none is bound. Evaluated under `staticcall`: the
+    ///  ledger still describes the state before the move.
+    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view virtual returns (uint256);
 
     /// @dev Whether every `SPENDER` module accepts `ctx.spender`, `true` when none is bound. A view: the
     ///  modules are called under `staticcall`.
     function _spenderAllowed(IModule.TransferContext memory ctx) internal view virtual returns (bool);
 
-    /// @dev Calls `afterTransfer` on every `TRACKER` module, once the positions have been updated.
+    /// @dev Calls `afterTransfer` on every `AFTER` module, once the positions have been updated.
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal virtual;
 
     /// @dev Sends one leg of a validation toward `chainKey`, through the token.

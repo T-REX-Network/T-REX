@@ -93,7 +93,7 @@ contract SpenderVerificationModule is AbstractModuleUpgradeable, AccessManagedOw
 
     /// @inheritdoc IModule
     /// @dev Allowed when the spender's wallet, native or satellite, is eligible in the token's registry.
-    function moduleCheckSpender(TransferContext calldata ctx) external view override returns (bool) {
+    function checkSpender(TransferContext calldata ctx) external view override returns (bool) {
         return _identityRegistry(ctx.compliance).isWalletVerified(ctx.spender);
     }
 

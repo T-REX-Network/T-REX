@@ -7,7 +7,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
 import { UtilityCheckerProxy } from "contracts/utils/UtilityCheckerProxy.sol";
 
-import { RecordingModule, TrackerOnlyModule } from "../mocks/CapabilityModules.sol";
+import { NoMintModule, RecordingModule, TrackerOnlyModule } from "../mocks/CapabilityModules.sol";
 import { MockContract } from "../mocks/MockContract.sol";
 import { TestModule } from "../mocks/TestModule.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -145,6 +145,26 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertEq(compliance.getModules().length, 2);
         assertEq(results.length, 1);
         assertEq(keccak256(bytes(results[0].moduleName)), keccak256(bytes("TestModule")));
+    }
+
+    /// @notice The checker builds the context the compliance builds, `kind` included: a rule that refuses mints
+    ///         refuses a previewed mint too, and the preview agrees with `canTransfer`.
+    function test_getTransferDetails_ReportsTheSameKindAsTheCompliance_OnAMint() public {
+        NoMintModule implementation = new NoMintModule();
+        address noMint =
+            address(new ModuleProxy(address(implementation), abi.encodeCall(RecordingModule.initialize, ())));
+        vm.prank(deployer);
+        compliance.addModule(noMint);
+
+        UtilityChecker.ComplianceCheckDetails[] memory mint =
+            utilityChecker.getTransferDetails(address(mockContract), address(0), bob, 100);
+        assertEq(mint.length, 2);
+        assertFalse(mint[1].pass, "a mint is previewed as a mint");
+        assertFalse(compliance.canTransfer(address(0), bob, 100), "and the compliance agrees");
+
+        UtilityChecker.ComplianceCheckDetails[] memory transfer =
+            utilityChecker.getTransferDetails(address(mockContract), alice, bob, 100);
+        assertTrue(transfer[1].pass, "a transfer is previewed as a transfer");
     }
 
 }
