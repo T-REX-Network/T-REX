@@ -92,8 +92,8 @@ import { IModule } from "./modules/IModule.sol";
 /// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
-/// `RULE` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
-/// every `TRACKER` module what happened. A mint and a burn are the same movement with one side missing, so the
+/// `TRANSFER_CHECK` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
+/// every `AFTER` module what happened. A mint and a burn are the same movement with one side missing, so the
 /// three base hooks differ only in which side they fill in. A module is kept in one list per type it named at
 /// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
 contract ModularCompliance is
@@ -225,7 +225,9 @@ contract ModularCompliance is
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
         return _spenderAllowed(
-            _buildNativeContext(_from, _to, _value, InteroperableAddress.formatEvmV1(block.chainid, _spender))
+            _buildNativeContext(
+                _from, _to, _value, MovementKindLib.TRANSFER, InteroperableAddress.formatEvmV1(block.chainid, _spender)
+            )
         );
     }
 
@@ -308,7 +310,7 @@ contract ModularCompliance is
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
 
-    /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
+    /// @dev Rule evaluation: the amount must be at most the smallest amount any `TRANSFER_CHECK` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
     ///  A wallet that resolves to no identity is refused outright while a rule is bound, on either side. Every
@@ -317,14 +319,14 @@ contract ModularCompliance is
     ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
     ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
-        if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
+        if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
         if (to != address(0) && ctx.toIdentity == address(0)) return false;
-        return value <= _minAllowedAmount(ctx);
+        return value <= _callCheckTransfer(ctx);
     }
 
-    /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
+    /// @dev A transfer: the position follows the tokens, then every `AFTER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
         _applyMovement(from, to, value, MovementKindLib.TRANSFER);
     }
@@ -347,8 +349,8 @@ contract ModularCompliance is
         _applyMovement(from, to, amount, kind);
     }
 
-    /// @dev Moves the positions and tells the trackers. One function serves all three hooks: the absent side of
-    ///  a mint or a burn is a zero wallet and stays a zero identity.
+    /// @dev Moves the positions, then tells the `AFTER` modules. One function serves all three hooks: the absent
+    ///  side of a mint or a burn is a zero wallet and stays a zero identity.
     ///
     ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
@@ -374,10 +376,12 @@ contract ModularCompliance is
         view
         returns (IModule.TransferContext memory)
     {
-        return _buildNativeContext(from, to, value, "");
+        // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
+        uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
+        return _buildNativeContext(from, to, value, kind, "");
     }
 
-    function _buildNativeContext(address from, address to, uint256 value, bytes memory spender)
+    function _buildNativeContext(address from, address to, uint256 value, uint8 kind, bytes memory spender)
         private
         view
         returns (IModule.TransferContext memory)
@@ -387,8 +391,6 @@ contract ModularCompliance is
         address toIdentity;
         if (from != address(0)) fromIdentity = address(registry.identity(from));
         if (to != address(0)) toIdentity = address(registry.identity(to));
-        // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
-        uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
         return TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, spender);
     }
 
@@ -411,14 +413,14 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The smallest answer of the `RULE` modules. `allowedAmount` is a view on the interface, so each
+    /// @dev The smallest answer of the `TRANSFER_CHECK` modules. `checkTransfer` is a view on the interface, so each
     ///  call is a `staticcall` and a module that writes there reverts.
-    function _minAllowedAmount(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
+    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
         allowed = type(uint256).max;
-        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.RULE];
+        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK];
         uint256 length = rules.length();
         for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).allowedAmount(ctx);
+            uint256 answer = IModule(rules.at(i)).checkTransfer(ctx);
             if (answer < allowed) allowed = answer;
         }
     }
@@ -428,14 +430,14 @@ contract ModularCompliance is
         EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
         uint256 length = spenderRules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(spenderRules.at(i)).moduleCheckSpender(ctx)) return false;
+            if (!IModule(spenderRules.at(i)).checkSpender(ctx)) return false;
         }
         return true;
     }
 
     /// @inheritdoc TransferValidation
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal override {
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
+        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.AFTER];
         uint256 length = trackers.length();
         for (uint256 i = 0; i < length; i++) {
             IModule(trackers.at(i)).afterTransfer(ctx);

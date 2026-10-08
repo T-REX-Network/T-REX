@@ -40,16 +40,16 @@ contract ModuleTypesUnitTest is Test {
 
     function test_moduleTypes_Success_WhenAFixtureNamesSeveral() public {
         IModule.ModuleType[] memory ruleAndTracker = new IModule.ModuleType[](2);
-        ruleAndTracker[0] = IModule.ModuleType.RULE;
-        ruleAndTracker[1] = IModule.ModuleType.TRACKER;
+        ruleAndTracker[0] = IModule.ModuleType.TRANSFER_CHECK;
+        ruleAndTracker[1] = IModule.ModuleType.AFTER;
 
         _assertTypes(_deploy(address(new RuleAndTrackerModule())), ruleAndTracker);
         _assertTypes(_deploy(address(new CappedRecipientModule())), ruleAndTracker);
 
         IModule.ModuleType[] memory all = new IModule.ModuleType[](3);
-        all[0] = IModule.ModuleType.RULE;
+        all[0] = IModule.ModuleType.TRANSFER_CHECK;
         all[1] = IModule.ModuleType.SPENDER;
-        all[2] = IModule.ModuleType.TRACKER;
+        all[2] = IModule.ModuleType.AFTER;
         _assertTypes(_deploy(address(new AllTypesModule())), all);
     }
 
@@ -80,8 +80,8 @@ contract ModuleTypesUnitTest is Test {
     function test_defaults_Success_WhenTheQuestionsAreNotOverridden() public {
         IModule module = IModule(_deploy(address(new TrackerOnlyModule())));
 
-        assertEq(module.allowedAmount(_context(1)), type(uint256).max, "no limit by default");
-        assertTrue(module.moduleCheckSpender(_context(1)), "allowed by default");
+        assertEq(module.checkTransfer(_context(1)), type(uint256).max, "no limit by default");
+        assertTrue(module.checkSpender(_context(1)), "allowed by default");
     }
 
     function test_defaults_Success_WhenTheActionIsNotOverridden() public {
@@ -135,7 +135,7 @@ contract ModuleTypesUnitTest is Test {
 
     function _rule() private pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](1);
-        types[0] = IModule.ModuleType.RULE;
+        types[0] = IModule.ModuleType.TRANSFER_CHECK;
     }
 
     function _spender() private pure returns (IModule.ModuleType[] memory types) {
@@ -145,7 +145,7 @@ contract ModuleTypesUnitTest is Test {
 
     function _tracker() private pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](1);
-        types[0] = IModule.ModuleType.TRACKER;
+        types[0] = IModule.ModuleType.AFTER;
     }
 
     function _context(uint256 amount) private view returns (IModule.TransferContext memory ctx) {

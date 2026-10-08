@@ -53,7 +53,7 @@ All notable changes to this project will be documented in this file.
   - `UtilityChecker.getVerifiedDetails` also returns the wallet's `IIdentityFactory.AccountStatus`, so a
     revoked wallet whose identity passes every claim reads `Revoked` instead of looking verified. A
     registry without an IdentityFactory reports `None`. Callers decode a second return value.
-  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
+  - While a `TRANSFER_CHECK` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
     refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
   - The ledger follows the registry on its own. It remembers which identity it credited each native
     wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
@@ -78,13 +78,13 @@ All notable changes to this project will be documented in this file.
     `WalletKeyLib.walletId` is the one place a wallet's ledger id is computed. `LedgerAttribution.t.sol` pins the separation of the two reads, and the ledger
     invariant harness now revokes native wallets mid-sequence, so the fuzzer explores movements out of a
     revoked wallet rather than only registry-stable ones.
-  - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`RULE`, `SPENDER`, `TRACKER`),
+  - `IModule.moduleTypes()` returns the `ModuleType`s a module is (`TRANSFER_CHECK`, `SPENDER`, `AFTER`),
     read once at binding. `ModularCompliance` keeps one list per type and dispatches to it only:
-    `RULE` answers `allowedAmount(ctx)`, the largest amount it allows, and the compliance keeps the
-    smallest answer (`type(uint256).max` is no limit, 0 is refused; the rule must be monotonic);
-    `SPENDER` answers `moduleCheckSpender`, all must agree; `TRACKER` is told `afterTransfer(ctx)` after
+    `TRANSFER_CHECK` answers `checkTransfer(ctx)`, the largest amount it allows, and the compliance keeps
+    the smallest answer (`type(uint256).max` is no limit, 0 is refused; the rule must be monotonic);
+    `SPENDER` answers `checkSpender`, all must agree; `AFTER` is told `afterTransfer(ctx)` after
     the positions moved. One action, not three: a mint is a movement with a zero sender side and a burn one
-    with a zero recipient side, the convention `allowedAmount` already used, so the tracker sorts them
+    with a zero recipient side, the convention `checkTransfer` already uses, so the tracker sorts them
     itself and the compliance keeps one dispatch loop.
   - `IModule.TransferContext`: the compliance asking, both identities resolved once, both wallet keys,
     `amountMin` / `amountMax`, `kind`, `isIssuance`, `spender` and `data`. Every rule, spender policy and
@@ -99,10 +99,18 @@ All notable changes to this project will be documented in this file.
     the compliance call swapped; `ERC3643Token` is untouched. `kind` is a `uint8` and not an enum on purpose: an enum is range-checked on
     calldata decoding, so a module compiled against today's kinds would revert on one added later and block
     every movement of that kind until upgraded.
+  - Module types are the three methods every module implements, and a type says which the compliance calls:
+    `TRANSFER_CHECK` (`checkTransfer(ctx)`, a view answering the largest amount allowed, was `RULE` /
+    `allowedAmount`), `SPENDER` (`checkSpender`, a view, was `moduleCheckSpender`) and `AFTER`
+    (`afterTransfer(ctx)`, was `TRACKER`). Two questions and one notice: the two views are called under
+    `staticcall`, so nothing is recorded before the move; `afterTransfer` is where a module counts. A check
+    on the state a movement leaves behind is an `AFTER` module that reverts, on `TRANSFER` and `MINT` only: a
+    settlement, a burn and an agent's movement run `afterTransfer` too, and a revert there is no veto. The issuance
+    of a validation reaches `TRANSFER_CHECK` and `SPENDER` only; a settlement moves, then tells `AFTER`.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.
-  - A recipient that resolves to no identity is refused while a `RULE` is bound: a distribution rule keys
+  - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys
     on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
     registry with eligibility checks disabled reaches that path.
   - `resyncModuleTypes(address)` re-reads a bound module's declaration after an implementation
@@ -112,10 +120,10 @@ All notable changes to this project will be documented in this file.
   - `MaxBalancePerIdentityModule`: the first rule over the ledger, a cap per identity over every
     wallet and every chain, plug and play, one function for a native transfer, an issuance, two
     validations racing for the same cap and a late reconciliation.
-  - `UtilityChecker.getTransferDetails` reports each `RULE` module's `allowedAmount` next to the
+  - `UtilityChecker.getTransferDetails` reports each `TRANSFER_CHECK` module's `checkTransfer` answer next to the
     pass verdict (`ComplianceCheckDetails.allowedAmount`).
   - `docs/compliance-modules.md` is the one-page guide to writing a module.
-- **Spender compliance check**: `IModule.moduleCheckSpender(ctx)` and
+- **Spender compliance check**: `IModule.checkSpender(ctx)` and
   `IModularCompliance.canSpenderCall(...)`, with AND semantics across the modules naming
   `SPENDER`. The spender travels in `TransferContext.spender` as an ERC-7930 envelope, so one policy
   covers the caller of `transferFrom` and the operator a validation names on a satellite.
@@ -379,7 +387,7 @@ All notable changes to this project will be documented in this file.
     position reaches a satellite through delegation-out, which burns before it instructs. `from` must
     resolve to an identity (revoked included), `to` must pass `isWalletVerified`, every envelope must
     be canonical. The range is capped at `from`'s bridged position less what is already pending out of
-    it, then at the smallest `allowedAmount` any `RULE` module answers (skipped when both wallets belong
+    it, then at the smallest `checkTransfer` any `TRANSFER_CHECK` module answers (skipped when both wallets belong
     to one identity); an empty range reverts with `EmptyValidationRange`, a zero maximum with
     `ZeroValue`, and nothing is written. The record (`validationOf`) is stored for the lifecycle,
     `TransferValidationIssued` carries the full envelopes, and one leg per involved satellite chain
@@ -450,7 +458,7 @@ All notable changes to this project will be documented in this file.
     keeper would open, against the liveness dependency a restricted one carries.
   - Late reconciliation: a leg for a `Discarded` validation is applied anyway, the status becomes
     `LateReconciled` and `LateReconciliation` fires. Issuance for that chain pauses only when the
-    executed amount is above the smallest `allowedAmount` the rules answer once the reservation is
+    executed amount is above the smallest `checkTransfer` the rules answer once the reservation is
     released, forcing a late delivery being cheap enough that pausing on every one would be a denial
     of service. A late first leg of two consults no rule, so it stays `Discarded` with its flag set and
     only warns for its own chain.
@@ -628,7 +636,7 @@ All notable changes to this project will be documented in this file.
   empty set, so stripping an issuer of every topic means `removeTrustedIssuer`.
 - `batchRegisterIdentity` is `restricted` and bound to AGENT. No role was bound to its selector
   before, so the AccessManager fell back to admin-only on a function meant for agents.
-- **Breaking, `IModule`**: `moduleTypes()` replaces `moduleCapabilities()`, `allowedAmount(ctx)`
+- **Breaking, `IModule`**: `moduleTypes()` replaces `moduleCapabilities()`, `checkTransfer(ctx)`
   replaces `moduleCheck` and `validationBounds`, and one `afterTransfer(ctx)` replaces
   `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
   `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.

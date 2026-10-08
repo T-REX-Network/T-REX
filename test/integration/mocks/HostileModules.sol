@@ -15,21 +15,21 @@ contract UnbindRevertingModule is IModule {
         revert UnbindRefused();
     }
 
-    function allowedAmount(IModule.TransferContext calldata) external pure returns (uint256) {
+    function checkTransfer(IModule.TransferContext calldata) external pure returns (uint256) {
         return type(uint256).max;
     }
 
     function afterTransfer(IModule.TransferContext calldata) external { }
 
-    function moduleCheckSpender(IModule.TransferContext calldata) external pure returns (bool) {
+    function checkSpender(IModule.TransferContext calldata) external pure returns (bool) {
         return true;
     }
 
     function moduleTypes() external pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](3);
-        types[0] = IModule.ModuleType.RULE;
+        types[0] = IModule.ModuleType.TRANSFER_CHECK;
         types[1] = IModule.ModuleType.SPENDER;
-        types[2] = IModule.ModuleType.TRACKER;
+        types[2] = IModule.ModuleType.AFTER;
     }
 
     function isComplianceBound(address) external pure returns (bool) {

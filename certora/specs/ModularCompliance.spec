@@ -34,9 +34,9 @@ methods {
     function moduleCount()          external returns (uint256) envfree;
 
     // ----- IModule callbacks: opaque -----
+    function _.checkTransfer(IModule.TransferContext)       external => ALWAYS(max_uint256);
     function _.afterTransfer(IModule.TransferContext)        external => NONDET;
-    function _.allowedAmount(IModule.TransferContext)        external => ALWAYS(max_uint256);
-    function _.moduleCheckSpender(IModule.TransferContext)   external => ALWAYS(true);
+    function _.checkSpender(IModule.TransferContext)         external => ALWAYS(true);
     // what a module names is opaque here: binding files it under the types it returns
     function _.moduleTypes()                                 external => NONDET;
     function _.bindCompliance(address)                       external => NONDET;
