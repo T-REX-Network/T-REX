@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
+import { MovementKindLib } from "./MovementKindLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title TransferContextLib
@@ -11,8 +12,11 @@ import { IModule } from "./modules/IModule.sol";
 library TransferContextLib {
 
     /// @dev A native movement: a transfer, a mint (zero `from`) or a burn (zero `to`), for `amount` exactly.
+    ///  `kind` is what the token reported, which the zero sides alone cannot tell: a forced transfer and a
+    ///  recovery move between two non-zero wallets exactly like a transfer does.
     function native(
         address compliance,
+        uint8 kind,
         address fromIdentity,
         address toIdentity,
         address from,
@@ -21,6 +25,7 @@ library TransferContextLib {
         bytes memory spender
     ) internal pure returns (IModule.TransferContext memory ctx) {
         ctx.compliance = compliance;
+        ctx.kind = kind;
         ctx.fromIdentity = fromIdentity;
         ctx.toIdentity = toIdentity;
         if (from != address(0)) ctx.fromWallet = WalletKeyLib.walletId(from);
@@ -48,6 +53,7 @@ library TransferContextLib {
         ctx.toWallet = toWallet;
         ctx.amountMin = amountMin;
         ctx.amountMax = amountMax;
+        ctx.kind = MovementKindLib.CROSS_CHAIN;
         ctx.isIssuance = true;
         ctx.spender = spender;
     }
@@ -69,6 +75,7 @@ library TransferContextLib {
         ctx.toWallet = toWallet;
         ctx.amountMin = amount;
         ctx.amountMax = amount;
+        ctx.kind = MovementKindLib.CROSS_CHAIN;
     }
 
 }

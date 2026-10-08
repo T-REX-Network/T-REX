@@ -6,6 +6,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -335,7 +336,8 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
             bytes32 toWallet,
             uint256 amountMin,
             uint256 amountMax,
-            bool issuance,
+            uint8 kind,
+            bool issuance,,
         ) = TrackerOnlyModule(recorder).lastContext();
         assertEq(compliance, address(mc));
         assertEq(fromIdentity, aliceIdentity);
@@ -344,6 +346,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(toWallet, WalletKeyLib.canonicalKey(toSat));
         assertEq(amountMin, 50);
         assertEq(amountMax, 50);
+        assertEq(kind, MovementKindLib.CROSS_CHAIN, "a settlement is the cross-chain kind a tracker sees");
         assertFalse(issuance);
     }
 
@@ -393,7 +396,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertFalse(halt);
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(mc.positionOf(bobId), 40);
-        (,,,, bytes32 toWallet,,,,) = TrackerOnlyModule(recorder).lastContext();
+        (,,,, bytes32 toWallet,,,,,,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(toWallet, bytes32(uint256(uint160(bob))), "a native wallet is its padded address");
     }
 
@@ -431,7 +434,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
-        (, address fromIdentity, address toIdentity,,,,,,) = TrackerOnlyModule(recorder).lastContext();
+        (, address fromIdentity, address toIdentity,,,,,,,,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(fromIdentity, aliceIdentity, "the settlement knows whose it is");
         assertEq(toIdentity, bobIdentity);
         assertEq(mc.positionOf(bobId), 50);
