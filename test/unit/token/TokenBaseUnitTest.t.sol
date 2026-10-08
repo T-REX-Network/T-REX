@@ -82,6 +82,7 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.created.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.destroyed.selector), "");
         vm.mockCall(compliance, abi.encodeWithSelector(IERC3643Compliance.transferred.selector), "");
+        vm.mockCall(compliance, abi.encodeWithSelector(IModularCompliance.agentTransferred.selector), "");
     }
 
     /// @dev Makes a mock pass the ERC165Checker guard on the token's dependency setters.

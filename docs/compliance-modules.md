@@ -62,10 +62,42 @@ struct TransferContext {
     bytes32 toWallet;       // zero on a burn
     uint256 amountMin;      // equal to amountMax on a native movement
     uint256 amountMax;      // the amount that moved, or the requested maximum on an issuance
+    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
+    bytes   data;           // empty today; room for a later compliance to say more without a selector change
 }
 ```
+
+`kind` says what produced the movement. The zero sides already tell a mint and a burn apart, but a forced
+transfer and a recovery move between two non-zero wallets exactly like a transfer does, and only the token
+knows the difference: it reports them to the compliance through `agentTransferred`, with the kind, instead
+of `transferred`. A tracker that counts an investor's own activity, a monthly transfer limit for instance,
+reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. A tracker that follows ownership does not:
+a forced transfer always moves the position between identities, and a recovery does when the new wallet
+belongs to another identity, so a holder count or a per-identity tracker records both. No rule is ever
+asked about those two, so a `RULE` only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+
+`kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
+module compiled against today's kinds would revert on a kind added later and block every movement of that
+kind until it was upgraded. With a number, a module that meets a kind it was not written for sees an
+unfamiliar value. A module MUST NOT revert on a kind it does not know; that is the contract `IModule` states
+on each hook. Zero is never a kind: a context reporting zero was built without one, and a test sees that
+instead of a forced transfer that reads as a plain transfer.
+
+Letting an unknown kind through is not safe by itself. A tracker that skips a kind it does not know misses
+a movement in silence, and a revert that would have been loud becomes a count that is quietly wrong. So each
+tracker decides, on purpose, what an unknown kind means for it. A counter of the investor's own activity
+leaves it out, the way it leaves out `FORCED_TRANSFER` and `RECOVERY`. A tracker that has to see every
+change of ownership, a holder count for instance, records it like any other movement. Write that choice
+in the module; never let it fall out of a `switch` with no default.
+
+`data` is empty and reserved. The struct is a parameter of every module function, so it is part of their
+selectors: a field added once modules are deployed changes the selectors and breaks every one of them. A
+new fact goes in `data` instead. The compliance that fills it documents the shape, an `abi.encode`d tuple,
+and only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when a
+later fact is added behind it. A module decodes `data` only when it knows which compliance filled it, and
+ignores it otherwise.
 
 A `SPENDER` module answers about `ctx.spender`, a wallet on this chain or on a satellite, so one
 policy covers `transferFrom` here and a validation a satellite operator will execute. The shipped
@@ -76,8 +108,8 @@ Identities arrive resolved, so a module never calls the registry to find out who
 ledger describes the state before the move.
 
 One context, one convention, everywhere. A mint has no sender, so `fromIdentity` and `fromWallet` are zero;
-a burn has no recipient, so `toIdentity` and `toWallet` are zero. A `TRACKER` reads that to tell the three
-apart, which is why it needs one function and not three.
+a burn has no recipient, so `toIdentity` and `toWallet` are zero. A `TRACKER` reads that, and `kind`, to
+tell every movement apart, which is why it needs one function and not three.
 
 A recipient that resolves to no identity is refused before any rule is asked, whenever a rule is bound. A
 distribution rule keys on the identity and would read a zero one as a burn, so the tokens would land where

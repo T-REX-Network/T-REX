@@ -77,6 +77,7 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
@@ -465,26 +466,48 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         emit ComplianceAdded(complianceAddress);
     }
 
-    /// @dev Adds the T-REX recovery preconditions to the standard recovery: a wallet may not be
-    ///  recovered onto itself, there must be something to recover, and at least one of the two wallets
-    ///  must already be known to the identity registry.
+    /// @dev The standard recovery with the T-REX preconditions in front, a wallet may not be recovered onto
+    ///  itself, there must be something to recover, and at least one of the two wallets must already be known
+    ///  to the identity registry, and the move reported to the modular compliance as an agent's movement, so
+    ///  the trackers can leave it out of what they count against the investor. The steps are the base's, see
+    ///  {ERC3643Token-_recoveryAddress}; only the compliance call differs.
+    /// @dev Carries its own `nonReentrant` and `whenNotPaused` because it reimplements the base body instead
+    ///  of calling `super`, like {_forcedTransfer}.
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         internal
         override
+        whenNotPaused
+        nonReentrant
         returns (bool)
     {
-        TokenRecoveryLib.checkRecovery(
-            _getIdentityRegistry(), lostWallet, newWallet, investorOnchainId, balanceOf(lostWallet)
-        );
+        uint256 investorTokens = balanceOf(lostWallet);
+        TokenRecoveryLib.checkRecovery(_getIdentityRegistry(), lostWallet, newWallet, investorOnchainId, investorTokens);
 
-        return super._recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        uint256 frozenTokens = _erc3643TokenStorage().frozenTokens[lostWallet];
+
+        // The new wallet is registered before the move and the lost wallet is deleted after the compliance
+        // call, so that during `agentTransferred` both wallets still resolve to the identities that hold and
+        // receive the tokens. A module keyed by identity can then debit and credit through the registry.
+        bool migrateIdentity = _registerRecoveredWallet(lostWallet, newWallet, investorOnchainId);
+
+        _forceUpdate(lostWallet, newWallet, investorTokens);
+        _migrateFrozenAmount(newWallet, frozenTokens);
+        _migrateAddressFrozen(lostWallet, newWallet);
+
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(lostWallet, newWallet, investorTokens, MovementKindLib.RECOVERY);
+
+        if (migrateIdentity) _getIdentityRegistry().deleteIdentity(lostWallet);
+
+        emit RecoverySuccess(lostWallet, newWallet, investorOnchainId);
+        return true;
     }
 
     /// @dev Adds the T-REX `ForcedTransfer` event to the standard forced transfer. It is emitted before
     ///  the compliance hook so that no module log can land between `Transfer` and this event.
     /// @dev Carries its own `nonReentrant` and `whenNotPaused` because it reimplements the base body
     ///  instead of calling `super`, so the base modifiers never run on this path. {_recoveryAddress} does
-    ///  call `super` and inherits both, which is why it is not marked here.
+    ///  the same.
     function _forcedTransfer(address from, address to, uint256 amount)
         internal
         override
@@ -495,7 +518,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
-        _getCompliance().transferred(from, to, amount);
+        // Reported as an agent's movement, so a module counting what the investor does can leave it out.
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
         return true;
     }
 
