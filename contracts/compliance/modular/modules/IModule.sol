@@ -130,9 +130,10 @@ interface IModule {
      *  state plus or minus `ctx.amountMax`
      *  reverting stops the movement: a module that cannot record a move has to stop it, and a module that
      *  judges the state the movement left behind refuses it the same way, with its own error. Such a veto is
-     *  for `TRANSFER` and `MINT`: on a settlement the satellite already executed, so a revert only blocks the
-     *  delivery, and a forced transfer or a recovery is the agent's override. `forceRemoveModule` is the
-     *  escape hatch for a module that reverts everywhere
+     *  for `TRANSFER` and `MINT` only, and lets `BURN`, `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY`
+     *  pass: on a settlement the satellite already executed, so a revert only blocks the delivery, and a
+     *  burn, a forced transfer or a recovery is the agent's own action. `forceRemoveModule` is the escape
+     *  hatch for a module that reverts everywhere
      *  MUST NOT revert on a `ctx.kind` it does not know: a kind added later has to keep moving through
      *  modules deployed before it. The module decides what an unknown kind means for its own count, on
      *  purpose: left out, like an agent's movement, or recorded, like any change of ownership

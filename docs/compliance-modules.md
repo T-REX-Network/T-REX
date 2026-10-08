@@ -51,10 +51,11 @@ minus it.
 
 An `AFTER` veto refuses a native transfer and a mint, nothing else. `afterTransfer` also runs where a revert
 is no veto: on a settlement, where the satellite already executed, so the revert leaves the delivery
-undeliverable until `forceRemoveModule` drops the module, and with it the veto on every movement; and on a
+undeliverable until `forceRemoveModule` drops the module, and with it the veto on every movement; on a
 forced transfer and a recovery, which are the agent's override, usually the movement that has to get
-through. So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only,
-letting `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
+through; and on a burn, which only an agent can call, so a revert there blocks a redemption the same way.
+So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only, letting
+`BURN`, `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
 `checkTransfer`, which narrows the issuance before anything leaves.
 
 ## checkTransfer

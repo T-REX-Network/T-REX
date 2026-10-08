@@ -105,7 +105,7 @@ All notable changes to this project will be documented in this file.
     (`afterTransfer(ctx)`, was `TRACKER`). Two questions and one notice: the two views are called under
     `staticcall`, so nothing is recorded before the move; `afterTransfer` is where a module counts. A check
     on the state a movement leaves behind is an `AFTER` module that reverts, on `TRANSFER` and `MINT` only: a
-    settlement and an agent's movement run `afterTransfer` too, and a revert there is no veto. The issuance
+    settlement, a burn and an agent's movement run `afterTransfer` too, and a revert there is no veto. The issuance
     of a validation reaches `TRANSFER_CHECK` and `SPENDER` only; a settlement moves, then tells `AFTER`.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
