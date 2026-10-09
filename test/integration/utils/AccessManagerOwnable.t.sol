@@ -141,4 +141,11 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
         );
     }
 
+    /// @notice Ownership cannot be renounced: the owner is the AccessManager, and a zero authority is refused.
+    function test_transferOwnership_RevertWhen_RenouncingToZero() public {
+        vm.prank(address(accessManager));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedInvalidAuthority.selector, address(0)));
+        IERC173(address(token)).transferOwnership(address(0));
+    }
+
 }
