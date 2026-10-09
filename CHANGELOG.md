@@ -23,6 +23,9 @@ All notable changes to this project will be documented in this file.
     `NotAssigned`, `RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` and the event `SuiteProfileSet`.
   - `AccessManagerSetupLib` keeps the platform wiring only (factory, implementation authority, gateway
     registry, identity factory policy).
+  - An issuer's own setup is one transaction: `multicall([createDomain(name), setupSuite(domainCount() + 1,
+    token)])` on the manager. Deploying and setting up stay two transactions, because the factory never
+    writes into a manager it is given (audit #77) and the two are usually signed by different parties.
   - `setupSuite` runs once per token and reverts with `SuiteAlreadySetUp` afterwards: a second run would
     reset every role mapping the admin changed since, and a run into another domain would move the suite
     while its storage and the token's old `AGENT` grant stay behind.

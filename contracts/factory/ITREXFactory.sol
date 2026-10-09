@@ -152,7 +152,9 @@ interface ITREXFactory {
      *  admin from the first block, and it sets the suite's roles up itself in a domain named after the
      *  token. The factory never holds a role on it. When a manager is supplied the factory never calls it:
      *  the suite deploys with no role wiring and is not operable until the issuer calls
-     *  `TREXAccessManager.setupSuite(domainId, token)` on it.
+     *  `TREXAccessManager.setupSuite(domainId, token)` on it, in the same `multicall` as `createDomain` when the
+     *  suite needs a new domain. The factory never writes into a manager it is given, so this second
+     *  transaction is the issuer's own.
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
@@ -187,7 +189,9 @@ interface ITREXFactory {
      *  beacon, initialized as in {deployTREXSuite}: `_tokenDetails.accessManagerAdmin` is its only admin and
      *  it sets the suite's roles up itself. When a manager is supplied the factory never calls it: the suite
      *  deploys with no role wiring and is not operable until the issuer calls
-     *  `TREXAccessManager.setupSuite(domainId, token)` on it.
+     *  `TREXAccessManager.setupSuite(domainId, token)` on it, in the same `multicall` as `createDomain` when the
+     *  suite needs a new domain. The factory never writes into a manager it is given, so this second
+     *  transaction is the issuer's own.
      *  Restricted to the suite deployer role chosen at setup
      *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the factory config role.
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events

@@ -273,6 +273,28 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(fundToken.balanceOf(alice), 3);
     }
 
+    /// @notice The issuer's whole part is one transaction: a new domain and its first suite go through the
+    ///         manager's `multicall`, with the domain id read as `domainCount() + 1` before sending.
+    function test_issuerManager_CreateDomainAndSetupSuiteInOneTransaction() public {
+        address acmeBoard = makeAddr("acmeBoard");
+        TREXAccessManager acmeManager = _newTREXAccessManager(acmeBoard);
+        Token acmeToken = _deployBare("acme", address(0), address(acmeManager));
+        uint32 nextDomainId = acmeManager.domainCount() + 1;
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(TREXAccessManager.createDomain, ("Acme Bonds"));
+        calls[1] = abi.encodeCall(TREXAccessManager.setupSuite, (nextDomainId, address(acmeToken)));
+
+        vm.prank(acmeBoard);
+        acmeManager.multicall(calls);
+
+        assertEq(acmeManager.domainName(nextDomainId), "Acme Bonds");
+        assertEq(acmeManager.domainOf(address(acmeToken)), nextDomainId);
+        assertEq(
+            acmeManager.getTargetFunctionRole(address(acmeToken), IERC3643.mint.selector),
+            RolesLib.forDomain(nextDomainId, RolesLib.Role.AGENT_MINTER)
+        );
+    }
+
     function test_issuerManager_SetupSuiteRevertWhen_DomainDoesNotExist() public {
         Token fundToken = _deployBare("fund-x", address(0), address(issuerManager));
         uint32 missingDomain = 7;

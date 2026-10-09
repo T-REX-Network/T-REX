@@ -162,6 +162,9 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     ///      several domains is written only through roles of the first. Binding a registry to a shared
     ///      storage is not done here: a fresh storage binds its first registry at init, a reused one is
     ///      bound by a holder of `IRS_BINDER`.
+    /// @dev A new domain and its first suite take one transaction: the manager inherits OpenZeppelin's
+    ///      `multicall`, so the admin sends `createDomain(name)` and `setupSuite(domainCount() + 1, token)`
+    ///      together. The id is `domainCount() + 1` because ids are dense and only admins create domains.
     /// @param domainId An existing domain
     /// @param token The suite's token
     function setupSuite(uint32 domainId, address token) external onlyAuthorized {
