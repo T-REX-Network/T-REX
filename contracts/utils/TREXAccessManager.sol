@@ -250,55 +250,68 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     // ============================================================
 
     function _setTokenFunctionRoles(address token, uint32 domainId) private {
-        uint64 tokenManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.TOKEN_MANAGER);
-        uint64 identityManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.IDENTITY_MANAGER);
-        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-
         // Renaming the token.
+        uint64 tokenManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.TOKEN_MANAGER);
         _setTargetFunctionRole(token, IERC3643.setName.selector, tokenManagerRole);
         _setTargetFunctionRole(token, IERC3643.setSymbol.selector, tokenManagerRole);
+
         // Repointing what the token obeys and where it talks to.
+        uint64 identityManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.IDENTITY_MANAGER);
         _setTargetFunctionRole(token, IERC3643.setOnchainID.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setIdentityRegistry.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setCompliance.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
+
         // Cross-chain instructions.
+        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(token, IToken.dispatchMintInstruction.selector, agentRole);
         _setTargetFunctionRole(token, IToken.dispatchRecallInstruction.selector, agentRole);
-        // One agent verb, one role. A batch has a row of its own, on the same role as its single-item
+
+        // From here on, one agent verb per role. Each batch has a row of its own, on the role of its single-item
         // function: without one it falls back to ADMIN_ROLE, and an agent granted with an execution delay could
         // not schedule it at all.
+
+        // Minting.
         uint64 minterRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_MINTER);
         _setTargetFunctionRole(token, IERC3643.mint.selector, minterRole);
         _setTargetFunctionRole(token, IERC3643.batchMint.selector, minterRole);
+
+        // Burning.
         uint64 burnerRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_BURNER);
         _setTargetFunctionRole(token, IERC3643.burn.selector, burnerRole);
         _setTargetFunctionRole(token, IERC3643.batchBurn.selector, burnerRole);
+
+        // Freezing part of a balance, and releasing it.
         uint64 partialFreezerRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PARTIAL_FREEZER);
         _setTargetFunctionRole(token, IERC3643.freezePartialTokens.selector, partialFreezerRole);
         _setTargetFunctionRole(token, IERC3643.batchFreezePartialTokens.selector, partialFreezerRole);
         _setTargetFunctionRole(token, IERC3643.unfreezePartialTokens.selector, partialFreezerRole);
         _setTargetFunctionRole(token, IERC3643.batchUnfreezePartialTokens.selector, partialFreezerRole);
+
+        // Freezing a whole wallet.
         uint64 addressFreezerRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADDRESS_FREEZER);
         _setTargetFunctionRole(token, IERC3643.setAddressFrozen.selector, addressFreezerRole);
         _setTargetFunctionRole(token, IERC3643.batchSetAddressFrozen.selector, addressFreezerRole);
+
+        // Moving tokens without the holder.
         uint64 forcedTransferRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
         _setTargetFunctionRole(token, IERC3643.forcedTransfer.selector, forcedTransferRole);
         _setTargetFunctionRole(token, IERC3643.batchForcedTransfer.selector, forcedTransferRole);
-        _setTargetFunctionRole(
-            token, IERC3643.recoveryAddress.selector, RolesLib.forDomain(domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS)
-        );
+
+        // Moving a lost wallet's balance to a new wallet.
+        uint64 recoveryRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
+        _setTargetFunctionRole(token, IERC3643.recoveryAddress.selector, recoveryRole);
+
+        // Stopping every transfer, and resuming.
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
         _setTargetFunctionRole(token, IERC3643.pause.selector, pauserRole);
         _setTargetFunctionRole(token, IERC3643.unpause.selector, pauserRole);
     }
 
     function _setRegistryFunctionRoles(address registry, uint32 domainId) private {
+        // The rules of eligibility: which storage, who is trusted, what is required, whether checks run at all.
         uint64 ownerRole = RolesLib.forDomain(domainId, RolesLib.Role.OWNER);
-        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-
-        // The rules of eligibility: who is trusted, what is required, whether checks run at all.
         _setTargetFunctionRole(registry, IERC3643IdentityRegistry.setIdentityRegistryStorage.selector, ownerRole);
         _setTargetFunctionRole(registry, ITREXRegistry.disableEligibilityChecks.selector, ownerRole);
         _setTargetFunctionRole(registry, ITREXRegistry.enableEligibilityChecks.selector, ownerRole);
@@ -309,7 +322,9 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(registry, IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, ownerRole);
         _setTargetFunctionRole(registry, ITREXRegistry.addClaimTopicForIdentityType.selector, ownerRole);
         _setTargetFunctionRole(registry, ITREXRegistry.removeClaimTopicForIdentityType.selector, ownerRole);
+
         // Onboarding investors.
+        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(registry, IERC3643IdentityRegistry.registerIdentity.selector, agentRole);
         _setTargetFunctionRole(registry, IERC3643IdentityRegistry.batchRegisterIdentity.selector, agentRole);
         _setTargetFunctionRole(registry, IERC3643IdentityRegistry.updateIdentity.selector, agentRole);
@@ -317,19 +332,20 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     }
 
     function _setStorageFunctionRoles(address identityStorage, uint32 domainId) private {
-        uint64 storageWriterRole = RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER);
+        // Attaching a registry to the storage.
+        uint64 storageBinderRole = RolesLib.forDomain(domainId, RolesLib.Role.IRS_BINDER);
+        _setTargetFunctionRole(
+            identityStorage, IERC3643IdentityRegistryStorage.bindIdentityRegistry.selector, storageBinderRole
+        );
 
+        // Detaching one.
+        uint64 ownerRole = RolesLib.forDomain(domainId, RolesLib.Role.OWNER);
         _setTargetFunctionRole(
-            identityStorage,
-            IERC3643IdentityRegistryStorage.bindIdentityRegistry.selector,
-            RolesLib.forDomain(domainId, RolesLib.Role.IRS_BINDER)
+            identityStorage, IERC3643IdentityRegistryStorage.unbindIdentityRegistry.selector, ownerRole
         );
-        _setTargetFunctionRole(
-            identityStorage,
-            IERC3643IdentityRegistryStorage.unbindIdentityRegistry.selector,
-            RolesLib.forDomain(domainId, RolesLib.Role.OWNER)
-        );
-        // Investor records are written by registries only; `IRS_WRITER` is granted to them in {_setupSuite}.
+
+        // Writing investor records: registries only, `IRS_WRITER` is granted to them in {_setupSuite}.
+        uint64 storageWriterRole = RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER);
         _setTargetFunctionRole(
             identityStorage, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, storageWriterRole
         );
@@ -342,11 +358,9 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     }
 
     function _setComplianceFunctionRoles(address compliance, uint32 domainId) private {
+        // The rules themselves: which modules run, and a position fixed by hand. `bindToken` and `unbindToken`
+        // share one virtual selector, see {RolesLib.BIND_UNBIND_TOKEN}.
         uint64 ownerRole = RolesLib.forDomain(domainId, RolesLib.Role.OWNER);
-        uint64 complianceManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER);
-        uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);
-
-        // The rules themselves: which modules run, and a position fixed by hand.
         _setTargetFunctionRole(compliance, IModularCompliance.addModule.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.addAndSetModule.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.removeModule.selector, ownerRole);
@@ -354,18 +368,20 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(compliance, IModularCompliance.callModuleFunction.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.resyncModuleTypes.selector, ownerRole);
         _setTargetFunctionRole(compliance, IComplianceLedger.fixPosition.selector, ownerRole);
-        // `bindToken` and `unbindToken` share one virtual selector, see {RolesLib.BIND_UNBIND_TOKEN}.
         _setTargetFunctionRole(compliance, RolesLib.BIND_UNBIND_TOKEN, ownerRole);
+
         // Cross-chain validation policy.
+        uint64 complianceManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _setTargetFunctionRole(compliance, ITransferValidation.setDefaultValidityWindow.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITransferValidation.setReconciliationWindow.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITransferValidation.setIssuancePaused.selector, complianceManagerRole);
-        // Issuing and cleaning up validations.
-        _setTargetFunctionRole(
-            compliance,
-            ITransferValidation.requestTransferValidation.selector,
-            RolesLib.forDomain(domainId, RolesLib.Role.AGENT)
-        );
+
+        // Issuing a validation.
+        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
+        _setTargetFunctionRole(compliance, ITransferValidation.requestTransferValidation.selector, agentRole);
+
+        // Cleaning up expired or stuck validations.
+        uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);
         _setTargetFunctionRole(compliance, ITransferValidation.discardExpiredValidations.selector, validationKeeperRole);
         _setTargetFunctionRole(compliance, ITransferValidation.resolveStuckValidation.selector, validationKeeperRole);
     }
@@ -374,9 +390,8 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     ///      no suite function. `OWNER`, `SUITE_ADMIN`, `AGENT_ADMIN` and `IRS_WRITER` keep the manager's
     ///      `ADMIN_ROLE` as their admin.
     function _setRoleAdmins(uint32 domainId) private {
+        // The agent family is appointed by AGENT_ADMIN.
         uint64 agentAdminRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADMIN);
-        uint64 suiteAdminRole = RolesLib.forDomain(domainId, RolesLib.Role.SUITE_ADMIN);
-
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_MINTER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_BURNER), agentAdminRole);
@@ -387,6 +402,9 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.IRS_BINDER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER), agentAdminRole);
+
+        // The configuration managers are appointed by SUITE_ADMIN.
+        uint64 suiteAdminRole = RolesLib.forDomain(domainId, RolesLib.Role.SUITE_ADMIN);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.TOKEN_MANAGER), suiteAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.IDENTITY_MANAGER), suiteAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER), suiteAdminRole);
