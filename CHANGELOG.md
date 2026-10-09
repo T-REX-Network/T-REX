@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Every namespaced struct's layout is pinned** (`test/standard/NamespaceFields.t.sol`). A namespace's slot
+  comes from its string alone, so a struct that changes shape under an unchanged string makes an upgraded
+  proxy read old bytes under new names, with no revert and no failing deployment test. The test points each
+  of the 16 namespaced structs at its real slot, writes every field and asserts the slot and byte it lands
+  in. Removing, reordering, retyping or inserting a field fails; appending one at the end does not.
 - **Identity-type-aware claim requirements** (per-type claim topics with default fallback):
   - The `TREXRegistry` can hold an alternative set of required claim topics per ONCHAINID identity
     type (`IdentityTypes`: ASSET, INDIVIDUAL, CORPORATE, IOT, CLAIM_ISSUER, SMART_CONTRACT,
