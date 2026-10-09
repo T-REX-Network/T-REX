@@ -266,20 +266,28 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         // Cross-chain instructions.
         _setTargetFunctionRole(token, IToken.dispatchMintInstruction.selector, agentRole);
         _setTargetFunctionRole(token, IToken.dispatchRecallInstruction.selector, agentRole);
-        // One agent verb, one role.
-        _setTargetFunctionRole(token, IERC3643.mint.selector, RolesLib.forDomain(domainId, RolesLib.Role.AGENT_MINTER));
-        _setTargetFunctionRole(token, IERC3643.burn.selector, RolesLib.forDomain(domainId, RolesLib.Role.AGENT_BURNER));
+        // One agent verb, one role. A batch has a row of its own, on the same role as its single-item
+        // function: without one it falls back to ADMIN_ROLE, and an agent granted with an execution delay could
+        // not schedule it at all.
+        uint64 minterRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_MINTER);
+        _setTargetFunctionRole(token, IERC3643.mint.selector, minterRole);
+        _setTargetFunctionRole(token, IERC3643.batchMint.selector, minterRole);
+        uint64 burnerRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_BURNER);
+        _setTargetFunctionRole(token, IERC3643.burn.selector, burnerRole);
+        _setTargetFunctionRole(token, IERC3643.batchBurn.selector, burnerRole);
         uint64 partialFreezerRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PARTIAL_FREEZER);
         _setTargetFunctionRole(token, IERC3643.freezePartialTokens.selector, partialFreezerRole);
+        _setTargetFunctionRole(token, IERC3643.batchFreezePartialTokens.selector, partialFreezerRole);
         _setTargetFunctionRole(token, IERC3643.unfreezePartialTokens.selector, partialFreezerRole);
-        _setTargetFunctionRole(
-            token, IERC3643.setAddressFrozen.selector, RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADDRESS_FREEZER)
-        );
+        _setTargetFunctionRole(token, IERC3643.batchUnfreezePartialTokens.selector, partialFreezerRole);
+        uint64 addressFreezerRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        _setTargetFunctionRole(token, IERC3643.setAddressFrozen.selector, addressFreezerRole);
+        _setTargetFunctionRole(token, IERC3643.batchSetAddressFrozen.selector, addressFreezerRole);
+        uint64 forcedTransferRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        _setTargetFunctionRole(token, IERC3643.forcedTransfer.selector, forcedTransferRole);
+        _setTargetFunctionRole(token, IERC3643.batchForcedTransfer.selector, forcedTransferRole);
         _setTargetFunctionRole(
             token, IERC3643.recoveryAddress.selector, RolesLib.forDomain(domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS)
-        );
-        _setTargetFunctionRole(
-            token, IERC3643.forcedTransfer.selector, RolesLib.forDomain(domainId, RolesLib.Role.AGENT_FORCED_TRANSFER)
         );
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
         _setTargetFunctionRole(token, IERC3643.pause.selector, pauserRole);

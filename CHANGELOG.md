@@ -26,6 +26,11 @@ All notable changes to this project will be documented in this file.
   - An issuer's own setup is one transaction: `multicall([createDomain(name), setupSuite(domainCount() + 1,
     token)])` on the manager. Deploying and setting up stay two transactions, because the factory never
     writes into a manager it is given (audit #77) and the two are usually signed by different parties.
+  - The six token batch functions have rows of their own, on the role of their single-item function
+    (`batchMint`, `batchBurn`, `batchFreezePartialTokens`, `batchUnfreezePartialTokens`,
+    `batchSetAddressFrozen`, `batchForcedTransfer`). Without a row they fell back to `ADMIN_ROLE`, so an
+    agent granted with an execution delay could not even schedule them. `batchRegisterIdentity` already
+    had its row for the same reason.
   - `setupSuite` runs once per token and reverts with `SuiteAlreadySetUp` afterwards: a second run would
     reset every role mapping the admin changed since, and a run into another domain would move the suite
     while its storage and the token's old `AGENT` grant stay behind.
