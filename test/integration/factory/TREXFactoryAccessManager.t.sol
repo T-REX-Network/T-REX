@@ -13,7 +13,6 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ITREXFactory } from "contracts/factory/TREXFactory.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
@@ -46,7 +45,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertFalse(factoryIsAdmin);
     }
 
-    function test_deployTREXSuite_Success_FreshManagerIsSetUpBeforeHandover() public {
+    function test_deployTREXSuite_Success_FreshManagerIsSetUpAtInitialization() public {
         Token deployed = _deployWithFreshManager("wired");
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());

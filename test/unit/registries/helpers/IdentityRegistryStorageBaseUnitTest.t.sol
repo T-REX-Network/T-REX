@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
+
 import { Test, Vm } from "@forge-std/Test.sol";
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
-import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
@@ -18,10 +18,9 @@ import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 ///      asks each bound registry for its factory and that factory for the wallet's identity, to tell whether the
 ///      local binding shadows a global one. `wallet` is known to the first factory as `globalIdentity`,
 ///      `otherWallet` only to the second one as `otherIdentity`.
-abstract contract IdentityRegistryStorageBaseUnitTest is Test {
+abstract contract IdentityRegistryStorageBaseUnitTest is AccessManagerHelper {
 
     IdentityRegistryStorage internal irs;
-    AccessManager internal accessManager;
 
     address internal registry = makeAddr("registry");
     address internal idFactory = makeAddr("idFactory");
@@ -35,7 +34,7 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
     address internal otherIdentity = makeAddr("otherIdentity");
 
     function setUp() public virtual {
-        accessManager = new AccessManager(address(this));
+        _deployAccessManager();
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
 
@@ -45,7 +44,7 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
                 beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
+        _setupStorageRoles(address(irs));
 
         vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         vm.mockCall(registry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));

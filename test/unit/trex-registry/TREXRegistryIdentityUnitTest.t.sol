@@ -5,7 +5,6 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
@@ -122,7 +121,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
+        _setupRegistryRoles(address(registry));
 
         address second = makeAddr("secondBatchUser");
 
@@ -227,7 +226,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
         registry.setIdentityRegistryStorage(address(replacement));
 
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(replacement), DOMAIN);
+        _setupStorageRoles(address(replacement));
         vm.prank(deployer);
         replacement.bindIdentityRegistry(address(registry));
 

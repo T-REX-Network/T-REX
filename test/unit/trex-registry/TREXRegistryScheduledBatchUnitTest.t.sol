@@ -3,7 +3,6 @@ pragma solidity 0.8.30;
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
 /// @dev A batch is authorized by its single-item counterpart, but it must still consume a scheduled
@@ -12,7 +11,7 @@ import { RolesLib } from "contracts/libraries/RolesLib.sol";
 contract TREXRegistryScheduledBatchUnitTest is TREXRegistryBaseUnitTest {
 
     function test_batchRegisterIdentity_Success_WhenScheduledByDelayedAgent() public {
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
+        _setupRegistryRoles(address(registry));
 
         address delayed = makeAddr("delayedAgent");
         accessManager.grantRole(_role(RolesLib.Role.AGENT), delayed, 1 days);

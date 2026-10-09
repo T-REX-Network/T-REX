@@ -2,32 +2,86 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {
+    AccessManagerUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
+import { TestTREXAccessManager } from "test/integration/mocks/TestTREXAccessManager.sol";
 
-/// @notice Shared AccessManager scaffolding for tests: deploys a manager administered by the test
-///         contract, wires the TREX suite selector-to-role mappings through AccessManagerSetupLib
+/// @notice Shared AccessManager scaffolding for tests: deploys a `TREXAccessManager` administered by the
+///         test contract with one domain, sets suites or single suite contracts up in that domain,
 ///         and exposes role-granting helpers (all grants use execution delay 0 so vm.prank works).
 abstract contract AccessManagerHelper is Test {
 
     uint32 internal constant NO_EXECUTION_DELAY = 0;
+    /// @dev The first domain a fresh manager creates, where every suite of the fixture is set up.
     uint32 internal constant DOMAIN = 1;
 
-    AccessManager public accessManager;
+    /// @dev The real manager plus one test-only entry point, {TestTREXAccessManager.setupSuiteContracts}, used by
+    ///      the single-contract helpers below.
+    TestTREXAccessManager public accessManager;
 
-    /// @notice Deploys the AccessManager with the test contract as admin, wires the role-giver
-    ///         hierarchy (AGENT_ADMIN over the AGENT family, SUITE_ADMIN over the config roles)
-    ///         and labels the roles.
-    function _deployAccessManager() internal returns (AccessManager) {
-        accessManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupRoleAdmins(accessManager, DOMAIN);
-        // Operational roles are now administered by the giver roles, not ADMIN_ROLE(0); the test
-        // admin needs the givers to be able to grant AGENT/AGENT_* and TOKEN_MANAGER/IDENTITY_MANAGER.
+    /// @dev Placeholders for the suite contracts a single-contract unit test does not deploy. Setting a suite
+    ///      up reads nothing from the addresses it is given, so mapping roles onto placeholders is inert.
+    address internal unusedToken = makeAddr("unused token");
+    address internal unusedRegistry = makeAddr("unused registry");
+    address internal unusedIdentityStorage = makeAddr("unused identity storage");
+    address internal unusedCompliance = makeAddr("unused compliance");
+
+    /// @notice Deploys the manager with the test contract as admin, creates the fixture's domain, and makes
+    ///         the test contract a giver of both role families so it can grant AGENT/AGENT_* and the manager
+    ///         roles once a suite is set up.
+    function _deployAccessManager() internal returns (TREXAccessManager) {
+        accessManager = TestTREXAccessManager(
+            address(
+                new ERC1967Proxy(
+                    address(new TestTREXAccessManager()),
+                    abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
+                )
+            )
+        );
+        accessManager.createDomain("test suite");
         _grantAgentAdminRole(address(this));
         _grantSuiteAdminRole(address(this));
         return accessManager;
+    }
+
+    /// @notice Deploys a `TREXAccessManager` behind an ERC-1967 proxy with `admin` as its only admin and no
+    ///         domain yet, the shape an issuer gets when they run a manager themselves.
+    function _newTREXAccessManager(address admin) internal returns (TREXAccessManager) {
+        return TREXAccessManager(
+            address(
+                new ERC1967Proxy(
+                    address(new TREXAccessManager()), abi.encodeCall(AccessManagerUpgradeable.initialize, (admin))
+                )
+            )
+        );
+    }
+
+    /// @notice Sets up the suite of a deployed `token` in the fixture's domain, through the production
+    ///         `setupSuite`, which reads the registry, storage and compliance from the token.
+    function _setupSuiteRoles(address token) internal {
+        accessManager.setupSuite(DOMAIN, token);
+    }
+
+    function _setupTokenRoles(address token) internal {
+        accessManager.setupSuiteContracts(DOMAIN, token, unusedRegistry, unusedIdentityStorage, unusedCompliance);
+    }
+
+    function _setupRegistryRoles(address registry) internal {
+        accessManager.setupSuiteContracts(DOMAIN, unusedToken, registry, unusedIdentityStorage, unusedCompliance);
+    }
+
+    function _setupStorageRoles(address identityStorage) internal {
+        accessManager.setupSuiteContracts(DOMAIN, unusedToken, unusedRegistry, identityStorage, unusedCompliance);
+    }
+
+    function _setupComplianceRoles(address compliance) internal {
+        accessManager.setupSuiteContracts(DOMAIN, unusedToken, unusedRegistry, unusedIdentityStorage, compliance);
     }
 
     /// @notice The two factory roles the tests pick. The suite deployer role is a named platform role, which is
@@ -63,15 +117,6 @@ abstract contract AccessManagerHelper is Test {
     /// @notice Wires the TREXImplementationAuthority version selectors to the version manager role for `ia`.
     function _setupImplementationAuthorityRoles(address ia) internal {
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia, _versionManagerRole());
-    }
-
-    /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
-    /// @dev `registry` is the TREXRegistry, which serves as the suite's IR, CTR and TIR.
-    function _setupSuiteRoles(address token, address registry, address irs, address mc) internal {
-        AccessManagerSetupLib.setupTokenRoles(accessManager, token, DOMAIN);
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, registry, DOMAIN);
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, irs, DOMAIN);
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, mc, DOMAIN);
     }
 
     function _role(RolesLib.Role role) internal pure returns (uint64) {

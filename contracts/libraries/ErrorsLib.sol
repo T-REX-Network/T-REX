@@ -138,7 +138,6 @@ library ErrorsLib {
     error AuthorityMismatch();
     error StorageAuthorityMismatch(address identityRegistryStorage, address expected, address actual);
     error AccessManagerNotAContract(address accessManager);
-    error SuiteProfileNotAContract(address suiteProfile);
     error InvalidAccessManagerAdmin();
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
@@ -166,10 +165,6 @@ library ErrorsLib {
     error MaxIRByIRSReached(uint256 max);
 
     // AccessManagerSetupLib Errors
-    error NotAssigned(address target);
-    error PendingDelayChange(address account, uint64 role);
-    error PendingRoleGrant(address account, uint64 role);
-    error RoleNotHeld(address account, uint64 role);
     error SuiteDeployerCannotGovernFactory();
     error PlatformRoleCannotBePublic();
 
@@ -178,6 +173,7 @@ library ErrorsLib {
 
     // TREXAccessManager Errors
     error DomainNotFound(uint32 domainId);
+    error SuiteAlreadySetUp(address token, uint32 domainId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

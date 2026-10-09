@@ -67,9 +67,6 @@ import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurpose
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
-import {
-    AccessManagerUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -85,7 +82,6 @@ import { TREXRegistry } from "../registry/implementation/TREXRegistry.sol";
 import { IToken } from "../token/IToken.sol";
 import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
-import { ISuiteProfile } from "./ISuiteProfile.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
@@ -99,23 +95,20 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// the network's trusted gateway registry, wired into every token this factory deploys
     address private _trustedGatewayRegistry;
 
-    /// the profile applied to every suite deployed with its own manager (see {ISuiteProfile}); what
-    /// those suites look like is the profile's decision, never this contract's
-    address private _suiteProfile;
-
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
+    /// CREATE3 contract type discriminators, one per suite contract; see {_saltBytes}.
     string private constant ACCESS_MANAGER = "AccessManager";
-
-    /// The manager's own admin role, which a fresh suite manager starts with this factory holding.
-    uint64 private constant ADMIN_ROLE = 0;
+    string private constant TOKEN = "Token";
+    string private constant REGISTRY = "REGISTRY";
+    string private constant IRS = "IRS";
+    string private constant MC = "MC";
 
     constructor(
         address implementationAuthority,
         address idFactory,
         address trustedGatewayRegistry,
-        address suiteProfile,
         address accessManager
     ) AccessManagedOwnable(accessManager) {
         require(accessManager != address(0), ErrorsLib.ZeroAddress());
@@ -123,17 +116,15 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
         _setTrustedGatewayRegistry(trustedGatewayRegistry);
-        _setSuiteProfile(suiteProfile);
     }
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuite}.
-     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
-     *  domain named after the token, assigns the token and its storage, lets the configured
-     *  {ISuiteProfile} set the suite up and hands `ADMIN_ROLE` to
-     *  `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls it: the suite
-     *  deploys with no role wiring and is not operable until the issuer sets it up (for the default
-     *  profile, `AccessManagerSetupLib.setupSuite`).
+     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager` that lays
+     *  out the suite's roles itself when it is initialized, with `tokenDetails.accessManagerAdmin` as its
+     *  admin from the first block; the factory never holds a role on it. With a supplied manager the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
+     *  sets it up (`TREXAccessManager.setupSuite`).
      */
     function deployTREXSuite(string memory salt, TokenDetails calldata tokenDetails, ClaimDetails calldata claimDetails)
         external
@@ -148,12 +139,11 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuiteIsolated}.
-     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
-     *  domain named after the token, assigns the token and its storage, lets the configured
-     *  {ISuiteProfile} set the suite up and hands `ADMIN_ROLE` to
-     *  `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls it: the suite
-     *  deploys with no role wiring and is not operable until the issuer sets it up (for the default
-     *  profile, `AccessManagerSetupLib.setupSuite`).
+     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager` that lays
+     *  out the suite's roles itself when it is initialized, with `tokenDetails.accessManagerAdmin` as its
+     *  admin from the first block; the factory never holds a role on it. With a supplied manager the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
+     *  sets it up (`TREXAccessManager.setupSuite`).
      */
     function deployTREXSuiteIsolated(
         string memory salt,
@@ -225,13 +215,19 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         ClaimDetails calldata claimDetails,
         ITREXImplementationAuthority.SuiteBeacons memory beacons
     ) private returns (address) {
-        address manager = tokenDetails.accessManager;
-        if (manager == address(0)) {
-            manager = _deployAccessManager(salt, beacons.accessManagerBeacon);
-        }
+        // A reused storage is wired by its address; a fresh one by the address CREATE3 will give it.
         address irs = tokenDetails.irs;
         if (irs == address(0)) {
-            irs = _deployIRS(salt, beacons.irsBeacon, manager);
+            irs = _predictAddress(salt, IRS);
+        }
+        address manager = tokenDetails.accessManager;
+        if (manager == address(0)) {
+            // The manager lays the suite's roles out as it is initialized, against the addresses the
+            // suite contracts are about to be deployed at. The issuer's admin is its admin from here on.
+            manager = _deployAccessManager(salt, beacons.accessManagerBeacon, tokenDetails, irs);
+        }
+        if (tokenDetails.irs == address(0)) {
+            _deployIRS(salt, beacons.irsBeacon, manager);
         } else {
             address authority = IAccessManaged(irs).authority();
             require(authority == manager, ErrorsLib.StorageAuthorityMismatch(irs, manager, authority));
@@ -240,12 +236,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
-        // The suite exists here; what follows is role wiring by the profile, an external contract,
-        // so the log is written before that call rather than after it.
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
-        if (tokenDetails.accessManager == address(0)) {
-            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token, tokenDetails.name);
-        }
         return token;
     }
 
@@ -315,27 +306,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /**
-     *  @dev See {ITREXFactory-getSuiteProfile}.
-     */
-    function getSuiteProfile() external view returns (address) {
-        return _suiteProfile;
-    }
-
-    /**
-     *  @dev See {ITREXFactory-setSuiteProfile}.
-     */
-    function setSuiteProfile(address suiteProfileAddress) public restricted {
-        _setSuiteProfile(suiteProfileAddress);
-    }
-
-    /// internal setter for the suite profile, see {ITREXFactory-setSuiteProfile}
-    function _setSuiteProfile(address suiteProfileAddress) internal {
-        require(suiteProfileAddress.code.length != 0, ErrorsLib.SuiteProfileNotAContract(suiteProfileAddress));
-        _suiteProfile = suiteProfileAddress;
-        emit EventsLib.SuiteProfileSet(suiteProfileAddress);
-    }
-
-    /**
      *  @dev See {ITREXFactory-setTrustedGatewayRegistry}.
      */
     function setTrustedGatewayRegistry(address trustedGatewayRegistryAddress) public restricted {
@@ -387,28 +357,28 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return bytes20(address(this)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
     }
 
-    function _deployAccessManager(string memory salt, address accessManagerBeacon) private returns (address) {
-        return _deploy(
-            salt,
-            ACCESS_MANAGER,
-            _beaconProxyBytecode(
-                accessManagerBeacon, abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
+    /// @dev Deploys the suite's own `TREXAccessManager` and initializes it in the proxy constructor with
+    ///      `tokenDetails.accessManagerAdmin` as admin and the four suite addresses CREATE3 will produce
+    ///      for `salt`. The manager writes its own role layout from those addresses, so the suite is
+    ///      operable as soon as its contracts land, and this factory never holds a role on it.
+    function _deployAccessManager(
+        string memory salt,
+        address accessManagerBeacon,
+        TokenDetails calldata tokenDetails,
+        address identityStorage
+    ) private returns (address) {
+        bytes memory initData = abi.encodeCall(
+            TREXAccessManager.initializeSuite,
+            (
+                tokenDetails.accessManagerAdmin,
+                tokenDetails.name,
+                _predictAddress(salt, TOKEN),
+                _predictAddress(salt, REGISTRY),
+                identityStorage,
+                _predictAddress(salt, MC)
             )
         );
-    }
-
-    /// @dev The profile holds `ADMIN_ROLE` for exactly one call: granted before, revoked after, so what
-    ///      it maps lands as the manager's admin and nothing of it outlives the deploy.
-    function _handOverAccessManager(address manager, address admin, address token, string memory name) private {
-        TREXAccessManager accessManager = TREXAccessManager(manager);
-        uint32 domainId = accessManager.createDomain(name);
-        accessManager.assign(domainId, token);
-        address profile = _suiteProfile;
-        accessManager.grantRole(ADMIN_ROLE, profile, 0);
-        ISuiteProfile(profile).applyTo(accessManager, token);
-        accessManager.revokeRole(ADMIN_ROLE, profile);
-        accessManager.grantRole(ADMIN_ROLE, admin, 0);
-        accessManager.renounceRole(ADMIN_ROLE, address(this));
+        return _deploy(salt, ACCESS_MANAGER, _beaconProxyBytecode(accessManagerBeacon, initData));
     }
 
     function _deployTREXRegistry(
@@ -420,7 +390,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     ) private returns (address) {
         return _deploy(
             salt,
-            "REGISTRY",
+            REGISTRY,
             _beaconProxyBytecode(
                 trexRegistryBeacon,
                 abi.encodeCall(
@@ -444,13 +414,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     {
         return _deploy(
             salt,
-            "MC",
+            MC,
             _beaconProxyBytecode(
                 mcBeacon,
                 abi.encodeCall(
                     ModularCompliance.init,
                     (
-                        _predictAddress(salt, "Token"),
+                        _predictAddress(salt, TOKEN),
                         manager,
                         tokenDetails.complianceModules,
                         tokenDetails.complianceSettings
@@ -464,9 +434,9 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     function _deployIRS(string memory salt, address irsBeacon, address manager) private returns (address) {
         return _deploy(
             salt,
-            "IRS",
+            IRS,
             _beaconProxyBytecode(
-                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, "REGISTRY")))
+                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, REGISTRY)))
             )
         );
     }
@@ -498,7 +468,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address identityRegistry,
         address compliance
     ) private returns (address) {
-        address predictedToken = _predictAddress(salt, "Token");
+        address predictedToken = _predictAddress(salt, TOKEN);
         address oid = tokenDetails.ONCHAINID;
         if (oid == address(0)) {
             oid = IIdentityFactory(_idFactory)
@@ -516,9 +486,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             );
         }
         return
-            _deploy(
-                salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, manager, identityRegistry, compliance, oid)
-            );
+            _deploy(salt, TOKEN, _tokenBytecode(tokenBeacon, tokenDetails, manager, identityRegistry, compliance, oid));
     }
 
     /// @dev Builds the single-entry MANAGEMENT key set granting `managementKey` control of the minted
