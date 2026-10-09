@@ -659,10 +659,10 @@ All notable changes to this project will be documented in this file.
 - **Breaking, interface ids**: `type(IModule).interfaceId`, `type(IModularCompliance).interfaceId`,
   `type(ITransferValidation).interfaceId`, `type(IUtilityChecker).interfaceId` and
   `type(IComplianceLedger).interfaceId` change with the above.
-- **Build**: `via_ir = true` in the default and mutation profiles, and `solc_via_ir` in the Certora
-  confs. It is what keeps `ModularCompliance` under EIP-170 with the validation refund and the position
-  repair in; the legacy pipeline leaves it about 550 bytes over. `Token` grows by about 700 bytes under
-  it and was already over the limit.
+- **Build**: the legacy pipeline, `via_ir = false`, in the default and mutation profiles and in the Certora
+  confs. #85 switched to via-IR to keep `ModularCompliance` under EIP-170 with the validation refund and the
+  position repair in; moving the module set and the compliance ledger into linked libraries (93fba03)
+  brought it back under without it, so via-IR is off again.
 - `ModularCompliance` holds its bound modules in one `EnumerableSet.AddressSet` plus one per type, so
   a dispatch is a loop over exactly the modules that answer it. Ordering follows binding order within a
   type. Binding validates fully before writing state, so `canComplianceBind` sees the module as not
