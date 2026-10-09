@@ -544,7 +544,7 @@ All notable changes to this project will be documented in this file.
   could also repoint the factory's implementation authority, identity factory or trusted gateway
   registry, which every later suite is wired to. The function now takes two role ids chosen by
   governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory config role
-  for the four setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
+  for the three setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
   role (`SuiteDeployerCannotConfigureFactory`). The three other platform
   setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
   `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
@@ -556,22 +556,13 @@ All notable changes to this project will be documented in this file.
   platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
   The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
   `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
-  `OWNER` from them. The suite profile below does need a new factory.
-- **The suite role profile is no longer compiled into the factory** (#102). `deployTREXSuite` and
-  `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.setupSuite` from inside the factory, so
-  the selector-to-role tables and the role-admin table of every future suite were a constant of the
-  factory's bytecode, and changing a default meant a new factory and a new CREATE3 address space. The
-  factory now hands the fresh `TREXAccessManager` to an `ISuiteProfile`: it grants the profile
-  `ADMIN_ROLE`, calls `applyTo(accessManager, token)`, revokes the role and only then hands
-  `ADMIN_ROLE` to `accessManagerAdmin`. `DefaultSuiteProfile` is the default profile and simply applies
-  the library tables; only an admin of the manager may call its `applyTo`
-  (`AccessManagerUnauthorizedAccount`), so an issuer who keeps the shared profile as an admin of their
-  own manager does not let anyone else apply it. Governance replaces it through the new `setSuiteProfile` (factory config
-  role, `SuiteProfileSet`, `SuiteProfileNotAContract`) to change what every later suite looks
-  like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
-  **Breaking**: the `TREXFactory` constructor takes the profile as its fourth argument, before the
-  access manager, and `getSuiteProfile` is added to `ITREXFactory`. The factory no longer links
-  `AccessManagerSetupLib`.
+  `OWNER` from them.
+- **The suite role layout is no longer compiled into the factory** (#102, reworked by the self-configuring
+  manager above). `deployTREXSuite` and `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.setupSuite`
+  from inside the factory, so the role layout of every future suite was a constant of the factory's
+  bytecode. #102 moved it into a swappable suite profile; the layout now lives in `TREXAccessManager`
+  itself, which writes it when it is initialized, and changes with a new manager version. The factory no
+  longer links `AccessManagerSetupLib`.
 - **`UtilityChecker` is gated by the AccessManager, not by a single owner** (#103). It was the only
   upgradeable contract of the suite on `OwnableUpgradeable`. It is now `AccessManagedOwnableUpgradeable`
   like the compliance modules: `initialize(address accessManager)` replaces `initialize()`,
