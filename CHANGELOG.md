@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **The suite AccessManager lays its own roles out** (`TREXAccessManager.initializeSuite`,
+  `TREXAccessManager.setupSuite`): a fresh suite's manager is initialized in its proxy constructor with the
+  issuer's admin and the four CREATE3-predicted suite addresses, and writes which role opens which function,
+  who hands out which role, and the two service grants (`AGENT` to the token, `IRS_WRITER` to the registry)
+  from there. The factory never holds `ADMIN_ROLE` on a suite manager: no transient grant, no revoke, no
+  renounce. An issuer running their own manager calls `createDomain` then `setupSuite(domainId, token)`,
+  which reads the registry, storage and compliance from the token so the four always belong to one suite,
+  and is also how one manager hosts several suites in one or several domains. Binding a registry to a
+  reused storage stays with `IRS_BINDER`; a fresh storage binds its first registry at init as before.
+  - Removed: `ISuiteProfile`, `DefaultSuiteProfile`, `TREXFactory.setSuiteProfile` / `getSuiteProfile` and
+    the factory's profile constructor argument (the role tables were swappable per profile; the factory is
+    redeployed for every other dependency change, and that one exception cost a contract, an interface, a
+    setter and a transient admin grant). Removed with them: `TREXAccessManager.assign`, the suite tables,
+    per-contract wrappers and domain migration helpers of `AccessManagerSetupLib` (never run outside tests;
+    moving a suite between domains is a script if the need appears), and the errors `SuiteProfileNotAContract`,
+    `NotAssigned`, `RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` and the event `SuiteProfileSet`.
+  - `AccessManagerSetupLib` keeps the platform wiring only (factory, implementation authority, gateway
+    registry, identity factory policy).
+  - `setupSuite` runs once per token and reverts with `SuiteAlreadySetUp` afterwards: a second run would
+    reset every role mapping the admin changed since, and a run into another domain would move the suite
+    while its storage and the token's old `AGENT` grant stay behind.
+  - **Breaking, deployment order:** the factory initializes a fresh suite manager with `initializeSuite`,
+    which only the new `TREXAccessManager` implementation has. Publish it in the same implementation
+    authority version as this factory (`publishAndUpgrade`, one transaction for all five implementations);
+    a factory deployed against an authority still serving the previous manager reverts every
+    fresh-manager deploy, with nothing half-deployed. The factory constructor loses its `suiteProfile`
+    argument. `TREXAccessManager.assign` is removed: scripts that called it call `setupSuite` instead.
 - **Identity-type-aware claim requirements** (per-type claim topics with default fallback):
   - The `TREXRegistry` can hold an alternative set of required claim topics per ONCHAINID identity
     type (`IdentityTypes`: ASSET, INDIVIDUAL, CORPORATE, IOT, CLAIM_ISSUER, SMART_CONTRACT,

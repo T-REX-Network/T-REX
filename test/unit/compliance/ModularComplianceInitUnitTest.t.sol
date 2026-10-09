@@ -2,12 +2,11 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -15,10 +14,9 @@ import { TestModule } from "test/integration/mocks/TestModule.sol";
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 import { Utils } from "test/unit/helpers/Utils.sol";
 
-contract ModularComplianceInitUnitTest is Test {
+contract ModularComplianceInitUnitTest is AccessManagerHelper {
 
     ModularCompliance private mcImplementation;
-    AccessManager private suiteManager;
     address private mcBeacon;
 
     address private notOwner = makeAddr("NotOwner");
@@ -26,7 +24,7 @@ contract ModularComplianceInitUnitTest is Test {
 
     function setUp() public {
         mcImplementation = new ModularCompliance();
-        suiteManager = new AccessManager(address(this));
+        _deploySuiteManager();
         suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
         mcBeacon = BeaconProxyDeployer.newBeacon(address(mcImplementation));
     }
@@ -168,7 +166,7 @@ contract ModularComplianceInitUnitTest is Test {
         returns (ModularCompliance)
     {
         ModularCompliance mc = ModularCompliance(_newMcProxy(_token, address(suiteManager), _modules, _moduleSettings));
-        AccessManagerSetupLib.setupModularComplianceRoles(suiteManager, address(mc), 1);
+        _setupComplianceRoles(address(mc));
         return mc;
     }
 

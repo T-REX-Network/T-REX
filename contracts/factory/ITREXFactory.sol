@@ -137,18 +137,6 @@ interface ITREXFactory {
     function setTrustedGatewayRegistry(address _trustedGatewayRegistry) external;
 
     /**
-     *  @dev setter for the suite profile
-     *  the profile decides which role gates which function of a suite the factory deploys with
-     *  its own AccessManager (see {ISuiteProfile}); replacing it changes the default profile of
-     *  every later suite without redeploying the factory
-     *  Restricted to the factory config role chosen at setup
-     *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the suite deployer role.
-     *  emits `SuiteProfileSet` event
-     *  @param _suiteProfile The address of the suite profile contract
-     */
-    function setSuiteProfile(address _suiteProfile) external;
-
-    /**
      *  @dev function used to deploy a new TREX token and set all the parameters as required by the issuer paperwork
      *  this function will deploy and set the contracts as follow :
      *  Token : deploy the token contract (proxy) and set the name, symbol, ONCHAINID, decimals, owner,
@@ -159,11 +147,12 @@ interface ITREXFactory {
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
      *  TIR : deploy TIR contract (proxy), set trusted issuers, set owner
      *  Compliance: deploy modular compliance, bind with token, add modules, set modules parameters, set owner
-     *  AccessManager : when `_tokenDetails.accessManager` is zero, deploy a `TREXAccessManager` (proxy),
-     *  create a domain named after the token, assign the token and its storage to it, set up the
-     *  suite and hand `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
-     *  factory never calls it: the suite deploys with no role wiring and is not operable until the
-     *  issuer sets it up (for the default profile, `AccessManagerSetupLib.setupSuite`).
+     *  AccessManager : when `_tokenDetails.accessManager` is zero, deploy a `TREXAccessManager` (proxy)
+     *  initialized with `TREXAccessManager.initializeSuite`: `_tokenDetails.accessManagerAdmin` is its only
+     *  admin from the first block, and it sets the suite's roles up itself in a domain named after the
+     *  token. The factory never holds a role on it. When a manager is supplied the factory never calls it:
+     *  the suite deploys with no role wiring and is not operable until the issuer calls
+     *  `TREXAccessManager.setupSuite(domainId, token)` on it.
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
@@ -195,10 +184,10 @@ interface ITREXFactory {
      *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always
      *  deploys its own identity storage through the cloned IRS beacon.
      *  When `_tokenDetails.accessManager` is zero the factory deploys a `TREXAccessManager` behind the cloned
-     *  beacon, creates a domain named after the token, assigns the token and its storage, sets up the
-     *  suite and hands `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
-     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
-     *  sets it up (for the default profile, `AccessManagerSetupLib.setupSuite`).
+     *  beacon, initialized as in {deployTREXSuite}: `_tokenDetails.accessManagerAdmin` is its only admin and
+     *  it sets the suite's roles up itself. When a manager is supplied the factory never calls it: the suite
+     *  deploys with no role wiring and is not operable until the issuer calls
+     *  `TREXAccessManager.setupSuite(domainId, token)` on it.
      *  Restricted to the suite deployer role chosen at setup
      *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never the factory config role.
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events
@@ -226,11 +215,6 @@ interface ITREXFactory {
      *  @dev getter for the trusted gateway registry address wired into newly deployed tokens
      */
     function getTrustedGatewayRegistry() external view returns (address);
-
-    /**
-     *  @dev getter for the suite profile the factory hands a fresh AccessManager to
-     */
-    function getSuiteProfile() external view returns (address);
 
     /**
      *  @dev getter for token address corresponding to salt string

@@ -6,7 +6,6 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -42,7 +41,7 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
                 abi.encodeCall(ModularCompliance.init, (token, address(suiteManager), new address[](0), new bytes[](0)))
             )
         );
-        AccessManagerSetupLib.setupModularComplianceRoles(suiteManager, address(reversed), 1);
+        _setupComplianceRoles(address(reversed));
 
         a = RuleOnlyModule(
             address(new ModuleProxy(address(new RuleOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))

@@ -2,27 +2,25 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
-contract IdentityRegistryStorageInitUnitTest is Test {
+contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
 
     IdentityRegistryStorage private irsImplementation;
-    AccessManager private suiteManager;
     address private irsBeacon;
 
     address private notOwner = makeAddr("NotOwner");
 
     function setUp() public {
         irsImplementation = new IdentityRegistryStorage();
-        suiteManager = new AccessManager(address(this));
+        _deploySuiteManager();
         suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
         // bindIdentityRegistry is gated by IRS_BINDER (not OWNER); the test acts as the binder here.
         suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
@@ -104,7 +102,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
                 irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), _initialIR))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(suiteManager, address(irs), 1);
+        _setupStorageRoles(address(irs));
         return irs;
     }
 

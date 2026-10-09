@@ -2,30 +2,44 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
+import {
+    AccessManagerUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
+import { TestTREXAccessManager } from "test/integration/mocks/TestTREXAccessManager.sol";
 
 /// @notice Shared AccessManager scaffolding for tests, split the way a deployment is: one manager for
 ///         the platform (factory, implementation authority, gateway registry, identity factory) and one
 ///         for the suite (token, registry, storage, compliance). Both are administered by the test
 ///         contract, so a fixture can still set anything up, but a platform key never opens a suite
-///         door or the reverse, which is the guarantee the protocol makes. Wires the selector-to-role
-///         mappings through AccessManagerSetupLib and exposes role-granting helpers (all grants use
-///         execution delay 0 so vm.prank works).
+///         door or the reverse, which is the guarantee the protocol makes. All grants use execution
+///         delay 0 so vm.prank works.
 abstract contract AccessManagerHelper is Test {
 
     uint32 internal constant NO_EXECUTION_DELAY = 0;
+    /// @dev The first domain the suite manager creates, where every suite of the fixture is set up.
     uint32 internal constant DOMAIN = 1;
 
     /// @notice The suite's manager: the authority of every token, registry, storage and compliance a
-    ///         test deploys, and the one `tokenDetails.accessManager` names.
-    AccessManager public suiteManager;
+    ///         test deploys, and the one `tokenDetails.accessManager` names. It is the real
+    ///         `TREXAccessManager` plus one test-only entry point, {TestTREXAccessManager.setupSuiteContracts}.
+    TestTREXAccessManager public suiteManager;
 
     /// @notice The platform's manager: the authority of the factory, the implementation authority, the
     ///         gateway registry and the identity factory. Platform roles live here and nowhere else.
     AccessManager public platformManager;
+
+    /// @dev Placeholders for the suite contracts a single-contract unit test does not deploy. Setting a suite
+    ///      up reads nothing from the addresses it is given, so mapping roles onto placeholders is inert.
+    address internal unusedToken = makeAddr("unused token");
+    address internal unusedRegistry = makeAddr("unused registry");
+    address internal unusedIdentityStorage = makeAddr("unused identity storage");
+    address internal unusedCompliance = makeAddr("unused compliance");
 
     /// @notice Deploys the platform AccessManager with the test contract as admin. Platform roles are
     ///         administered by ADMIN_ROLE directly, so no giver hierarchy is wired.
@@ -34,21 +48,38 @@ abstract contract AccessManagerHelper is Test {
         return platformManager;
     }
 
-    /// @notice Deploys the suite AccessManager with the test contract as admin, wires the role-giver
-    ///         hierarchy (AGENT_ADMIN over the AGENT family, SUITE_ADMIN over the config roles)
-    ///         and labels the roles.
-    function _deploySuiteManager() internal returns (AccessManager) {
-        suiteManager = new AccessManager(address(this));
-        AccessManagerSetupLib.setupRoleAdmins(suiteManager, DOMAIN);
-        // Operational roles are now administered by the giver roles, not ADMIN_ROLE(0); the test
-        // admin needs the givers to be able to grant AGENT/AGENT_* and TOKEN_MANAGER/IDENTITY_MANAGER.
+    /// @notice Deploys the suite manager with the test contract as admin, creates the fixture's domain, and
+    ///         makes the test contract a giver of both role families so it can grant AGENT/AGENT_* and the
+    ///         manager roles once a suite is set up.
+    function _deploySuiteManager() internal returns (TREXAccessManager) {
+        suiteManager = TestTREXAccessManager(
+            address(
+                new ERC1967Proxy(
+                    address(new TestTREXAccessManager()),
+                    abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
+                )
+            )
+        );
+        suiteManager.createDomain("test suite");
         _grantAgentAdminRole(address(this));
         _grantSuiteAdminRole(address(this));
         return suiteManager;
     }
 
+    /// @notice Deploys a `TREXAccessManager` behind an ERC-1967 proxy with `admin` as its only admin and no
+    ///         domain yet, the shape an issuer gets when they run a manager themselves.
+    function _newTREXAccessManager(address admin) internal returns (TREXAccessManager) {
+        return TREXAccessManager(
+            address(
+                new ERC1967Proxy(
+                    address(new TREXAccessManager()), abi.encodeCall(AccessManagerUpgradeable.initialize, (admin))
+                )
+            )
+        );
+    }
+
     /// @notice The two factory roles the tests pick. The suite deployer role is a named platform role, which is
-    ///         how a platform mints one without a release; governance stays on the platform OWNER.
+    ///         how a platform mints one without a release; configuration stays on the platform OWNER.
     function _suiteDeployerRole() internal pure returns (uint64) {
         return RolesLib.platform(bytes32("TOKEN_ISSUER"));
     }
@@ -82,13 +113,26 @@ abstract contract AccessManagerHelper is Test {
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(platformManager, ia, _versionManagerRole());
     }
 
-    /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
-    /// @dev `registry` is the TREXRegistry, which serves as the suite's IR, CTR and TIR.
-    function _setupSuiteRoles(address token, address registry, address irs, address mc) internal {
-        AccessManagerSetupLib.setupTokenRoles(suiteManager, token, DOMAIN);
-        AccessManagerSetupLib.setupTREXRegistryRoles(suiteManager, registry, DOMAIN);
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(suiteManager, irs, DOMAIN);
-        AccessManagerSetupLib.setupModularComplianceRoles(suiteManager, mc, DOMAIN);
+    /// @notice Sets up the suite of a deployed `token` in the fixture's domain, through the production
+    ///         `setupSuite`, which reads the registry, storage and compliance from the token.
+    function _setupSuiteRoles(address token) internal {
+        suiteManager.setupSuite(DOMAIN, token);
+    }
+
+    function _setupTokenRoles(address token) internal {
+        suiteManager.setupSuiteContracts(DOMAIN, token, unusedRegistry, unusedIdentityStorage, unusedCompliance);
+    }
+
+    function _setupRegistryRoles(address registry) internal {
+        suiteManager.setupSuiteContracts(DOMAIN, unusedToken, registry, unusedIdentityStorage, unusedCompliance);
+    }
+
+    function _setupStorageRoles(address identityStorage) internal {
+        suiteManager.setupSuiteContracts(DOMAIN, unusedToken, unusedRegistry, identityStorage, unusedCompliance);
+    }
+
+    function _setupComplianceRoles(address compliance) internal {
+        suiteManager.setupSuiteContracts(DOMAIN, unusedToken, unusedRegistry, unusedIdentityStorage, compliance);
     }
 
     function _role(RolesLib.Role role) internal pure returns (uint64) {
@@ -173,14 +217,14 @@ abstract contract AccessManagerHelper is Test {
         suiteManager.grantRole(_role(RolesLib.Role.AGENT_PAUSER), account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants the TOKEN_MANAGER and IDENTITY_MANAGER roles to `account`.
+    /// @notice Grants the TOKEN_MANAGER, IDENTITY_MANAGER and COMPLIANCE_MANAGER roles to `account`.
     function _grantManagerRoles(address account) internal {
         suiteManager.grantRole(_role(RolesLib.Role.TOKEN_MANAGER), account, NO_EXECUTION_DELAY);
         suiteManager.grantRole(_role(RolesLib.Role.IDENTITY_MANAGER), account, NO_EXECUTION_DELAY);
         _grantComplianceManagerRole(account);
     }
 
-    /// @notice Returns true when `account` holds the AGENT role on the manager.
+    /// @notice Returns true when `account` holds the AGENT role on the suite manager.
     function _hasAgentRole(address account) internal view returns (bool) {
         (bool isMember,) = suiteManager.hasRole(_role(RolesLib.Role.AGENT), account);
         return isMember;

@@ -4,7 +4,6 @@ pragma solidity 0.8.30;
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
@@ -56,7 +55,7 @@ abstract contract TokenLedgerBaseUnitTest is TokenBaseUnitTest {
         );
         ledger = TokenLedgerHarness(address(token));
 
-        AccessManagerSetupLib.setupTokenRoles(suiteManager, address(token), 1);
+        _setupTokenRoles(address(token));
         _grantAllAgentRoles(agent);
 
         vm.prank(agent);

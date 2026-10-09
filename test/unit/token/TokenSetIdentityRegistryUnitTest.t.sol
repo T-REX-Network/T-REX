@@ -5,7 +5,6 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -66,7 +65,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
             newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
-        AccessManagerSetupLib.setupTREXRegistryRoles(suiteManager, newIdentityRegistry, 1);
+        _setupRegistryRoles(newIdentityRegistry);
         suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT), address(token), 0);
 
         vm.expectEmit(true, true, true, true, address(token));

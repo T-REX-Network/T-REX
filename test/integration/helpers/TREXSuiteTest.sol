@@ -16,7 +16,6 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
-import { DefaultSuiteProfile } from "contracts/factory/DefaultSuiteProfile.sol";
 import { ITREXFactory, TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
@@ -62,7 +61,6 @@ contract TREXSuiteTest is AccessManagerHelper {
 
     // Factories
     TREXFactory public trexFactory;
-    DefaultSuiteProfile public suiteProfile;
     TREXImplementationAuthority public trexImplementationAuthority;
 
     // TREX Suite
@@ -150,15 +148,8 @@ contract TREXSuiteTest is AccessManagerHelper {
         returns (TREXFactory factory)
     {
         vm.startPrank(deployer);
-        if (address(suiteProfile) == address(0)) {
-            suiteProfile = new DefaultSuiteProfile();
-        }
         factory = new TREXFactory(
-            implementationAuthority,
-            address(idFactory),
-            address(trustedGatewayRegistry),
-            address(suiteProfile),
-            accessManagerAddress
+            implementationAuthority, address(idFactory), address(trustedGatewayRegistry), accessManagerAddress
         );
         vm.stopPrank();
     }
@@ -398,14 +389,10 @@ contract TREXSuiteTest is AccessManagerHelper {
         trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
     }
 
-    /// @notice Wires the selector-to-role mappings on the AccessManager for every contract of `_token`'s suite.
+    /// @notice Sets `_token`'s suite up in the fixture's domain of the supplied AccessManager, which the
+    ///         factory leaves to the issuer.
     function _setupTokenSuiteRoles(Token _token) internal {
-        // The registry answers topicsRegistry()/issuersRegistry() with its own address, so a single
-        // registry wiring covers all three sub-surfaces.
-        IERC3643IdentityRegistry ir = _token.identityRegistry();
-        _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
-        _grantAgentRole(address(_token));
-        _grantStorageWriterRole(address(ir));
+        _setupSuiteRoles(address(_token));
         _grantAgentRole(agent);
     }
 
@@ -422,7 +409,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(suiteManager), noModules, noSettings))
         );
         ModularCompliance freshCompliance = ModularCompliance(address(proxy));
-        AccessManagerSetupLib.setupModularComplianceRoles(suiteManager, address(freshCompliance), DOMAIN);
+        _setupComplianceRoles(address(freshCompliance));
         freshCompliance.unbindToken(sentinel);
         return freshCompliance;
     }
