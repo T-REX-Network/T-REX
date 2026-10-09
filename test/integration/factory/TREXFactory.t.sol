@@ -1268,66 +1268,81 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     // ============ AccessManagerSetupLib.setupTREXFactoryRoles() Tests ============
 
-    /// @notice The two deploy selectors land on the suite deployer role, the three setters on the factory config role.
-    function test_setupTREXFactoryRoles_SplitsDeploymentFromConfiguration() public view {
+    /// @notice The deploy selectors land on the suite deployer role, and each setter on the role that owns its subject.
+    function test_setupTREXFactoryRoles_GivesEachSetterToTheRoleThatOwnsItsSubject() public view {
         address factory = address(trexFactory);
         assertEq(
-            platformManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuite.selector),
-            _suiteDeployerRole(),
-            "deployTREXSuite must be mapped to the suite deployer role"
+            platformManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuite.selector), _suiteDeployerRole()
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.deployTREXSuiteIsolated.selector),
-            _suiteDeployerRole(),
-            "deployTREXSuiteIsolated must be mapped to the suite deployer role"
+            _suiteDeployerRole()
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.setImplementationAuthority.selector),
-            _factoryConfigRole(),
-            "setImplementationAuthority must be mapped to the factory config role"
-        );
-        assertEq(
-            platformManager.getTargetFunctionRole(factory, ITREXFactory.setIdFactory.selector),
-            _factoryConfigRole(),
-            "setIdFactory must be mapped to the factory config role"
+            _versionManagerRole(),
+            "the code new suites run belongs to the version manager"
         );
         assertEq(
             platformManager.getTargetFunctionRole(factory, ITREXFactory.setTrustedGatewayRegistry.selector),
-            _factoryConfigRole(),
-            "setTrustedGatewayRegistry must be mapped to the factory config role"
+            _interopManagerRole(),
+            "the bridges new tokens trust belong to the interop manager"
+        );
+        assertEq(
+            platformManager.getTargetFunctionRole(factory, ITREXFactory.setIdFactory.selector),
+            _platformOwnerRole(),
+            "who creates token identities belongs to the platform owner"
         );
     }
 
-    function test_setupTREXFactoryRoles_RevertWhen_OneRoleForBoth() public {
+    /// @notice The suite deployer role may be none of the three setter roles.
+    function test_setupTREXFactoryRoles_RevertWhen_SuiteDeployerIsASetterRole() public {
+        uint64 deployerRole = _suiteDeployerRole();
+
         vm.expectRevert(ErrorsLib.SuiteDeployerCannotConfigureFactory.selector);
-        this.setupFactoryRolesExternally(_factoryConfigRole(), _factoryConfigRole());
+        this.setupFactoryRolesExternally(deployerRole, deployerRole, _interopManagerRole(), _platformOwnerRole());
+
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotConfigureFactory.selector);
+        this.setupFactoryRolesExternally(deployerRole, _versionManagerRole(), deployerRole, _platformOwnerRole());
+
+        vm.expectRevert(ErrorsLib.SuiteDeployerCannotConfigureFactory.selector);
+        this.setupFactoryRolesExternally(deployerRole, _versionManagerRole(), _interopManagerRole(), deployerRole);
     }
 
-    /// @notice A suite deployer that is a manager admin could remap the config selectors or grant
-    ///         itself the config role, which is the one-role shape with an extra step.
+    /// @notice A suite deployer that is a manager admin could grant itself every setter role.
     function test_setupTREXFactoryRoles_RevertWhen_SuiteDeployerIsAdmin() public {
         vm.expectRevert(ErrorsLib.SuiteDeployerCannotConfigureFactory.selector);
-        this.setupFactoryRolesExternally(AccessManagerSetupLib.ADMIN_ROLE, _factoryConfigRole());
+        this.setupFactoryRolesExternally(
+            AccessManagerSetupLib.ADMIN_ROLE, _versionManagerRole(), _interopManagerRole(), _platformOwnerRole()
+        );
     }
 
-    /// @notice An admin can do everything anyway, so the config role may be the admin role.
-    function test_setupTREXFactoryRoles_AcceptsAdminAsConfigRole() public {
-        this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.ADMIN_ROLE);
+    /// @notice An admin can do everything anyway, so a setter role may be the admin role.
+    function test_setupTREXFactoryRoles_AcceptsAdminAsASetterRole() public {
+        this.setupFactoryRolesExternally(
+            _suiteDeployerRole(), _versionManagerRole(), _interopManagerRole(), AccessManagerSetupLib.ADMIN_ROLE
+        );
+
         assertEq(
             platformManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.setIdFactory.selector),
             AccessManagerSetupLib.ADMIN_ROLE
         );
-        assertEq(
-            platformManager.getTargetFunctionRole(address(trexFactory), ITREXFactory.deployTREXSuite.selector),
-            _suiteDeployerRole()
-        );
     }
 
-    function test_setupTREXFactoryRoles_RevertWhen_EitherRoleIsPublic() public {
+    function test_setupTREXFactoryRoles_RevertWhen_AnyRoleIsPublic() public {
+        uint64 publicRole = AccessManagerSetupLib.PUBLIC_ROLE;
+
         vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
-        this.setupFactoryRolesExternally(AccessManagerSetupLib.PUBLIC_ROLE, _factoryConfigRole());
+        this.setupFactoryRolesExternally(publicRole, _versionManagerRole(), _interopManagerRole(), _platformOwnerRole());
+
         vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
-        this.setupFactoryRolesExternally(_suiteDeployerRole(), AccessManagerSetupLib.PUBLIC_ROLE);
+        this.setupFactoryRolesExternally(_suiteDeployerRole(), publicRole, _interopManagerRole(), _platformOwnerRole());
+
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupFactoryRolesExternally(_suiteDeployerRole(), _versionManagerRole(), publicRole, _platformOwnerRole());
+
+        vm.expectRevert(ErrorsLib.PlatformRoleCannotBePublic.selector);
+        this.setupFactoryRolesExternally(_suiteDeployerRole(), _versionManagerRole(), _interopManagerRole(), publicRole);
     }
 
     /// @notice Every platform setup function takes its role as data and refuses the public role.
@@ -1396,41 +1411,67 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.setTrustedGatewayRegistry(address(newRegistry));
     }
 
-    /// @notice An account holding only the factory config role reconfigures the factory and is refused on
-    ///         both deploy entry points.
-    function test_setupTREXFactoryRoles_FactoryConfigRoleConfiguresButCannotDeploy() public {
-        address configurator = makeAddr("configurator");
-        _grantFactoryConfigRole(configurator);
-        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
-        ITREXFactory.ClaimDetails memory claimDetails = _createEmptyClaimDetails();
-
+    /// @notice The version manager repoints the implementation authority, and nothing else on the factory.
+    function test_setImplementationAuthority_OnlyByTheVersionManager() public {
+        address versionManager = makeAddr("versionManager");
+        _grantVersionManagerRole(versionManager);
         TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
-        IdentityFactory newIdFactory = _newIdentityFactory();
         TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(platformManager));
 
-        vm.startPrank(configurator);
+        vm.prank(versionManager);
         trexFactory.setImplementationAuthority(address(newIA));
-        trexFactory.setIdFactory(address(newIdFactory));
+        assertEq(trexFactory.getImplementationAuthority(), address(newIA));
+
+        vm.prank(versionManager);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, versionManager));
         trexFactory.setTrustedGatewayRegistry(address(newRegistry));
-        vm.stopPrank();
-        assertEq(trexFactory.getImplementationAuthority(), address(newIA), "factory config role must set the IA");
-        assertEq(trexFactory.getIdFactory(), address(newIdFactory), "factory config role must set the ID factory");
-        assertEq(
-            trexFactory.getTrustedGatewayRegistry(), address(newRegistry), "factory config role must set the registry"
-        );
-
-        vm.prank(configurator);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, configurator));
-        trexFactory.deployTREXSuite("configurator-shared", tokenDetails, claimDetails);
-
-        vm.prank(configurator);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, configurator));
-        trexFactory.deployTREXSuiteIsolated("configurator-isolated", tokenDetails, claimDetails);
     }
 
-    function setupFactoryRolesExternally(uint64 suiteDeployerRole, uint64 factoryConfigRole) external {
+    /// @notice The interop manager repoints the trusted gateway registry, and nothing else on the factory.
+    function test_setTrustedGatewayRegistry_OnlyByTheInteropManager() public {
+        address interopManager = makeAddr("interopManager");
+        _grantInteropManagerRole(interopManager);
+        TrustedGatewayRegistry newRegistry = new TrustedGatewayRegistry(address(platformManager));
+        IdentityFactory newIdFactory = _newIdentityFactory();
+
+        vm.prank(interopManager);
+        trexFactory.setTrustedGatewayRegistry(address(newRegistry));
+        assertEq(trexFactory.getTrustedGatewayRegistry(), address(newRegistry));
+
+        vm.prank(interopManager);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, interopManager));
+        trexFactory.setIdFactory(address(newIdFactory));
+    }
+
+    /// @notice The platform owner repoints the identity factory, and nothing else on the factory.
+    function test_setIdFactory_OnlyByThePlatformOwner() public {
+        address platformOwner = makeAddr("platformOwner");
+        _grantPlatformOwnerRole(platformOwner);
+        IdentityFactory newIdFactory = _newIdentityFactory();
+        TREXImplementationAuthority newIA = _deployTREXImplementationAuthority();
+
+        vm.prank(platformOwner);
+        trexFactory.setIdFactory(address(newIdFactory));
+        assertEq(trexFactory.getIdFactory(), address(newIdFactory));
+
+        vm.prank(platformOwner);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, platformOwner));
+        trexFactory.setImplementationAuthority(address(newIA));
+    }
+
+    function setupFactoryRolesExternally(
+        uint64 suiteDeployerRole,
+        uint64 versionManagerRole,
+        uint64 interopManagerRole,
+        uint64 platformOwnerRole
+    ) external {
         AccessManagerSetupLib.setupTREXFactoryRoles(
-            platformManager, address(trexFactory), suiteDeployerRole, factoryConfigRole
+            platformManager,
+            address(trexFactory),
+            suiteDeployerRole,
+            versionManagerRole,
+            interopManagerRole,
+            platformOwnerRole
         );
     }
 

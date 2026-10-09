@@ -78,13 +78,13 @@ abstract contract AccessManagerHelper is Test {
         );
     }
 
-    /// @notice The two factory roles the tests pick. The suite deployer role is a named platform role, which is
-    ///         how a platform mints one without a release; configuration stays on the platform OWNER.
+    /// @notice The platform roles the tests pick. The suite deployer role is a named platform role, which is how a
+    ///         platform mints one without a release; the others are the default `RolesLib.PlatformRole` vocabulary.
     function _suiteDeployerRole() internal pure returns (uint64) {
         return RolesLib.platform(bytes32("TOKEN_ISSUER"));
     }
 
-    function _factoryConfigRole() internal pure returns (uint64) {
+    function _platformOwnerRole() internal pure returns (uint64) {
         return RolesLib.platform(RolesLib.PlatformRole.OWNER);
     }
 
@@ -100,11 +100,17 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER);
     }
 
-    /// @notice Wires the two deploy selectors to the suite deployer role and the three setters to the
-    ///         factory config role.
+    /// @notice Wires the two deploy selectors to the suite deployer role, and each setter to the role that owns its
+    ///         subject: the implementation authority to the version manager, the gateway registry to the interop
+    ///         manager, the identity factory to the platform owner.
     function _setupFactoryRoles(address trexFactory) internal {
         AccessManagerSetupLib.setupTREXFactoryRoles(
-            platformManager, trexFactory, _suiteDeployerRole(), _factoryConfigRole()
+            platformManager,
+            trexFactory,
+            _suiteDeployerRole(),
+            _versionManagerRole(),
+            _interopManagerRole(),
+            _platformOwnerRole()
         );
     }
 
@@ -145,18 +151,21 @@ abstract contract AccessManagerHelper is Test {
         suiteManager.grantRole(_role(RolesLib.Role.OWNER), account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants factory configuration and suite deployment on the platform manager.
+    /// @notice Grants every platform role that opens a factory function: suite deployment and the three setter
+    ///         roles.
     function _grantPlatformRoles(address account) internal {
-        _grantFactoryConfigRole(account);
         _grantSuiteDeployerRole(account);
+        _grantVersionManagerRole(account);
+        _grantInteropManagerRole(account);
+        _grantPlatformOwnerRole(account);
     }
 
     function _grantSuiteDeployerRole(address account) internal {
         platformManager.grantRole(_suiteDeployerRole(), account, NO_EXECUTION_DELAY);
     }
 
-    function _grantFactoryConfigRole(address account) internal {
-        platformManager.grantRole(_factoryConfigRole(), account, NO_EXECUTION_DELAY);
+    function _grantPlatformOwnerRole(address account) internal {
+        platformManager.grantRole(_platformOwnerRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantStorageWriterRole(address account) internal {
