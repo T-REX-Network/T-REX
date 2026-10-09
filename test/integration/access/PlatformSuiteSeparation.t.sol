@@ -11,8 +11,8 @@ import { VersionLib } from "contracts/libraries/VersionLib.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 /// @notice The platform and a suite answer to different AccessManagers, as a deployment does: the factory
-///         mints a fresh manager per suite and hands its ADMIN_ROLE to the issuer, so no platform key opens a
-///         suite door and no suite key opens a platform door, whatever its power on its own side. The fixture
+///         deploys a fresh manager per suite whose only admin, from its first block, is the issuer, so no platform
+///         key opens a suite door and no suite key opens a platform door, whatever its power on its own side. The fixture
 ///         keeps the two apart for the same reason; one manager for both could not state any of this.
 contract PlatformSuiteSeparationTest is TREXSuiteTest {
 
