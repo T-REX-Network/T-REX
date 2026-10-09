@@ -87,6 +87,9 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
     ///      key stays with the manager that deployed the suite.
     /// @dev `OwnershipTransferred` is emitted by `_setAuthority` in the concrete base, which every owner change
     ///      passes through, so it is not emitted here a second time.
+    /// @dev Ownership cannot be renounced, despite the ERC-173 wording above: the owner is the AccessManager,
+    ///      and OpenZeppelin refuses an authority without code, so `address(0)` reverts with
+    ///      `AccessManagedInvalidAuthority`. A contract always has a manager to answer to.
     function transferOwnership(address newAuthority) external {
         setAuthority(newAuthority);
     }
