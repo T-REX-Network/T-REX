@@ -357,14 +357,26 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, IToken.dispatchMintInstruction.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, token, IToken.dispatchRecallInstruction.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, token, IERC3643.mint.selector, domainId, RolesLib.Role.AGENT_MINTER);
+        _assertRow(target, token, IERC3643.batchMint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.burn.selector, domainId, RolesLib.Role.AGENT_BURNER);
+        _assertRow(target, token, IERC3643.batchBurn.selector, domainId, RolesLib.Role.AGENT_BURNER);
         _assertRow(target, token, IERC3643.freezePartialTokens.selector, domainId, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        _assertRow(
+            target, token, IERC3643.batchFreezePartialTokens.selector, domainId, RolesLib.Role.AGENT_PARTIAL_FREEZER
+        );
         _assertRow(
             target, token, IERC3643.unfreezePartialTokens.selector, domainId, RolesLib.Role.AGENT_PARTIAL_FREEZER
         );
+        _assertRow(
+            target, token, IERC3643.batchUnfreezePartialTokens.selector, domainId, RolesLib.Role.AGENT_PARTIAL_FREEZER
+        );
         _assertRow(target, token, IERC3643.setAddressFrozen.selector, domainId, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        _assertRow(
+            target, token, IERC3643.batchSetAddressFrozen.selector, domainId, RolesLib.Role.AGENT_ADDRESS_FREEZER
+        );
         _assertRow(target, token, IERC3643.recoveryAddress.selector, domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
         _assertRow(target, token, IERC3643.forcedTransfer.selector, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        _assertRow(target, token, IERC3643.batchForcedTransfer.selector, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
         _assertRow(target, token, IERC3643.pause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, token, IERC3643.unpause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         // Registry
