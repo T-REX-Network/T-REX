@@ -3,15 +3,18 @@ pragma solidity 0.8.30;
 
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
+import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 /// @notice Covers the ERC-173 ownership compatibility shim that the suite contracts inherit on top
-///         of AccessManager. `owner()` is expected to mirror the AccessManager authority, while
-///         `transferOwnership()` is unsupported because authority changes flow through the
-///         AccessManager rather than ERC-173.
+///         of AccessManager. `owner()` mirrors the AccessManager authority, only the current authority can
+///         change it, and every change emits `OwnershipTransferred` exactly once, whichever path made it.
 contract AccessManagerOwnableTest is TREXSuiteTest {
 
     /// @dev Every suite contract inheriting AccessManagerOwnable.
@@ -85,6 +88,57 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
             contractsList[i].transferOwnership(address(newAuthority));
             assertEq(contractsList[i].owner(), address(newAuthority));
         }
+    }
+
+    // ============ OwnershipTransferred Tests ============
+
+    /// @notice The manager's own `updateAuthority` changes the owner without `transferOwnership`, and must still
+    ///         announce it, exactly once.
+    function test_updateAuthority_EmitsOwnershipTransferredOnce() public {
+        AccessManager newAuthority = new AccessManager(address(this));
+        IERC173[] memory contractsList = _shimmedContracts();
+        for (uint256 i = 0; i < contractsList.length; i++) {
+            vm.expectEmit(address(contractsList[i]));
+            emit IERC173.OwnershipTransferred(address(accessManager), address(newAuthority));
+            vm.recordLogs();
+            accessManager.updateAuthority(address(contractsList[i]), address(newAuthority));
+            assertEq(vm.getRecordedLogs().length, 2, "one AuthorityUpdated and one OwnershipTransferred");
+        }
+    }
+
+    /// @notice `transferOwnership` announces the change exactly once, not twice.
+    function test_transferOwnership_EmitsOwnershipTransferredOnce() public {
+        AccessManager newAuthority = new AccessManager(address(this));
+        IERC173[] memory contractsList = _shimmedContracts();
+        for (uint256 i = 0; i < contractsList.length; i++) {
+            vm.expectEmit(address(contractsList[i]));
+            emit IERC173.OwnershipTransferred(address(accessManager), address(newAuthority));
+            vm.recordLogs();
+            vm.prank(address(accessManager));
+            contractsList[i].transferOwnership(address(newAuthority));
+            assertEq(vm.getRecordedLogs().length, 2, "one AuthorityUpdated and one OwnershipTransferred");
+        }
+    }
+
+    /// @notice A contract built with a constructor announces its first owner, from the zero address.
+    function test_constructor_EmitsOwnershipTransferredFromZero() public {
+        address nextRegistry = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+
+        vm.expectEmit(nextRegistry);
+        emit IERC173.OwnershipTransferred(address(0), address(accessManager));
+        new TrustedGatewayRegistry(address(accessManager));
+    }
+
+    /// @notice A proxy built with an initializer announces its first owner, from the zero address.
+    function test_initializer_EmitsOwnershipTransferredFromZero() public {
+        address storageImplementation = address(new IdentityRegistryStorage());
+        address nextStorage = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+
+        vm.expectEmit(nextStorage);
+        emit IERC173.OwnershipTransferred(address(0), address(accessManager));
+        new ERC1967Proxy(
+            storageImplementation, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+        );
     }
 
 }
