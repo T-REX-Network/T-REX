@@ -271,12 +271,9 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
             if (foundClaimTopic != claimTopic || issuer != trustedIssuer) continue;
 
-            // A call to a wallet, or to a contract that answers nothing, still succeeds:
-            // only an answer of exactly one word equal to true counts.
-            (bool success, bytes memory answer) = trustedIssuer.staticcall(
-                abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data))
-            );
-            if (success && answer.length == 32 && abi.decode(answer, (uint256)) == 1) return true;
+            try IClaimIssuer(trustedIssuer).isClaimValid(userIdentity, claimTopic, sig, data) returns (bool valid) {
+                if (valid) return true;
+            } catch { }
         }
         return false;
     }

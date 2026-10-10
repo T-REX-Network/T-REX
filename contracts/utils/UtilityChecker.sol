@@ -203,11 +203,11 @@ contract UtilityChecker is IUtilityChecker, AccessManagedOwnableUpgradeable, UUP
         if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
-        // Asked the way the registry asks, so an issuer that answers nothing reports a failed check instead of
-        // reverting this view.
-        (bool success, bytes memory answer) =
-            trustedIssuer.staticcall(abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data)));
-        pass = success && answer.length == 32 && abi.decode(answer, (uint256)) == 1;
+        try IClaimIssuer(trustedIssuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
+            pass = validity;
+        } catch {
+            pass = false;
+        }
     }
 
     /// @inheritdoc IUtilityChecker

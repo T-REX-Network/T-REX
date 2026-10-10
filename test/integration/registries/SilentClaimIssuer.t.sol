@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
+import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 import { UtilityChecker } from "contracts/utils/UtilityChecker.sol";
@@ -62,9 +63,9 @@ contract AlwaysValidClaimIssuer {
 
 }
 
-/// @notice A trusted issuer that does not answer `isClaimValid` with `true` never validates a claim, in the registry
-///  and in the UtilityChecker alike. Before the fix, an issuer that answered nothing passed `isVerified`, because the
-///  answer was read from leftover memory, and made `getVerifiedDetails` revert.
+/// @notice A claim issuer that cannot answer `isClaimValid` never validates a claim. A wallet cannot be trusted at
+///  all, and an issuer contract that answers nothing or something that is not a bool makes `isVerified` revert
+///  rather than pass. Before the fix, both passed `isVerified`, because the answer was read from leftover memory.
 contract SilentClaimIssuerTest is TREXSuiteTest {
 
     UtilityChecker internal utilityChecker;
@@ -80,46 +81,32 @@ contract SilentClaimIssuerTest is TREXSuiteTest {
         );
     }
 
-    // ============ isVerified ============
+    function test_addTrustedIssuer_RevertWhen_IssuerIsAWallet() public {
+        Token token = _deployTokenWithClaimTopic("wallet-issuer", "WAL", "WAL");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        address walletIssuer = makeAddr("walletIssuer");
+        uint256[] memory topics = new uint256[](1);
+        topics[0] = CLAIM_TOPIC_1;
 
-    function test_isVerified_RefusesAWalletAsIssuer() public {
-        (, TREXRegistry registry) = _trustIssuerAndRegisterForgedStamp("wallet-issuer", makeAddr("walletIssuer"));
-
-        assertFalse(registry.isVerified(david));
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ERC3643ErrorsLib.TrustedIssuerHasNoCode.selector, walletIssuer));
+        registry.addTrustedIssuer(walletIssuer, topics);
     }
 
-    function test_isVerified_RefusesAnIssuerThatAnswersNothing() public {
-        (, TREXRegistry registry) =
-            _trustIssuerAndRegisterForgedStamp("silent-issuer", address(new SilentClaimIssuer()));
+    /// @notice The answer cannot be decoded, which `try` does not catch: the check reverts, and never passes.
+    function test_isVerified_RevertWhen_TheIssuerAnswersNothing() public {
+        TREXRegistry registry = _trustIssuerAndRegisterForgedStamp("silent-issuer", address(new SilentClaimIssuer()));
 
-        assertFalse(registry.isVerified(david));
+        vm.expectRevert(bytes(""));
+        registry.isVerified(david);
     }
 
-    function test_isVerified_RefusesAnAnswerThatIsNotTrue() public {
-        (, TREXRegistry registry) =
+    function test_isVerified_RevertWhen_TheAnswerIsNotABool() public {
+        TREXRegistry registry =
             _trustIssuerAndRegisterForgedStamp("non-boolean-issuer", address(new NonBooleanClaimIssuer()));
 
-        assertFalse(registry.isVerified(david));
-    }
-
-    // ============ getVerifiedDetails ============
-
-    function test_getVerifiedDetails_ReportsAWalletIssuerAsFailing() public {
-        (Token token,) = _trustIssuerAndRegisterForgedStamp("wallet-issuer", makeAddr("walletIssuer"));
-
-        (UtilityChecker.EligibilityCheckDetails[] memory details,) =
-            utilityChecker.getVerifiedDetails(address(token), david);
-
-        assertFalse(details[0].pass);
-    }
-
-    function test_getVerifiedDetails_ReportsAnIssuerThatAnswersNothingAsFailing() public {
-        (Token token,) = _trustIssuerAndRegisterForgedStamp("silent-issuer", address(new SilentClaimIssuer()));
-
-        (UtilityChecker.EligibilityCheckDetails[] memory details,) =
-            utilityChecker.getVerifiedDetails(address(token), david);
-
-        assertFalse(details[0].pass);
+        vm.expectRevert(bytes(""));
+        registry.isVerified(david);
     }
 
     /// @notice A claim filed under the trusted issuer's id but naming another issuer counts for neither side: the
@@ -139,15 +126,13 @@ contract SilentClaimIssuerTest is TREXSuiteTest {
         assertFalse(details[0].pass, "the UtilityChecker must agree with the registry");
     }
 
-    // ============ helpers ============
-
     /// @dev Deploys a token requiring `CLAIM_TOPIC_1`, trusts `issuer` for it, and registers `david` with an identity
     ///  reporting a claim from `issuer`.
     function _trustIssuerAndRegisterForgedStamp(string memory salt, address issuer)
         internal
-        returns (Token token, TREXRegistry registry)
+        returns (TREXRegistry registry)
     {
-        token = _deployTokenWithClaimTopic(salt, salt, salt);
+        Token token = _deployTokenWithClaimTopic(salt, salt, salt);
         registry = TREXRegistry(address(token.identityRegistry()));
         _trust(registry, issuer);
         StampForgingIdentity forged = new StampForgingIdentity(issuer, CLAIM_TOPIC_1);

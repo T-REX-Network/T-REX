@@ -37,6 +37,7 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import { NoOpSuiteProfile } from "test/integration/mocks/NoOpSuiteProfile.sol";
 import { TestModule } from "test/integration/mocks/TestModule.sol";
 import { TestTREXFactory } from "test/integration/mocks/TestTREXFactory.sol";
+import { Utils } from "test/unit/helpers/Utils.sol";
 
 contract TREXFactoryTest is TREXSuiteTest {
 
@@ -233,7 +234,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     function test_deployTREXSuite_Success() public {
         // The TIR only records issuer addresses; it never calls back into them.
-        address claimIssuer = makeAddr("suiteClaimIssuer");
+        address claimIssuer = Utils.addressWithCode("suiteClaimIssuer");
         uint256 claimTopic = 1;
 
         _runDeployTREXSuiteSuccess(claimIssuer, claimTopic);
@@ -394,8 +395,8 @@ contract TREXFactoryTest is TREXSuiteTest {
 
     /// @notice TIR must be owned by the suite AccessManager
     function test_deployTREXSuite_TIR_OwnershipAndIssuers_SetAtInit() public {
-        address issuerA = makeAddr("issuerA");
-        address issuerB = makeAddr("issuerB");
+        address issuerA = Utils.addressWithCode("issuerA");
+        address issuerB = Utils.addressWithCode("issuerB");
 
         address[] memory issuers = new address[](2);
         issuers[0] = address(issuerA);
@@ -856,7 +857,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         testModuleAddr = address(testModuleProxy);
 
         // Issuer for the TIR + claim topic. The TIR only records the address.
-        issuerAddr = makeAddr("tirClaimIssuer");
+        issuerAddr = Utils.addressWithCode("tirClaimIssuer");
 
         address[] memory complianceModules = new address[](1);
         complianceModules[0] = testModuleAddr;

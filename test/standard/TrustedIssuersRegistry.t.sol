@@ -7,6 +7,7 @@ import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 
 import { TrustedIssuersRegistryMock } from "./mocks/Mocks.sol";
+import { Utils } from "test/unit/helpers/Utils.sol";
 
 /// @dev ERC-3643 standard: Trusted Issuers Registry.
 ///
@@ -16,8 +17,8 @@ contract TrustedIssuersRegistryBaseTest is Test {
 
     TrustedIssuersRegistryMock internal registry;
 
-    address internal issuer = makeAddr("issuer");
-    address internal otherIssuer = makeAddr("otherIssuer");
+    address internal issuer = Utils.addressWithCode("issuer");
+    address internal otherIssuer = Utils.addressWithCode("otherIssuer");
 
     function setUp() public {
         registry = new TrustedIssuersRegistryMock();

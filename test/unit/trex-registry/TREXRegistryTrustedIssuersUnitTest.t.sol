@@ -7,6 +7,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { TREXRegistryBaseUnitTest } from "./helpers/TREXRegistryBaseUnitTest.t.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { Utils } from "test/unit/helpers/Utils.sol";
 
 contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
 
@@ -25,7 +26,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     function test_addTrustedIssuer_RevertWhen_NotOwner() public {
         uint256[] memory topics = new uint256[](1);
         topics[0] = CLAIM_TOPIC_1;
-        address anotherIssuer = makeAddr("anotherIssuer");
+        address anotherIssuer = Utils.addressWithCode("anotherIssuer");
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         registry.addTrustedIssuer(address(anotherIssuer), topics);
@@ -48,7 +49,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_addTrustedIssuer_RevertWhen_ClaimTopicsEmpty() public {
-        address newIssuer = makeAddr("newIssuer");
+        address newIssuer = Utils.addressWithCode("newIssuer");
         uint256[] memory empty = new uint256[](0);
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.TrustedClaimTopicsCannotBeEmpty.selector);
@@ -56,7 +57,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_addTrustedIssuer_RevertWhen_MoreThan15ClaimTopics() public {
-        address newIssuer = makeAddr("newIssuer");
+        address newIssuer = Utils.addressWithCode("newIssuer");
         uint256[] memory topics = new uint256[](16);
         for (uint256 i = 0; i < 16; i++) {
             topics[i] = i;
@@ -72,18 +73,19 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
         // We already have 1 issuer from setUp; add 49 more to reach 50 total.
         for (uint256 i = 0; i < 49; i++) {
             address issuerAddress = address(uint160(uint256(keccak256(abi.encodePacked("issuer", i)))));
+            vm.etch(issuerAddress, hex"00");
             vm.prank(deployer);
             registry.addTrustedIssuer(issuerAddress, topics);
         }
 
-        address overflow = makeAddr("overflow");
+        address overflow = Utils.addressWithCode("overflow");
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxTrustedIssuersReached.selector, 50));
         registry.addTrustedIssuer(address(overflow), topics);
     }
 
     function test_addTrustedIssuer_Success_EmitsEvent() public {
-        address newIssuer = makeAddr("newIssuer");
+        address newIssuer = Utils.addressWithCode("newIssuer");
         uint256[] memory topics = new uint256[](1);
         topics[0] = CLAIM_TOPIC_2;
 
@@ -110,16 +112,16 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_removeTrustedIssuer_RevertWhen_NotRegistered() public {
-        address newIssuer = makeAddr("newIssuer");
+        address newIssuer = Utils.addressWithCode("newIssuer");
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.NotATrustedIssuer.selector);
         registry.removeTrustedIssuer(address(newIssuer));
     }
 
     function test_removeTrustedIssuer_Success() public {
-        address bobIssuer = makeAddr("bobIssuer");
-        address anotherIssuer = makeAddr("anotherIssuer");
-        address charlieIssuer = makeAddr("charlieIssuer");
+        address bobIssuer = Utils.addressWithCode("bobIssuer");
+        address anotherIssuer = Utils.addressWithCode("anotherIssuer");
+        address charlieIssuer = Utils.addressWithCode("charlieIssuer");
 
         uint256[] memory topicsBob = new uint256[](3);
         topicsBob[0] = CLAIM_TOPIC_3;
@@ -156,7 +158,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_removeTrustedIssuer_ClearsClaimTopics() public {
-        address bobIssuer = makeAddr("bobIssuer");
+        address bobIssuer = Utils.addressWithCode("bobIssuer");
         uint256[] memory topicsBob = new uint256[](2);
         topicsBob[0] = CLAIM_TOPIC_2;
         topicsBob[1] = CLAIM_TOPIC_3;
@@ -176,8 +178,8 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_removeTrustedIssuer_KeepsCoIssuerOnSharedTopic() public {
-        address bobIssuer = makeAddr("bobIssuer");
-        address charlieIssuer = makeAddr("charlieIssuer");
+        address bobIssuer = Utils.addressWithCode("bobIssuer");
+        address charlieIssuer = Utils.addressWithCode("charlieIssuer");
         uint256[] memory sharedTopics = new uint256[](1);
         sharedTopics[0] = CLAIM_TOPIC_2;
 
@@ -212,7 +214,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_updateIssuerClaimTopics_RevertWhen_NotRegistered() public {
-        address newIssuer = makeAddr("newIssuer");
+        address newIssuer = Utils.addressWithCode("newIssuer");
         uint256[] memory topics = new uint256[](1);
         topics[0] = CLAIM_TOPIC_1;
         vm.prank(deployer);
@@ -273,8 +275,8 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_updateIssuerClaimTopics_CoversInnerLoopIncrement() public {
-        address firstIssuer = makeAddr("firstIssuer");
-        address secondIssuer = makeAddr("secondIssuer");
+        address firstIssuer = Utils.addressWithCode("firstIssuer");
+        address secondIssuer = Utils.addressWithCode("secondIssuer");
 
         uint256[] memory topics = new uint256[](1);
         topics[0] = CLAIM_TOPIC_1;
@@ -299,7 +301,7 @@ contract TREXRegistryTrustedIssuersUnitTest is TREXRegistryBaseUnitTest {
     // ============ getTrustedIssuerClaimTopics() ============
 
     function test_getTrustedIssuerClaimTopics_ReturnsEmptyWhen_NotRegistered() public {
-        address newIssuer = makeAddr("newIssuer");
+        address newIssuer = Utils.addressWithCode("newIssuer");
         assertEq(registry.getTrustedIssuerClaimTopics(address(newIssuer)).length, 0);
     }
 
