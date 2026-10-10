@@ -503,6 +503,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`OwnershipTransferred` is emitted on every owner change** (ERC-173). The owner of every T-REX contract is
+  its AccessManager, and the AccessManager's own `updateAuthority` changes it without going through
+  `transferOwnership`, so explorers and indexers that follow `OwnershipTransferred` kept showing the old
+  owner. Creation emitted nothing either. The event now comes from `_setAuthority`, which the constructor or
+  initializer, `updateAuthority` and `transferOwnership` all pass through, and `transferOwnership` no longer
+  emits it a second time. Every contract on the AccessManagedOwnable layer grows by 1 byte.
 - **Suite deployment is no longer gated by the role that configures the factory** (#100).
   `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
