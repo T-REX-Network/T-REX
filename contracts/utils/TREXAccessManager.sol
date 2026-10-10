@@ -149,8 +149,8 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     }
 
     /// @notice Wires the suite of `token` into `domainId`: maps every privileged function of its four
-    ///         contracts to the domain's roles, sets which role administers which, and grants the two roles
-    ///         the suite's own contracts hold. Runs once per token.
+    ///         contracts to the domain's roles and grants the two roles the suite's own contracts hold.
+    ///         Runs once per token.
     /// @dev The registry, the identity storage and the compliance are read from the token, so the four
     ///      addresses always belong to one suite. The token must already be deployed; a suite that does not
     ///      exist yet is set up through `initializeSuite`.
@@ -158,10 +158,13 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     ///      changed since to the default, and running it with another domain would move the token, registry
     ///      and compliance while the storage and the token's old `AGENT` grant stay behind. A function added
     ///      by a later manager version is mapped with `setTargetFunctionRole`.
-    /// @dev The identity storage keeps the domain it was first set up in, so a storage shared by
-    ///      several domains is written only through roles of the first. Binding a registry to a shared
-    ///      storage is not done here: a fresh storage binds its first registry at init, a reused one is
-    ///      bound by a holder of `IRS_BINDER`.
+    /// @dev A contract's rows are written the first time it joins a domain, never again: a registry, a storage
+    ///      or a compliance shared by a second token keeps every row its admin changed since. A registry or a
+    ///      compliance already set up in another domain is refused, since remapping its rows would lock the
+    ///      first token out of its own registry. The identity storage instead keeps the domain it was first set
+    ///      up in, so a storage shared by several domains is written only through roles of the first. Binding
+    ///      a registry to a shared storage is not done here: a fresh storage binds its first registry at init,
+    ///      a reused one is bound by a holder of `IRS_BINDER`.
     /// @dev A new domain and its first suite take one transaction: the manager inherits OpenZeppelin's
     ///      `multicall`, so the admin sends `createDomain(name)` and `setupSuite(domainCount() + 1, token)`
     ///      together. The id is `domainCount() + 1` because ids are dense and only admins create domains.
@@ -200,37 +203,37 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     // Suite setup
     // ============================================================
 
+    /// @dev Who hands out which role belongs to the domain, not to a suite, so it is set here once and no later
+    ///      suite set up in the domain puts an admin's change back.
     function _createDomain(string memory name) private returns (uint32 domainId) {
         DomainStorage storage domainStorage = _getDomainStorage();
         domainId = ++domainStorage.count;
         domainStorage.names[domainId] = name;
         emit EventsLib.DomainCreated(domainId, name);
+        _setRoleAdmins(domainId);
     }
 
     /// @dev Internal rather than private so a test subclass can set up a single suite contract on its own.
     function _setupSuite(uint32 domainId, address token, address registry, address identityStorage, address compliance)
         internal
     {
-        DomainStorage storage domainStorage = _getDomainStorage();
-        require(domainId != 0 && domainId <= domainStorage.count, ErrorsLib.DomainNotFound(domainId));
+        require(domainId != 0 && domainId <= _getDomainStorage().count, ErrorsLib.DomainNotFound(domainId));
 
         _assignToDomain(domainId, token);
-        _assignToDomain(domainId, registry);
-        _assignToDomain(domainId, compliance);
-        // A storage shared across domains keeps the domain of its first suite; see {setupSuite}.
-        uint32 storageDomainId = domainStorage.domainOf[identityStorage];
+        _setTokenFunctionRoles(token, domainId);
+        // A registry or a compliance shared by a second token in the same domain keeps its rows; see {setupSuite}.
+        if (_joinDomain(domainId, registry)) {
+            _setRegistryFunctionRoles(registry, domainId);
+        }
+        if (_joinDomain(domainId, compliance)) {
+            _setComplianceFunctionRoles(compliance, domainId);
+        }
+        // A storage shared across domains keeps the domain, and the rows, of its first suite; see {setupSuite}.
+        uint32 storageDomainId = _getDomainStorage().domainOf[identityStorage];
         if (storageDomainId == 0) {
             _assignToDomain(domainId, identityStorage);
+            _setStorageFunctionRoles(identityStorage, domainId);
             storageDomainId = domainId;
-        }
-
-        _setTokenFunctionRoles(token, domainId);
-        _setRegistryFunctionRoles(registry, domainId);
-        _setComplianceFunctionRoles(compliance, domainId);
-        _setStorageFunctionRoles(identityStorage, storageDomainId);
-        _setRoleAdmins(domainId);
-        if (storageDomainId != domainId) {
-            _setRoleAdmins(storageDomainId);
         }
 
         // The token registers wallets on recovery and dispatches cross-chain instructions, so it acts as
@@ -243,6 +246,19 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         require(target != address(0), ErrorsLib.ZeroAddress());
         _getDomainStorage().domainOf[target] = domainId;
         emit EventsLib.DomainAssigned(domainId, target);
+    }
+
+    /// @dev Puts `target` in `domainId` if it is in none yet, and says whether it did. A target already in
+    ///      `domainId` is left alone; one in another domain is refused.
+    function _joinDomain(uint32 domainId, address target) private returns (bool joined) {
+        require(target != address(0), ErrorsLib.ZeroAddress());
+        uint32 currentDomainId = _getDomainStorage().domainOf[target];
+        if (currentDomainId == 0) {
+            _assignToDomain(domainId, target);
+            return true;
+        }
+        require(currentDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(target, currentDomainId));
+        return false;
     }
 
     // ============================================================

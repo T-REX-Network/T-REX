@@ -33,7 +33,13 @@ All notable changes to this project will be documented in this file.
     had its row for the same reason.
   - `setupSuite` runs once per token and reverts with `SuiteAlreadySetUp` afterwards: a second run would
     reset every role mapping the admin changed since, and a run into another domain would move the suite
-    while its storage and the token's old `AGENT` grant stay behind.
+    while its storage and the token's old `AGENT` grant stay behind. A contract's rows are written the first
+    time it joins a domain and never again, so a registry, storage or compliance shared by a second token
+    keeps every row its admin changed. A registry or compliance already in another domain is refused with
+    the same error (remapping it would lock the first token out of its own registry); the storage keeps its
+    first domain as before. Who hands out which role is set once, in `createDomain`, so a second suite in a
+    domain no longer puts the default appointers back. The old library reset rows and appointers on every
+    run.
   - **Breaking, deployment order:** the factory initializes a fresh suite manager with `initializeSuite`,
     which only the new `TREXAccessManager` implementation has. Publish it in the same implementation
     authority version as this factory (`publishAndUpgrade`, one transaction for all five implementations);
