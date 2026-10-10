@@ -14,6 +14,11 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 ///         deploys a fresh manager per suite whose only admin, from its first block, is the issuer, so no platform
 ///         key opens a suite door and no suite key opens a platform door, whatever its power on its own side. The fixture
 ///         keeps the two apart for the same reason; one manager for both could not state any of this.
+/// @notice The platform manager and the suite manager keep platform keys and suite keys apart, as a deployment
+///         keeps them apart. The fixture passes its own `suiteManager` as `tokenDetails.accessManager`, so this
+///         file models an issuer bringing one manager shared by every suite the fixture deploys. The other path,
+///         where the factory mints a fresh manager per suite and holds no role on it, is covered in
+///         `TREXFactoryAccessManager.t.sol`.
 contract PlatformSuiteSeparationTest is TREXSuiteTest {
 
     address platformAdmin = makeAddr("platformAdmin");
