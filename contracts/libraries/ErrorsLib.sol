@@ -173,7 +173,7 @@ library ErrorsLib {
 
     // TREXAccessManager Errors
     error DomainNotFound(uint32 domainId);
-    error SuiteAlreadySetUp(address token, uint32 domainId);
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

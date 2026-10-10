@@ -115,6 +115,16 @@ contract TREXAccessManagerUnitTest is Test {
         assertEq(manager.domainName(2), "Fund B");
     }
 
+    /// @notice Who hands out which role belongs to the domain, so it is in place before any suite joins it.
+    function test_createDomain_SetsTheDomainsRoleAdmins() public {
+        uint32 fund = manager.createDomain("Fund A");
+
+        _assertAdmin(manager, fund, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
+        _assertAdmin(manager, fund, RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
+        _assertAdmin(manager, fund, RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
+        assertEq(manager.getRoleAdmin(RolesLib.forDomain(fund, RolesLib.Role.OWNER)), ADMIN_ROLE);
+    }
+
     function test_setupSuite_AssignsTheFourContractsAndWritesTheLayout() public {
         uint32 fund = manager.createDomain("Fund A");
 
@@ -207,6 +217,101 @@ contract TREXAccessManagerUnitTest is Test {
 
         assertEq(manager.domainOf(token), fundA, "the token stays in its domain");
         assertEq(manager.domainOf(registry), fundA, "the registry stays in its domain");
+    }
+
+    /// @notice Two tokens may share a registry, but not across domains: moving it would remap its rows to the
+    ///         second domain and lock the first token out of its own registry.
+    function test_setupSuite_RevertWhen_TheRegistryIsSetUpInAnotherDomain() public {
+        uint32 fundA = manager.createDomain("Fund A");
+        uint32 fundB = manager.createDomain("Fund B");
+        address otherToken = makeAddr("otherToken");
+        manager.setupSuite(fundA, token);
+        _mockSuite(otherToken, registry, makeAddr("otherStorage"), makeAddr("otherCompliance"));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, registry, fundA));
+        manager.setupSuite(fundB, otherToken);
+
+        assertEq(manager.domainOf(registry), fundA, "the registry stays in its domain");
+        assertEq(manager.domainOf(otherToken), 0, "nothing of the second suite is set up");
+        (bool tokenRegisters,) = manager.canCall(token, registry, IERC3643IdentityRegistry.registerIdentity.selector);
+        assertTrue(tokenRegisters, "the first token still registers wallets on recovery");
+    }
+
+    function test_setupSuite_RevertWhen_TheComplianceIsSetUpInAnotherDomain() public {
+        uint32 fundA = manager.createDomain("Fund A");
+        uint32 fundB = manager.createDomain("Fund B");
+        address otherToken = makeAddr("otherToken");
+        manager.setupSuite(fundA, token);
+        _mockSuite(otherToken, makeAddr("otherRegistry"), makeAddr("otherStorage"), compliance);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, compliance, fundA));
+        manager.setupSuite(fundB, otherToken);
+
+        assertEq(manager.domainOf(compliance), fundA, "the compliance stays in its domain");
+    }
+
+    /// @notice A registry shared by a second token in the same domain is set up once: the rows its admin changed
+    ///         since stay, and the second token still acts as its agent.
+    function test_setupSuite_ASharedRegistryKeepsTheRowsItsAdminChanged() public {
+        uint32 fund = manager.createDomain("Fund A");
+        address otherToken = makeAddr("otherToken");
+        manager.setupSuite(fund, token);
+        uint64 onboardingRole = RolesLib.forDomain(fund, bytes32("ONBOARDING"));
+        bytes4[] memory registerIdentity = new bytes4[](1);
+        registerIdentity[0] = IERC3643IdentityRegistry.registerIdentity.selector;
+        manager.setTargetFunctionRole(registry, registerIdentity, onboardingRole);
+        _mockSuite(otherToken, registry, identityStorage, makeAddr("otherCompliance"));
+
+        manager.setupSuite(fund, otherToken);
+
+        assertEq(manager.domainOf(otherToken), fund);
+        assertEq(
+            manager.getTargetFunctionRole(registry, registerIdentity[0]), onboardingRole, "the admin's row is kept"
+        );
+        (bool otherTokenIsAgent,) = manager.hasRole(RolesLib.forDomain(fund, RolesLib.Role.AGENT), otherToken);
+        assertTrue(otherTokenIsAgent, "the second token acts as an agent of the domain");
+    }
+
+    /// @notice Role admins belong to the domain. A second suite set up in it does not put back the default
+    ///         after the admin chose another appointer.
+    function test_setupSuite_ASecondSuiteKeepsTheDomainsRoleAdmins() public {
+        uint32 fund = manager.createDomain("Fund A");
+        address otherToken = makeAddr("otherToken");
+        manager.setupSuite(fund, token);
+        uint64 agentRole = RolesLib.forDomain(fund, RolesLib.Role.AGENT);
+        uint64 suiteAdminRole = RolesLib.forDomain(fund, RolesLib.Role.SUITE_ADMIN);
+        manager.setRoleAdmin(agentRole, suiteAdminRole);
+        _mockSuite(otherToken, makeAddr("otherRegistry"), makeAddr("otherStorage"), makeAddr("otherCompliance"));
+
+        manager.setupSuite(fund, otherToken);
+
+        assertEq(manager.getRoleAdmin(agentRole), suiteAdminRole, "the admin's appointer is kept");
+    }
+
+    /// @notice The same holds for the first domain of a shared storage: a second domain joining the storage
+    ///         does not touch the first domain's role admins or the storage's rows.
+    function test_setupSuite_ASharedStorageKeepsTheRowsAndRoleAdminsOfItsFirstDomain() public {
+        uint32 fundA = manager.createDomain("Fund A");
+        uint32 fundB = manager.createDomain("Fund B");
+        address otherToken = makeAddr("otherToken");
+        manager.setupSuite(fundA, token);
+        uint64 custodianRole = RolesLib.forDomain(fundA, bytes32("CUSTODIAN"));
+        bytes4[] memory unbind = new bytes4[](1);
+        unbind[0] = IERC3643IdentityRegistryStorage.unbindIdentityRegistry.selector;
+        manager.setTargetFunctionRole(identityStorage, unbind, custodianRole);
+        uint64 binderRole = RolesLib.forDomain(fundA, RolesLib.Role.IRS_BINDER);
+        manager.setRoleAdmin(binderRole, RolesLib.forDomain(fundA, RolesLib.Role.SUITE_ADMIN));
+        _mockSuite(otherToken, makeAddr("otherRegistry"), identityStorage, makeAddr("otherCompliance"));
+
+        manager.setupSuite(fundB, otherToken);
+
+        assertEq(manager.domainOf(identityStorage), fundA, "storage stays in the first domain");
+        assertEq(manager.getTargetFunctionRole(identityStorage, unbind[0]), custodianRole, "the admin's row is kept");
+        assertEq(
+            manager.getRoleAdmin(binderRole),
+            RolesLib.forDomain(fundA, RolesLib.Role.SUITE_ADMIN),
+            "the first domain's appointer is kept"
+        );
     }
 
     /// @notice The factory path sets the suite up at initialization, so the issuer cannot run it a second time.
