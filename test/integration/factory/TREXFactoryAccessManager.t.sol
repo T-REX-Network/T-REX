@@ -13,7 +13,6 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ITREXFactory } from "contracts/factory/TREXFactory.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
@@ -46,7 +45,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         assertFalse(factoryIsAdmin);
     }
 
-    function test_deployTREXSuite_Success_FreshManagerIsSetUpBeforeHandover() public {
+    function test_deployTREXSuite_Success_FreshManagerIsSetUpAtInitialization() public {
         Token deployed = _deployWithFreshManager("wired");
         TREXAccessManager manager = TREXAccessManager(IERC173(address(deployed)).owner());
         address registry = address(deployed.identityRegistry());
@@ -156,7 +155,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
         assertTrue(_isManager(oid, manager));
         assertFalse(_isManager(oid, address(trexFactory)));
-        assertFalse(_isManager(oid, address(accessManager)));
+        assertFalse(_isManager(oid, address(suiteManager)));
 
         vm.prank(issuerAdmin);
         TREXAccessManager(manager).execute(oid, _addKeyCall(another));
@@ -296,20 +295,20 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         vm.recordLogs();
         vm.prank(deployer);
         trexFactory.deployTREXSuiteIsolated(
-            "isolated-supplied", _details(address(accessManager), address(0)), _noClaims()
+            "isolated-supplied", _details(address(suiteManager), address(0)), _noClaims()
         );
         ITREXImplementationAuthority.SuiteBeacons memory beacons = _isolatedBeacons();
 
         assertEq(beacons.accessManagerBeacon, address(0));
-        assertEq(IERC173(trexFactory.getToken("isolated-supplied")).owner(), address(accessManager));
+        assertEq(IERC173(trexFactory.getToken("isolated-supplied")).owner(), address(suiteManager));
     }
 
     function test_deployTREXSuite_Success_SuppliedManagerIsUsedAsIs() public {
         vm.prank(deployer);
-        trexFactory.deployTREXSuite("supplied", _details(address(accessManager), issuerAdmin), _noClaims());
+        trexFactory.deployTREXSuite("supplied", _details(address(suiteManager), issuerAdmin), _noClaims());
 
-        assertEq(IERC173(trexFactory.getToken("supplied")).owner(), address(accessManager));
-        (bool issuerIsAdmin,) = accessManager.hasRole(accessManager.ADMIN_ROLE(), issuerAdmin);
+        assertEq(IERC173(trexFactory.getToken("supplied")).owner(), address(suiteManager));
+        (bool issuerIsAdmin,) = suiteManager.hasRole(suiteManager.ADMIN_ROLE(), issuerAdmin);
         assertFalse(issuerIsAdmin);
     }
 

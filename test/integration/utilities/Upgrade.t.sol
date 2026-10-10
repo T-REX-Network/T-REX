@@ -15,7 +15,7 @@ contract UpgradeTest is TREXSuiteTest {
 
     function _deployChecker() private returns (UtilityChecker) {
         UtilityChecker implementation = new UtilityChecker();
-        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, (address(accessManager)));
+        bytes memory initData = abi.encodeCall(UtilityChecker.initialize, (address(suiteManager)));
         return UtilityChecker(address(new UtilityCheckerProxy(address(implementation), initData)));
     }
 
@@ -38,7 +38,7 @@ contract UpgradeTest is TREXSuiteTest {
 
     function test_upgradeToAndCall_Success() public {
         UtilityChecker utilityChecker = _deployChecker();
-        assertEq(utilityChecker.owner(), address(accessManager), "owner() reports the authority");
+        assertEq(utilityChecker.owner(), address(suiteManager), "owner() reports the authority");
         UtilityChecker newImplementation = new UtilityChecker();
 
         // The test contract is the manager admin (see AccessManagerHelper).

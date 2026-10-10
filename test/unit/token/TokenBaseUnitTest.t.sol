@@ -7,7 +7,6 @@ import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
@@ -44,9 +43,11 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
     function setUp() public virtual {
         // the AccessManager cannot be mocked: AccessManaged calls canCall on it for every restricted function
-        _deployAccessManager();
+        _deployPlatformManager();
+        _deploySuiteManager();
 
-        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
+        // Network-level, so it answers to the platform manager, never to the suite's.
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(platformManager));
 
         token = Token(
             BeaconProxyDeployer.newProxy(
@@ -61,13 +62,13 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
                         compliance,
                         address(trustedGatewayRegistry),
                         address(onchainId),
-                        address(accessManager)
+                        address(suiteManager)
                     )
                 )
             )
         );
 
-        AccessManagerSetupLib.setupTokenRoles(accessManager, address(token), 1);
+        _setupTokenRoles(address(token));
         _grantAllAgentRoles(agent);
     }
 

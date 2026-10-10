@@ -358,7 +358,7 @@ contract TokenRecoveryTest is TREXSuiteTest {
     ///  recovery: writing the registry stays with AGENT.
     function test_recoveryAddress_RevertWhen_RecoveryAgentNamesAnotherIdentity() public {
         address recoveryAgent = makeAddr("recoveryAgent");
-        accessManager.grantRole(_role(RolesLib.Role.AGENT_RECOVERY_ADDRESS), recoveryAgent, 0);
+        suiteManager.grantRole(_role(RolesLib.Role.AGENT_RECOVERY_ADDRESS), recoveryAgent, 0);
         address freshWallet = makeAddr("freshWallet");
 
         vm.prank(recoveryAgent);

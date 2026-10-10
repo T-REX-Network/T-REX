@@ -177,7 +177,7 @@ contract SpenderVerificationModuleTest is TREXSuiteTest {
     function _deployModule() private returns (SpenderVerificationModule) {
         SpenderVerificationModule implementation = new SpenderVerificationModule();
         ModuleProxy proxy = new ModuleProxy(
-            address(implementation), abi.encodeCall(SpenderVerificationModule.initialize, (address(accessManager)))
+            address(implementation), abi.encodeCall(SpenderVerificationModule.initialize, (address(suiteManager)))
         );
         return SpenderVerificationModule(address(proxy));
     }
