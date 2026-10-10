@@ -31,6 +31,9 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         token.unpause();
         token.mint(lostWallet, mintAmount);
         vm.stopPrank();
+
+        // The lost wallet belongs to the investor being recovered, which recovery now checks.
+        mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
     }
 
     function testTokenRecoveryAddressRevertsWhenNotAgent(address caller) public {

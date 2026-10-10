@@ -81,8 +81,13 @@ import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 library TokenRecoveryLib {
 
     /// @dev The T-REX recovery preconditions: a wallet may not be recovered onto itself, there must be
-    ///  something to recover, at least one of the two wallets must already be known to the registry, and a
-    ///  known new wallet must already belong to `investorOnchainId`. Reverts in that order.
+    ///  something to recover, at least one of the two wallets must already be known to the registry, and each
+    ///  known wallet must belong to `investorOnchainId`. Reverts in that order.
+    /// @dev Recovery moves one investor's tokens between that investor's wallets. Without the lost-wallet check
+    ///  an agent could name another identity: the tokens would land in a wallet registered to it, skipping the
+    ///  verification a forced transfer requires and reported to the compliance as a recovery, and the registry
+    ///  would map the new wallet through the token's own AGENT grant. To move an investor to a new identity,
+    ///  rebind the lost wallet with `updateIdentity` first, then recover.
     /// @param lostBalance the lost wallet's current balance, read by the token
     function checkRecovery(
         IERC3643IdentityRegistry registry,
@@ -95,6 +100,10 @@ library TokenRecoveryLib {
         require(lostBalance != 0, ErrorsLib.NoTokenToRecover());
 
         require(registry.contains(lostWallet) || registry.contains(newWallet), ErrorsLib.RecoveryNotPossible());
+        require(
+            !registry.contains(lostWallet) || registry.identity(lostWallet) == IIdentity(investorOnchainId),
+            ErrorsLib.RecoveryNotPossible()
+        );
         require(
             !registry.contains(newWallet) || registry.identity(newWallet) == IIdentity(investorOnchainId),
             ErrorsLib.RecoveryNotPossible()
