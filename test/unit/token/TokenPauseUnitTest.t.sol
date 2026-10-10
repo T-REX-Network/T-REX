@@ -67,6 +67,12 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
             abi.encodeWithSelector(IERC3643IdentityRegistry.contains.selector, other),
             abi.encode(false)
         );
+        // The recovery preconditions run before the pause check and read the lost wallet's owner.
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(IERC3643IdentityRegistry.identity.selector, holder),
+            abi.encode(investorOnchainId)
+        );
         vm.startPrank(agent);
         token.mint(holder, 10);
         token.pause();

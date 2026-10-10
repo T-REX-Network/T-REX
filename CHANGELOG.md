@@ -481,6 +481,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
+  identity from the agent and never compared it with the lost wallet's owner. An agent could name another
+  identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
+  transfer makes, and were reported to the compliance as a recovery, which trackers leave out of what they
+  count. An agent holding only the recovery role could also map a wallet to any identity through the
+  token's own AGENT grant. `TokenRecoveryLib.checkRecovery` now requires every wallet the registry knows to
+  belong to the named identity, and reverts with `RecoveryNotPossible` otherwise. Moving an investor to a new
+  identity is two explicit steps: `updateIdentity` on the lost wallet, then `recoveryAddress`. The v4.2
+  decision that the new wallet need not be a key on the identity is unchanged. `Token`'s size is unchanged.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same
