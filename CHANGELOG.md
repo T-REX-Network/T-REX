@@ -512,6 +512,12 @@ All notable changes to this project will be documented in this file.
   belong to the named identity, and reverts with `RecoveryNotPossible` otherwise. Moving an investor to a new
   identity is two explicit steps: `updateIdentity` on the lost wallet, then `recoveryAddress`. The v4.2
   decision that the new wallet need not be a key on the identity is unchanged. `Token`'s size is unchanged.
+- **`OwnershipTransferred` is emitted on every owner change** (ERC-173). The owner of every T-REX contract is
+  its AccessManager, and the AccessManager's own `updateAuthority` changes it without going through
+  `transferOwnership`, so explorers and indexers that follow `OwnershipTransferred` kept showing the old
+  owner. Creation emitted nothing either. The event now comes from `_setAuthority`, which the constructor or
+  initializer, `updateAuthority` and `transferOwnership` all pass through, and `transferOwnership` no longer
+  emits it a second time. Every contract on the AccessManagedOwnable layer grows by 1 byte.
 - **Suite deployment is no longer gated by the role that configures the factory** (#100).
   `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
