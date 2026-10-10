@@ -94,6 +94,16 @@ abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, A
         super.setAuthority(newAuthority);
     }
 
+    /// @dev Every owner change passes here: the initializer, the manager's `updateAuthority` and
+    ///      `transferOwnership`. ERC-173 requires `OwnershipTransferred` on each, including creation, where the
+    ///      previous owner is the zero address.
+    function _setAuthority(address newAuthority) internal virtual override {
+        // `authority()` reads this contract's own storage; the linter mistakes it for an external call.
+        /// forge-lint: disable-next-line(reentrancy-events)
+        emit OwnershipTransferred(authority(), newAuthority);
+        super._setAuthority(newAuthority);
+    }
+
     /// @dev Reverts unless the caller may call `selector`. Its own selector gets the full
     ///  `AccessManaged` path, including consuming a scheduled operation; any other selector (a batch
     ///  authorized as its single-item counterpart) gets immediate permission only, because the

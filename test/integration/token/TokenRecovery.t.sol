@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+
 import { Identity } from "@onchain-id/solidity/contracts/Identity.sol";
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
@@ -10,6 +12,7 @@ import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedge
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
@@ -311,14 +314,16 @@ contract TokenRecoveryTest is TREXSuiteTest {
 
     /// @notice Recovering onto a wallet that already belongs to another identity is a real change of ownership:
     ///         the lost identity is emptied and the new one carries the balance.
-    function test_recoveryAddress_Success_PositionMovesAcrossIdentities() public {
+    /// @notice Moving an investor to another identity is two explicit steps: an agent rebinds the lost wallet with
+    ///  `updateIdentity`, then the recovery agent recovers within that identity. The position follows.
+    function test_recoveryAddress_Success_PositionFollowsAnExplicitRebind() public {
         IComplianceLedger ledger = IComplianceLedger(address(token.compliance()));
         uint256 recovered = token.balanceOf(bob);
         uint256 alicePositionBefore = ledger.positionOf(address(aliceIdentity));
         _unbindGlobally(bob);
-        vm.prank(agent);
-        identityRegistry.registerIdentity(another, aliceIdentity, 1);
 
+        vm.prank(agent);
+        identityRegistry.updateIdentity(bob, aliceIdentity);
         vm.prank(agent);
         token.recoveryAddress(bob, another, address(aliceIdentity));
 
@@ -326,6 +331,41 @@ contract TokenRecoveryTest is TREXSuiteTest {
         assertEq(
             ledger.positionOf(address(aliceIdentity)), alicePositionBefore + recovered, "new identity not credited"
         );
+    }
+
+    /// @notice Recovery moves one investor's tokens between that investor's wallets: naming another investor's
+    ///  identity is refused, so tokens cannot be handed to someone else and reported as a recovery.
+    function test_recoveryAddress_RevertWhen_NamedIdentityDoesNotOwnTheLostWallet() public {
+        address freshWallet = makeAddr("freshWallet");
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.RecoveryNotPossible.selector);
+        token.recoveryAddress(bob, freshWallet, address(aliceIdentity));
+    }
+
+    /// @notice Naming an identity that lacks the required claims is refused the same way, so recovery cannot
+    ///  place tokens where a forced transfer, which checks the destination, would not be allowed.
+    function test_recoveryAddress_RevertWhen_NamedIdentityIsAStranger() public {
+        IIdentity strangerIdentity = _deployIdentity(makeAddr("strangerOwner"), "stranger");
+        address freshWallet = makeAddr("freshWallet");
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.RecoveryNotPossible.selector);
+        token.recoveryAddress(bob, freshWallet, address(strangerIdentity));
+    }
+
+    /// @notice An agent holding only AGENT_RECOVERY_ADDRESS cannot map a wallet to another identity through
+    ///  recovery: writing the registry stays with AGENT.
+    function test_recoveryAddress_RevertWhen_RecoveryAgentNamesAnotherIdentity() public {
+        address recoveryAgent = makeAddr("recoveryAgent");
+        accessManager.grantRole(_role(RolesLib.Role.AGENT_RECOVERY_ADDRESS), recoveryAgent, 0);
+        address freshWallet = makeAddr("freshWallet");
+
+        vm.prank(recoveryAgent);
+        vm.expectRevert(ErrorsLib.RecoveryNotPossible.selector);
+        token.recoveryAddress(bob, freshWallet, address(aliceIdentity));
+
+        assertEq(address(identityRegistry.identity(freshWallet)), address(0), "no wallet was mapped");
     }
 
     /// @notice The lost wallet's local binding shadows a global one. The debit must land on the local identity
