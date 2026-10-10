@@ -68,6 +68,7 @@ import { IClaimIssuer, IIdentity } from "@onchain-id/solidity/contracts/interfac
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
@@ -203,11 +204,10 @@ contract UtilityChecker is IUtilityChecker, AccessManagedOwnableUpgradeable, UUP
         if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
-        try IClaimIssuer(trustedIssuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
-            pass = validity;
-        } catch {
-            pass = false;
-        }
+        (bool success, bytes32 answer,) = LowLevelCall.staticcallReturn64Bytes(
+            trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data))
+        );
+        pass = success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1));
     }
 
     /// @inheritdoc IUtilityChecker

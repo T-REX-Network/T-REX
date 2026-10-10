@@ -507,11 +507,14 @@ All notable changes to this project will be documented in this file.
   `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
   anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
   memory read as `true`: with such an issuer trusted, an identity reporting a claim from it passed `isVerified`.
-  `addTrustedIssuer` now refuses an issuer without code (`TrustedIssuerHasNoCode`), and the registry asks the
-  issuer with a plain `try`/`catch`. An issuer contract that answers nothing, or something that is not a bool,
-  now makes `isVerified` revert instead of pass, since a `try` cannot catch a failure to decode the answer.
-  `UtilityChecker.getVerifiedDetails` asks the trusted issuer itself and ignores a claim that names another
-  issuer, as the registry already did, so the two report the same result.
+  The registry now counts an answer only when it is exactly one word equal to `true`. An issuer that reverts,
+  answers nothing or answers something else is skipped like an invalid claim, never a revert, so one broken
+  issuer cannot halt transfers and another trusted issuer for the same topic can still verify the holder.
+  `addTrustedIssuer` also refuses an issuer without code (`TrustedIssuerHasNoCode`), as an early signal for a
+  wrong address; the check runs at trust time only, so an issuer must be deployed before a suite that trusts
+  it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
+  `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
+  claim that names another issuer as the registry already did, so the two report the same result.
 - **Suite deployment is no longer gated by the role that configures the factory** (#100).
   `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token

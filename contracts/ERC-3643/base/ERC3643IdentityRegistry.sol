@@ -65,6 +65,7 @@ pragma solidity 0.8.30;
 import { IClaimIssuer } from "@onchain-id/solidity/contracts/interface/IClaimIssuer.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
+import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
 import { ERC3643ErrorsLib } from "../ERC3643ErrorsLib.sol";
 import { IERC3643ClaimTopicsRegistry } from "../IERC3643ClaimTopicsRegistry.sol";
@@ -271,9 +272,12 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
             if (foundClaimTopic != claimTopic || issuer != trustedIssuer) continue;
 
-            try IClaimIssuer(trustedIssuer).isClaimValid(userIdentity, claimTopic, sig, data) returns (bool valid) {
-                if (valid) return true;
-            } catch { }
+            // Only an answer of exactly one word equal to true counts. An issuer that reverts, answers nothing or
+            // answers something else is skipped like an invalid claim, so one broken issuer never halts transfers.
+            (bool success, bytes32 answer,) = LowLevelCall.staticcallReturn64Bytes(
+                trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data))
+            );
+            if (success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1))) return true;
         }
         return false;
     }
