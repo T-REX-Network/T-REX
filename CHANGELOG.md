@@ -503,6 +503,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A trusted issuer that answers nothing no longer validates a claim.** `isVerified` read the issuer's
+  `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
+  anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
+  memory read as `true`: with such an issuer trusted, an identity reporting a claim from it passed `isVerified`.
+  The registry now calls the issuer with a plain `staticcall` and counts only an answer of exactly one word
+  equal to `true`. `UtilityChecker.getVerifiedDetails`, which reverted on the same issuers because a `try`
+  cannot catch a failure to decode the answer, now asks the same way and reports a failed check; it also
+  ignores a claim that names another issuer than the trusted one, as the registry already did.
 - **Suite deployment is no longer gated by the role that configures the factory** (#100).
   `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
