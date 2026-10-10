@@ -198,10 +198,12 @@ contract UtilityChecker is IUtilityChecker, AccessManagedOwnableUpgradeable, UUP
         bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
         (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
             identity.getClaim(claimId);
-        if (foundClaimTopic != topic) return (false, false);
+        // Same rule as the registry's `isVerified`: only a claim from the trusted issuer itself counts, and only
+        // that issuer is asked about it.
+        if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
-        try IClaimIssuer(issuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
+        try IClaimIssuer(trustedIssuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
             pass = validity;
         } catch {
             pass = false;

@@ -153,6 +153,8 @@ abstract contract ERC3643TrustedIssuersRegistry is IERC3643TrustedIssuersRegistr
     /// @dev Registers a trusted issuer for a set of claim topics, maintaining the reverse index.
     function _addTrustedIssuer(address trustedIssuer, uint256[] memory claimTopics) internal virtual {
         require(trustedIssuer != address(0), ERC3643ErrorsLib.ZeroAddress());
+        // The registry asks the issuer `isClaimValid`, and a call to an address without code answers nothing.
+        require(trustedIssuer.code.length > 0, ERC3643ErrorsLib.TrustedIssuerHasNoCode(trustedIssuer));
 
         ERC3643TrustedIssuersRegistryStorage storage s = _erc3643TrustedIssuersRegistryStorage();
         require(!s.trustedIssuers.contains(trustedIssuer), ERC3643ErrorsLib.TrustedIssuerAlreadyExists());
