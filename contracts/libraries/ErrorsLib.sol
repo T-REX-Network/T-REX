@@ -165,7 +165,7 @@ library ErrorsLib {
     error MaxIRByIRSReached(uint256 max);
 
     // AccessManagerSetupLib Errors
-    error SuiteDeployerCannotGovernFactory();
+    error SuiteDeployerCannotConfigureFactory();
     error PlatformRoleCannotBePublic();
 
     // RolesLib Errors

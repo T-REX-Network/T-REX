@@ -18,7 +18,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
     }
 
     function testTokenSetIdentityRegistryRevertsWhenUnauthorized(address caller) public {
@@ -39,7 +39,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     /// @notice A target with no ERC-165 support is refused, so a mistyped address cannot halt the token.
     function testTokenSetIdentityRegistryRevertsWhenNoERC165() public {
         address notAContract = makeAddr("NotAContract");
-        vm.mockCall(notAContract, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(notAContract, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
 
         vm.expectRevert(ErrorsLib.InvalidIdentityRegistry.selector);
         token.setIdentityRegistry(notAContract);
@@ -50,7 +50,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     /// @notice A contract that is not an identity registry is refused.
     function testTokenSetIdentityRegistryRevertsWhenWrongInterface() public {
         vm.mockCall(
-            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
+            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643Compliance).interfaceId);
 
@@ -62,11 +62,11 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
 
     function testTokenSetIdentityRegistryNominal() public {
         vm.mockCall(
-            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
+            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
         _setupRegistryRoles(newIdentityRegistry);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT), address(token), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT), address(token), 0);
 
         vm.expectEmit(true, true, true, true, address(token));
         emit IERC3643.IdentityRegistryAdded(newIdentityRegistry);

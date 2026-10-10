@@ -37,11 +37,11 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        domainA = accessManager.createDomain("Fund A");
-        domainB = accessManager.createDomain("Fund B");
-        team = accessManager.createDomain("Team");
-        tokenA = _deployBare("ns-a", address(0), address(accessManager));
-        tokenB = _deployBare("ns-b", address(0), address(accessManager));
+        domainA = suiteManager.createDomain("Fund A");
+        domainB = suiteManager.createDomain("Fund B");
+        team = suiteManager.createDomain("Team");
+        tokenA = _deployBare("ns-a", address(0), address(suiteManager));
+        tokenB = _deployBare("ns-b", address(0), address(suiteManager));
         issuerManager = _newTREXAccessManager(address(this));
     }
 
@@ -125,9 +125,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_AgentOfAOperatesAOnly() public {
-        _setupSuiteInto(accessManager, tokenA, domainA);
-        _setupSuiteInto(accessManager, tokenB, domainB);
-        _grantAllAgentRoles(accessManager, agentA, domainA);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
+        _setupSuiteInto(suiteManager, tokenB, domainB);
+        _grantAllAgentRoles(suiteManager, agentA, domainA);
 
         vm.startPrank(agentA);
         tokenA.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -154,9 +154,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_AgentOfBOperatesBOnly() public {
-        _setupSuiteInto(accessManager, tokenA, domainA);
-        _setupSuiteInto(accessManager, tokenB, domainB);
-        _grantAllAgentRoles(accessManager, agentB, domainB);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
+        _setupSuiteInto(suiteManager, tokenB, domainB);
+        _grantAllAgentRoles(suiteManager, agentB, domainB);
 
         vm.startPrank(agentB);
         tokenB.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -169,9 +169,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_TwoTokensInOneDomainShareOneTeam() public {
-        _setupSuiteInto(accessManager, tokenA, team);
-        _setupSuiteInto(accessManager, tokenB, team);
-        _grantAllAgentRoles(accessManager, agentA, team);
+        _setupSuiteInto(suiteManager, tokenA, team);
+        _setupSuiteInto(suiteManager, tokenB, team);
+        _grantAllAgentRoles(suiteManager, agentA, team);
 
         IERC3643IdentityRegistry registryB = tokenB.identityRegistry();
         vm.startPrank(agentA);
@@ -196,54 +196,54 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_MapsEverySuiteContractIntoTheDomain() public {
-        _setupSuiteInto(accessManager, tokenA, domainA);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
         address suiteRegistry = address(tokenA.identityRegistry());
         address irs = address(tokenA.identityRegistry().identityStorage());
         address mc = address(tokenA.compliance());
 
-        assertEq(accessManager.domainOf(address(tokenA)), domainA);
-        assertEq(accessManager.domainOf(suiteRegistry), domainA);
-        assertEq(accessManager.domainOf(irs), domainA);
-        assertEq(accessManager.domainOf(mc), domainA);
+        assertEq(suiteManager.domainOf(address(tokenA)), domainA);
+        assertEq(suiteManager.domainOf(suiteRegistry), domainA);
+        assertEq(suiteManager.domainOf(irs), domainA);
+        assertEq(suiteManager.domainOf(mc), domainA);
         assertEq(
-            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
+            suiteManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
             RolesLib.forDomain(domainA, RolesLib.Role.AGENT_MINTER)
         );
         assertEq(
-            accessManager.getTargetFunctionRole(suiteRegistry, IERC3643IdentityRegistry.registerIdentity.selector),
+            suiteManager.getTargetFunctionRole(suiteRegistry, IERC3643IdentityRegistry.registerIdentity.selector),
             RolesLib.forDomain(domainA, RolesLib.Role.AGENT)
         );
         assertEq(
-            accessManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
+            suiteManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
             RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER)
         );
         assertEq(
-            accessManager.getTargetFunctionRole(mc, IModularCompliance.addModule.selector),
+            suiteManager.getTargetFunctionRole(mc, IModularCompliance.addModule.selector),
             RolesLib.forDomain(domainA, RolesLib.Role.OWNER)
         );
         assertEq(
-            accessManager.getRoleAdmin(RolesLib.forDomain(domainA, RolesLib.Role.AGENT)),
+            suiteManager.getRoleAdmin(RolesLib.forDomain(domainA, RolesLib.Role.AGENT)),
             RolesLib.forDomain(domainA, RolesLib.Role.AGENT_ADMIN)
         );
-        (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forDomain(domainA, RolesLib.Role.AGENT), address(tokenA));
+        (bool tokenIsAgent,) = suiteManager.hasRole(RolesLib.forDomain(domainA, RolesLib.Role.AGENT), address(tokenA));
         (bool registryWrites,) =
-            accessManager.hasRole(RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER), suiteRegistry);
+            suiteManager.hasRole(RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER), suiteRegistry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
     }
 
     function test_explicitDomain_StorageWriterStaysUnderAdminRole() public {
-        _setupSuiteInto(accessManager, tokenA, domainA);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
         uint64 writer = RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER);
         uint64 agentAdmin = RolesLib.forDomain(domainA, RolesLib.Role.AGENT_ADMIN);
-        accessManager.grantRole(agentAdmin, agentA, 0);
+        suiteManager.grantRole(agentAdmin, agentA, 0);
 
-        assertEq(accessManager.getRoleAdmin(writer), 0);
+        assertEq(suiteManager.getRoleAdmin(writer), 0);
         vm.prank(agentA);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, agentA, uint64(0))
         );
-        accessManager.grantRole(writer, agentB, 0);
+        suiteManager.grantRole(writer, agentB, 0);
     }
 
     /// @notice An issuer running their own manager creates a domain, then sets a suite up in it.

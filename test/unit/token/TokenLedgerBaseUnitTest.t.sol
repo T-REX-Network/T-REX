@@ -30,9 +30,10 @@ abstract contract TokenLedgerBaseUnitTest is TokenBaseUnitTest {
     }
 
     function setUp() public virtual override {
-        _deployAccessManager();
+        _deployPlatformManager();
+        _deploySuiteManager();
 
-        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(platformManager));
 
         token = Token(
             BeaconProxyDeployer.newProxy(
@@ -47,7 +48,7 @@ abstract contract TokenLedgerBaseUnitTest is TokenBaseUnitTest {
                         compliance,
                         address(trustedGatewayRegistry),
                         address(onchainId),
-                        address(accessManager)
+                        address(suiteManager)
                     )
                 )
             )

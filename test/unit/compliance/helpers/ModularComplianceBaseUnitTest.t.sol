@@ -22,14 +22,12 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
     address public stranger = makeAddr("Stranger");
 
     function setUp() public virtual {
-        _deployAccessManager();
+        _deploySuiteManager();
         mcBeacon = BeaconProxyDeployer.newBeacon(address(new TransferValidationHarness()));
         mc = TransferValidationHarness(
             BeaconProxyDeployer.newProxy(
                 mcBeacon,
-                abi.encodeCall(
-                    ModularCompliance.init, (token, address(accessManager), new address[](0), new bytes[](0))
-                )
+                abi.encodeCall(ModularCompliance.init, (token, address(suiteManager), new address[](0), new bytes[](0)))
             )
         );
         _setupComplianceRoles(address(mc));

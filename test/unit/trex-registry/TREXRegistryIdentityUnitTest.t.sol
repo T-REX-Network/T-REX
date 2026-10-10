@@ -243,7 +243,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
             address(
                 new ERC1967Proxy(
                     address(identityRegistryStorageImpl),
-                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), initialIR))
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), initialIR))
                 )
             )
         );

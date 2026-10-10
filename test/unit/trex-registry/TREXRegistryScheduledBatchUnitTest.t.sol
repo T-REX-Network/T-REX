@@ -14,7 +14,7 @@ contract TREXRegistryScheduledBatchUnitTest is TREXRegistryBaseUnitTest {
         _setupRegistryRoles(address(registry));
 
         address delayed = makeAddr("delayedAgent");
-        accessManager.grantRole(_role(RolesLib.Role.AGENT), delayed, 1 days);
+        suiteManager.grantRole(_role(RolesLib.Role.AGENT), delayed, 1 days);
 
         IIdentity id = _deployIdentity(another, "another");
         address[] memory addrs = new address[](1);
@@ -27,7 +27,7 @@ contract TREXRegistryScheduledBatchUnitTest is TREXRegistryBaseUnitTest {
         bytes memory data = abi.encodeWithSelector(registry.batchRegisterIdentity.selector, addrs, ids, countries);
 
         vm.prank(delayed);
-        accessManager.schedule(address(registry), data, 0);
+        suiteManager.schedule(address(registry), data, 0);
 
         vm.warp(block.timestamp + 1 days + 1);
         vm.prank(delayed);

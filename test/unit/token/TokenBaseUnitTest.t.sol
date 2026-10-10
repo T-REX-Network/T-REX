@@ -43,9 +43,11 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
     function setUp() public virtual {
         // the AccessManager cannot be mocked: AccessManaged calls canCall on it for every restricted function
-        _deployAccessManager();
+        _deployPlatformManager();
+        _deploySuiteManager();
 
-        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
+        // Network-level, so it answers to the platform manager, never to the suite's.
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(platformManager));
 
         token = Token(
             BeaconProxyDeployer.newProxy(
@@ -60,7 +62,7 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
                         compliance,
                         address(trustedGatewayRegistry),
                         address(onchainId),
-                        address(accessManager)
+                        address(suiteManager)
                     )
                 )
             )

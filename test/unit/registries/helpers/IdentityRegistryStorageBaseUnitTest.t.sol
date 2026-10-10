@@ -34,19 +34,19 @@ abstract contract IdentityRegistryStorageBaseUnitTest is AccessManagerHelper {
     address internal otherIdentity = makeAddr("otherIdentity");
 
     function setUp() public virtual {
-        _deployAccessManager();
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
+        _deploySuiteManager();
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(
             BeaconProxyDeployer.newProxy(
-                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), address(0)))
             )
         );
         _setupStorageRoles(address(irs));
 
-        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(registry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));
         vm.mockCall(
             idFactory,
@@ -60,7 +60,7 @@ abstract contract IdentityRegistryStorageBaseUnitTest is AccessManagerHelper {
         );
 
         // A second registry built on another factory: it knows `otherWallet`, the first one does not.
-        vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(otherRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(otherIdFactory));
         vm.mockCall(
             otherIdFactory,

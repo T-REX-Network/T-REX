@@ -22,7 +22,7 @@ contract TokenScheduledBatchTest is TREXSuiteTest {
 
     function test_batchBurn_Success_WhenScheduledByDelayedBurner() public {
         address delayedBurner = makeAddr("delayedBurner");
-        accessManager.grantRole(_role(RolesLib.Role.AGENT_BURNER), delayedBurner, 1 days);
+        suiteManager.grantRole(_role(RolesLib.Role.AGENT_BURNER), delayedBurner, 1 days);
         address[] memory holders = new address[](1);
         holders[0] = alice;
         uint256[] memory amounts = new uint256[](1);
@@ -30,7 +30,7 @@ contract TokenScheduledBatchTest is TREXSuiteTest {
         bytes memory batchBurnCall = abi.encodeCall(IERC3643.batchBurn, (holders, amounts));
 
         vm.prank(delayedBurner);
-        accessManager.schedule(address(token), batchBurnCall, 0);
+        suiteManager.schedule(address(token), batchBurnCall, 0);
         vm.warp(block.timestamp + 1 days);
         vm.prank(delayedBurner);
         token.batchBurn(holders, amounts);
@@ -40,7 +40,7 @@ contract TokenScheduledBatchTest is TREXSuiteTest {
 
     function test_batchForcedTransfer_Success_WhenScheduledByDelayedAgent() public {
         address delayedAgent = makeAddr("delayedAgent");
-        accessManager.grantRole(_role(RolesLib.Role.AGENT_FORCED_TRANSFER), delayedAgent, 1 days);
+        suiteManager.grantRole(_role(RolesLib.Role.AGENT_FORCED_TRANSFER), delayedAgent, 1 days);
         address[] memory senders = new address[](1);
         senders[0] = alice;
         address[] memory recipients = new address[](1);
@@ -51,7 +51,7 @@ contract TokenScheduledBatchTest is TREXSuiteTest {
             abi.encodeCall(IERC3643.batchForcedTransfer, (senders, recipients, amounts));
 
         vm.prank(delayedAgent);
-        accessManager.schedule(address(token), batchForcedTransferCall, 0);
+        suiteManager.schedule(address(token), batchForcedTransferCall, 0);
         vm.warp(block.timestamp + 1 days);
         vm.prank(delayedAgent);
         token.batchForcedTransfer(senders, recipients, amounts);
@@ -77,7 +77,7 @@ contract TokenScheduledBatchTest is TREXSuiteTest {
                 IERC3643.batchBurn.selector
             )
         );
-        accessManager.schedule(address(token), batchBurnCall, 0);
+        suiteManager.schedule(address(token), batchBurnCall, 0);
     }
 
 }

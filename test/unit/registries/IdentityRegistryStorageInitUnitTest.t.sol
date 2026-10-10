@@ -20,17 +20,17 @@ contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
 
     function setUp() public {
         irsImplementation = new IdentityRegistryStorage();
-        _deployAccessManager();
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
+        _deploySuiteManager();
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
         // bindIdentityRegistry is gated by IRS_BINDER (not OWNER); the test acts as the binder here.
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
         irsBeacon = BeaconProxyDeployer.newBeacon(address(irsImplementation));
     }
 
     function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         IdentityRegistryStorage irs = _deployProxy(address(0));
 
-        assertEq(IAccessManaged(address(irs)).authority(), address(accessManager));
+        assertEq(IAccessManaged(address(irs)).authority(), address(suiteManager));
         assertNotEq(IAccessManaged(address(irs)).authority(), address(this));
     }
 
@@ -59,7 +59,7 @@ contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
         address ir2 = makeAddr("ir2");
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir2 must report the storage's
         // AccessManager as its authority.
-        vm.mockCall(ir2, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(ir2, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         storageContract.bindIdentityRegistry(ir2);
 
         address[] memory linked = storageContract.linkedIdentityRegistries();
@@ -76,9 +76,9 @@ contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
         address ir = makeAddr("ir");
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir must report the storage's
         // AccessManager as its authority.
-        vm.mockCall(ir, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(ir, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         storageContract.bindIdentityRegistry(ir);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), ir, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), ir, 0);
 
         assertTrue(_hasWriterRole(ir));
     }
@@ -99,7 +99,7 @@ contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
     function _deployProxy(address _initialIR) private returns (IdentityRegistryStorage) {
         IdentityRegistryStorage irs = IdentityRegistryStorage(
             BeaconProxyDeployer.newProxy(
-                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), _initialIR))
+                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), _initialIR))
             )
         );
         _setupStorageRoles(address(irs));
@@ -107,7 +107,7 @@ contract IdentityRegistryStorageInitUnitTest is AccessManagerHelper {
     }
 
     function _hasWriterRole(address account) private view returns (bool) {
-        (bool isMember,) = accessManager.hasRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), account);
+        (bool isMember,) = suiteManager.hasRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), account);
         return isMember;
     }
 

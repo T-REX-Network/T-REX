@@ -548,10 +548,14 @@ All notable changes to this project will be documented in this file.
   `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
   could also repoint the factory's implementation authority, identity factory or trusted gateway
-  registry, which every later suite is wired to. The function now takes two role ids chosen by
-  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory governor role
-  for the three setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
-  role (`SuiteDeployerCannotGovernFactory`). The three other platform
+  registry, which every later suite is wired to. The function now takes four role ids chosen by
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and for each setter
+  the role that already owns its subject. `setImplementationAuthority` goes to the version manager role,
+  which decides the code new suites run; `setTrustedGatewayRegistry` to the interop manager role, which
+  decides the bridges new tokens trust; `setIdFactory` to the platform owner role. No role exists only to
+  configure the factory, so nobody can go around the version manager or the interop manager by repointing
+  it. The function refuses the suite deployer role as any setter role, and the manager's `ADMIN_ROLE` as the
+  suite deployer role (`SuiteDeployerCannotConfigureFactory`). The three other platform
   setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
   `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
   instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
