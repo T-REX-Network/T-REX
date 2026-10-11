@@ -137,7 +137,7 @@ library AccessManagerSetupLib {
     }
 
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](18);
+        table = new SelectorRole[](19);
         table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.Role.TOKEN_MANAGER);
         table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.Role.TOKEN_MANAGER);
         table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.Role.IDENTITY_MANAGER);
@@ -145,8 +145,8 @@ library AccessManagerSetupLib {
         table[4] = SelectorRole(IERC3643.setCompliance.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[5] = SelectorRole(ITREXMessaging.setRoute.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[6] = SelectorRole(ITREXMessaging.setPeer.selector, RolesLib.Role.IDENTITY_MANAGER);
-        table[7] = SelectorRole(IToken.dispatchMintInstruction.selector, RolesLib.Role.AGENT);
-        table[8] = SelectorRole(IToken.dispatchRecallInstruction.selector, RolesLib.Role.AGENT);
+        table[7] = SelectorRole(IToken.delegateOut.selector, RolesLib.Role.AGENT);
+        table[8] = SelectorRole(IToken.instructRecall.selector, RolesLib.Role.AGENT);
         table[9] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
         table[10] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
         table[11] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
@@ -156,6 +156,7 @@ library AccessManagerSetupLib {
         table[15] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
         table[16] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
         table[17] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[18] = SelectorRole(IToken.resend.selector, RolesLib.Role.AGENT);
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {

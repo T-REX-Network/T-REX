@@ -341,6 +341,12 @@ contract ModularCompliance is
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
     }
 
+    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
+    ///  and no module is told.
+    function syncOwner(address wallet) external onlyBoundToken {
+        _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
+    }
+
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
     ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {

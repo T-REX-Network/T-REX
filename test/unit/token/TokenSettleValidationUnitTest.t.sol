@@ -22,7 +22,7 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
         nativeUser2 = satelliteEnvelope(block.chainid, user2);
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.delegateOut(user1, satellite1, 60);
+        ledger.ledgerDelegateOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 

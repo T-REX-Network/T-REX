@@ -107,6 +107,23 @@ library ErrorsLib {
     error OnlyBoundCompliance();
     /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
+    /// @dev A delegation-out or a recall moves location, never ownership: the native wallet and the satellite
+    ///  wallet must resolve to one identity, and that identity must exist.
+    error WalletsNotLinked(address nativeWallet, bytes wallet);
+    /// @dev The burn proof or the resend names another wallet, or the proof another chain, than the recall.
+    error RecallMismatch(uint256 recallId);
+    /// @dev The satellite proves it burned more than the recall instructed.
+    error RecallAmountExceeded(uint256 recallId, uint256 instructed, uint256 proven);
+    /// @dev The wallet already has a recall waiting for its proof; one at a time.
+    error RecallPending(bytes32 walletKey, uint256 recallId);
+    /// @dev The recall is not waiting for a proof: never issued, or already settled.
+    error RecallNotPending(uint256 recallId);
+    /// @dev The fields given for a resend are not the ones the delegation committed to.
+    error DelegationMismatch(uint256 delegationId);
+    /// @dev The chain's peer changed since the instruction went out; a resend never retargets.
+    error PeerChanged(bytes32 chainKey);
+    /// @dev `resend` knows two kinds: 0, a delegation, and 1, a recall.
+    error UnknownResendKind(uint8 kind);
     /// @dev The validation already holds an amount in transit; a burn leg moves it once.
     error TransitAlreadyHeld(uint256 validationId);
     /// @dev The amount settled under the validation is not the one its burn leg put in transit.

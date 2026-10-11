@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
+  `Token.resend`, the burn proof):
+  - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
+    `toWallet`, a satellite wallet of the same identity, under a sequential `delegationId`; `totalSupply` is
+    unchanged. A `MINT_INSTRUCTION { delegationId, toWallet, amount, holder }` goes to the Lite, and
+    `keccak256(chainKey, peerKey, toWallet, amount, holder)` is stored so a resend can prove it repeats it. Callable
+    by the holder, the holder's identity, or AGENT. The compliance is told as `DELEGATION`
+    (`MovementKindLib.DELEGATION = 7`) so it follows a registry relink of the holder; no rule is asked.
+  - `instructRecall(wallet, amount, nativeWallet)` (AGENT, not pause-gated) records a `PendingRecall` with the
+    gateway and peer it is dispatched to, one open recall per wallet (`RecallPending`), bounded by the bridged
+    position, and sends a `RECALL_INSTRUCTION`. `pendingRecall(recallId)` exposes the record.
+  - A `BURN_PROOF { recallId, burnedWallet, amount }` for an open recall is admitted only from that recall's peer and
+    gateway, so a later route or peer change cannot strand it; a distrusted gateway is still refused. It must name the
+    instructed wallet and chain and prove at most the instructed amount, possibly zero. Before the credit,
+    `ModularCompliance.syncOwner(nativeWallet)` follows any relink of the native wallet. The bridged position is
+    debited (`Recalled`, `RecallSettled`) and the native wallet the instruction recorded is minted to. The settled
+    proof's hash is kept: the same proof again is a no-op (`BurnProofDuplicate`); a different proof for a settled
+    recall, or one for a recall never issued, pauses the token (`ReplayedBurnProof`).
+  - `resend(kind, id, data)` (AGENT) sends a mint (`kind` 0) or recall (`kind` 1) instruction again, byte for byte,
+    under its id, through the current route, to the same peer (`PeerChanged` otherwise). A recall resend moves the
+    admitted gateway to the current route.
+  - New linked library `TokenDelegationLib`; `TokenStorage` gains `recalls`, `lastRecallId`, `openRecall`,
+    `settledProofs`, `lastDelegationId`, `delegations` after `reservedForValidations`.
+  - `docs/satellite-lite.md`: the rules a Lite must follow, the retry table, and the accepted limitations.
+
 - **Identity-type-aware claim requirements** (per-type claim topics with default fallback):
   - The `TREXRegistry` can hold an alternative set of required claim topics per ONCHAINID identity
     type (`IdentityTypes`: ASSET, INDIVIDUAL, CORPORATE, IOT, CLAIM_ISSUER, SMART_CONTRACT,
@@ -503,6 +528,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `BurnProof` is `{ recallId, burnedWallet, amount }`; the token credits the native wallet the instruction recorded.
+  `MessageTypesLib` gains `MintInstruction` and `RecallInstruction`. No token or Lite was live at this change, so
+  `MessageTypesLib.VERSION` stays 1.
+- `DelegatedOut` carries the `delegationId`; `BurnProofReceived` carries `(originChainKey, recallId, burnedWallet,
+  amount)`.
+- `DelegatedOut` gains an indexed `delegationId`, so its topic hash changed; consumers of the old event need an
+  ABI update.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
@@ -687,6 +720,10 @@ All notable changes to this project will be documented in this file.
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
 
 ### Removed
+
+- `Token.dispatchMintInstruction`, which let an agent instruct a satellite to mint with no native burn, and
+  `Token.dispatchRecallInstruction`; `delegateOut`, `instructRecall` and `resend` are the only senders of those types.
+  `TREXMessagingLib.announceBurnProof` is replaced by `TokenDelegationLib.consumeBurnProof`.
 
 - `ModuleCapabilitiesLib` and the capability bitmask, `refreshModuleCapabilities`,
   `getModuleCapabilities`, `getModulesByCapability`, `ModuleCapabilitiesRecorded`,
