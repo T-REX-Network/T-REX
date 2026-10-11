@@ -267,11 +267,6 @@ contract ModularCompliance is
         _resolveStuckValidation(validationId);
     }
 
-    /// @inheritdoc IComplianceLedger
-    function fixPosition(address from, address to, uint256 amount) external restricted {
-        _fixPosition(from, to, amount);
-    }
-
     /// @inheritdoc ITransferValidation
     function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
         _discardExpiredValidations(validationIds);

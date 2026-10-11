@@ -23,7 +23,8 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///
 /// Three identities, each with a native wallet and two wallets on one satellite chain, so every issued
 /// validation has a single leg and nothing waits in transit. The transitions are the ones the ledger is written
-/// from: mint, burn, transfer, forced transfer, validation issuance (to another identity, to the same identity,
+/// from: mint, burn, transfer, forced transfer, a wallet no registry names receiving, being linked and sending,
+/// validation issuance (to another identity, to the same identity,
 /// to a native wallet), settlement in time or late, and the keeper's discard. A cap is bound so issuance is
 /// really narrowed by the ledger.
 ///
@@ -32,6 +33,8 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///   LEDGER-3  pendingInOf / pendingOutOf == sum of amountMax over stored-Pending validations of the identity,
 ///             relocations excluded
 ///   LEDGER-4  the token's reservedOf(wallet) == sum of amountMax over open validations out of that wallet
+///   LEDGER-5  a wallet no registry names is counted under itself, then under its identity once linked
+/// forge-config: default.invariant.fail-on-revert = true
 contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
 
     uint256 internal constant ACTORS = 3;
@@ -55,6 +58,15 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     uint256 public callsSettle;
     uint256 public callsDiscard;
     uint256 public callsRevoke;
+    uint256 public callsToStranger;
+    uint256 public callsLinkStranger;
+    uint256 public callsFromStranger;
+
+    /// @dev A wallet no registry names until `linkStranger` links it.
+    address internal stranger;
+    /// @dev Who the stranger's tokens should be counted under, modelled here from the rule the ledger is meant
+    ///      to follow: the wallet itself until it is linked, then the linked identity from its next movement on.
+    address internal strangerOwner;
 
     function setUp() public override {
         super.setUp();
@@ -62,6 +74,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         gateway = _newTrustedGateway(POLYGON);
         _openEvmChain(token, POLYGON, address(gateway));
 
+        stranger = makeAddr("stranger");
         actors = [alice, bob, charlie];
         identities = [aliceIdentity, bobIdentity, charlieIdentity];
         satellites = new bytes[][](ACTORS);
@@ -90,7 +103,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         token.unpause();
 
         targetContract(address(this));
-        bytes4[] memory selectors = new bytes4[](8);
+        bytes4[] memory selectors = new bytes4[](11);
         selectors[0] = this.mint.selector;
         selectors[1] = this.burn.selector;
         selectors[2] = this.transfer.selector;
@@ -99,6 +112,9 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         selectors[5] = this.settle.selector;
         selectors[6] = this.discard.selector;
         selectors[7] = this.revokeNativeWallet.selector;
+        selectors[8] = this.forcedTransferToStranger.selector;
+        selectors[9] = this.linkStranger.selector;
+        selectors[10] = this.forcedTransferFromStranger.selector;
         targetSelector(FuzzSelector({ addr: address(this), selectors: selectors }));
     }
 
@@ -225,6 +241,67 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         _revokeWallet(identities[actor], envelope);
     }
 
+    /// @dev With eligibility checks off, an agent moves tokens to a wallet no registry names. The ledger counts
+    ///      them under the wallet itself until an agent links it.
+    function forcedTransferToStranger(uint256 fromSeed, uint256 amount) external {
+        address from = actors[fromSeed % ACTORS];
+        uint256 balance = token.balanceOf(from);
+        if (balance == 0) return;
+        amount = bound(amount, 1, balance);
+
+        callsToStranger++;
+        ITREXRegistry registry = ITREXRegistry(address(token.identityRegistry()));
+        vm.prank(deployer);
+        registry.disableEligibilityChecks();
+        vm.prank(agent);
+        token.forcedTransfer(from, stranger, amount);
+        vm.prank(deployer);
+        registry.enableEligibilityChecks();
+        _strangerMoved();
+    }
+
+    /// @dev An agent links the stranger's wallet to an identity, or relinks it to another one. Nothing moves
+    ///      until the wallet's next movement.
+    function linkStranger(uint256 actorSeed) external {
+        IIdentity identity = identities[actorSeed % ACTORS];
+        ITREXRegistry registry = ITREXRegistry(address(token.identityRegistry()));
+        IERC3643IdentityRegistry identityRegistry = IERC3643IdentityRegistry(address(registry));
+
+        callsLinkStranger++;
+        vm.startPrank(agent);
+        if (!registry.isLocallyRegistered(stranger)) {
+            identityRegistry.registerIdentity(stranger, identity, 0);
+        } else if (identityRegistry.identity(stranger) != identity) {
+            identityRegistry.updateIdentity(stranger, identity);
+        }
+        vm.stopPrank();
+    }
+
+    /// @dev An agent moves tokens out of the stranger's wallet to an actor that can still receive. The first
+    ///      movement after a link moves the wallet's whole balance onto the linked identity first.
+    function forcedTransferFromStranger(uint256 toSeed, uint256 amount) external {
+        address to = actors[toSeed % ACTORS];
+        uint256 balance = token.balanceOf(stranger);
+        if (balance == 0 || !token.identityRegistry().isVerified(to)) return;
+        amount = bound(amount, 1, balance);
+
+        callsFromStranger++;
+        vm.prank(agent);
+        token.forcedTransfer(stranger, to, amount);
+        _strangerMoved();
+    }
+
+    /// @dev The stranger's wallet just moved, so its tokens are now counted under whoever the registry names, or
+    ///      under the wallet itself while nobody is named and nobody was before.
+    function _strangerMoved() private {
+        ITREXRegistry registry = ITREXRegistry(address(token.identityRegistry()));
+        if (registry.isLocallyRegistered(stranger)) {
+            strangerOwner = address(IERC3643IdentityRegistry(address(registry)).identity(stranger));
+        } else if (strangerOwner == address(0)) {
+            strangerOwner = stranger;
+        }
+    }
+
     /* ----- Invariants ----- */
 
     /// LEDGER-1: a position is exactly what the identity's wallets hold, native and bridged.
@@ -238,19 +315,23 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         }
     }
 
-    /// LEDGER-2: the positions plus what the registry displaced sum to the supply.
+    /// LEDGER-2: the positions sum to the supply: every token is counted under exactly one owner.
     function invariant_positionsSumToSupply() public view {
-        int256 sum;
+        uint256 sum;
         for (uint256 i = 0; i < ACTORS; i++) {
-            sum += int256(ledger.positionOf(address(identities[i])));
+            sum += ledger.positionOf(address(identities[i]));
         }
-        assertEq(sum + ledger.positionGap(), int256(token.totalSupply()), "LEDGER-2 positions + gap != supply");
+        sum += ledger.positionOf(stranger);
+        assertEq(sum, token.totalSupply(), "LEDGER-2 positions != supply");
     }
 
-    /// LEDGER-2b: nothing is displaced while no agent touches the registry. Every transition here is a token
-    /// movement or an investor revoking a wallet, so the pool must stay at zero.
-    function invariant_positionGapIsZero() public view {
-        assertEq(ledger.positionGap(), 0, "LEDGER-2b the gap moved without an agent action");
+    /// LEDGER-5: the stranger's tokens sit wholly under the owner the rule names, and the ledger remembers that owner.
+    function invariant_strangerIsCountedUnderItsOwner() public view {
+        uint256 expected = strangerOwner == stranger ? token.balanceOf(stranger) : 0;
+        assertEq(ledger.positionOf(stranger), expected, "LEDGER-5 the stranger's own position drifted");
+        if (strangerOwner != address(0)) {
+            assertEq(ledger.ownerOf(stranger), strangerOwner, "LEDGER-5 the ledger follows another owner");
+        }
     }
 
     /// LEDGER-3: the pending amounts of an identity are the open validations' maxima, relocations excluded.
@@ -285,6 +366,9 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         console.log("settle        ", callsSettle);
         console.log("discard       ", callsDiscard);
         console.log("revoke        ", callsRevoke);
+        console.log("toStranger    ", callsToStranger);
+        console.log("linkStranger  ", callsLinkStranger);
+        console.log("fromStranger  ", callsFromStranger);
         console.log("validations   ", issued.length);
     }
 
@@ -292,6 +376,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
 
     function _recount(uint256 actor) private view returns (uint256 sum) {
         sum = token.balanceOf(actors[actor]);
+        if (strangerOwner == address(identities[actor])) sum += token.balanceOf(stranger);
         for (uint256 j = 0; j < WALLETS_PER_ACTOR; j++) {
             sum += token.bridgedBalanceOf(satellites[actor][j]);
         }

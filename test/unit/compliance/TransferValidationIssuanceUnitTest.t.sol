@@ -209,6 +209,29 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
     }
 
+    /// @notice A satellite recipient with no identity is refused even when the registry calls every wallet
+    ///         verified: the ledger cannot follow a satellite wallet to an identity linked to it later.
+    function test_requestTransferValidation_RevertWhen_TheSatelliteRecipientHasNoIdentity() public configured {
+        _bind(toSat, address(0));
+        vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", toSat), abi.encode(true));
+
+        vm.prank(aliceIdentity);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, toSat));
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+    }
+
+    /// @notice A native recipient with no identity is still accepted when the registry calls every wallet verified:
+    ///         the ledger counts it under its own address and follows it once it is linked.
+    function test_requestTransferValidation_Success_WhenTheNativeRecipientHasNoIdentity() public configured {
+        _bind(nativeBob, address(0));
+        vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", nativeBob), abi.encode(true));
+
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 90, "");
+
+        assertEq(mc.validationOf(id).toIdentity, address(0));
+    }
+
     // ==== bounds Tests ====
 
     function test_requestTransferValidation_Success_WhenCappingAtTheBridgedBalance() public configured {

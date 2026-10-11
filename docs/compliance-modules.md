@@ -192,11 +192,12 @@ the wallet to another identity, the next movement through it moves the wallet's 
 owner first, then counts the movement; `WalletOwnerChanged` says so. When an agent deletes the entry
 and nothing else names the wallet, the remembered owner still answers. Nobody calls anything.
 
-One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
-does not know, which only a registry with eligibility checks disabled allows. That amount is counted
-in `positionGap()`, signed, so that `sum(positions) + positionGap == totalSupply` holds regardless,
-`PositionUnresolved` names it, and the owner hands it to its identity with
-`fixPosition(from, to, amount)`, where a zero side is the gap.
+A wallet the registry has never named can only hold tokens when the registry has eligibility checks
+disabled. The ledger counts such a wallet under its own address, so `ownerOf(wallet)` is the wallet and
+`positionOf(wallet)` is what it holds. When an agent later links it to an identity, its next movement
+moves that balance onto the identity like any relink. So `sum(positions) == totalSupply` always holds, and
+nothing is left for anyone to repair. A satellite wallet is not followed this way, so a validation is never
+issued toward a satellite wallet that has no identity, even with eligibility checks disabled.
 
 ## Binding
 

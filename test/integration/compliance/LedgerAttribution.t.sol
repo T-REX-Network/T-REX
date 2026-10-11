@@ -185,9 +185,8 @@ contract LedgerAttributionTest is TREXSuiteTest {
 
     /* ----- What the registry displaces is counted, and the owner puts it back ----- */
 
-    /// @notice A burn from a wallet that attributes to nobody leaves the positions over the supply by that
-    ///         amount. It is not floored away: the gap goes negative by it, and the owner moves the
-    ///         stale position off the identity that no longer holds it.
+    /// @notice A burn from a wallet that attributes to nobody any more debits the identity the ledger
+    ///         remembers crediting it to.
     function test_burn_Success_DebitsTheRememberedOwner_WhenTheWalletIsUnlinkedEverywhere() public {
         _unlinkAliceEverywhere();
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
@@ -197,42 +196,52 @@ contract LedgerAttributionTest is TREXSuiteTest {
         token.burn(alice, BALANCE);
 
         assertEq(ledger.positionOf(address(aliceIdentity)), 0, "debited from the remembered owner");
-        assertEq(ledger.positionGap(), 0, "nothing to repair");
-        _assertPositionsPlusGapRecountTheSupply();
+        _assertPositionsRecountTheSupply();
     }
 
-    /// @notice What no lookup can resolve is the one thing left for the owner: a wallet the ledger never
-    ///         credited and the registry does not know. Only a registry with eligibility checks disabled lets
-    ///         tokens land there. The amount is counted in the gap, and `fixPosition` hands it to its owner.
-    function test_fixPosition_Success_WhenTokensLandedOnAWalletKnownToNobody() public {
+    /// @notice A wallet no registry names, which only a registry with eligibility checks disabled lets hold
+    ///         tokens, is counted under its own address, so the positions still add up to the supply.
+    function test_mint_Success_CountsAWalletKnownToNobodyUnderItself() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
         address stranger = makeAddr("stranger");
         vm.prank(deployer);
         registry.disableEligibilityChecks();
 
         vm.prank(agent);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.PositionUnresolved(bytes32(uint256(uint160(stranger))), 50);
         token.mint(stranger, 50);
 
-        assertEq(ledger.ownerOf(stranger), address(0), "nobody to remember");
-        assertEq(ledger.positionGap(), 50, "counted, not lost");
-        _assertPositionsPlusGapRecountTheSupply();
-
-        vm.prank(deployer);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.PositionFixed(address(0), address(charlieIdentity), 50);
-        compliance.fixPosition(address(0), address(charlieIdentity), 50);
-
-        assertEq(ledger.positionGap(), 0);
-        assertEq(ledger.positionOf(address(charlieIdentity)), 50);
-        _assertPositionsPlusGapRecountTheSupply();
+        assertEq(ledger.ownerOf(stranger), stranger, "the wallet owns itself");
+        assertEq(ledger.positionOf(stranger), 50, "counted under the wallet");
+        assertEq(_identitiesPositionSum() + ledger.positionOf(stranger), token.totalSupply());
     }
 
-    /// @notice An agent relinking a wallet that holds tokens is the case a revocation never produces: the next
-    ///         debit lands on the new identity, which holds nothing, so it underflows. The shortfall is counted,
-    ///         and the owner moves the position from the identity the relink left too high to the one it left
-    ///         too low.
+    /// @notice Once an agent links that wallet, its first movement moves what it holds onto the identity, like
+    ///         any relink, and nothing is left for anyone to repair.
+    function test_transfer_Success_FollowsTheLink_WhenAWalletKnownToNobodyIsLinked() public {
+        IComplianceLedger ledger = IComplianceLedger(address(compliance));
+        address stranger = makeAddr("stranger");
+        vm.prank(deployer);
+        registry.disableEligibilityChecks();
+        vm.prank(agent);
+        token.mint(stranger, 50);
+
+        vm.prank(agent);
+        registry.registerIdentity(stranger, charlieIdentity, 0);
+
+        vm.prank(stranger);
+        vm.expectEmit(address(compliance));
+        emit EventsLib.WalletOwnerChanged(stranger, stranger, address(charlieIdentity), 50);
+        token.transfer(bob, 20);
+
+        assertEq(ledger.ownerOf(stranger), address(charlieIdentity), "followed");
+        assertEq(ledger.positionOf(stranger), 0, "nothing left under the wallet");
+        assertEq(ledger.positionOf(address(charlieIdentity)), 30, "charlie's identity owns the rest");
+        assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 20);
+        _assertPositionsRecountTheSupply();
+    }
+
+    /// @notice An agent relinking a wallet that holds tokens is the case a revocation never produces: the
+    ///         wallet's next movement first moves its whole balance onto the new identity, then applies itself.
     function test_burn_Success_FollowsTheRelink_WhenAnAgentRelinkedAHoldingWallet() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
 
@@ -250,8 +259,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(ledger.ownerOf(alice), address(charlieIdentity), "followed");
         assertEq(ledger.positionOf(address(aliceIdentity)), 0, "alice's identity owns nothing through this wallet");
         assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 300, "charlie's identity owns the rest");
-        assertEq(ledger.positionGap(), 0);
-        _assertPositionsPlusGapRecountTheSupply();
+        _assertPositionsRecountTheSupply();
     }
 
     /// @notice The same, through a transfer: the whole balance follows the wallet, then the amount moves on.
@@ -266,43 +274,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(ledger.positionOf(address(aliceIdentity)), 0);
         assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 100);
         assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 100);
-        assertEq(ledger.positionGap(), 0);
-        _assertPositionsPlusGapRecountTheSupply();
-    }
-
-    /// @notice The pool can also hand tokens to an identity: the other direction of the same repair.
-    function test_fixPosition_Success_FromThePoolToAnIdentity() public {
-        IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        vm.startPrank(deployer);
-        compliance.fixPosition(address(aliceIdentity), address(0), 100);
-        compliance.fixPosition(address(0), address(bobIdentity), 100);
-        vm.stopPrank();
-
-        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE - 100);
-        assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 100);
-        assertEq(ledger.positionGap(), 0);
-    }
-
-    function test_fixPosition_RevertWhen_TheIdentityHoldsLess() public {
-        vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.InsufficientPosition.selector, address(aliceIdentity), BALANCE, BALANCE + 1
-            )
-        );
-        compliance.fixPosition(address(aliceIdentity), address(0), BALANCE + 1);
-    }
-
-    function test_fixPosition_RevertWhen_BothSidesAreTheSame() public {
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.FromAndToAreTheSame.selector);
-        compliance.fixPosition(address(0), address(0), 1);
-    }
-
-    function test_fixPosition_RevertWhen_NotTheOwner() public {
-        vm.prank(another);
-        vm.expectRevert();
-        compliance.fixPosition(address(aliceIdentity), address(0), 1);
+        _assertPositionsRecountTheSupply();
     }
 
     /* ----- Helpers ----- */
@@ -319,13 +291,14 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
     }
 
-    function _assertPositionsPlusGapRecountTheSupply() private view {
+    function _identitiesPositionSum() private view returns (uint256) {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        int256 sum = int256(
-            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
-                + ledger.positionOf(address(charlieIdentity))
-        );
-        assertEq(sum + ledger.positionGap(), int256(token.totalSupply()), "positions + gap != supply");
+        return ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
+            + ledger.positionOf(address(charlieIdentity));
+    }
+
+    function _assertPositionsRecountTheSupply() private view {
+        assertEq(_identitiesPositionSum(), token.totalSupply(), "positions != supply");
     }
 
     function _bindLockup(address lockedIdentity) private returns (LockedSenderModule lockup) {

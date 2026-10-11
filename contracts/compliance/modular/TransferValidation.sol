@@ -189,6 +189,11 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         ITREXRegistry registry = _boundRegistry();
         require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
         draft.toIdentity = address(registry.resolveIdentity(to));
+        // The ledger follows a native wallet to the identity it is later linked to, but not a satellite wallet,
+        // which could never send onward without an identity anyway. So a satellite recipient needs one, even with
+        // eligibility checks disabled.
+        (bool toNative,) = WalletKeyLib.isReferenceChain(to);
+        require(toNative || draft.toIdentity != address(0), ErrorsLib.UnverifiedWallet(to));
         draft.fromKey = WalletKeyLib.canonicalKey(from);
 
         _capAtWhatTheWalletCanSend(draft, from);

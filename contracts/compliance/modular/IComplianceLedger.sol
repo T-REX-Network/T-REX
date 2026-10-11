@@ -43,19 +43,15 @@ pragma solidity 0.8.30;
 /// registry agent still can, by deleting or relinking the local entry of a wallet that holds tokens. The ledger
 /// keeps up on its own: it remembers which identity it credited each native wallet to (`ownerOf`), and the next
 /// movement through a relinked wallet moves its balance to the new owner before applying the movement. A wallet
-/// the registry no longer names keeps its remembered owner. Only a wallet the ledger never credited and the
-/// registry does not know leaves a trace: that amount is counted in `positionGap`, signed, so that
-/// `sum(positions) + positionGap == totalSupply` holds regardless, and the owner moves it with `fixPosition`.
+/// the registry no longer names keeps its remembered owner. A wallet the registry has never named, which only a
+/// registry with eligibility checks disabled lets hold tokens, is counted under its own address, and moves to
+/// its identity the same way on its first movement after an agent links it. So `sum(positions) == totalSupply`
+/// always holds, and nothing is ever left for anyone to repair.
 interface IComplianceLedger {
-
-    event PositionFixed(address indexed from, address indexed to, uint256 amount);
-
-    error InsufficientPosition(address identity, uint256 held, uint256 amount);
-    error FromAndToAreTheSame();
 
     /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
     ///  wallets included. Moving tokens between two wallets of one identity does not change it.
-    /// @param identity the ONCHAINID to look up
+    /// @param identity the ONCHAINID to look up, or a wallet the registry has never named
     function positionOf(address identity) external view returns (uint256);
 
     /// @dev Sum of `amountMax` over the validations issued toward `identity` that have not settled or been
@@ -69,17 +65,8 @@ interface IComplianceLedger {
     function pendingOutOf(address identity) external view returns (uint256);
 
     /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to, which
-    ///  follows the registry on the wallet's next movement. Zero for a wallet the ledger has never credited.
+    ///  follows the registry on the wallet's next movement. The wallet itself when the registry named nobody at the
+    ///  time. Zero for a wallet the ledger has never credited.
     function ownerOf(address wallet) external view returns (address);
-
-    /// @dev The gap between the positions and the supply, negative when they are over it: credits that landed on no
-    ///  identity add to it, debits that found no identity or too small a position subtract from it. Zero while
-    ///  the registry is stable, which the ledger invariants hold it to.
-    function positionGap() external view returns (int256);
-
-    /// @dev Moves `amount` of position from `from` to `to`. A zero side is the gap: from zero to an
-    ///  identity gives tokens that landed on nobody their owner, from an identity to zero takes a stale position off an
-    ///  identity a relink left too high. Owner only.
-    function fixPosition(address from, address to, uint256 amount) external;
 
 }

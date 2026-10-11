@@ -196,6 +196,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_handleSettlement_Success_WhenALateLegIsReplayed() public {
+        _track();
         uint256 id = _issue();
         _discard(id);
         vm.prank(token);
@@ -212,6 +213,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_handleSettlement_Success_WhenTheChainIsAlreadyPausedOnALateLeg() public {
+        _track();
         uint256 id = _issue();
         _discard(id);
         mc.setIssuancePaused(polygon, true);
@@ -368,6 +370,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     /// @notice A settlement on either end of the issued range is accepted: the bounds are inclusive.
     function test_handleSettlement_Success_WhenTheAmountIsOnABound() public {
+        _track();
         uint256 first = _issue();
         // The first validation reserved its maximum against the sending wallet, so the second can only be
         // issued for what is left of it.
@@ -381,6 +384,24 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         assertEq(mc.validationOf(first).executedAmount, 10, "settled at its minimum");
         assertEq(mc.validationOf(second).executedAmount, secondMax, "settled at its maximum");
+    }
+
+    /// @notice A native recipient no registry names is counted under its own address when the validation
+    ///         settles, so the positions still add up to what moved.
+    function test_handleSettlement_Success_WhenTheNativeRecipientHasNoIdentity() public {
+        _track();
+        _bind(nativeBob, address(0));
+        vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", nativeBob), abi.encode(true));
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
+
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, nativeBob, 40));
+
+        assertEq(mc.ownerOf(bob), bob, "the wallet owns itself");
+        assertEq(mc.positionOf(bob), 40, "counted under the wallet");
+        assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE - 40);
+        assertEq(mc.pendingInOf(address(0)), 0, "nothing left reserved");
     }
 
     function test_handleSettlement_Success_WhenTheNativeSideIsTheRecipient() public {
@@ -520,6 +541,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_handleSettlement_Success_WhenTheMintLegLandsFirst() public {
+        _track();
         uint256 id = _issueCrossChain();
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), 0);

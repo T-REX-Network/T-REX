@@ -64,14 +64,14 @@ All notable changes to this project will be documented in this file.
     wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
     balance to the new owner before counting the movement (`WalletOwnerChanged`), and a wallet the
     registry no longer names keeps its remembered owner. No owner call, no underflow, no stale position.
-  - What no lookup can place is counted, not floored away. `positionGap()` is signed: a
-    credit that lands on no identity adds to it, a debit that finds no identity or too small a position
-    subtracts from it, so `sum(positions) + positionGap == totalSupply` holds through any registry
-    change. `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` name the
-    amount, and `fixPosition(from, to, amount)`, owner only, moves it, a zero side being the pool.
-    The ledger invariant harness holds the pool to zero under every transition that is not an agent
-    action. One rule now governs the ledger's writes: the compliance's own bookkeeping reverts, a write
-    the registry made impossible is counted for repair.
+  - A wallet the registry has never named, which only a registry with eligibility checks disabled lets
+    hold tokens, owns itself: the ledger counts it under its own address and follows it to its identity,
+    like any relink, on its first movement after an agent links it. Every token is always counted under
+    exactly one owner, so `sum(positions) == totalSupply`, and every position write is checked: a debit
+    larger than the position can only be a bug, and reverts. A validation is never issued toward a
+    satellite wallet that has no identity, since the ledger does not follow satellite wallets. The
+    ledger invariant harness holds all of this with unexpected reverts treated as failures, including a
+    wallet that receives tokens while unnamed, is linked and relinked by an agent, and sends them on.
   - `refundValidation(validationId)`, keeper only, is the way out of a two-leg validation of which one
     leg never came, a second reconciliation window past `releaseAt`. Burn leg in: the held amount goes
     back to the wallet it left through `Token.returnInTransit`, the reservation is released, the status is

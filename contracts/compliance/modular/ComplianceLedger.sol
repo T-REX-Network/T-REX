@@ -25,14 +25,13 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 
 /**
  * @title ComplianceLedger
- * @dev The four numbers the compliance keeps about identities, in its own ERC-7201 namespace.
+ * @dev The three numbers the compliance keeps about identities, and who owns each native wallet, in its own ERC-7201 namespace.
  *
  * The rule: a number is kept by the contract that produces it. The compliance sees every movement through the
  * token's hooks and issues every cross-chain validation itself, so it is the one contract that can keep an
@@ -45,14 +44,13 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * it. The ledger keeps up on its own. It remembers which identity it credited each native wallet to, and the
  * next movement through that wallet notices the registry now names someone else and moves the wallet's balance
  * to them first, so no owner call is needed. When the registry names nobody, the remembered owner still
- * answers. Satellite wallets need none of this: the IdentityFactory's bindings are sticky.
+ * answers. A wallet the registry has never named, which only a registry with eligibility checks disabled lets
+ * hold tokens, owns itself: it is counted under its own address, and followed to its identity like any relink
+ * once an agent links it. Satellite wallets need none of this: the IdentityFactory's bindings are sticky, and
+ * a validation is never issued toward a satellite wallet that has no identity.
  *
- * One rule decides what happens when a write still cannot be honoured. The compliance's own bookkeeping, the
- * pending amounts it reserves and releases, uses checked arithmetic and reverts: an inconsistency there is a
- * bug in this contract. A position write that finds nobody, a wallet the ledger never credited and the registry
- * does not know, never reverts, because blocking the movement would make the repair harder. The amount is
- * counted in `gap`, signed, so that `sum(positions) + gap == totalSupply` holds regardless, and `fixPosition`
- * lets the owner move it to where it belongs.
+ * So every token is always counted under exactly one owner, and `sum(positions) == totalSupply`. Every write
+ * uses checked arithmetic: a debit larger than the position can only be a bug in this contract, and reverts.
  */
 abstract contract ComplianceLedger is IComplianceLedger {
 
@@ -76,39 +74,32 @@ abstract contract ComplianceLedger is IComplianceLedger {
         return _ledger().ownerOf[wallet];
     }
 
-    /// @inheritdoc IComplianceLedger
-    function positionGap() external view returns (int256) {
-        return _ledger().gap;
-    }
-
     /// @dev Who a native wallet's tokens belong to now, given who the registry names. Records the first owner
-    ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody.
+    ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody. A wallet
+    ///  the registry has never named owns itself, until an agent links it.
     /// @return owner the identity to debit or credit for this wallet
     /// @return previous the identity that was credited before, when the owner just changed and the wallet's
     ///  balance has to follow; zero otherwise
     function _followOwner(address wallet, address resolved) internal returns (address owner, address previous) {
-        mapping(address => address) storage ownerOf = _ledger().ownerOf;
-        address recorded = ownerOf[wallet];
-        if (resolved == address(0)) return (recorded, address(0));
-        if (recorded == resolved) return (resolved, address(0));
-        ownerOf[wallet] = resolved;
-        return (resolved, recorded);
+        ComplianceLedgerLib.Ledger storage ledger = _ledger();
+        address recorded = ledger.ownerOf[wallet];
+
+        owner = resolved;
+        if (owner == address(0)) owner = recorded;
+        if (owner == address(0)) owner = wallet;
+
+        if (owner == recorded) return (owner, address(0));
+        ledger.ownerOf[wallet] = owner;
+        return (owner, recorded);
     }
 
     /// @dev Moves what `wallet` held from the identity it was credited to onto the one the registry names now.
     function _moveWalletBalance(address wallet, address previous, address owner, uint256 balance) internal {
         if (balance != 0) {
-            _debitPosition(previous, bytes32(uint256(uint160(wallet))), balance);
-            _creditPosition(owner, bytes32(uint256(uint160(wallet))), balance);
+            _debitPosition(previous, balance);
+            _creditPosition(owner, balance);
         }
         emit EventsLib.WalletOwnerChanged(wallet, previous, owner, balance);
-    }
-
-    /// @dev Moves `amount` of position from one side to the other. A zero side is the gap between the positions and
-    ///  the supply, so this can give tokens that landed on nobody their owner, or take a stale position off an
-    ///  identity a relink left too high.
-    function _fixPosition(address from, address to, uint256 amount) internal {
-        ComplianceLedgerLib.fixPosition(from, to, amount);
     }
 
     /// @dev Moves `amount` of position from one identity to the other: one side loses it, the other gains it.
@@ -123,44 +114,16 @@ abstract contract ComplianceLedger is IComplianceLedger {
         uint256 amount
     ) internal {
         if (_isRelocation(fromIdentity, toIdentity)) return;
-        if (fromWallet != bytes32(0)) _debitPosition(fromIdentity, fromWallet, amount);
-        if (toWallet != bytes32(0)) _creditPosition(toIdentity, toWallet, amount);
+        if (fromWallet != bytes32(0)) _debitPosition(fromIdentity, amount);
+        if (toWallet != bytes32(0)) _creditPosition(toIdentity, amount);
     }
 
-    /// @dev Takes `amount` off an identity's position.
-    ///
-    ///  Two things the registry can do leave nothing, or too little, to debit: a wallet that resolves to nobody,
-    ///  and an identity relinked to a wallet after another identity's position was credited for it. Neither
-    ///  reverts, since the cause is outside this contract and blocking a burn or a forced transfer would make
-    ///  the repair harder. What could not be debited leaves the positions over the supply, so it comes off
-    ///  the gap, and the event names it for the owner who will `fixPosition` it.
-    function _debitPosition(address identity, bytes32 wallet, uint256 amount) private {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        if (identity == address(0)) {
-            ledger.gap -= int256(amount);
-            emit EventsLib.PositionUnresolved(wallet, amount);
-            return;
-        }
-        uint256 held = ledger.position[identity];
-        if (held < amount) {
-            ledger.gap -= int256(amount - held);
-            ledger.position[identity] = 0;
-            emit EventsLib.PositionUnderflow(identity, amount - held);
-            return;
-        }
-        ledger.position[identity] = held - amount;
+    function _debitPosition(address identity, uint256 amount) private {
+        _ledger().position[identity] -= amount;
     }
 
-    /// @dev Adds `amount` to an identity's position. A wallet that resolves to nobody is credited to the gap
-    ///  instead, which leaves the positions short of the supply by exactly that amount.
-    function _creditPosition(address identity, bytes32 wallet, uint256 amount) private {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        if (identity == address(0)) {
-            ledger.gap += int256(amount);
-            emit EventsLib.PositionUnresolved(wallet, amount);
-            return;
-        }
-        ledger.position[identity] += amount;
+    function _creditPosition(address identity, uint256 amount) private {
+        _ledger().position[identity] += amount;
     }
 
     /// @dev Undoes the identities' half of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation
