@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **A module upgrade cannot change what the module names.** A compliance reads `moduleTypes()` once, at
+  binding, so an upgrade that changed it left every bound compliance calling the module by the old types until
+  its owner called `resyncModuleTypes`, and a module shared by several issuers needed every one of them to
+  notice. `AbstractModuleUpgradeable.upgradeToAndCall` now compares the list of types before and after the
+  upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
+  as a new module and bound in place of the old one. `resyncModuleTypes` is removed: nothing is left for it to
+  repair.
 - **Every namespaced struct's layout is pinned** (`test/standard/NamespaceFields.t.sol`). A namespace's slot
   comes from its string alone, so a struct that changes shape under an unchanged string makes an upgraded
   proxy read old bytes under new names, with no revert and no failing deployment test. The test points each
@@ -118,9 +125,8 @@ All notable changes to this project will be documented in this file.
   - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys
     on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
     registry with eligibility checks disabled reaches that path.
-  - `resyncModuleTypes(address)` re-reads a bound module's declaration after an implementation
-    upgrade, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
-    `ModuleTypesRecorded(module, moduleTypes)` on bind and resync. `ModuleHasNoType` and
+  - `getModulesByType(ModuleType)` lists the modules of one kind.
+    `ModuleTypesRecorded(module, moduleTypes)` on bind. `ModuleHasNoType` and
     `DuplicateModuleType` refuse a declaration the compliance cannot route.
   - `MaxBalancePerIdentityModule`: the first rule over the ledger, a cap per identity over every
     wallet and every chain, plug and play, one function for a native transfer, an issuance, two
@@ -661,8 +667,7 @@ All notable changes to this project will be documented in this file.
   `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
   `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.
   `AbstractModuleUpgradeable` ships the neutral default for every question, so a module implements
-  only what it enforces. What a module names is read at binding; an upgrade that changes it needs
-  `resyncModuleTypes` on every bound compliance.
+  only what it enforces. What a module names is read at binding, and an upgrade may not change it.
 - **Breaking, `ITransferValidation`**: `Validation` replaces `ValidationRecord` and `ValidationState`,
   read through `validationOf` alone (`stateOf` is gone); it carries the identities resolved at
   issuance and the two reservation flags. `setIssuancePaused(chainKey, paused)`, idempotent, replaces

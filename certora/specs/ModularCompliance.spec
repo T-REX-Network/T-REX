@@ -91,7 +91,6 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:addAndSetModule(address,bytes[]).selector
     || f.selector == sig:addModule(address).selector
     || f.selector == sig:callModuleFunction(bytes,address).selector
-    || f.selector == sig:resyncModuleTypes(address).selector
     || f.selector == sig:setIssuancePaused(bytes32,bool).selector
     || f.selector == sig:discardExpiredValidations(uint256[]).selector;
 

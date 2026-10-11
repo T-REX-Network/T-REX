@@ -130,15 +130,6 @@ library ModuleSetLib {
         _removeFromItsTypeLists(moduleSet, _module);
     }
 
-    /// @dev Re-reads what the module says it is and files it again, as a rebind would, without touching the
-    ///  module's own state.
-    function resyncModuleTypes(address _module) external {
-        ModuleSet storage moduleSet = layout();
-        require(moduleSet.modules.contains(_module), ErrorsLib.ModuleNotBound());
-        _removeFromItsTypeLists(moduleSet, _module);
-        _addToItsTypeLists(moduleSet, _module);
-    }
-
     /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
     ///  Reverts when `_module` is not bound or when the underlying call fails.
     function callModuleFunction(bytes calldata callData, address _module) external {

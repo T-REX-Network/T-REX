@@ -121,6 +121,8 @@ library ErrorsLib {
     error ModuleHasNoType();
     /// @dev A module names the same type twice.
     error DuplicateModuleType(uint8 moduleType);
+    /// @dev An upgrade would change the types a module names, which every bound compliance read at binding.
+    error ModuleTypesChanged();
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();

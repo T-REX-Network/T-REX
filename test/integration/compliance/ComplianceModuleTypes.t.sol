@@ -16,11 +16,12 @@ import {
     RuleAndTrackerModule,
     RuleOnlyModule,
     SpenderOnlyModule,
+    TrackerAndRuleModule,
     TrackerOnlyModule
 } from "test/integration/mocks/CapabilityModules.sol";
 
 /// @dev Binding lifecycle for modules that name their types: what a compliance files, what it refuses, what
-///      survives a removal from the middle of the bound set, and what a resync rewrites.
+///      survives a removal from the middle of the bound set, and why an upgrade cannot change what it names.
 contract ComplianceModuleTypesTest is TREXSuiteTest {
 
     ModularCompliance internal mc;
@@ -111,17 +112,18 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         assertFalse(mc.isModuleBound(module));
     }
 
-    /// @notice A rejected attempt leaves nothing behind: the same address binds once its declaration is fixed.
+    /// @notice A rejected attempt leaves nothing behind: no list holds the rejected module, and the next bind
+    ///         starts from an empty set.
     function test_addModule_Success_WhenBindingAfterARejectedAttempt() public {
-        address module = _deploy(address(new NoTypeModule()));
+        address rejected = _deploy(address(new NoTypeModule()));
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ModuleHasNoType.selector);
-        mc.addModule(module);
+        mc.addModule(rejected);
 
-        RecordingModule(module).upgradeToAndCall(address(new RuleOnlyModule()), "");
-
+        address module = _deploy(address(new RuleOnlyModule()));
         _bind(module);
-        assertTrue(mc.isModuleBound(module));
+
+        assertEq(mc.getModules().length, 1);
         _assertListed(IModule.ModuleType.TRANSFER_CHECK, module);
     }
 
@@ -198,81 +200,48 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         assertFalse(mc.isModuleBound(module));
     }
 
-    // ==== .resyncModuleTypes Tests ====
+    // ==== .upgradeToAndCall Tests ====
 
-    /// @notice A module upgraded to a different declaration is refiled, and stops being called where it no
-    ///         longer answers.
-    function test_resyncModuleTypes_Success_WhenTheDeclarationChanged() public {
-        address module = _deploy(address(new RuleOnlyModule()));
-        _bind(module);
-        _assertListed(IModule.ModuleType.TRANSFER_CHECK, module);
-
-        RecordingModule(module).upgradeToAndCall(address(new TrackerOnlyModule()), "");
-
-        vm.prank(deployer);
-        mc.resyncModuleTypes(module);
-
-        assertEq(mc.getModulesByType(IModule.ModuleType.TRANSFER_CHECK).length, 0, "no longer a rule");
-        _assertListed(IModule.ModuleType.AFTER, module);
-        assertTrue(mc.isModuleBound(module), "still bound, so its settings survive");
-    }
-
-    /// @notice A resync rewrites one module's filing: the others and the bind order are untouched.
-    function test_resyncModuleTypes_Success_WhenOtherModulesAreBound() public {
-        address first = _deploy(address(new RuleOnlyModule()));
-        address second = _deploy(address(new TrackerOnlyModule()));
-        _bind(first);
-        _bind(second);
-
-        RecordingModule(first).upgradeToAndCall(address(new SpenderOnlyModule()), "");
-        vm.prank(deployer);
-        mc.resyncModuleTypes(first);
-
-        assertEq(mc.getModules().length, 2);
-        _assertListed(IModule.ModuleType.SPENDER, first);
-        _assertListed(IModule.ModuleType.AFTER, second);
-        assertEq(mc.getModulesByType(IModule.ModuleType.TRANSFER_CHECK).length, 0);
-    }
-
-    function test_resyncModuleTypes_Success_WhenNothingChanged() public {
+    /// @notice An upgrade that keeps what the module names goes through, and the compliance keeps calling it.
+    function test_upgradeToAndCall_Success_WhenTypesAreUnchanged() public {
         address module = _deploy(address(new RuleOnlyModule()));
         _bind(module);
 
-        vm.prank(deployer);
-        mc.resyncModuleTypes(module);
+        RecordingModule(module).upgradeToAndCall(address(new RuleOnlyModule()), "");
 
         _assertListed(IModule.ModuleType.TRANSFER_CHECK, module);
-        assertEq(mc.getModules().length, 1);
     }
 
-    function test_resyncModuleTypes_RevertWhen_ModuleIsNotBound() public {
-        address module = _deploy(address(new RuleOnlyModule()));
+    /// @notice The same types in another order are refused too: the rule is one plain comparison of the two lists.
+    function test_upgradeToAndCall_RevertWhen_TypesAreReordered() public {
+        address module = _deploy(address(new RuleAndTrackerModule()));
+        _bind(module);
+        address newImplementation = address(new TrackerAndRuleModule());
 
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ModuleNotBound.selector);
-        mc.resyncModuleTypes(module);
+        vm.expectRevert(ErrorsLib.ModuleTypesChanged.selector);
+        RecordingModule(module).upgradeToAndCall(newImplementation, "");
     }
 
-    /// @notice An upgrade that left the module answering nothing is refused, so the compliance never keeps a
-    ///         module it would never call.
-    function test_resyncModuleTypes_RevertWhen_DeclarationBecameEmpty() public {
+    /// @notice An upgrade to other types is refused: the compliance filed the module once and would keep
+    ///         calling it by the old ones.
+    function test_upgradeToAndCall_RevertWhen_TypesChange() public {
         address module = _deploy(address(new RuleOnlyModule()));
         _bind(module);
+        address newImplementation = address(new TrackerOnlyModule());
 
-        RecordingModule(module).upgradeToAndCall(address(new NoTypeModule()), "");
+        vm.expectRevert(ErrorsLib.ModuleTypesChanged.selector);
+        RecordingModule(module).upgradeToAndCall(newImplementation, "");
 
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ModuleHasNoType.selector);
-        mc.resyncModuleTypes(module);
+        _assertListed(IModule.ModuleType.TRANSFER_CHECK, module);
     }
 
-    function test_resyncModuleTypes_RevertWhen_CallerIsNotOwner() public {
+    /// @notice An upgrade that would leave the module naming nothing is refused the same way.
+    function test_upgradeToAndCall_RevertWhen_TypesBecomeEmpty() public {
         address module = _deploy(address(new RuleOnlyModule()));
-        _bind(module);
+        address newImplementation = address(new NoTypeModule());
 
-        vm.prank(alice);
-        vm.expectRevert();
-        mc.resyncModuleTypes(module);
+        vm.expectRevert(ErrorsLib.ModuleTypesChanged.selector);
+        RecordingModule(module).upgradeToAndCall(newImplementation, "");
     }
 
     /// @dev Asserts `module` is the only entry of that type's list.

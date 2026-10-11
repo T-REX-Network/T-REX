@@ -81,8 +81,7 @@ import { IModule } from "./IModule.sol";
  * type and forgets to override its function therefore lets everything through rather than reverting, which is
  * why {moduleTypes} and the overrides are reviewed together.
  *
- * What a module names is read at binding. An upgrade that changes it takes effect once each bound compliance
- * calls `resyncModuleTypes`.
+ * What a module names is read at binding, and an upgrade may not change it: see {upgradeToAndCall}.
  */
 abstract contract AbstractModuleUpgradeable is
     IModule,
@@ -198,6 +197,23 @@ abstract contract AbstractModuleUpgradeable is
     function getNonce(address _compliance) public view returns (uint256) {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         return s.nonces[_compliance];
+    }
+
+    /**
+     *  @dev Refuses an upgrade that would change what the module names. Every bound compliance read the types
+     *  once, at binding, and calls the module by them, so new types would be silently ignored by each of
+     *  those compliances. A module that needs other types is a new module: deploy it and bind it in place of
+     *  this one.
+     *  The list is compared before and after the upgrade, so the caller is authorized first. The new code
+     *  must name the same types in the same order.
+     */
+    function upgradeToAndCall(address newImplementation, bytes memory data) public payable virtual override {
+        // Asked through `this`, so the call goes through the proxy and, after the upgrade, reaches the new code.
+        bytes memory typesBefore = abi.encode(this.moduleTypes());
+
+        super.upgradeToAndCall(newImplementation, data);
+
+        require(keccak256(abi.encode(this.moduleTypes())) == keccak256(typesBefore), ErrorsLib.ModuleTypesChanged());
     }
 
     /**

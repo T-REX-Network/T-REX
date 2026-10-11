@@ -164,15 +164,6 @@ contract ModularCompliance is
         emit EventsLib.ModuleForceRemoved(_module);
     }
 
-    /**
-     *  @dev See {IModularCompliance-resyncModuleTypes}.
-     *  Re-reads what the module says it is and files it again, as a rebind would, without touching the
-     *  module's own state.
-     */
-    function resyncModuleTypes(address _module) external restricted {
-        ModuleSetLib.resyncModuleTypes(_module);
-    }
-
     /// @inheritdoc ISettlementHandler
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
