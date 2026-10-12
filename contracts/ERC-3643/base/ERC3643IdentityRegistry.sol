@@ -272,10 +272,12 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
             if (foundClaimTopic != claimTopic || issuer != trustedIssuer) continue;
 
-            (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
+            // Only an answer of exactly one word equal to true counts. An issuer that reverts, answers nothing or
+            // answers something else is skipped like an invalid claim, so one broken issuer never halts transfers.
+            (bool success, bytes32 answer,) = LowLevelCall.staticcallReturn64Bytes(
                 trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data))
             );
-            if (success && result != bytes32(0)) return true;
+            if (success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1))) return true;
         }
         return false;
     }
