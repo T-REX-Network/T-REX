@@ -10,8 +10,8 @@ All notable changes to this project will be documented in this file.
   its owner called `resyncModuleTypes`, and a module shared by several issuers needed every one of them to
   notice. `AbstractModuleUpgradeable.upgradeToAndCall` now compares the list of types before and after the
   upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
-  as a new module and bound in place of the old one. `resyncModuleTypes` is removed: nothing is left for it to
-  repair.
+  as a new module and bound in place of the old one. `resyncModuleTypes` stays as the owner's repair for a
+  module the guard does not cover: one not built on the base, or upgraded to code that dropped the override.
 
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
@@ -192,8 +192,9 @@ All notable changes to this project will be documented in this file.
   - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys
     on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
     registry with eligibility checks disabled reaches that path.
-  - `getModulesByType(ModuleType)` lists the modules of one kind.
-    `ModuleTypesRecorded(module, moduleTypes)` on bind. `ModuleHasNoType` and
+  - `resyncModuleTypes(address)` re-reads a bound module's declaration, for a module whose types changed
+    outside the upgrade guard, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
+    `ModuleTypesRecorded(module, moduleTypes)` on bind and resync. `ModuleHasNoType` and
     `DuplicateModuleType` refuse a declaration the compliance cannot route.
   - `MaxBalancePerIdentityModule`: the first rule over the ledger, a cap per identity over every
     wallet and every chain, plug and play, one function for a native transfer, an issuance, two
@@ -753,7 +754,8 @@ All notable changes to this project will be documented in this file.
   `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
   `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.
   `AbstractModuleUpgradeable` ships the neutral default for every question, so a module implements
-  only what it enforces. What a module names is read at binding, and an upgrade may not change it.
+  only what it enforces. What a module names is read at binding, and an upgrade may not change it; a module
+  outside that guard is refiled with `resyncModuleTypes`.
 - **Breaking, `ITransferValidation`**: `Validation` replaces `ValidationRecord` and `ValidationState`,
   read through `validationOf` alone (`stateOf` is gone); it carries the identities resolved at
   issuance and the two reservation flags. `setIssuancePaused(chainKey, paused)`, idempotent, replaces

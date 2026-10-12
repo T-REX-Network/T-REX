@@ -91,6 +91,22 @@ interface IModularCompliance is IERC3643Compliance {
     function addModule(address _module) external;
 
     /**
+     *  @dev re-reads what a bound module says it is and files it again
+     *  @param _module address of the bound module to resynchronise
+     *  a module sits behind a proxy, so an implementation upgrade can change what `moduleTypes` answers while
+     *  this compliance still routes by what it recorded at binding. A module on `AbstractModuleUpgradeable`
+     *  refuses such an upgrade; this is the repair for one that is not, or whose new code dropped that guard.
+     *  Until this is called, the compliance keeps
+     *  calling the module for a type it dropped, which reverts on every movement, and never calls it for a type
+     *  it gained
+     *  removing and re-adding the module is not the same thing: an unbind increments the module's bind nonce,
+     *  which is how a module scopes its per-compliance settings, so the rebound module comes back unconfigured
+     *  Restricted to the configured AccessManager role (OWNER).
+     *  Emits a ModuleTypesRecorded event, including when nothing changed
+     */
+    function resyncModuleTypes(address _module) external;
+
+    /**
      *  @dev removes a module from the list of compliance modules
      *  @param _module address of the module to remove
      *  Restricted to the configured AccessManager role (OWNER).

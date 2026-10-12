@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { ERC1967Utils } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
@@ -21,7 +22,8 @@ import {
 } from "test/integration/mocks/CapabilityModules.sol";
 
 /// @dev Binding lifecycle for modules that name their types: what a compliance files, what it refuses, what
-///      survives a removal from the middle of the bound set, and why an upgrade cannot change what it names.
+///      survives a removal from the middle of the bound set, why an upgrade cannot change what it names, and
+///      what a resync rewrites for a module outside that guard.
 contract ComplianceModuleTypesTest is TREXSuiteTest {
 
     ModularCompliance internal mc;
@@ -244,6 +246,84 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
         RecordingModule(module).upgradeToAndCall(newImplementation, "");
     }
 
+    // ==== .resyncModuleTypes Tests ====
+    // A guarded upgrade cannot change the types, so these swap the code under the proxy directly: the case of a
+    // module not built on the base, or upgraded to code that dropped the guard.
+
+    /// @notice A module whose declaration changed is refiled, and stops being called where it no longer answers.
+    function test_resyncModuleTypes_Success_WhenTheDeclarationChanged() public {
+        address module = _deploy(address(new RuleOnlyModule()));
+        _bind(module);
+        _assertListed(IModule.ModuleType.TRANSFER_CHECK, module);
+
+        _swapCode(module, address(new TrackerOnlyModule()));
+
+        vm.prank(deployer);
+        mc.resyncModuleTypes(module);
+
+        assertEq(mc.getModulesByType(IModule.ModuleType.TRANSFER_CHECK).length, 0, "no longer a rule");
+        _assertListed(IModule.ModuleType.AFTER, module);
+        assertTrue(mc.isModuleBound(module), "still bound, so its settings survive");
+    }
+
+    /// @notice A resync rewrites one module's filing: the others and the bind order are untouched.
+    function test_resyncModuleTypes_Success_WhenOtherModulesAreBound() public {
+        address first = _deploy(address(new RuleOnlyModule()));
+        address second = _deploy(address(new TrackerOnlyModule()));
+        _bind(first);
+        _bind(second);
+
+        _swapCode(first, address(new SpenderOnlyModule()));
+        vm.prank(deployer);
+        mc.resyncModuleTypes(first);
+
+        assertEq(mc.getModules().length, 2);
+        _assertListed(IModule.ModuleType.SPENDER, first);
+        _assertListed(IModule.ModuleType.AFTER, second);
+        assertEq(mc.getModulesByType(IModule.ModuleType.TRANSFER_CHECK).length, 0);
+    }
+
+    function test_resyncModuleTypes_Success_WhenNothingChanged() public {
+        address module = _deploy(address(new RuleOnlyModule()));
+        _bind(module);
+
+        vm.prank(deployer);
+        mc.resyncModuleTypes(module);
+
+        _assertListed(IModule.ModuleType.TRANSFER_CHECK, module);
+        assertEq(mc.getModules().length, 1);
+    }
+
+    function test_resyncModuleTypes_RevertWhen_ModuleIsNotBound() public {
+        address module = _deploy(address(new RuleOnlyModule()));
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ModuleNotBound.selector);
+        mc.resyncModuleTypes(module);
+    }
+
+    /// @notice Code that left the module answering nothing is refused, so the compliance never keeps a module
+    ///         it would never call.
+    function test_resyncModuleTypes_RevertWhen_DeclarationBecameEmpty() public {
+        address module = _deploy(address(new RuleOnlyModule()));
+        _bind(module);
+
+        _swapCode(module, address(new NoTypeModule()));
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ModuleHasNoType.selector);
+        mc.resyncModuleTypes(module);
+    }
+
+    function test_resyncModuleTypes_RevertWhen_CallerIsNotOwner() public {
+        address module = _deploy(address(new RuleOnlyModule()));
+        _bind(module);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        mc.resyncModuleTypes(module);
+    }
+
     /// @dev Asserts `module` is the only entry of that type's list.
     function _assertListed(IModule.ModuleType moduleType, address module) private view {
         address[] memory listed = mc.getModulesByType(moduleType);
@@ -254,6 +334,11 @@ contract ComplianceModuleTypesTest is TREXSuiteTest {
     function _bind(address module) private {
         vm.prank(deployer);
         mc.addModule(module);
+    }
+
+    /// @dev Replaces the code under `module`'s proxy without going through its upgrade function.
+    function _swapCode(address module, address implementation) private {
+        vm.store(module, ERC1967Utils.IMPLEMENTATION_SLOT, bytes32(uint256(uint160(implementation))));
     }
 
     function _deploy(address implementation) private returns (address) {

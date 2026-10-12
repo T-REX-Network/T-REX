@@ -564,6 +564,7 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, compliance, IModularCompliance.removeModule.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IModularCompliance.forceRemoveModule.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IModularCompliance.callModuleFunction.selector, domainId, RolesLib.Role.OWNER);
+        _assertRow(target, compliance, IModularCompliance.resyncModuleTypes.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IComplianceLedger.fixPosition.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, RolesLib.BIND_UNBIND_TOKEN, domainId, RolesLib.Role.OWNER);
         _assertRow(

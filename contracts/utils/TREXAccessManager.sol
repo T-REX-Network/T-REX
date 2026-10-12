@@ -383,6 +383,7 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(compliance, IModularCompliance.removeModule.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.forceRemoveModule.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.callModuleFunction.selector, ownerRole);
+        _setTargetFunctionRole(compliance, IModularCompliance.resyncModuleTypes.selector, ownerRole);
         _setTargetFunctionRole(compliance, IComplianceLedger.fixPosition.selector, ownerRole);
         _setTargetFunctionRole(compliance, RolesLib.BIND_UNBIND_TOKEN, ownerRole);
 

@@ -206,9 +206,14 @@ abstract contract AbstractModuleUpgradeable is
      *  this one.
      *  The list is compared before and after the upgrade, so the caller is authorized first. The new code
      *  must name the same types in the same order.
+     *  The guard runs in this code only: a new implementation that drops this override leaves later upgrades
+     *  unchecked, and each bound compliance's owner repairs those with `resyncModuleTypes`.
      */
     function upgradeToAndCall(address newImplementation, bytes memory data) public payable virtual override {
-        // Asked through `this`, so the call goes through the proxy and, after the upgrade, reaches the new code.
+        // The second read must go through `this`: this frame keeps executing the old implementation's bytecode
+        // after the upgrade, so an internal call would ask the old code again and always match. Only an
+        // external call re-enters the proxy and reaches the new code. The first read goes the same way so both
+        // sides are encoded identically.
         bytes memory typesBefore = abi.encode(this.moduleTypes());
 
         super.upgradeToAndCall(newImplementation, data);
