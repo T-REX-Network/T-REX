@@ -18,7 +18,7 @@ import { TREXImplementationAuthority } from "contracts/proxy/beacon/TREXImplemen
 contract TREXImplementationAuthorityUnitTest is Test {
 
     TREXImplementationAuthority private authority;
-    AccessManager private accessManager;
+    AccessManager private suiteManager;
 
     address private versionManager = makeAddr("VersionManager");
     address private notVersionManager = makeAddr("NotVersionManager");
@@ -49,21 +49,21 @@ contract TREXImplementationAuthorityUnitTest is Test {
         irsImplV1 = new DummyIrsV1();
         mcImplV1 = new DummyMcV1();
 
-        accessManager = new AccessManager(address(this));
-        authority = new TREXImplementationAuthority(address(accessManager), v0, _v0Impls());
+        suiteManager = new AccessManager(address(this));
+        authority = new TREXImplementationAuthority(address(suiteManager), v0, _v0Impls());
 
         // publish / upgrade / publishAndUpgrade are gated by VERSION_MANAGER
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(
-            accessManager, address(authority), RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER)
+            suiteManager, address(authority), RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER)
         );
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), versionManager, 0);
+        suiteManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), versionManager, 0);
     }
 
     // ---------- constructor ----------
 
     function test_constructor_SetsAccessManagerAsOwner() public view {
-        assertEq(authority.owner(), address(accessManager));
-        assertEq(authority.authority(), address(accessManager));
+        assertEq(authority.owner(), address(suiteManager));
+        assertEq(authority.authority(), address(suiteManager));
     }
 
     function test_constructor_Deploys4BeaconsOwnedByRegistry() public view {
@@ -121,7 +121,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         impls.tokenImplementation = address(0);
 
         vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
-        new TREXImplementationAuthority(address(accessManager), v0, impls);
+        new TREXImplementationAuthority(address(suiteManager), v0, impls);
     }
 
     function test_constructor_RevertWhen_TrexRegistryImplementationIsZero() public {
@@ -129,7 +129,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         impls.trexRegistryImplementation = address(0);
 
         vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
-        new TREXImplementationAuthority(address(accessManager), v0, impls);
+        new TREXImplementationAuthority(address(suiteManager), v0, impls);
     }
 
     function test_constructor_RevertWhen_IrsImplementationIsZero() public {
@@ -137,7 +137,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         impls.irsImplementation = address(0);
 
         vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
-        new TREXImplementationAuthority(address(accessManager), v0, impls);
+        new TREXImplementationAuthority(address(suiteManager), v0, impls);
     }
 
     function test_constructor_RevertWhen_McImplementationIsZero() public {
@@ -145,7 +145,7 @@ contract TREXImplementationAuthorityUnitTest is Test {
         impls.mcImplementation = address(0);
 
         vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
-        new TREXImplementationAuthority(address(accessManager), v0, impls);
+        new TREXImplementationAuthority(address(suiteManager), v0, impls);
     }
 
     // ---------- publishAndUpgrade happy path ----------

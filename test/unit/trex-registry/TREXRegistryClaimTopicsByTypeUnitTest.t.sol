@@ -33,7 +33,7 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
 
         // The harness only registers INDIVIDUAL / CLAIM_ISSUER / ASSET policies; open CORPORATE too
         // (this contract is the AccessManager admin) so corporate identities can be minted.
-        idFactory.setIdentityTypePolicy(IdentityTypes.CORPORATE, accessManager.PUBLIC_ROLE(), true, false);
+        idFactory.setIdentityTypePolicy(IdentityTypes.CORPORATE, suiteManager.PUBLIC_ROLE(), true, false);
         idFactory.setIdentityTypeModules(
             IdentityTypes.CORPORATE,
             IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule))

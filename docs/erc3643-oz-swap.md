@@ -23,7 +23,9 @@ before the split too. Splitting the registries apart would restore the base impl
 3. Run `forge test --match-path "test/standard/*"` against the new base. This suite exercises the
    standard surface only, so it is the regression net that turns the swap into a diff.
 4. Run the full suite. Failures here are T-REX behavior that the new base changed.
-5. Apply the storage migration for any contract whose namespace string differs (see the table).
+5. Apply the storage migration for any contract whose namespace string differs (see the table). The
+   base sections of `test/standard/NamespaceFields.t.sol` stop compiling at the swap, since they name the
+   local base structs; rewrite them against OpenZeppelin's structs once the migration is decided.
 
 ## Namespace status
 
@@ -71,9 +73,12 @@ earlier commit must be redeployed, not upgraded in place.
 `test/unit/token/TokenStorageLocationUnitTests.t.sol`, `test/unit/registries/RegistryStorageLayout.t.sol`
 and a layout test in `test/unit/compliance/ModularComplianceInitUnitTest.t.sol` read real storage with
 `vm.load` to confirm each field sits where
-the new namespace says it does. None of this catches a struct that changes without its namespace moving:
-no fresh-deploy test can, since the suite never upgrades a proxy in place. Committing
-`forge inspect <Contract> storage-layout` and diffing it in CI would close that gap.
+the new namespace says it does. A struct that changes shape without its namespace moving is caught by
+`test/standard/NamespaceFields.t.sol`: for every namespaced struct it writes each field at the real
+namespace slot and asserts the exact slot and byte it lands in, so a field removed, reordered, retyped or
+inserted before the end fails, while a field appended at the end does not. `forge inspect <Contract>
+storage-layout` cannot do this: namespaced structs are not part of a contract's storage layout, and it
+reports nothing for them.
 
 The Token's frozen state also changed shape, per issue #54: one mapping to a packed
 `{bool addressFrozen, uint256 amount}` struct became two separate mappings, matching OpenZeppelin's

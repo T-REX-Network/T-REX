@@ -31,6 +31,9 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
         token.unpause();
         token.mint(lostWallet, mintAmount);
         vm.stopPrank();
+
+        // The lost wallet belongs to the investor being recovered, which recovery now checks.
+        mockIdentityRegistryIdentity(lostWallet, IIdentity(investorOnchainId));
     }
 
     function testTokenRecoveryAddressRevertsWhenNotAgent(address caller) public {
@@ -43,7 +46,7 @@ contract TokenRecoveryUnitTest is TokenBaseUnitTest {
 
     function testTokenRecoveryAddressRevertsWhenCallerOnlyMinter() public {
         address minter = makeAddr("Minter");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
         vm.prank(minter);
