@@ -578,6 +578,22 @@ All notable changes to this project will be documented in this file.
     emits `WalletOwnerMismatch`. It no longer moves a wallet's balance to a new owner. Removed: the event
     `WalletOwnerChanged`.
 
+- **Disabling the eligibility checks no longer admits a wallet without an identity** (#119). In 4.2,
+  `disableEligibilityChecks` made `isVerified` return true for every address, so tokens could be minted to and
+  moved between wallets no identity owns, and they stayed there after the checks were enabled again. The switch
+  now skips the claim checks only, required topics and trusted issuers: `isVerified` and `isWalletVerified`
+  still need an active identity, so an unbound or revoked wallet is refused in every mode. Every holder of an
+  open-mode token needs an ONCHAINID. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
+  interfaces, so the standard is unaffected.
+  - Every token now has an owner, so the compliance ledger drops its repair path: `sum(positions) ==
+    totalSupply` always holds and a debit the position cannot cover reverts. Removed: `positionGap`,
+    `fixPosition` and its AccessManager row, the events `PositionUnresolved`, `PositionUnderflow` and
+    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`, and the ledger's `gap` field,
+    which moves `ownerOf` one slot up in `erc3643.storage.ComplianceLedger`.
+  - `canTransfer` no longer refuses a recipient with no identity itself, since the token's `isVerified`
+    refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
+    resolve to nobody after the registry's storage is swapped.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced

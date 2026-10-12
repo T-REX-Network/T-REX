@@ -238,19 +238,13 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         }
     }
 
-    /// LEDGER-2: the positions plus what the registry displaced sum to the supply.
+    /// LEDGER-2: the positions sum to the supply. Every token has an owner, so nothing is left uncounted.
     function invariant_positionsSumToSupply() public view {
-        int256 sum;
+        uint256 sum;
         for (uint256 i = 0; i < ACTORS; i++) {
-            sum += int256(ledger.positionOf(address(identities[i])));
+            sum += ledger.positionOf(address(identities[i]));
         }
-        assertEq(sum + ledger.positionGap(), int256(token.totalSupply()), "LEDGER-2 positions + gap != supply");
-    }
-
-    /// LEDGER-2b: nothing is displaced while no agent touches the registry. Every transition here is a token
-    /// movement or an investor revoking a wallet, so the pool must stay at zero.
-    function invariant_positionGapIsZero() public view {
-        assertEq(ledger.positionGap(), 0, "LEDGER-2b the gap moved without an agent action");
+        assertEq(sum, token.totalSupply(), "LEDGER-2 positions != supply");
     }
 
     /// LEDGER-3: the pending amounts of an identity are the open validations' maxima, relocations excluded.

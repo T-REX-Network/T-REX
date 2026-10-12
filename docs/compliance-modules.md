@@ -196,11 +196,9 @@ The registry could still name another identity later, for example after its stor
 ledger then keeps counting the wallet under the recorded owner and emits `WalletOwnerMismatch`. If the
 registry names nobody, the recorded owner is used as well.
 
-One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
-does not know, which only a registry with eligibility checks disabled allows. That amount is counted
-in `positionGap()`, signed, so that `sum(positions) + positionGap == totalSupply` holds regardless,
-`PositionUnresolved` names it, and the owner hands it to its identity with
-`fixPosition(from, to, amount)`, where a zero side is the gap.
+Every token has an owner. The registry admits no wallet without an active identity, even with its
+eligibility checks disabled, which skip the claims only. So `sum(positions) == totalSupply` always
+holds, and a debit the position cannot cover reverts.
 
 ## Binding
 

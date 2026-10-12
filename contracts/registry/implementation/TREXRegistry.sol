@@ -104,7 +104,7 @@ contract TREXRegistry is
     ///  standard bases, so reusing the old one would leave `checksDisabled` reading the low byte of the
     ///  old storage address and silently verify everyone. Migration in docs/erc3643-oz-swap.md.
     struct Storage {
-        /// @dev When true, `isVerified` short-circuits to true for every address.
+        /// @dev When true, `isVerified` skips the claim checks: any wallet with an active identity passes.
         bool checksDisabled;
 
         /// @dev Per-identity-type claim topic overrides; a non-empty set fully replaces the default
@@ -231,11 +231,11 @@ contract TREXRegistry is
     /// @dev Admission lookup. Same claim check as {isVerified}, over the active binding only: a revoked wallet,
     ///  on this chain or a satellite one, keeps its position but is not eligible for new activity.
     function isWalletVerified(bytes calldata wallet) external view override returns (bool) {
-        if (_getStorage().checksDisabled) return true;
-
         (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
-        if (onReferenceChain) return _identityIsVerified(_activeIdentityOf(userAddress));
-        return _identityIsVerified(IIdentity(_IDENTITY_FACTORY.getIdentity(wallet)));
+        IIdentity userIdentity =
+            onReferenceChain ? _activeIdentityOf(userAddress) : IIdentity(_IDENTITY_FACTORY.getIdentity(wallet));
+        if (_getStorage().checksDisabled) return address(userIdentity) != address(0);
+        return _identityIsVerified(userIdentity);
     }
 
     /// @inheritdoc ITREXRegistry
@@ -372,10 +372,10 @@ contract TREXRegistry is
         return IIdentityRegistryStorage(address(_identityStorage())).localAccountStatus(userAddress);
     }
 
-    /// @dev The eligibility kill switch short-circuits verification for every address, including one
-    ///  with no identity binding: the identity-exists check is skipped too, not only the claims.
+    /// @dev The eligibility kill switch skips the claim checks only. A wallet still needs an active identity,
+    ///  so tokens never land on a wallet the compliance ledger cannot count under an owner.
     function _isVerified(address userAddress) internal view override returns (bool) {
-        if (_getStorage().checksDisabled) return true;
+        if (_getStorage().checksDisabled) return address(_activeIdentityOf(userAddress)) != address(0);
         return super._isVerified(userAddress);
     }
 
