@@ -351,17 +351,13 @@ contract ModularCompliance is
 
     /// @dev Moves the positions, then tells the `AFTER` modules. One function serves all three hooks: the absent
     ///  side of a mint or a burn is a zero wallet and stays a zero identity.
-    ///
-    ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
-    ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
-    ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
-    ///  to the new owner here, before the movement itself is counted.
+    ///  Each wallet is counted under its recorded owner, see `_ownerOf`.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
-        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), int256(value));
-        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
+        if (from != address(0)) fromIdentity = _ownerOf(from, address(registry.identity(from)));
+        if (to != address(0)) toIdentity = _ownerOf(to, address(registry.identity(to)));
 
         IModule.TransferContext memory ctx =
             TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");

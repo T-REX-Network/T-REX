@@ -41,11 +41,9 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * Only this contract writes them, from the hooks and from the issuance, settlement and discard paths. There is
  * no setter, no writer role and no key: four mappings and four views.
  *
- * The registry can change who owns a wallet under the ledger's feet: an agent relinks a local entry, or deletes
- * it. The ledger keeps up on its own. It remembers which identity it credited each native wallet to, and the
- * next movement through that wallet notices the registry now names someone else and moves the wallet's balance
- * to them first, so no owner call is needed. When the registry names nobody, the remembered owner still
- * answers. Satellite wallets need none of this: the IdentityFactory's bindings are sticky.
+ * A wallet's owner is recorded the first time the ledger sees it and never changes. The registry could still
+ * name another identity later, for example after its storage is swapped. The ledger then keeps the recorded
+ * owner and emits `WalletOwnerMismatch`. If the registry names nobody, the recorded owner is used too.
  *
  * One rule decides what happens when a write still cannot be honoured. The compliance's own bookkeeping, the
  * pending amounts it reserves and releases, uses checked arithmetic and reverts: an inconsistency there is a
@@ -81,32 +79,24 @@ abstract contract ComplianceLedger is IComplianceLedger {
         return _ledger().gap;
     }
 
-    /// @dev Who a native wallet's tokens belong to now, given who the registry names. Records the first owner
-    ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody.
-    /// @return owner the identity to debit or credit for this wallet
-    /// @return previous the identity that was credited before, when the owner just changed and the wallet's
-    ///  balance has to follow; zero otherwise
-    function _followOwner(address wallet, address resolved) internal returns (address owner, address previous) {
-        mapping(address => address) storage ownerOf = _ledger().ownerOf;
-        address recorded = ownerOf[wallet];
-        if (resolved == address(0)) return (recorded, address(0));
-        if (recorded == resolved) return (resolved, address(0));
-        ownerOf[wallet] = resolved;
-        return (resolved, recorded);
-    }
-
-    /// @dev Moves what `wallet` held from the identity it was credited to onto the one the registry names now.
-    function _moveWalletBalance(address wallet, address previous, address owner, uint256 balance) internal {
-        if (balance != 0) {
-            _debitPosition(previous, bytes32(uint256(uint160(wallet))), balance);
-            _creditPosition(owner, bytes32(uint256(uint160(wallet))), balance);
+    /// @dev The identity a native wallet's tokens are counted under. The first identity the registry names is
+    ///  recorded and kept for good. If the registry later names another identity, the recorded one is still
+    ///  used and `WalletOwnerMismatch` is emitted.
+    function _ownerOf(address wallet, address resolved) internal returns (address) {
+        mapping(address wallet => address identity) storage owners = _ledger().ownerOf;
+        address recorded = owners[wallet];
+        if (recorded == address(0)) {
+            if (resolved != address(0)) owners[wallet] = resolved;
+            return resolved;
         }
-        emit EventsLib.WalletOwnerChanged(wallet, previous, owner, balance);
+        if (resolved != address(0) && resolved != recorded) {
+            emit EventsLib.WalletOwnerMismatch(wallet, recorded, resolved);
+        }
+        return recorded;
     }
 
     /// @dev Moves `amount` of position from one side to the other. A zero side is the gap between the positions and
-    ///  the supply, so this can give tokens that landed on nobody their owner, or take a stale position off an
-    ///  identity a relink left too high.
+    ///  the supply, so this can give tokens that landed on nobody their owner.
     function _fixPosition(address from, address to, uint256 amount) internal {
         ComplianceLedgerLib.fixPosition(from, to, amount);
     }

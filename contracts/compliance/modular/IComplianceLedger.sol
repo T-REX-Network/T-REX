@@ -39,11 +39,9 @@ pragma solidity 0.8.30;
 ///
 /// The positions are exact while every wallet that holds tokens resolves, through the token's identity
 /// registry, to the identity that owns it. A wallet keeps resolving after its investor revokes it, so no investor
-/// can break this on their own, and a token that circulates may not change its registry or its compliance. A
-/// registry agent still can, by deleting or relinking the local entry of a wallet that holds tokens. The ledger
-/// keeps up on its own: it remembers which identity it credited each native wallet to (`ownerOf`), and the next
-/// movement through a relinked wallet moves its balance to the new owner before applying the movement. A wallet
-/// the registry no longer names keeps its remembered owner. Only a wallet the ledger never credited and the
+/// can break this on their own, and a token that circulates may not change its registry or its compliance. The ledger
+/// records each native wallet's first owner (`ownerOf`) and keeps it, even if the registry later names another
+/// identity or nobody. Only a wallet the ledger never credited and the
 /// registry does not know leaves a trace: that amount is counted in `positionGap`, signed, so that
 /// `sum(positions) + positionGap == totalSupply` holds regardless, and the owner moves it with `fixPosition`.
 interface IComplianceLedger {
@@ -68,8 +66,8 @@ interface IComplianceLedger {
     /// @param identity the ONCHAINID to look up
     function pendingOutOf(address identity) external view returns (uint256);
 
-    /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to, which
-    ///  follows the registry on the wallet's next movement. Zero for a wallet the ledger has never credited.
+    /// @dev The identity a native wallet's tokens are counted under. It is the first identity the registry named
+    ///  for the wallet and never changes. Zero for a wallet the ledger has never counted.
     function ownerOf(address wallet) external view returns (address);
 
     /// @dev The gap between the positions and the supply, negative when they are over it: credits that landed on no

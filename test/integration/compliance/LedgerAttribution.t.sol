@@ -48,13 +48,6 @@ contract LedgerAttributionTest is TREXSuiteTest {
         token.mint(bob, BALANCE);
         token.unpause();
         vm.stopPrank();
-
-        // Drop the local entries so both wallets resolve through the global fallback, which is the lookup
-        // that has to keep attributing a revoked wallet.
-        vm.startPrank(agent);
-        registry.deleteIdentity(alice);
-        registry.deleteIdentity(bob);
-        vm.stopPrank();
     }
 
     /* ----- A revoked wallet keeps its owner ----- */
@@ -138,15 +131,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
     function test_transfer_RevertWhen_TheSenderCannotBeAttributed() public {
         _bindLockup(address(bobIdentity));
 
-        // Alice keeps no binding anywhere: neither local, nor global.
-        vm.mockCall(
-            address(idFactory),
-            abi.encodeCall(
-                idFactory.getIdentityIncludingRevoked, (InteroperableAddress.formatEvmV1(block.chainid, alice))
-            ),
-            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
-        );
-        assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
+        _unlinkAliceEverywhere();
 
         vm.prank(alice);
         vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
@@ -229,44 +214,77 @@ contract LedgerAttributionTest is TREXSuiteTest {
         _assertPositionsPlusGapRecountTheSupply();
     }
 
-    /// @notice An agent relinking a wallet that holds tokens is the case a revocation never produces: the next
-    ///         debit lands on the new identity, which holds nothing, so it underflows. The shortfall is counted,
-    ///         and the owner moves the position from the identity the relink left too high to the one it left
-    ///         too low.
-    function test_burn_Success_FollowsTheRelink_WhenAnAgentRelinkedAHoldingWallet() public {
+    /// @notice Bindings are sticky, so an agent cannot relink a wallet that holds tokens: the registration is
+    ///         refused, before and after a revocation, and the ledger never has an owner change to follow.
+    function test_registerIdentity_RevertWhen_AnAgentRelinksAHoldingWallet() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
 
-        // The agent re-points alice's wallet at charlie's identity, over the global link. Nothing moves yet.
         vm.prank(agent);
+        vm.expectRevert(ErrorsLib.AddressAlreadyStored.selector);
         registry.registerIdentity(alice, charlieIdentity, 0);
-        assertEq(ledger.ownerOf(alice), address(aliceIdentity), "the ledger has not heard yet");
-        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
 
         vm.prank(agent);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.WalletOwnerChanged(alice, address(aliceIdentity), address(charlieIdentity), BALANCE);
-        token.burn(alice, 300);
+        registry.deleteIdentity(alice);
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, alice));
+        registry.registerIdentity(alice, charlieIdentity, 0);
 
-        assertEq(ledger.ownerOf(alice), address(charlieIdentity), "followed");
-        assertEq(ledger.positionOf(address(aliceIdentity)), 0, "alice's identity owns nothing through this wallet");
-        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 300, "charlie's identity owns the rest");
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, alice));
+        registry.updateIdentity(alice, charlieIdentity);
+
+        assertEq(address(registry.identity(alice)), address(aliceIdentity), "alice keeps her owner");
+        assertEq(ledger.ownerOf(alice), address(aliceIdentity));
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
+    }
+
+    /// @notice The registry may name another identity for a wallet without any registry write, for example after
+    ///         its storage is swapped. The ledger keeps the owner it recorded, so the tokens never change hands.
+    function test_transfer_KeepsTheRecordedOwner_WhenTheRegistryNamesAnotherIdentity() public {
+        IComplianceLedger ledger = IComplianceLedger(address(compliance));
+        _resolveAliceTo(charlieIdentity);
+
+        vm.prank(alice);
+        vm.expectEmit(address(compliance));
+        emit EventsLib.WalletOwnerMismatch(alice, address(aliceIdentity), address(charlieIdentity));
+        token.transfer(bob, 100);
+
+        assertEq(ledger.ownerOf(alice), address(aliceIdentity), "the recorded owner stays");
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE - 100);
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0, "nothing moved to the new identity");
+        assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 100);
         assertEq(ledger.positionGap(), 0);
         _assertPositionsPlusGapRecountTheSupply();
     }
 
-    /// @notice The same, through a transfer: the whole balance follows the wallet, then the amount moves on.
-    function test_transfer_Success_FollowsTheRelink_WhenAnAgentRelinkedAHoldingWallet() public {
+    /// @notice The same holds for a wallet that receives tokens. A swapped storage that knows a wallet the
+    ///         factory does not is the one case where such a wallet stays verified.
+    function test_transfer_KeepsTheRecordedOwner_OfTheRecipient() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        vm.prank(agent);
-        registry.registerIdentity(alice, charlieIdentity, 0);
+        _resolveAliceTo(charlieIdentity);
+        // The factory must not know alice, or the registry would refuse her as a recipient on the mismatch.
+        _forgetAliceInTheFactory();
+
+        vm.prank(bob);
+        token.transfer(alice, 100);
+
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE + 100);
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
+        _assertPositionsPlusGapRecountTheSupply();
+    }
+
+    /// @notice A wallet sending to itself changes nothing, even while the registry names another identity.
+    function test_transfer_ChangesNothing_WhenAWalletSendsToItselfDuringAMismatch() public {
+        IComplianceLedger ledger = IComplianceLedger(address(compliance));
+        _resolveAliceTo(charlieIdentity);
+        // The factory must not know alice, or the registry would refuse her as a recipient on the mismatch.
+        _forgetAliceInTheFactory();
 
         vm.prank(alice);
-        token.transfer(bob, 100);
+        token.transfer(alice, 100);
 
-        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
-        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 100);
-        assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 100);
-        assertEq(ledger.positionGap(), 0);
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
         _assertPositionsPlusGapRecountTheSupply();
     }
 
@@ -307,8 +325,19 @@ contract LedgerAttributionTest is TREXSuiteTest {
 
     /* ----- Helpers ----- */
 
-    /// @dev Alice keeps no binding anywhere: neither local (dropped in setUp), nor global.
+    /// @dev Alice keeps no binding anywhere. Bindings are sticky, so no registry write produces this; it stands
+    ///      for the registry's storage being swapped for one that does not know her.
     function _unlinkAliceEverywhere() private {
+        vm.mockCall(
+            address(registry.identityStorage()),
+            abi.encodeCall(registry.identityStorage().storedIdentity, (alice)),
+            abi.encode(address(0))
+        );
+        assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
+    }
+
+    /// @dev The factory knows nothing about alice.
+    function _forgetAliceInTheFactory() private {
         vm.mockCall(
             address(idFactory),
             abi.encodeCall(
@@ -316,7 +345,16 @@ contract LedgerAttributionTest is TREXSuiteTest {
             ),
             abi.encode(address(0), IIdentityFactory.AccountStatus.None)
         );
-        assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
+    }
+
+    /// @dev The registry's storage names `identity` for alice, as a swapped storage would.
+    function _resolveAliceTo(IIdentity identity) private {
+        vm.mockCall(
+            address(registry.identityStorage()),
+            abi.encodeCall(registry.identityStorage().storedIdentity, (alice)),
+            abi.encode(address(identity))
+        );
+        assertEq(address(registry.identity(alice)), address(identity));
     }
 
     function _assertPositionsPlusGapRecountTheSupply() private view {

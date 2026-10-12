@@ -48,16 +48,15 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         registry.updateIdentity(bob, charlieIdentity);
     }
 
-    function test_updateIdentity_Success_EmitsEvent() public {
-        IIdentity old = registry.identity(bob);
-        assertEq(address(old), address(bobIdentity));
-
+    /// @dev Bindings are sticky: `updateIdentity` never moves a wallet to another identity.
+    function test_updateIdentity_RevertWhen_WalletIsBound() public {
         vm.prank(agent);
-        vm.expectEmit(true, true, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityUpdated(old, charlieIdentity);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
         registry.updateIdentity(bob, charlieIdentity);
 
-        assertEq(address(registry.identity(bob)), address(charlieIdentity));
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
     }
 
     // ============ updateCountry() — deprecated ============

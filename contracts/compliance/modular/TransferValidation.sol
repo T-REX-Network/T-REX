@@ -407,7 +407,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     {
         address toIdentity = validation.toIdentity;
         (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
-        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
+        if (toNative) toIdentity = _ownerOf(toWallet, toIdentity);
 
         return TransferContextLib.settlement(
             address(this),
@@ -743,18 +743,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         }
 
         validation.status = next;
-    }
-
-    /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its
-    ///  mind. `adjustment` is what this very movement already did to the wallet's balance on the token, so that
-    ///  what moves is what the wallet held before it: `+amount` for a sender the token already debited,
-    ///  `-amount` for a recipient it already credited, zero when the token has not moved yet.
-    function _currentOwner(address wallet, address resolved, int256 adjustment) internal returns (address owner) {
-        address previous;
-        (owner, previous) = _followOwner(wallet, resolved);
-        if (previous == address(0)) return owner;
-        uint256 balance = uint256(int256(_boundToken().balanceOf(wallet)) + adjustment);
-        _moveWalletBalance(wallet, previous, owner, balance);
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.

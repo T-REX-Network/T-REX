@@ -62,8 +62,6 @@
  */
 pragma solidity 0.8.30;
 
-import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { MessageTypesLib } from "./MessageTypesLib.sol";
@@ -146,13 +144,6 @@ library EventsLib {
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
-    event InvestorIdentityChanged(address indexed investor);
-    event IdentityOverridden(
-        address indexed investor, IIdentity indexed globalIdentity, IIdentity indexed localIdentity
-    );
-    event IdentityOverrideReleased(
-        address indexed investor, IIdentity indexed localIdentity, IIdentity indexed globalIdentity
-    );
 
     // Token Events
     event ForcedTransfer(address indexed agent);
@@ -222,11 +213,9 @@ library EventsLib {
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
 
-    /// The registry now names another identity for a wallet that holds tokens, so its balance followed it: what
-    /// the previous identity's position counted for this wallet is now the new one's.
-    event WalletOwnerChanged(
-        address indexed wallet, address indexed previousIdentity, address indexed identity, uint256 amount
-    );
+    /// The registry names another identity for a wallet than the one the ledger recorded. The ledger keeps
+    /// counting the wallet under the recorded identity.
+    event WalletOwnerMismatch(address indexed wallet, address indexed identity, address indexed resolvedIdentity);
 
     /// The owner moved `amount` of position between two sides; a zero side is the gap.
     event PositionFixed(address indexed from, address indexed to, uint256 amount);

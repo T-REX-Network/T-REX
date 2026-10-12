@@ -62,13 +62,13 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { ERC3643IdentityRegistryStorage } from "../../ERC-3643/base/ERC3643IdentityRegistryStorage.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
@@ -88,6 +88,16 @@ contract IdentityRegistryStorage is
     AccessManagedOwnableUpgradeable
 {
 
+    /// @custom:storage-location erc7201:erc3643.storage.TREXIdentityRegistryStorage
+    struct Storage {
+        /// @dev The status of each local wallet. Only `Revoked` is written. A wallet with no entry is `Active`
+        ///  when it has a stored identity, and `None` otherwise.
+        mapping(address wallet => IIdentityFactory.AccountStatus) accountStatus;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXIdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant STORAGE_LOCATION = 0xcb64a18d0bc273a26dd2f33432c876864881ae0a84f136720d41c3286c288f00;
+
     /// @notice Upper bound on the registries bound to this storage. It caps the cost of the global
     ///  fallback, which asks the IdentityFactory of every bound registry in turn (one external call each)
     ///  whenever a wallet has no local binding.
@@ -106,20 +116,6 @@ contract IdentityRegistryStorage is
         if (initialIRAddress != address(0)) {
             _bindIdentityRegistry(initialIRAddress);
         }
-    }
-
-    /// @inheritdoc IERC3643IdentityRegistryStorage
-    /// @dev Adds `EventsLib.InvestorIdentityChanged` to the standard behavior: T-REX operators watch it
-    ///  to reconcile off-chain investor records when an identity contract is replaced.
-    function modifyStoredIdentity(address _userAddress, IIdentity _identity)
-        external
-        override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
-    {
-        _authorizeIdentityWrite();
-        IIdentity oldIdentity = _storedIdentity(_userAddress);
-        _modifyStoredIdentity(_userAddress, _identity);
-        emit EventsLib.InvestorIdentityChanged(_userAddress);
-        _signalOverrideChange(_userAddress, oldIdentity, _identity);
     }
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
@@ -155,7 +151,7 @@ contract IdentityRegistryStorage is
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
     /// @dev The local binding takes precedence; without one, the wallet resolves through the global
-    ///  identity registry (see `_globalIdentity`).
+    ///  identity registry (see `_globalIdentity`). A revoked wallet still returns its identity.
     function storedIdentity(address _userAddress)
         external
         view
@@ -182,8 +178,8 @@ contract IdentityRegistryStorage is
     }
 
     /// @inheritdoc IIdentityRegistryStorage
-    function isLocallyRegistered(address userAddress) external view override returns (bool) {
-        return address(_storedIdentity(userAddress)) != address(0);
+    function localAccountStatus(address userAddress) external view override returns (IIdentityFactory.AccountStatus) {
+        return _localAccountStatus(userAddress);
     }
 
     /// @inheritdoc IIdentityRegistryStorage
@@ -196,45 +192,48 @@ contract IdentityRegistryStorage is
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev Signals an override after the standard `IdentityStored`: an override registration logs both
-    ///  events, in that order, so an indexer must read the pair rather than stop at `IdentityStored`.
-    ///  The country argument is ignored and no `CountryModified` is emitted: T-REX keeps no country here,
-    ///  see `modifyStoredInvestorCountry`.
+    /// @dev Reverts if the wallet was revoked, or if the IdentityFactory links it to another identity. Binding
+    ///  the same identity as the factory is allowed. The country is ignored, since this storage keeps none.
     function _addIdentityToStorage(address userAddress, IIdentity userIdentity, uint16) internal override {
+        require(
+            _getStorage().accountStatus[userAddress] != IIdentityFactory.AccountStatus.Revoked,
+            ErrorsLib.WalletAlreadyRevoked(userAddress)
+        );
         super._addIdentityToStorage(userAddress, userIdentity, 0);
 
         IIdentity globalIdentity = _globalIdentity(userAddress);
-        if (address(globalIdentity) != address(0) && globalIdentity != userIdentity) {
-            emit EventsLib.IdentityOverridden(userAddress, globalIdentity, userIdentity);
-        }
+        require(
+            address(globalIdentity) == address(0) || globalIdentity == userIdentity,
+            ErrorsLib.WalletBoundToAnotherIdentity(userAddress, address(globalIdentity))
+        );
     }
 
-    /// @dev Signals at most one override change after the standard events: `IdentityOverridden` when the
-    ///  new binding diverges from a non-zero global identity, `IdentityOverrideReleased` when it realigns
-    ///  with it. A write that leaves the binding unchanged signals nothing. An indexer tracking the
-    ///  override state must read that trailing event, not only the modification pair.
-    function _signalOverrideChange(address userAddress, IIdentity oldIdentity, IIdentity newIdentity) private {
-        IIdentity globalIdentity = _globalIdentity(userAddress);
-        if (address(globalIdentity) == address(0)) return;
-
-        if (globalIdentity != newIdentity) {
-            emit EventsLib.IdentityOverridden(userAddress, globalIdentity, newIdentity);
-        } else if (oldIdentity != newIdentity) {
-            emit EventsLib.IdentityOverrideReleased(userAddress, oldIdentity, globalIdentity);
-        }
+    /// @dev Always reverts, because a wallet never changes identity. To move an investor to a new identity,
+    ///  register a wallet of that identity and force transfer to it.
+    function _modifyStoredIdentity(address userAddress, IIdentity userIdentity) internal view override {
+        IIdentity boundIdentity = _storedIdentity(userAddress);
+        require(address(boundIdentity) != address(0), ErrorsLib.AddressNotYetStored());
+        require(
+            _getStorage().accountStatus[userAddress] != IIdentityFactory.AccountStatus.Revoked,
+            ErrorsLib.WalletAlreadyRevoked(userAddress)
+        );
+        require(boundIdentity != userIdentity, ErrorsLib.WalletAlreadyLinkedToIdentity(userAddress));
+        revert ErrorsLib.WalletBoundToAnotherIdentity(userAddress, address(boundIdentity));
     }
 
-    /// @dev Deletes the local override only. The wallet does not disappear from the token's view: it falls
-    ///  back to the global registry, and when bound there it remains `contains` and potentially
-    ///  `isVerified`. Excluding a wallet from a token is a compliance concern, not this function.
+    /// @dev Revokes the wallet, like the IdentityFactory's `revokeAccount`. The wallet keeps its identity, but
+    ///  `isVerified` returns false and it can never be bound again.
     function _removeIdentityFromStorage(address userAddress) internal override {
-        IIdentity oldIdentity = _storedIdentity(userAddress);
-        super._removeIdentityFromStorage(userAddress);
+        require(userAddress != address(0), ErrorsLib.ZeroAddress());
+        IIdentity boundIdentity = _storedIdentity(userAddress);
+        require(address(boundIdentity) != address(0), ErrorsLib.AddressNotYetStored());
+        require(
+            _localAccountStatus(userAddress) == IIdentityFactory.AccountStatus.Active,
+            ErrorsLib.WalletNotActive(userAddress)
+        );
 
-        IIdentity globalIdentity = _globalIdentity(userAddress);
-        if (address(globalIdentity) != address(0) && globalIdentity != oldIdentity) {
-            emit EventsLib.IdentityOverrideReleased(userAddress, oldIdentity, globalIdentity);
-        }
+        _getStorage().accountStatus[userAddress] = IIdentityFactory.AccountStatus.Revoked;
+        emit IdentityUnstored(userAddress, boundIdentity);
     }
 
     /// @dev T-REX keeps no country here, so nothing is written and no `CountryModified` is emitted. The
@@ -270,6 +269,21 @@ contract IdentityRegistryStorage is
         for (uint256 i = 0; i < registries.length && address(identity) == address(0); i++) {
             (address resolved,) = ITREXRegistry(registries[i]).identityFactory().getIdentityIncludingRevoked(account);
             identity = IIdentity(resolved);
+        }
+    }
+
+    /// @dev The status of a local wallet, as described on `Storage.accountStatus`.
+    function _localAccountStatus(address userAddress) private view returns (IIdentityFactory.AccountStatus) {
+        if (_getStorage().accountStatus[userAddress] == IIdentityFactory.AccountStatus.Revoked) {
+            return IIdentityFactory.AccountStatus.Revoked;
+        }
+        if (address(_storedIdentity(userAddress)) == address(0)) return IIdentityFactory.AccountStatus.None;
+        return IIdentityFactory.AccountStatus.Active;
+    }
+
+    function _getStorage() private pure returns (Storage storage store) {
+        assembly ("memory-safe") {
+            store.slot := STORAGE_LOCATION
         }
     }
 

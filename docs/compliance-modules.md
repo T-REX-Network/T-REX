@@ -186,11 +186,15 @@ changed through its modules; wallet bindings are changed in the registry it has.
 A wallet keeps its identity after the investor revokes it, so a revoked wallet can still be burned,
 recovered or force-transferred against the right position; it just may not act.
 
-What a registry agent changes under a wallet that holds tokens, the ledger follows on its own. It
-remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When an agent relinks
-the wallet to another identity, the next movement through it moves the wallet's balance to the new
-owner first, then counts the movement; `WalletOwnerChanged` says so. When an agent deletes the entry
-and nothing else names the wallet, the remembered owner still answers. Nobody calls anything.
+Wallet bindings are sticky in the registry's storage, as in the ONCHAINID IdentityFactory. An agent
+cannot relink a wallet to another identity, and deleting an entry revokes it: the wallet keeps its
+identity but may no longer act, and it can never be registered again. Moving an investor to a new
+identity is a forced transfer to a wallet of that identity.
+
+The ledger is sticky too. It records each native wallet's first owner (`ownerOf(wallet)`) and keeps it.
+The registry could still name another identity later, for example after its storage is swapped. The
+ledger then keeps counting the wallet under the recorded owner and emits `WalletOwnerMismatch`. If the
+registry names nobody, the recorded owner is used as well.
 
 One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
 does not know, which only a registry with eligibility checks disabled allows. That amount is counted

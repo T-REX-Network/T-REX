@@ -549,6 +549,35 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
+  The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
+  register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
+  - `modifyStoredIdentity`, and so `updateIdentity`, always reverts: `WalletBoundToAnotherIdentity` for
+    another identity, `WalletAlreadyLinkedToIdentity` for the same one, `WalletAlreadyRevoked` for a
+    revoked wallet.
+  - `removeIdentityFromStorage`, and so `deleteIdentity`, revokes instead of deleting. The wallet keeps its
+    identity for `identity` and `contains`, `isVerified` turns false, and the wallet can never be
+    registered again. Revoking twice reverts with `WalletNotActive`. The standard `IdentityUnstored` and
+    `IdentityRemoved` events are still emitted.
+  - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
+    factory links the wallet, actively or revoked, to a different identity, and with
+    `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
+  - The storage records the status in a new namespace, `erc3643.storage.TREXIdentityRegistryStorage`.
+    Bindings stored before the upgrade read as `Active`.
+  - Removed: `IIdentityRegistryStorage.isLocallyRegistered`, replaced by `localAccountStatus`, which returns
+    the factory's `AccountStatus`. `ITREXRegistry.isLocallyRegistered` stays and now counts active local
+    bindings only. Also removed are the events `InvestorIdentityChanged`, `IdentityOverridden` and
+    `IdentityOverrideReleased`, which no write can produce any more.
+  - Moving an investor to a new identity is now a forced transfer to a wallet of that identity, reported
+    to the compliance as `FORCED_TRANSFER` rather than `RECOVERY`.
+  - `isVerified` and `isWalletVerified` return false when the IdentityFactory links a wallet to another
+    identity than the storage does, even if that link was revoked. The wallet keeps its owner for
+    `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
+  - The compliance ledger keeps each wallet's first recorded owner for good. If the registry later names
+    another identity, for example after its storage is swapped, the ledger keeps the recorded owner and
+    emits `WalletOwnerMismatch`. It no longer moves a wallet's balance to a new owner. Removed: the event
+    `WalletOwnerChanged`.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
