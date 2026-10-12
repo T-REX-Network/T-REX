@@ -190,6 +190,16 @@ interface IModularCompliance is IERC3643Compliance {
     function agentTransferred(address _from, address _to, uint256 _amount, uint8 _kind) external;
 
     /**
+     *  @dev follows a registry relink of a native wallet before tokens land on it outside a movement the
+     *  compliance hears of, a recall's credit: the wallet's current balance moves from the identity it was last
+     *  credited to onto the one the registry names now, and nothing else. No movement is counted and no module is
+     *  called. A no-op when the owner has not changed.
+     *  This function can be called ONLY by the token bound to the compliance
+     *  @param _wallet the native wallet about to be credited
+     */
+    function syncOwner(address _wallet) external;
+
+    /**
      *  @dev getter for the bound modules of one type, in the order they were bound
      *  @param moduleType which modules to list, see {IModule-ModuleType}
      *  a module that named several types appears in each of their lists

@@ -264,7 +264,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
+    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
+    function discardExpiredValidations(uint256[] calldata validationIds) external {
         _discardExpiredValidations(validationIds);
     }
 
@@ -330,6 +332,12 @@ contract ModularCompliance is
     /// @dev A burn: no recipient, the sender's position shrinks.
     function _destroyed(address from, uint256 value) internal override {
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
+    }
+
+    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
+    ///  and no module is told.
+    function syncOwner(address wallet) external onlyBoundToken {
+        _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
