@@ -16,13 +16,13 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.delegateOut(user1, satellite1, 60);
+        ledger.ledgerDelegateOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
     function test_recall_BringsTheBridgedPositionBack() public {
         vm.prank(agent);
-        ledger.recall(satellite1, user1, 40);
+        ledger.ledgerRecall(satellite1, user1, 40);
 
         assertEq(token.bridgedBalanceOf(satellite1), 20);
         assertEq(token.balanceOf(user1), 80);
@@ -39,12 +39,12 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         emit EventsLib.Recalled(keccak256(satellite1), user1, satellite1, 40);
 
         vm.prank(agent);
-        ledger.recall(satellite1, user1, 40);
+        ledger.ledgerRecall(satellite1, user1, 40);
     }
 
     function test_recall_TheWholePosition() public {
         vm.prank(agent);
-        ledger.recall(satellite1, user1, 60);
+        ledger.ledgerRecall(satellite1, user1, 60);
 
         assertEq(token.bridgedBalanceOf(satellite1), 0);
         assertEq(token.totalBridged(), 0);
@@ -56,7 +56,7 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.Recalled(keccak256(satellite1), user1, satellite1, 0);
         vm.prank(agent);
-        ledger.recall(satellite1, user1, 0);
+        ledger.ledgerRecall(satellite1, user1, 0);
 
         assertEq(token.bridgedBalanceOf(satellite1), 60);
     }
@@ -65,7 +65,7 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
     ///      credits whichever it is handed.
     function test_recall_LandsOnAnotherNativeWallet() public {
         vm.prank(agent);
-        ledger.recall(satellite1, user2, 60);
+        ledger.ledgerRecall(satellite1, user2, 60);
 
         assertEq(token.balanceOf(user2), 60);
         assertEq(token.balanceOf(user1), 40);
@@ -75,7 +75,7 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
     function test_recall_LeavesTheFrozenBucketAlone() public {
         vm.startPrank(agent);
         token.freezePartialTokens(user1, 40);
-        ledger.recall(satellite1, user1, 60);
+        ledger.ledgerRecall(satellite1, user1, 60);
         vm.stopPrank();
 
         assertEq(token.getFrozenTokens(user1), 40);
@@ -87,14 +87,14 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         vm.expectCall(compliance, abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector), 0);
         vm.expectCall(identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.isVerified.selector), 0);
         vm.prank(agent);
-        ledger.recall(satellite1, user1, 40);
+        ledger.ledgerRecall(satellite1, user1, 40);
     }
 
     function test_recall_RoundTripRestoresTheNativePosition() public {
         vm.startPrank(agent);
-        ledger.recall(satellite1, user1, 60);
-        ledger.delegateOut(user1, satellite1, 60);
-        ledger.recall(satellite1, user1, 60);
+        ledger.ledgerRecall(satellite1, user1, 60);
+        ledger.ledgerDelegateOut(user1, satellite1, 60);
+        ledger.ledgerRecall(satellite1, user1, 60);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user1), 100);
@@ -106,33 +106,33 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
     function test_recall_RevertWhen_AmountAboveTheBridgedPosition() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, satellite1, 60, 61));
         vm.prank(agent);
-        ledger.recall(satellite1, user1, 61);
+        ledger.ledgerRecall(satellite1, user1, 61);
     }
 
     function test_recall_RevertWhen_WalletHoldsNoPosition() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, satellite2, 0, 1));
         vm.prank(agent);
-        ledger.recall(satellite2, user1, 1);
+        ledger.ledgerRecall(satellite2, user1, 1);
     }
 
     function test_recall_RevertWhen_WalletIsOnTheReferenceChain() public {
         bytes memory native = satelliteEnvelope(block.chainid, user1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, native));
         vm.prank(agent);
-        ledger.recall(native, user1, 0);
+        ledger.ledgerRecall(native, user1, 0);
     }
 
     function test_recall_RevertWhen_EnvelopeIsNotCanonical() public {
         bytes memory padded = abi.encodePacked(satellite1, hex"00");
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
         vm.prank(agent);
-        ledger.recall(padded, user1, 10);
+        ledger.ledgerRecall(padded, user1, 10);
     }
 
     function test_recall_RevertWhen_HolderIsZero() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         vm.prank(agent);
-        ledger.recall(satellite1, address(0), 10);
+        ledger.ledgerRecall(satellite1, address(0), 10);
     }
 
 }

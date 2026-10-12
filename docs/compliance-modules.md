@@ -55,7 +55,7 @@ undeliverable until `forceRemoveModule` drops the module, and with it the veto o
 forced transfer and a recovery, which are the agent's override, usually the movement that has to get
 through; and on a burn, which only an agent can call, so a revert there blocks a redemption the same way.
 So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only, letting
-`BURN`, `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
+`BURN`, `CROSS_CHAIN`, `DELEGATION`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
 `checkTransfer`, which narrows the issuance before anything leaves.
 
 ## checkTransfer
@@ -88,7 +88,7 @@ struct TransferContext {
     bytes32 toWallet;       // zero on a burn
     uint256 amountMin;      // equal to amountMax on a native movement
     uint256 amountMax;      // the amount that moved, or the requested maximum on an issuance
-    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN; never zero
+    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
     bytes   data;           // empty today; room for a later compliance to say more without a selector change
@@ -103,6 +103,18 @@ reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. A tracker that fol
 a forced transfer always moves the position between identities, and a recovery does when the new wallet
 belongs to another identity, so a holder count or a per-identity tracker records both. No rule is ever
 asked about those two, so a `TRANSFER_CHECK` module only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+
+`DELEGATION` is a holder moving native balance onto a satellite wallet of the same identity, reported with
+`fromWallet == toWallet`, both the native wallet, and no rule asked: location changes, ownership does not, and the
+position does not move. Like every hook it runs after the move, so when the registry relinked the holder, the
+migration counts the delegated amount back in and the whole pre-delegation balance lands on the new owner. A tracker
+of the investor's own activity leaves it out like `FORCED_TRANSFER` and `RECOVERY`; a holder count sees no change of
+ownership.
+
+The way back, a recall answered by a satellite's burn proof, is not a movement and no module is told. Before the
+credit lands the token calls `syncOwner(nativeWallet)`, which follows a registry relink of that wallet at adjustment
+zero: the wallet's existing balance moves to the identity the registry names now, and nothing else. The credit is
+already counted in that identity's position as a bridged one, so it must not be migrated with it.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
