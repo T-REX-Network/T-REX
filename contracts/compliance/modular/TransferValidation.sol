@@ -259,6 +259,24 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         if (draft.twoLegs) _dispatchLeg(draft.toChainKey, validationId, body);
     }
 
+    /// @inheritdoc ITransferValidation
+    /// @dev The record keeps everything but `to` and `spender`, which the caller supplies again; the rebuilt leg
+    ///  must hash to what was issued, see {TransferValidationLib-redispatch}. Nothing is written: the
+    ///  reservation, the id and the pinned route are those of the issuance, and the token refuses the send once
+    ///  the leg's pinned gateway is no longer the route.
+    function redispatchValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+        external
+    {
+        TransferValidationLib.redispatch(
+            validationId,
+            chainKey,
+            to,
+            spender,
+            address(_boundToken()),
+            _canCallSelector(msg.sender, this.redispatchValidation.selector)
+        );
+    }
+
     /* ----- Settlement ----- */
 
     /// @dev Classifies an attributed settlement against the stored validation. Reverts on a leg that does not

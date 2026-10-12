@@ -62,6 +62,7 @@
 
 pragma solidity 0.8.30;
 
+import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
@@ -144,6 +145,55 @@ library TransferValidationLib {
         );
 
         body = abi.encode(issued);
+    }
+
+    /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the record does not
+    ///  keep, for a resend. The rebuilt object must hash to what was issued, so a resend repeats the issuance
+    ///  byte for byte and can neither widen nor retarget it. Announces the resend and sends it through the token,
+    ///  which as the compliance's DELEGATECALL target sees the compliance as its caller, as {_record} relies on.
+    /// @param token the token the compliance is bound to
+    /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
+    function redispatch(
+        uint256 validationId,
+        bytes32 chainKey,
+        bytes calldata to,
+        bytes calldata spender,
+        address token,
+        bool authorised
+    ) external {
+        ValidationStorage storage store = layout();
+        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        ITransferValidation.Validation storage stored = store.validations[validationId];
+        require(
+            stored.status == ITransferValidation.ValidationStatus.Pending,
+            ErrorsLib.ValidationNotRedispatchable(validationId, uint8(stored.status))
+        );
+        require(block.timestamp < stored.expiry, ErrorsLib.ValidationExpired(validationId, stored.expiry));
+        require(
+            chainKey == stored.fromChainKey || (stored.twoLegs && chainKey == stored.toChainKey),
+            ErrorsLib.ChainNotPartOfValidation(validationId, chainKey)
+        );
+        require(
+            msg.sender == stored.fromIdentity || authorised,
+            ErrorsLib.NotAuthorizedForWallet(msg.sender, stored.fromWallet)
+        );
+
+        MessageTypesLib.ComplianceValidation memory issued = MessageTypesLib.ComplianceValidation({
+            validationId: validationId,
+            from: stored.fromWallet,
+            to: to,
+            spender: spender,
+            amountMin: stored.amountMin,
+            amountMax: stored.amountMax,
+            expiry: stored.expiry,
+            reconciliationWindow: stored.releaseAt - stored.expiry,
+            token: token
+        });
+        require(MessageTypesLib.hashValidation(issued) == stored.hash, ErrorsLib.ValidationBodyMismatch(validationId));
+
+        emit EventsLib.ValidationRedispatched(validationId, chainKey);
+
+        IToken(token).dispatchComplianceValidation(chainKey, validationId, abi.encode(issued));
     }
 
     function layout() internal pure returns (ValidationStorage storage $) {

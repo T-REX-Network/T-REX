@@ -273,6 +273,32 @@ interface ITransferValidation {
     /// Emits `ValidationResolved`.
     function resolveStuckValidation(uint256 validationId) external;
 
+    /// @dev Sends the leg of an issued validation toward `chainKey` again, byte for byte, through the gateway the
+    /// issuance pinned. The way to recover a leg the transport lost before the satellite's deadline, instead of
+    /// waiting for `releaseAt` and asking for a new validation. `to` and `spender` are the two fields the record
+    /// does not keep; they are read off `TransferValidationIssued` and must rebuild the issued hash, so a resend
+    /// can neither widen nor retarget the movement. Nothing is written.
+    ///
+    /// Requirements:
+    /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
+    /// - It must be stored `Pending`; otherwise reverts with `ValidationNotRedispatchable`.
+    /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
+    /// - `chainKey` must be the sender's chain or, on two legs, the recipient's; otherwise reverts with
+    ///   `ChainNotPartOfValidation`.
+    /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`.
+    /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
+    ///   otherwise reverts with `NotAuthorizedForWallet`.
+    /// - The leg's pinned gateway must still be the chain's route; otherwise the token reverts with
+    ///   `ValidationAlreadyRouted`, and the reservation returns through discard at `releaseAt`.
+    ///
+    /// Emits `ValidationRedispatched`, then the token's `ProtocolMessageSent`.
+    /// @param validationId The validation whose leg is sent again.
+    /// @param chainKey The chain the leg goes to, keyed as `MessageTypesLib.chainKey` computes it.
+    /// @param to ERC-7930 interoperable address of the recipient, as issued.
+    /// @param spender ERC-7930 address of the spender, as issued, or empty.
+    function redispatchValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+        external;
+
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);
 

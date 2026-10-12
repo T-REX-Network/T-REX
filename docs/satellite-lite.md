@@ -61,6 +61,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
+| validation leg | sender's identity or agent | `redispatchValidation(validationId, chainKey, to, spender)` before `expiry`; rebuilt from the record and checked against the issued hash; goes through the gateway the issuance pinned |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -68,6 +69,9 @@ Nothing is written off; a lost message is sent again.
 
 A resend never retargets: it is refused (`PeerChanged`) once the chain's peer is no longer the one the instruction
 was addressed to. A resend after a route switch is the expected way to recover a recall whose original gateway is gone.
+A validation leg is the exception: its settlement is matched against the pinned gateway, so after a route switch the
+leg is not resent (`ValidationAlreadyRouted`); the reservation comes back through discard at `releaseAt` and a new
+validation is requested.
 
 ## What the reference chain does with a Lite that breaks a rule
 

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`redispatchValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
+  for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
+  waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by
+  the sender's identity or AGENT before `expiry`; `to` and `spender`, the two fields the record does not keep, come
+  from `TransferValidationIssued` and must rebuild the stored hash (`ValidationBodyMismatch` otherwise). Refused on a
+  non-`Pending` id (`ValidationNotRedispatchable`), past `expiry` (`ValidationExpired`), toward a chain the
+  validation does not involve (`ChainNotPartOfValidation`), and by the token after a route switch
+  (`ValidationAlreadyRouted`). Emits `ValidationRedispatched`. Rebuild lives in `TransferValidationLib`.
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
   - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
