@@ -3,8 +3,8 @@ pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import {
     IdentityRegistryStorageBaseUnitTest
@@ -18,7 +18,7 @@ contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorag
         vm.recordLogs();
         irs.removeIdentityFromStorage(wallet);
 
-        _assertOnlyIdentityUnstored();
+        _assertOnlyIdentityRevoked();
         assertEq(address(irs.storedIdentity(wallet)), localIdentity);
         assertEq(uint8(irs.localAccountStatus(wallet)), uint8(IIdentityFactory.AccountStatus.Revoked));
     }
@@ -28,7 +28,7 @@ contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorag
         irs.addIdentityToStorage(wallet, IIdentity(globalIdentity), 0);
 
         vm.expectEmit(address(irs));
-        emit IERC3643IdentityRegistryStorage.IdentityUnstored(wallet, IIdentity(globalIdentity));
+        emit EventsLib.IdentityRevoked(wallet, IIdentity(globalIdentity));
         irs.removeIdentityFromStorage(wallet);
 
         assertEq(address(irs.storedIdentity(wallet)), globalIdentity);
@@ -50,9 +50,9 @@ contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorag
         irs.removeIdentityFromStorage(wallet);
     }
 
-    function _assertOnlyIdentityUnstored() private {
+    function _assertOnlyIdentityRevoked() private {
         bytes32[] memory selectors = new bytes32[](1);
-        selectors[0] = IERC3643IdentityRegistryStorage.IdentityUnstored.selector;
+        selectors[0] = EventsLib.IdentityRevoked.selector;
         _assertLogSelectors(vm.getRecordedLogs(), selectors);
     }
 

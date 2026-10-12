@@ -407,7 +407,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     {
         address toIdentity = validation.toIdentity;
         (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
-        if (toNative) toIdentity = _ownerOf(toWallet, toIdentity);
+        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
 
         return TransferContextLib.settlement(
             address(this),
@@ -484,8 +484,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /* ----- Discard ----- */
 
-    /// @dev The keeper's batch. Each id must be stored `Pending` and past `releaseAt`; a one still awaiting a leg is
-    ///  refused whatever the clock says. One refused id reverts the whole batch.
     /// @dev The way out of a pair of which one leg never arrived. The gate is a second reconciliation window
     ///  past `releaseAt`, the same length as the first, so a leg that is merely slow still lands as a late
     ///  reconciliation and never as a resolution.
@@ -502,7 +500,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             _awaitingOtherLeg(validation.status), ErrorsLib.ValidationNotStuck(validationId, uint8(validation.status))
         );
 
-        uint64 resolvableAt = validation.releaseAt + (validation.releaseAt - validation.expiry);
+        uint64 resolvableAt = _secondWindowEnd(validation);
         require(block.timestamp > resolvableAt, ErrorsLib.ValidationNotYetResolvable(validationId, resolvableAt));
 
         uint256 returnedAmount = 0;
@@ -518,8 +516,15 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         emit EventsLib.ValidationResolved(validationId, returnedAmount);
     }
 
+    /// @dev Each id must be stored `Pending` and past `releaseAt`; one still awaiting a leg is refused whatever
+    ///  the clock says. One refused id reverts the whole batch.
+    /// @dev Who may: the keeper from `releaseAt`, anyone from the end of the second window. A discard turns a
+    ///  leg that lands afterwards into a late reconciliation, which can pause its chain's issuance, so during the
+    ///  first window the keeper alone judges that a leg is late rather than slow. Past the second window a pair
+    ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
     function _discardExpiredValidations(uint256[] calldata validationIds) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
+        bool keeper = _canCallSelector(msg.sender, this.discardExpiredValidations.selector);
         for (uint256 i = 0; i < validationIds.length; i++) {
             uint256 validationId = validationIds[i];
             require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
@@ -532,11 +537,21 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
                 block.timestamp > validation.releaseAt,
                 ErrorsLib.ValidationNotReleasable(validationId, validation.releaseAt)
             );
+            if (!keeper) {
+                uint64 publicAt = _secondWindowEnd(validation);
+                require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(validationId, publicAt));
+            }
 
             _moveTo(validation, ValidationStatus.Discarded, false);
 
             emit EventsLib.ValidationDiscarded(validationId);
         }
+    }
+
+    /// @dev The end of the second reconciliation window: one more window past `releaseAt`, the same length as
+    ///  the first. Resolution and the public discard both open here.
+    function _secondWindowEnd(Validation storage validation) private view returns (uint64) {
+        return validation.releaseAt + (validation.releaseAt - validation.expiry);
     }
 
     /* ----- Views ----- */
@@ -743,6 +758,18 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         }
 
         validation.status = next;
+    }
+
+    /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its
+    ///  mind. `adjustment` is what this very movement already did to the wallet's balance on the token, so that
+    ///  what moves is what the wallet held before it: `+amount` for a sender the token already debited,
+    ///  `-amount` for a recipient it already credited, zero when the token has not moved yet.
+    function _currentOwner(address wallet, address resolved, int256 adjustment) internal returns (address owner) {
+        address previous;
+        (owner, previous) = _followOwner(wallet, resolved);
+        if (previous == address(0)) return owner;
+        uint256 balance = uint256(int256(_boundToken().balanceOf(wallet)) + adjustment);
+        _moveWalletBalance(wallet, previous, owner, balance);
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.

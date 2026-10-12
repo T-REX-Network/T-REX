@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
+  `Token.resend`, the burn proof):
+  - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
+    `toWallet`, a satellite wallet of the same identity, under a sequential `delegationId`; `totalSupply` is
+    unchanged. A `MINT_INSTRUCTION { delegationId, toWallet, amount, holder }` goes to the Lite, and
+    `keccak256(chainKey, peerKey, toWallet, amount, holder)` is stored so a resend can prove it repeats it. Callable
+    by the holder, the holder's identity, or AGENT. The compliance is told as `DELEGATION`
+    (`MovementKindLib.DELEGATION = 7`) so it follows a registry relink of the holder; no rule is asked.
+  - `instructRecall(wallet, amount, nativeWallet)` (AGENT, not pause-gated) records a `PendingRecall` with the
+    gateway and peer it is dispatched to, one open recall per wallet (`RecallPending`), bounded by the bridged
+    position, and sends a `RECALL_INSTRUCTION`. `pendingRecall(recallId)` exposes the record.
+  - A `BURN_PROOF { recallId, burnedWallet, amount }` for an open recall is admitted only from that recall's peer and
+    gateway, so a later route or peer change cannot strand it; a distrusted gateway is still refused. It must name the
+    instructed wallet and chain and prove at most the instructed amount, possibly zero. Before the credit,
+    `ModularCompliance.syncOwner(nativeWallet)` follows any relink of the native wallet. The bridged position is
+    debited (`Recalled`, `RecallSettled`) and the native wallet the instruction recorded is minted to. The settled
+    proof's hash is kept: the same proof again is a no-op (`BurnProofDuplicate`); a different proof for a settled
+    recall, or one for a recall never issued, pauses the token (`ReplayedBurnProof`).
+  - `resend(kind, id, data)` (AGENT) sends a mint (`kind` 0) or recall (`kind` 1) instruction again, byte for byte,
+    under its id, through the current route, to the same peer (`PeerChanged` otherwise). A recall resend moves the
+    admitted gateway to the current route.
+  - New linked library `TokenDelegationLib`; `TokenStorage` gains `recalls`, `lastRecallId`, `openRecall`,
+    `settledProofs`, `lastDelegationId`, `delegations` after `reservedForValidations`.
+  - `docs/satellite-lite.md`: the rules a Lite must follow, the retry table, and the accepted limitations.
+
 - **The suite AccessManager lays its own roles out** (`TREXAccessManager.initializeSuite`,
   `TREXAccessManager.setupSuite`): a fresh suite's manager is initialized in its proxy constructor with the
   issuer's admin and the four CREATE3-predicted suite addresses, and writes which role opens which function,
@@ -301,7 +326,7 @@ All notable changes to this project will be documented in this file.
     make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
     healthy module's unbind at will.
   - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
-    module and emits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
+    module and e`mits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
     can tell a forced removal from a regular one. The module keeps its own binding record, so the same
     proxy address cannot be re-added afterwards; a fresh deployment can.
   - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
@@ -557,8 +582,9 @@ All notable changes to this project will be documented in this file.
     revoked wallet.
   - `removeIdentityFromStorage`, and so `deleteIdentity`, revokes instead of deleting. The wallet keeps its
     identity for `identity` and `contains`, `isVerified` turns false, and the wallet can never be
-    registered again. Revoking twice reverts with `WalletNotActive`. The standard `IdentityUnstored` and
-    `IdentityRemoved` events are still emitted.
+    registered again. Revoking twice reverts with `WalletNotActive`. The storage and the registry emit
+    `IdentityRevoked` instead of the standard `IdentityUnstored` and `IdentityRemoved`, which mean the
+    wallet left the registry. See docs/erc3643-oz-swap.md for integrators.
   - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
     factory links the wallet, actively or revoked, to a different identity, and with
     `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
@@ -573,10 +599,8 @@ All notable changes to this project will be documented in this file.
   - `isVerified` and `isWalletVerified` return false when the IdentityFactory links a wallet to another
     identity than the storage does, even if that link was revoked. The wallet keeps its owner for
     `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
-  - The compliance ledger keeps each wallet's first recorded owner for good. If the registry later names
-    another identity, for example after its storage is swapped, the ledger keeps the recorded owner and
-    emits `WalletOwnerMismatch`. It no longer moves a wallet's balance to a new owner. Removed: the event
-    `WalletOwnerChanged`.
+  - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
+    ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
 
 - **Disabling the eligibility checks no longer admits a wallet without an identity** (#119). In 4.2,
   `disableEligibilityChecks` made `isVerified` return true for every address, so tokens could be minted to and
@@ -594,6 +618,30 @@ All notable changes to this project will be documented in this file.
     refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
     resolve to nobody after the registry's storage is swapped.
 
+- **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
+  a keeper that stopped running left every expired reservation locked until an admin found a new one. From
+  `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where
+  `resolveStuckValidation` already opens, any caller may, and is refused `ValidationNotPubliclyDiscardable` before
+  it. The `restricted` modifier is gone; the keeper is recognised through the selector's role binding.
+- `BurnProof` is `{ recallId, burnedWallet, amount }`; the token credits the native wallet the instruction recorded.
+  `MessageTypesLib` gains `MintInstruction` and `RecallInstruction`. No token or Lite was live at this change, so
+  `MessageTypesLib.VERSION` stays 1.
+- `DelegatedOut` carries the `delegationId`; `BurnProofReceived` carries `(originChainKey, recallId, burnedWallet,
+  amount)`.
+- `DelegatedOut` gains an indexed `delegationId`, so its topic hash changed; consumers of the old event need an
+  ABI update.
+- **A trusted issuer that answers nothing no longer validates a claim.** `isVerified` read the issuer's
+  `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
+  anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
+  memory read as `true`: with such an issuer trusted, an identity reporting a claim from it passed `isVerified`.
+  The registry now counts an answer only when it is exactly one word equal to `true`. An issuer that reverts,
+  answers nothing or answers something else is skipped like an invalid claim, never a revert, so one broken
+  issuer cannot halt transfers and another trusted issuer for the same topic can still verify the holder.
+  `addTrustedIssuer` also refuses an issuer without code (`TrustedIssuerHasNoCode`), as an early signal for a
+  wrong address; the check runs at trust time only, so an issuer must be deployed before a suite that trusts
+  it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
+  `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
+  claim that names another issuer as the registry already did, so the two report the same result.
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
@@ -773,6 +821,10 @@ All notable changes to this project will be documented in this file.
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
 
 ### Removed
+
+- `Token.dispatchMintInstruction`, which let an agent instruct a satellite to mint with no native burn, and
+  `Token.dispatchRecallInstruction`; `delegateOut`, `instructRecall` and `resend` are the only senders of those types.
+  `TREXMessagingLib.announceBurnProof` is replaced by `TokenDelegationLib.consumeBurnProof`.
 
 - `ModuleCapabilitiesLib` and the capability bitmask, `refreshModuleCapabilities`,
   `getModuleCapabilities`, `getModulesByCapability`, `ModuleCapabilitiesRecorded`,

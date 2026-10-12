@@ -280,8 +280,9 @@ contract TREXAccessManager is AccessManagerUpgradeable {
 
         // Cross-chain instructions.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-        _setTargetFunctionRole(token, IToken.dispatchMintInstruction.selector, agentRole);
-        _setTargetFunctionRole(token, IToken.dispatchRecallInstruction.selector, agentRole);
+        _setTargetFunctionRole(token, IToken.delegateOut.selector, agentRole);
+        _setTargetFunctionRole(token, IToken.instructRecall.selector, agentRole);
+        _setTargetFunctionRole(token, IToken.resend.selector, agentRole);
 
         // From here on, one agent verb per role. Each batch has a row of its own, on the role of its single-item
         // function: without one it falls back to ADMIN_ROLE, and an agent granted with an execution delay could

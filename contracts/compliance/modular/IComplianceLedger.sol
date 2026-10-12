@@ -39,8 +39,11 @@ pragma solidity 0.8.30;
 ///
 /// The positions are exact: `sum(positions) == totalSupply`. The token's identity registry admits no wallet
 /// without an active identity, even with its eligibility checks disabled, so every token lands on a wallet with
-/// an owner. The ledger records each native wallet's first owner (`ownerOf`) and keeps it, even if the registry
-/// later names another identity or nobody.
+/// an owner. Registry writes never relink a wallet, but the owner can still change who a wallet resolves to by
+/// swapping the registry's storage or unbinding a registry from it. The ledger keeps up on its own: it remembers
+/// which identity it credited each native wallet to (`ownerOf`), and the next movement through a wallet whose
+/// owner changed moves its balance to the new owner before applying the movement. A wallet the registry no longer
+/// names keeps its remembered owner.
 interface IComplianceLedger {
 
     /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
@@ -58,8 +61,8 @@ interface IComplianceLedger {
     /// @param identity the ONCHAINID to look up
     function pendingOutOf(address identity) external view returns (uint256);
 
-    /// @dev The identity a native wallet's tokens are counted under. It is the first identity the registry named
-    ///  for the wallet and never changes. Zero for a wallet the ledger has never counted.
+    /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to, which
+    ///  follows the registry on the wallet's next movement. Zero for a wallet the ledger has never credited.
     function ownerOf(address wallet) external view returns (address);
 
 }

@@ -21,7 +21,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.delegateOut(user1, satellite1, 60);
+        ledger.ledgerDelegateOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
@@ -67,7 +67,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         uint256 snapshot = vm.snapshotState();
 
         vm.prank(agent);
-        ledger.recall(satellite1, user2, 50);
+        ledger.ledgerRecall(satellite1, user2, 50);
         (uint256 free, uint256 bridged, uint256 bridgedTotal, uint256 supply) = _buckets();
 
         vm.revertToState(snapshot);
@@ -96,7 +96,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
     function test_settleToNative_ThenDelegatesBackOut() public {
         vm.startPrank(agent);
         ledger.settleToNative(satellite1, user2, 50, VALIDATION_ID);
-        ledger.delegateOut(user2, satellite3, 50);
+        ledger.ledgerDelegateOut(user2, satellite3, 50);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 0);

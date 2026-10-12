@@ -167,7 +167,7 @@ contract TokenHandler is Test {
         bytes memory to = _satellite(actor, walletSeed);
         amount = bound(amount, 0, token.freeBalanceOf(holder));
         vm.prank(agent);
-        try token.delegateOut(holder, to, amount) {
+        try token.ledgerDelegateOut(holder, to, amount) {
             ghostBridgedTotal += amount;
         } catch { }
     }
@@ -179,7 +179,7 @@ contract TokenHandler is Test {
         bytes memory from = _satellite(actor, walletSeed);
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
         vm.prank(agent);
-        try token.recall(from, holder, amount) {
+        try token.ledgerRecall(from, holder, amount) {
             ghostBridgedTotal -= amount;
         } catch { }
     }

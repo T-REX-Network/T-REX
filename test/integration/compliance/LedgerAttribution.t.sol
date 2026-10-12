@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -224,52 +223,42 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
     }
 
-    /// @notice The registry may name another identity for a wallet without any registry write, for example after
-    ///         its storage is swapped. The ledger keeps the owner it recorded, so the tokens never change hands.
-    function test_transfer_KeepsTheRecordedOwner_WhenTheRegistryNamesAnotherIdentity() public {
+    /// @notice Registry writes never relink a wallet, but swapping the registry's storage can. Rules and positions
+    ///         then follow the same identity: the lockup on the new identity refuses alice's transfer, and an
+    ///         agent's burn debits the new identity, which the wallet's balance followed to.
+    function test_storageSwap_RulesAndPositionsFollowTheSameIdentity() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
+        LockedSenderModule lockup = _bindLockup(address(charlieIdentity));
         _resolveAliceTo(charlieIdentity);
 
         vm.prank(alice);
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        token.transfer(bob, 1);
+        assertEq(lockup.checkTransfer(_contextFrom(charlieIdentity)), 0, "the rule judges the new identity");
+
+        vm.prank(agent);
         vm.expectEmit(address(compliance));
-        emit EventsLib.WalletOwnerMismatch(alice, address(aliceIdentity), address(charlieIdentity));
-        token.transfer(bob, 100);
+        emit EventsLib.WalletOwnerChanged(alice, address(aliceIdentity), address(charlieIdentity), BALANCE);
+        token.burn(alice, 100);
 
-        assertEq(ledger.ownerOf(alice), address(aliceIdentity), "the recorded owner stays");
-        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE - 100);
-        assertEq(ledger.positionOf(address(charlieIdentity)), 0, "nothing moved to the new identity");
-        assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 100);
+        assertEq(ledger.ownerOf(alice), address(charlieIdentity), "the ledger followed");
+        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
+        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 100, "the burn debited the new identity");
         _assertPositionsRecountTheSupply();
     }
 
-    /// @notice The same holds for a wallet that receives tokens. A swapped storage that knows a wallet the
-    ///         factory does not is the one case where such a wallet stays verified.
-    function test_transfer_KeepsTheRecordedOwner_OfTheRecipient() public {
+    /// @notice A recovery after a storage swap stays within one identity: the lost wallet's balance follows to
+    ///         the identity the registry names, and the recovery moves it between that identity's wallets.
+    function test_storageSwap_RecoveryStaysWithinTheNewIdentity() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
         _resolveAliceTo(charlieIdentity);
-        // The factory must not know alice, or the registry would refuse her as a recipient on the mismatch.
-        _forgetAliceInTheFactory();
 
-        vm.prank(bob);
-        token.transfer(alice, 100);
+        vm.prank(agent);
+        token.recoveryAddress(alice, another, address(charlieIdentity));
 
-        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE + 100);
-        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
-        _assertPositionsRecountTheSupply();
-    }
-
-    /// @notice A wallet sending to itself changes nothing, even while the registry names another identity.
-    function test_transfer_ChangesNothing_WhenAWalletSendsToItselfDuringAMismatch() public {
-        IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        _resolveAliceTo(charlieIdentity);
-        // The factory must not know alice, or the registry would refuse her as a recipient on the mismatch.
-        _forgetAliceInTheFactory();
-
-        vm.prank(alice);
-        token.transfer(alice, 100);
-
-        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
-        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
+        assertEq(token.balanceOf(another), BALANCE);
+        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
+        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE, "one identity before and after");
         _assertPositionsRecountTheSupply();
     }
 
@@ -284,17 +273,6 @@ contract LedgerAttributionTest is TREXSuiteTest {
             abi.encode(address(0))
         );
         assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
-    }
-
-    /// @dev The factory knows nothing about alice.
-    function _forgetAliceInTheFactory() private {
-        vm.mockCall(
-            address(idFactory),
-            abi.encodeCall(
-                idFactory.getIdentityIncludingRevoked, (InteroperableAddress.formatEvmV1(block.chainid, alice))
-            ),
-            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
-        );
     }
 
     /// @dev The registry's storage names `identity` for alice, as a swapped storage would.

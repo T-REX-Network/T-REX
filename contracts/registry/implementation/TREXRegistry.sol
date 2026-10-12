@@ -367,6 +367,13 @@ contract TREXRegistry is
         return userIdentity;
     }
 
+    /// @dev Deleting revokes the wallet in the storage. It stays in the registry, so `IdentityRevoked` is emitted
+    ///  instead of the standard `IdentityRemoved`.
+    function _deleteIdentity(address userAddress) internal override {
+        _identityStorage().removeIdentityFromStorage(userAddress);
+        emit EventsLib.IdentityRevoked(userAddress, _identityOf(userAddress));
+    }
+
     /// @dev The status of the wallet in this registry's storage, ignoring the IdentityFactory.
     function _localAccountStatus(address userAddress) private view returns (IIdentityFactory.AccountStatus) {
         return IIdentityRegistryStorage(address(_identityStorage())).localAccountStatus(userAddress);

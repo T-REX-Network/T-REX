@@ -401,7 +401,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
         envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
         vm.prank(agent);
-        TokenLedgerHarness(address(token)).delegateOut(alice, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerDelegateOut(alice, envelope, amount);
     }
 
 }

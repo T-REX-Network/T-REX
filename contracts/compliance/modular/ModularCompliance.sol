@@ -268,7 +268,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
+    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
+    function discardExpiredValidations(uint256[] calldata validationIds) external {
         _discardExpiredValidations(validationIds);
     }
 
@@ -334,6 +336,12 @@ contract ModularCompliance is
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
     }
 
+    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
+    ///  and no module is told.
+    function syncOwner(address wallet) external onlyBoundToken {
+        _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
+    }
+
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
     ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
@@ -344,13 +352,17 @@ contract ModularCompliance is
 
     /// @dev Moves the positions, then tells the `AFTER` modules. One function serves all three hooks: the absent
     ///  side of a mint or a burn is a zero wallet and stays a zero identity.
-    ///  Each wallet is counted under its recorded owner, see `_ownerOf`.
+    ///
+    ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
+    ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
+    ///  minus what just arrived. A wallet whose owner changed since it was last credited has its balance moved
+    ///  to the new owner here, before the movement itself is counted.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
-        if (from != address(0)) fromIdentity = _ownerOf(from, address(registry.identity(from)));
-        if (to != address(0)) toIdentity = _ownerOf(to, address(registry.identity(to)));
+        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), int256(value));
+        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
 
         IModule.TransferContext memory ctx =
             TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");

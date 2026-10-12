@@ -20,7 +20,6 @@ import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
-import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -623,9 +622,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertTrue(registry.isVerified(bob));
 
         vm.expectEmit(address(identityRegistryStorage));
-        emit IERC3643IdentityRegistryStorage.IdentityUnstored(bob, bobIdentity);
+        emit EventsLib.IdentityRevoked(bob, bobIdentity);
         vm.expectEmit(address(registry));
-        emit IERC3643IdentityRegistry.IdentityRemoved(bob, bobIdentity);
+        emit EventsLib.IdentityRevoked(bob, bobIdentity);
         vm.prank(agent);
         registry.deleteIdentity(bob);
 
