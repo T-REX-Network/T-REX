@@ -94,7 +94,9 @@ interface IModularCompliance is IERC3643Compliance {
      *  @dev re-reads what a bound module says it is and files it again
      *  @param _module address of the bound module to resynchronise
      *  a module sits behind a proxy, so an implementation upgrade can change what `moduleTypes` answers while
-     *  this compliance still routes by what it recorded at binding. Until this is called, the compliance keeps
+     *  this compliance still routes by what it recorded at binding. A module on `AbstractModuleUpgradeable`
+     *  refuses such an upgrade; this is the repair for one that is not, or whose new code dropped that guard.
+     *  Until this is called, the compliance keeps
      *  calling the module for a type it dropped, which reverts on every movement, and never calls it for a type
      *  it gained
      *  removing and re-adding the module is not the same thing: an unbind increments the module's bind nonce,
