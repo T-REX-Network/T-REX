@@ -386,24 +386,6 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.validationOf(second).executedAmount, secondMax, "settled at its maximum");
     }
 
-    /// @notice A native recipient no registry names is counted under its own address when the validation
-    ///         settles, so the positions still add up to what moved.
-    function test_handleSettlement_Success_WhenTheNativeRecipientHasNoIdentity() public {
-        _track();
-        _bind(nativeBob, address(0));
-        vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", nativeBob), abi.encode(true));
-        vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
-
-        vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, nativeBob, 40));
-
-        assertEq(mc.ownerOf(bob), bob, "the wallet owns itself");
-        assertEq(mc.positionOf(bob), 40, "counted under the wallet");
-        assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE - 40);
-        assertEq(mc.pendingInOf(address(0)), 0, "nothing left reserved");
-    }
-
     function test_handleSettlement_Success_WhenTheNativeSideIsTheRecipient() public {
         _track();
         address recorder = _bindAfterTransferModule();

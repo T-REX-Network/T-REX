@@ -104,7 +104,7 @@ contract TREXRegistry is
     ///  standard bases, so reusing the old one would leave `checksDisabled` reading the low byte of the
     ///  old storage address and silently verify everyone. Migration in docs/erc3643-oz-swap.md.
     struct Storage {
-        /// @dev When true, `isVerified` short-circuits to true for every address.
+        /// @dev When true, `isVerified` skips the claim checks: any wallet with an active identity passes.
         bool checksDisabled;
 
         /// @dev Per-identity-type claim topic overrides; a non-empty set fully replaces the default
@@ -209,7 +209,7 @@ contract TREXRegistry is
 
     /// @inheritdoc ITREXRegistry
     function isLocallyRegistered(address userAddress) external view override returns (bool) {
-        return IIdentityRegistryStorage(address(_identityStorage())).isLocallyRegistered(userAddress);
+        return _localAccountStatus(userAddress) == IIdentityFactory.AccountStatus.Active;
     }
 
     /// @inheritdoc ITREXRegistry
@@ -231,11 +231,10 @@ contract TREXRegistry is
     /// @dev Admission lookup. Same claim check as {isVerified}, over the active binding only: a revoked wallet,
     ///  on this chain or a satellite one, keeps its position but is not eligible for new activity.
     function isWalletVerified(bytes calldata wallet) external view override returns (bool) {
-        if (_getStorage().checksDisabled) return true;
-
         (bool onReferenceChain, address userAddress) = WalletKeyLib.isReferenceChain(wallet);
         IIdentity userIdentity =
             onReferenceChain ? _activeIdentityOf(userAddress) : IIdentity(_IDENTITY_FACTORY.getIdentity(wallet));
+        if (_getStorage().checksDisabled) return address(userIdentity) != address(0);
         return _identityIsVerified(userIdentity);
     }
 
@@ -349,29 +348,41 @@ contract TREXRegistry is
         return true;
     }
 
-    /// @dev A wallet the IdentityFactory has revoked may not act, however it was registered. Neither read it
-    ///  would otherwise pass through catches that on its own: a local binding is a plain mapping that knows
-    ///  nothing of revocation, and the storage's global fallback deliberately keeps answering for a revoked
-    ///  wallet so its holdings never lose an owner. So the status is asked of the factory directly here, and
-    ///  a wallet the factory never linked (status `None`) is unaffected.
+    /// @dev The identity a wallet may act through, or zero. A wallet may not act when the storage or the
+    ///  IdentityFactory revoked it, or when the factory links it to another identity than the storage does.
+    ///  In that last case the wallet's own signature disagrees with the agent's binding, so neither is trusted.
     ///
     ///  `_identityOf` is left as is. Attribution and admission are separate questions: `contains`, `identity`
-    ///  and recovery keep naming who owns a revoked wallet's tokens, while this read decides who may act.
+    ///  and recovery keep naming who owns the wallet's tokens, while this read decides who may act.
     function _activeIdentityOf(address userAddress) internal view override returns (IIdentity) {
         IIdentity userIdentity = _identityOf(userAddress);
         if (address(userIdentity) == address(0)) return userIdentity;
+        if (_localAccountStatus(userAddress) == IIdentityFactory.AccountStatus.Revoked) return IIdentity(address(0));
 
         bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
-        if (_IDENTITY_FACTORY.getAccountStatus(account) == IIdentityFactory.AccountStatus.Revoked) {
-            return IIdentity(address(0));
-        }
+        (address globalIdentity, IIdentityFactory.AccountStatus status) =
+            _IDENTITY_FACTORY.getIdentityIncludingRevoked(account);
+        if (status == IIdentityFactory.AccountStatus.Revoked) return IIdentity(address(0));
+        if (globalIdentity != address(0) && globalIdentity != address(userIdentity)) return IIdentity(address(0));
         return userIdentity;
     }
 
-    /// @dev The eligibility kill switch short-circuits verification for every address, including one
-    ///  with no identity binding: the identity-exists check is skipped too, not only the claims.
+    /// @dev Deleting revokes the wallet in the storage. It stays in the registry, so `IdentityRevoked` is emitted
+    ///  instead of the standard `IdentityRemoved`.
+    function _deleteIdentity(address userAddress) internal override {
+        _identityStorage().removeIdentityFromStorage(userAddress);
+        emit EventsLib.IdentityRevoked(userAddress, _identityOf(userAddress));
+    }
+
+    /// @dev The status of the wallet in this registry's storage, ignoring the IdentityFactory.
+    function _localAccountStatus(address userAddress) private view returns (IIdentityFactory.AccountStatus) {
+        return IIdentityRegistryStorage(address(_identityStorage())).localAccountStatus(userAddress);
+    }
+
+    /// @dev The eligibility kill switch skips the claim checks only. A wallet still needs an active identity,
+    ///  so tokens never land on a wallet the compliance ledger cannot count under an owner.
     function _isVerified(address userAddress) internal view override returns (bool) {
-        if (_getStorage().checksDisabled) return true;
+        if (_getStorage().checksDisabled) return address(_activeIdentityOf(userAddress)) != address(0);
         return super._isVerified(userAddress);
     }
 

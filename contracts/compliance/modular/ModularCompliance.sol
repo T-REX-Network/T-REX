@@ -268,7 +268,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
+    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
+    function discardExpiredValidations(uint256[] calldata validationIds) external {
         _discardExpiredValidations(validationIds);
     }
 
@@ -308,16 +310,14 @@ contract ModularCompliance is
     /// @dev Rule evaluation: the amount must be at most the smallest amount any `TRANSFER_CHECK` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
-    ///  A wallet that resolves to no identity is refused outright while a rule is bound, on either side. Every
-    ///  rule about distribution keys on the identity: a zero recipient would read as the absent side of a burn
-    ///  and answer "no limit", letting tokens land where no cap can ever reach them; a zero sender would read as
-    ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
-    ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
+    ///  A sender that resolves to no identity is refused outright while a rule is bound: it would read as a mint
+    ///  and escape every rule about leaving. A holding wallet resolves to nobody only after the owner swaps the
+    ///  registry's storage or unbinds a registry from it. The recipient needs no such guard, since the token asks
+    ///  `isVerified` first, and that requires an active identity even with the eligibility checks disabled.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        if (to != address(0) && ctx.toIdentity == address(0)) return false;
         return value <= _callCheckTransfer(ctx);
     }
 
@@ -336,6 +336,12 @@ contract ModularCompliance is
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
     }
 
+    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
+    ///  and no module is told.
+    function syncOwner(address wallet) external onlyBoundToken {
+        _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
+    }
+
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
     ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
@@ -349,7 +355,7 @@ contract ModularCompliance is
     ///
     ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
-    ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
+    ///  minus what just arrived. A wallet whose owner changed since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();

@@ -2,11 +2,13 @@
 pragma solidity 0.8.30;
 
 import { Vm } from "@forge-std/Vm.sol";
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -18,7 +20,6 @@ import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { MockContract } from "../mocks/MockContract.sol";
-import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Countries } from "test/integration/helpers/Countries.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -97,16 +98,15 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     // ============ modifyStoredIdentity() Tests ============
 
-    /// @notice `InvestorIdentityChanged` names the wallet the standard `IdentityModified` omits.
-    function test_modifyStoredIdentity_EmitsInvestorIdentityChanged() public {
-        vm.expectEmit(address(identityRegistryStorage));
-        emit IERC3643IdentityRegistryStorage.IdentityModified(bobIdentity, charlieIdentity);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.InvestorIdentityChanged(bob);
+    /// @notice Bindings are sticky: a stored wallet is never moved to another identity.
+    function test_modifyStoredIdentity_RevertWhen_WalletIsBound() public {
         vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
         identityRegistryStorage.modifyStoredIdentity(bob, charlieIdentity);
 
-        assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(charlieIdentity));
+        assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(bobIdentity));
     }
 
     /// @notice Should revert when sender is not agent
@@ -116,28 +116,21 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
     }
 
-    /// @notice Should revert when identity is zero address
-    function test_modifyStoredIdentity_RevertWhen_IdentityZeroAddress() public {
+    /// @notice A revoked wallet keeps its binding, so it cannot be moved either.
+    function test_modifyStoredIdentity_RevertWhen_WalletWasRevoked() public {
         vm.prank(agent);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        identityRegistryStorage.modifyStoredIdentity(charlie, IIdentity(address(0)));
-    }
+        identityRegistryStorage.removeIdentityFromStorage(charlie);
 
-    /// @notice Should revert when wallet is zero address
-    function test_modifyStoredIdentity_RevertWhen_WalletZeroAddress() public {
         vm.prank(agent);
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        identityRegistryStorage.modifyStoredIdentity(address(0), charlieIdentity);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, charlie));
+        identityRegistryStorage.modifyStoredIdentity(charlie, bobIdentity);
     }
 
     /// @notice Should revert when wallet is not registered
     function test_modifyStoredIdentity_RevertWhen_NotStored() public {
         vm.prank(agent);
-        identityRegistryStorage.removeIdentityFromStorage(charlie);
-
-        vm.prank(agent);
         vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
-        identityRegistryStorage.modifyStoredIdentity(charlie, charlieIdentity);
+        identityRegistryStorage.modifyStoredIdentity(another, charlieIdentity);
     }
 
     // ============ modifyStoredInvestorCountry() — deprecated ============
@@ -175,10 +168,17 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when wallet is not registered
     function test_removeIdentityFromStorage_RevertWhen_NotStored() public {
         vm.prank(agent);
+        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+        identityRegistryStorage.removeIdentityFromStorage(another);
+    }
+
+    /// @notice Revocation is terminal: a revoked wallet cannot be revoked again.
+    function test_removeIdentityFromStorage_RevertWhen_AlreadyRevoked() public {
+        vm.prank(agent);
         identityRegistryStorage.removeIdentityFromStorage(charlie);
 
         vm.prank(agent);
-        vm.expectRevert(ErrorsLib.AddressNotYetStored.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletNotActive.selector, charlie));
         identityRegistryStorage.removeIdentityFromStorage(charlie);
     }
 
@@ -219,7 +219,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
             // bindIdentityRegistry is gated by onlySharedAuthority: each registry must report the storage's
             // AccessManager as its authority.
             vm.mockCall(
-                registryAddress, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
+                registryAddress, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
             );
             vm.prank(deployer);
             identityRegistryStorage.bindIdentityRegistry(registryAddress);
@@ -228,7 +228,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // Try to add 301st registry (should fail, length is now 300, not < 300). It must also share the
         // authority so it reaches the count check rather than reverting on onlySharedAuthority first.
         address extraRegistry = vm.addr(2000);
-        vm.mockCall(extraRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(extraRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         uint256 maxBound = identityRegistryStorage.MAX_BOUND_REGISTRIES();
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, maxBound));
@@ -255,7 +255,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // Bind first. bindIdentityRegistry is gated by onlySharedAuthority, so the bound address must report
         // the storage's AccessManager as its authority.
         vm.mockCall(
-            address(charlieIdentity), abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
+            address(charlieIdentity), abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
         );
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
@@ -301,7 +301,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         // bindIdentityRegistry is gated by onlySharedAuthority: the bound address must report the
         // storage's AccessManager as its authority.
-        vm.mockCall(secondIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(secondIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(secondIR);
 
@@ -328,7 +328,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // Bind another registry and verify it appears. It must share the storage's authority to pass
         // the onlySharedAuthority guard.
         address extraIR = makeAddr("extraIR");
-        vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
 
@@ -348,7 +348,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertTrue(identityRegistryStorage.isIdentityRegistryBound(existingIR));
         assertFalse(identityRegistryStorage.isIdentityRegistryBound(extraIR));
 
-        vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
         assertTrue(identityRegistryStorage.isIdentityRegistryBound(extraIR));
@@ -373,7 +373,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), 1);
 
         address extraIR = makeAddr("extraIR");
-        vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
 
@@ -408,7 +408,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         extras = new address[](count);
         for (uint256 i = 0; i < count; i++) {
             address extra = makeAddr(string.concat("pagedIR", vm.toString(i)));
-            vm.mockCall(extra, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+            vm.mockCall(extra, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
             vm.prank(deployer);
             identityRegistryStorage.bindIdentityRegistry(extra);
             extras[i] = extra;
@@ -534,144 +534,116 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertNotEq(globalIdentity, address(0));
     }
 
-    // ============ addIdentityToStorage() override signal ============
+    // ============ sticky bindings against the IdentityFactory ============
 
-    /// @notice A local binding that shadows a different global identity is signalled by `IdentityOverridden`
-    ///         right after the standard `IdentityStored`, and the local binding wins.
-    function test_addIdentityToStorage_EmitsIdentityOverridden_WhenGlobalIdentityDiffers() public {
+    /// @notice A wallet the factory links to one identity cannot be bound locally to another.
+    function test_addIdentityToStorage_RevertWhen_FactoryLinksWalletToAnotherIdentity() public {
         IIdentity globalIdentity = _deployIdentity(another, "another");
 
-        vm.expectEmit(address(identityRegistryStorage));
-        emit IERC3643IdentityRegistryStorage.IdentityStored(another, charlieIdentity);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverridden(another, globalIdentity, charlieIdentity);
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, another, address(globalIdentity))
+        );
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+    }
+
+    /// @notice The refusal reaches the agent path an issuer actually uses: registering through the registry.
+    function test_registerIdentity_RevertWhen_FactoryLinksWalletToAnotherIdentity() public {
+        address globalOnly = makeAddr("globalOnly");
+        IIdentity globalIdentity = _deployIdentity(globalOnly, "globalOnly");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, globalOnly, address(globalIdentity))
+        );
+        registry.registerIdentity(globalOnly, charlieIdentity, 0);
+    }
+
+    /// @notice A wallet the factory revoked stays bound to its identity, so it cannot be bound to another.
+    function test_addIdentityToStorage_RevertWhen_FactoryRevokedWalletOfAnotherIdentity() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+        vm.prank(address(globalIdentity));
+        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, another));
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(globalIdentity));
+
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, another, address(globalIdentity))
+        );
+        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+    }
+
+    /// @notice A local copy of the factory's own link is allowed.
+    function test_addIdentityToStorage_Succeeds_WhenGlobalIdentityMatches() public {
+        IIdentity globalIdentity = _deployIdentity(another, "another");
+
+        vm.recordLogs();
+        vm.prank(agent);
+        identityRegistryStorage.addIdentityToStorage(another, globalIdentity, 0);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityStored.selector);
+        assertEq(
+            uint8(identityRegistryStorage.localAccountStatus(another)), uint8(IIdentityFactory.AccountStatus.Active)
+        );
+    }
+
+    /// @notice With no registry bound there is no factory to consult: the local binding is accepted.
+    function test_addIdentityToStorage_Succeeds_WhenNoRegistryBound() public {
+        _deployIdentity(another, "another");
+        vm.prank(deployer);
+        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
+
         vm.prank(agent);
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
 
         assertEq(address(identityRegistryStorage.storedIdentity(another)), address(charlieIdentity));
     }
 
-    /// @notice The signal reaches the agent path an issuer actually uses: registering through the registry.
-    function test_registerIdentity_EmitsIdentityOverridden_ThroughRegistry() public {
-        address globalOnly = makeAddr("globalOnly");
-        IIdentity globalIdentity = _deployIdentity(globalOnly, "globalOnly");
+    /// @notice Updating through the registry is refused like the storage write it relays.
+    function test_updateIdentity_RevertWhen_WalletIsBound() public {
         TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
 
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
+        registry.updateIdentity(bob, charlieIdentity);
+
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
+    }
+
+    /// @notice Deleting through the registry revokes: the wallet keeps its owner but may no longer act, and it
+    ///         never falls back to the factory's identity.
+    function test_deleteIdentity_RevokesAndKeepsTheOwner() public {
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        assertTrue(registry.isVerified(bob));
+
         vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverridden(globalOnly, globalIdentity, charlieIdentity);
+        emit EventsLib.IdentityRevoked(bob, bobIdentity);
         vm.expectEmit(address(registry));
-        emit IERC3643IdentityRegistry.IdentityRegistered(globalOnly, charlieIdentity);
+        emit EventsLib.IdentityRevoked(bob, bobIdentity);
         vm.prank(agent);
-        registry.registerIdentity(globalOnly, charlieIdentity, 0);
+        registry.deleteIdentity(bob);
+
+        assertTrue(registry.contains(bob));
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
+        assertFalse(registry.isVerified(bob));
+        assertFalse(registry.isLocallyRegistered(bob));
+        assertEq(uint8(identityRegistryStorage.localAccountStatus(bob)), uint8(IIdentityFactory.AccountStatus.Revoked));
     }
 
-    /// @notice With no registry bound there is no global registry to compare against: only `IdentityStored`.
-    function test_addIdentityToStorage_EmitsOnlyIdentityStored_WhenNoRegistryBound() public {
-        _deployIdentity(another, "another");
-        vm.prank(deployer);
-        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
-
-        vm.recordLogs();
-        vm.prank(agent);
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityStored.selector);
-    }
-
-    // ============ modifyStoredIdentity() / removeIdentityFromStorage() override signal ============
-
-    /// @notice Rewriting a local binding that still differs from the global identity keeps signalling the
-    ///         divergence, after the two standard modification logs.
-    function test_modifyStoredIdentity_EmitsIdentityOverridden_WhenGlobalIdentityDiffers() public {
-        IIdentity globalIdentity = _deployIdentity(another, "another");
-        vm.prank(agent);
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        vm.expectEmit(address(identityRegistryStorage));
-        emit IERC3643IdentityRegistryStorage.IdentityModified(charlieIdentity, bobIdentity);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.InvestorIdentityChanged(another);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverridden(another, globalIdentity, bobIdentity);
-        vm.prank(agent);
-        identityRegistryStorage.modifyStoredIdentity(another, bobIdentity);
-
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(bobIdentity));
-    }
-
-    /// @notice Rewriting the local binding to exactly the global identity ends the override.
-    function test_modifyStoredIdentity_EmitsIdentityOverrideReleased_WhenNewIdentityMatchesGlobal() public {
-        IIdentity globalIdentity = _deployIdentity(another, "another");
-        vm.prank(agent);
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
-        vm.prank(agent);
-        identityRegistryStorage.modifyStoredIdentity(another, globalIdentity);
-    }
-
-    /// @notice The signal reaches the agent path an issuer actually uses: updating through the registry.
-    function test_updateIdentity_EmitsIdentityOverridden_ThroughRegistry() public {
-        IIdentity globalIdentity = _deployIdentity(another, "another");
+    /// @notice A revoked wallet can never be registered again, not even to its own identity.
+    function test_registerIdentity_RevertWhen_WalletWasRevoked() public {
         TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
         vm.prank(agent);
-        registry.registerIdentity(another, charlieIdentity, 0);
+        registry.deleteIdentity(bob);
 
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverridden(another, globalIdentity, bobIdentity);
-        vm.expectEmit(address(registry));
-        emit IERC3643IdentityRegistry.IdentityUpdated(charlieIdentity, bobIdentity);
         vm.prank(agent);
-        registry.updateIdentity(another, bobIdentity);
-    }
-
-    /// @notice Removing the local binding hands the wallet to a different global identity: never silent.
-    function test_removeIdentityFromStorage_EmitsIdentityOverrideReleased_WhenGlobalIdentityDiffers() public {
-        IIdentity globalIdentity = _deployIdentity(another, "another");
-        vm.prank(agent);
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        vm.expectEmit(address(identityRegistryStorage));
-        emit IERC3643IdentityRegistryStorage.IdentityUnstored(another, charlieIdentity);
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
-        vm.prank(agent);
-        identityRegistryStorage.removeIdentityFromStorage(another);
-
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(globalIdentity));
-        assertFalse(identityRegistryStorage.isLocallyRegistered(another));
-    }
-
-    /// @notice The release signal reaches the registry path too.
-    function test_deleteIdentity_EmitsIdentityOverrideReleased_ThroughRegistry() public {
-        IIdentity globalIdentity = _deployIdentity(another, "another");
-        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
-        vm.prank(agent);
-        registry.registerIdentity(another, charlieIdentity, 0);
-
-        vm.expectEmit(address(identityRegistryStorage));
-        emit EventsLib.IdentityOverrideReleased(another, charlieIdentity, globalIdentity);
-        vm.expectEmit(address(registry));
-        emit IERC3643IdentityRegistry.IdentityRemoved(another, charlieIdentity);
-        vm.prank(agent);
-        registry.deleteIdentity(another);
-    }
-
-    /// @notice A wallet the factory never minted has no global identity to fall back to: only `IdentityUnstored`.
-    function test_removeIdentityFromStorage_EmitsOnlyIdentityUnstored_WhenWalletIsUnknownGlobally() public {
-        vm.prank(agent);
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        vm.recordLogs();
-        vm.prank(agent);
-        identityRegistryStorage.removeIdentityFromStorage(another);
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], IERC3643IdentityRegistryStorage.IdentityUnstored.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, bob));
+        registry.registerIdentity(bob, bobIdentity, 0);
     }
 
     // ============ supportsInterface() Tests ============

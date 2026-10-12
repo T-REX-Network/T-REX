@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
+  `Token.resend`, the burn proof):
+  - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
+    `toWallet`, a satellite wallet of the same identity, under a sequential `delegationId`; `totalSupply` is
+    unchanged. A `MINT_INSTRUCTION { delegationId, toWallet, amount, holder }` goes to the Lite, and
+    `keccak256(chainKey, peerKey, toWallet, amount, holder)` is stored so a resend can prove it repeats it. Callable
+    by the holder, the holder's identity, or AGENT. The compliance is told as `DELEGATION`
+    (`MovementKindLib.DELEGATION = 7`) so it follows a registry relink of the holder; no rule is asked.
+  - `instructRecall(wallet, amount, nativeWallet)` (AGENT, not pause-gated) records a `PendingRecall` with the
+    gateway and peer it is dispatched to, one open recall per wallet (`RecallPending`), bounded by the bridged
+    position, and sends a `RECALL_INSTRUCTION`. `pendingRecall(recallId)` exposes the record.
+  - A `BURN_PROOF { recallId, burnedWallet, amount }` for an open recall is admitted only from that recall's peer and
+    gateway, so a later route or peer change cannot strand it; a distrusted gateway is still refused. It must name the
+    instructed wallet and chain and prove at most the instructed amount, possibly zero. Before the credit,
+    `ModularCompliance.syncOwner(nativeWallet)` follows any relink of the native wallet. The bridged position is
+    debited (`Recalled`, `RecallSettled`) and the native wallet the instruction recorded is minted to. The settled
+    proof's hash is kept: the same proof again is a no-op (`BurnProofDuplicate`); a different proof for a settled
+    recall, or one for a recall never issued, pauses the token (`ReplayedBurnProof`).
+  - `resend(kind, id, data)` (AGENT) sends a mint (`kind` 0) or recall (`kind` 1) instruction again, byte for byte,
+    under its id, through the current route, to the same peer (`PeerChanged` otherwise). A recall resend moves the
+    admitted gateway to the current route.
+  - New linked library `TokenDelegationLib`; `TokenStorage` gains `recalls`, `lastRecallId`, `openRecall`,
+    `settledProofs`, `lastDelegationId`, `delegations` after `reservedForValidations`.
+  - `docs/satellite-lite.md`: the rules a Lite must follow, the retry table, and the accepted limitations.
+
+- **The suite AccessManager lays its own roles out** (`TREXAccessManager.initializeSuite`,
+  `TREXAccessManager.setupSuite`): a fresh suite's manager is initialized in its proxy constructor with the
+  issuer's admin and the four CREATE3-predicted suite addresses, and writes which role opens which function,
+  who hands out which role, and the two service grants (`AGENT` to the token, `IRS_WRITER` to the registry)
+  from there. The factory never holds `ADMIN_ROLE` on a suite manager: no transient grant, no revoke, no
+  renounce. An issuer running their own manager calls `createDomain` then `setupSuite(domainId, token)`,
+  which reads the registry, storage and compliance from the token so the four always belong to one suite,
+  and is also how one manager hosts several suites in one or several domains. Binding a registry to a
+  reused storage stays with `IRS_BINDER`; a fresh storage binds its first registry at init as before.
+  - Removed: `ISuiteProfile`, `DefaultSuiteProfile`, `TREXFactory.setSuiteProfile` / `getSuiteProfile` and
+    the factory's profile constructor argument (the role tables were swappable per profile; the factory is
+    redeployed for every other dependency change, and that one exception cost a contract, an interface, a
+    setter and a transient admin grant). Removed with them: `TREXAccessManager.assign`, the suite tables,
+    per-contract wrappers and domain migration helpers of `AccessManagerSetupLib` (never run outside tests;
+    moving a suite between domains is a script if the need appears), and the errors `SuiteProfileNotAContract`,
+    `NotAssigned`, `RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` and the event `SuiteProfileSet`.
+  - `AccessManagerSetupLib` keeps the platform wiring only (factory, implementation authority, gateway
+    registry, identity factory policy).
+  - An issuer's own setup is one transaction: `multicall([createDomain(name), setupSuite(domainCount() + 1,
+    token)])` on the manager. Deploying and setting up stay two transactions, because the factory never
+    writes into a manager it is given (audit #77) and the two are usually signed by different parties.
+  - The six token batch functions have rows of their own, on the role of their single-item function
+    (`batchMint`, `batchBurn`, `batchFreezePartialTokens`, `batchUnfreezePartialTokens`,
+    `batchSetAddressFrozen`, `batchForcedTransfer`). Without a row they fell back to `ADMIN_ROLE`, so an
+    agent granted with an execution delay could not even schedule them. `batchRegisterIdentity` already
+    had its row for the same reason.
+  - `setupSuite` runs once per token and reverts with `SuiteAlreadySetUp` afterwards: a second run would
+    reset every role mapping the admin changed since, and a run into another domain would move the suite
+    while its storage and the token's old `AGENT` grant stay behind. A contract's rows are written the first
+    time it joins a domain and never again, so a registry, storage or compliance shared by a second token
+    keeps every row its admin changed. A registry or compliance already in another domain is refused with
+    the same error (remapping it would lock the first token out of its own registry); the storage keeps its
+    first domain as before. Who hands out which role is set once, in `createDomain`, so a second suite in a
+    domain no longer puts the default appointers back. The old library reset rows and appointers on every
+    run.
+  - **Breaking, deployment order:** the factory initializes a fresh suite manager with `initializeSuite`,
+    which only the new `TREXAccessManager` implementation has. Publish it in the same implementation
+    authority version as this factory (`publishAndUpgrade`, one transaction for all five implementations);
+    a factory deployed against an authority still serving the previous manager reverts every
+    fresh-manager deploy, with nothing half-deployed. The factory constructor loses its `suiteProfile`
+    argument. `TREXAccessManager.assign` is removed: scripts that called it call `setupSuite` instead.
 - **Every namespaced struct's layout is pinned** (`test/standard/NamespaceFields.t.sol`). A namespace's slot
   comes from its string alone, so a struct that changes shape under an unchanged string makes an upgraded
   proxy read old bytes under new names, with no revert and no failing deployment test. The test points each
@@ -64,14 +130,14 @@ All notable changes to this project will be documented in this file.
     wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
     balance to the new owner before counting the movement (`WalletOwnerChanged`), and a wallet the
     registry no longer names keeps its remembered owner. No owner call, no underflow, no stale position.
-  - A wallet the registry has never named, which only a registry with eligibility checks disabled lets
-    hold tokens, owns itself: the ledger counts it under its own address and follows it to its identity,
-    like any relink, on its first movement after an agent links it. Every token is always counted under
-    exactly one owner, so `sum(positions) == totalSupply`, and every position write is checked: a debit
-    larger than the position can only be a bug, and reverts. A validation is never issued toward a
-    satellite wallet that has no identity, since the ledger does not follow satellite wallets. The
-    ledger invariant harness holds all of this with unexpected reverts treated as failures, including a
-    wallet that receives tokens while unnamed, is linked and relinked by an agent, and sends them on.
+  - What no lookup can place is counted, not floored away. `positionGap()` is signed: a
+    credit that lands on no identity adds to it, a debit that finds no identity or too small a position
+    subtracts from it, so `sum(positions) + positionGap == totalSupply` holds through any registry
+    change. `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` name the
+    amount, and `fixPosition(from, to, amount)`, owner only, moves it, a zero side being the pool.
+    The ledger invariant harness holds the pool to zero under every transition that is not an agent
+    action. One rule now governs the ledger's writes: the compliance's own bookkeeping reverts, a write
+    the registry made impossible is counted for repair.
   - `refundValidation(validationId)`, keeper only, is the way out of a two-leg validation of which one
     leg never came, a second reconciliation window past `releaseAt`. Burn leg in: the held amount goes
     back to the wallet it left through `Token.returnInTransit`, the reservation is released, the status is
@@ -260,7 +326,7 @@ All notable changes to this project will be documented in this file.
     make the subcall fail while the outer call succeeds, so a tolerant path would let anyone skip a
     healthy module's unbind at will.
   - `forceRemoveModule(address)`, restricted to OWNER, deletes the entry without any call to the
-    module and emits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
+    module and e`mits `ModuleForceRemoved(address indexed module)` and no `ModuleRemoved`, so an indexer
     can tell a forced removal from a regular one. The module keeps its own binding record, so the same
     proxy address cannot be re-added afterwards; a fresh deployment can.
   - `AbstractModuleUpgradeable.unbindCompliance` reverts `ModuleStillBound` while the calling
@@ -508,6 +574,75 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
+  The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
+  register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
+  - `modifyStoredIdentity`, and so `updateIdentity`, always reverts: `WalletBoundToAnotherIdentity` for
+    another identity, `WalletAlreadyLinkedToIdentity` for the same one, `WalletAlreadyRevoked` for a
+    revoked wallet.
+  - `removeIdentityFromStorage`, and so `deleteIdentity`, revokes instead of deleting. The wallet keeps its
+    identity for `identity` and `contains`, `isVerified` turns false, and the wallet can never be
+    registered again. Revoking twice reverts with `WalletNotActive`. The storage and the registry emit
+    `IdentityRevoked` instead of the standard `IdentityUnstored` and `IdentityRemoved`, which mean the
+    wallet left the registry. See docs/erc3643-oz-swap.md for integrators.
+  - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
+    factory links the wallet, actively or revoked, to a different identity, and with
+    `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
+  - The storage records the status in a new namespace, `erc3643.storage.TREXIdentityRegistryStorage`.
+    Bindings stored before the upgrade read as `Active`.
+  - Removed: `IIdentityRegistryStorage.isLocallyRegistered`, replaced by `localAccountStatus`, which returns
+    the factory's `AccountStatus`. `ITREXRegistry.isLocallyRegistered` stays and now counts active local
+    bindings only. Also removed are the events `InvestorIdentityChanged`, `IdentityOverridden` and
+    `IdentityOverrideReleased`, which no write can produce any more.
+  - Moving an investor to a new identity is now a forced transfer to a wallet of that identity, reported
+    to the compliance as `FORCED_TRANSFER` rather than `RECOVERY`.
+  - `isVerified` and `isWalletVerified` return false when the IdentityFactory links a wallet to another
+    identity than the storage does, even if that link was revoked. The wallet keeps its owner for
+    `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
+  - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
+    ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
+
+- **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
+  a keeper that stopped running left every expired reservation locked until an admin found a new one. From
+  `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where
+  `resolveStuckValidation` already opens, any caller may, and is refused `ValidationNotPubliclyDiscardable` before
+  it. The `restricted` modifier is gone; the keeper is recognised through the selector's role binding.
+- `BurnProof` is `{ recallId, burnedWallet, amount }`; the token credits the native wallet the instruction recorded.
+  `MessageTypesLib` gains `MintInstruction` and `RecallInstruction`. No token or Lite was live at this change, so
+  `MessageTypesLib.VERSION` stays 1.
+- `DelegatedOut` carries the `delegationId`; `BurnProofReceived` carries `(originChainKey, recallId, burnedWallet,
+  amount)`.
+- `DelegatedOut` gains an indexed `delegationId`, so its topic hash changed; consumers of the old event need an
+  ABI update.
+- **A trusted issuer that answers nothing no longer validates a claim.** `isVerified` read the issuer's
+  `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
+  anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
+  memory read as `true`: with such an issuer trusted, an identity reporting a claim from it passed `isVerified`.
+  The registry now counts an answer only when it is exactly one word equal to `true`. An issuer that reverts,
+  answers nothing or answers something else is skipped like an invalid claim, never a revert, so one broken
+  issuer cannot halt transfers and another trusted issuer for the same topic can still verify the holder.
+  `addTrustedIssuer` also refuses an issuer without code (`TrustedIssuerHasNoCode`), as an early signal for a
+  wrong address; the check runs at trust time only, so an issuer must be deployed before a suite that trusts
+  it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
+  `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
+  claim that names another issuer as the registry already did, so the two report the same result.
+
+- **Disabling the eligibility checks no longer admits a wallet without an identity** (#119). In 4.2,
+  `disableEligibilityChecks` made `isVerified` return true for every address, so tokens could be minted to and
+  moved between wallets no identity owns, and they stayed there after the checks were enabled again. The switch
+  now skips the claim checks only, required topics and trusted issuers: `isVerified` and `isWalletVerified`
+  still need an active identity, so an unbound or revoked wallet is refused in every mode. Every holder of an
+  open-mode token needs an ONCHAINID. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
+  interfaces, so the standard is unaffected.
+  - Every token now has an owner, so the compliance ledger drops its repair path: `sum(positions) ==
+    totalSupply` always holds and a debit the position cannot cover reverts. Removed: `positionGap`,
+    `fixPosition` and its AccessManager row, the events `PositionUnresolved`, `PositionUnderflow` and
+    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`, and the ledger's `gap` field,
+    which moves `ownerOf` one slot up in `erc3643.storage.ComplianceLedger`.
+  - `canTransfer` no longer refuses a recipient with no identity itself, since the token's `isVerified`
+    refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
+    resolve to nobody after the registry's storage is swapped.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
@@ -527,10 +662,14 @@ All notable changes to this project will be documented in this file.
   `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
   to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
   could also repoint the factory's implementation authority, identity factory or trusted gateway
-  registry, which every later suite is wired to. The function now takes two role ids chosen by
-  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and a factory governor role
-  for the four setters. It refuses one role for both, and the manager's `ADMIN_ROLE` as the suite deployer
-  role (`SuiteDeployerCannotGovernFactory`). The three other platform
+  registry, which every later suite is wired to. The function now takes four role ids chosen by
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and for each setter
+  the role that already owns its subject. `setImplementationAuthority` goes to the version manager role,
+  which decides the code new suites run; `setTrustedGatewayRegistry` to the interop manager role, which
+  decides the bridges new tokens trust; `setIdFactory` to the platform owner role. No role exists only to
+  configure the factory, so nobody can go around the version manager or the interop manager by repointing
+  it. The function refuses the suite deployer role as any setter role, and the manager's `ADMIN_ROLE` as the
+  suite deployer role (`SuiteDeployerCannotConfigureFactory`). The three other platform
   setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
   `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
   instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
@@ -541,22 +680,13 @@ All notable changes to this project will be documented in this file.
   platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
   The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
   `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
-  `OWNER` from them. The suite profile below does need a new factory.
-- **The suite role profile is no longer compiled into the factory** (#102). `deployTREXSuite` and
-  `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.setupSuite` from inside the factory, so
-  the selector-to-role tables and the role-admin table of every future suite were a constant of the
-  factory's bytecode, and changing a default meant a new factory and a new CREATE3 address space. The
-  factory now hands the fresh `TREXAccessManager` to an `ISuiteProfile`: it grants the profile
-  `ADMIN_ROLE`, calls `applyTo(accessManager, token)`, revokes the role and only then hands
-  `ADMIN_ROLE` to `accessManagerAdmin`. `DefaultSuiteProfile` is the default profile and simply applies
-  the library tables; only an admin of the manager may call its `applyTo`
-  (`AccessManagerUnauthorizedAccount`), so an issuer who keeps the shared profile as an admin of their
-  own manager does not let anyone else apply it. Governance replaces it through the new `setSuiteProfile` (factory governor
-  role, `SuiteProfileSet`, `SuiteProfileNotAContract`) to change what every later suite looks
-  like, the way `IdentityFactory.setIdentityTypeModules` swaps the bundle installed on new identities.
-  **Breaking**: the `TREXFactory` constructor takes the profile as its fourth argument, before the
-  access manager, and `getSuiteProfile` is added to `ITREXFactory`. The factory no longer links
-  `AccessManagerSetupLib`.
+  `OWNER` from them.
+- **The suite role layout is no longer compiled into the factory** (#102, reworked by the self-configuring
+  manager above). `deployTREXSuite` and `deployTREXSuiteIsolated` applied `AccessManagerSetupLib.setupSuite`
+  from inside the factory, so the role layout of every future suite was a constant of the factory's
+  bytecode. #102 moved it into a swappable suite profile; the layout now lives in `TREXAccessManager`
+  itself, which writes it when it is initialized, and changes with a new manager version. The factory no
+  longer links `AccessManagerSetupLib`.
 - **`UtilityChecker` is gated by the AccessManager, not by a single owner** (#103). It was the only
   upgradeable contract of the suite on `OwnableUpgradeable`. It is now `AccessManagedOwnableUpgradeable`
   like the compliance modules: `initialize(address accessManager)` replaces `initialize()`,
@@ -692,6 +822,10 @@ All notable changes to this project will be documented in this file.
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
 
 ### Removed
+
+- `Token.dispatchMintInstruction`, which let an agent instruct a satellite to mint with no native burn, and
+  `Token.dispatchRecallInstruction`; `delegateOut`, `instructRecall` and `resend` are the only senders of those types.
+  `TREXMessagingLib.announceBurnProof` is replaced by `TokenDelegationLib.consumeBurnProof`.
 
 - `ModuleCapabilitiesLib` and the capability bitmask, `refreshModuleCapabilities`,
   `getModuleCapabilities`, `getModulesByCapability`, `ModuleCapabilitiesRecorded`,

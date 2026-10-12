@@ -78,9 +78,10 @@ library MessageTypesLib {
     enum Message {
         /// Outbound. A `ComplianceValidation` issued on the reference chain for a satellite to execute.
         COMPLIANCE_VALIDATION,
-        /// Outbound. A delegation-out instruction to mint on a satellite. One-way, nothing reconciled.
+        /// Outbound. A delegation-out instruction to mint on a satellite. Resent unchanged under its `delegationId`;
+        /// the Lite mints once per id.
         MINT_INSTRUCTION,
-        /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF`.
+        /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF` under its id.
         RECALL_INSTRUCTION,
         /// Inbound. A satellite reporting that a validation's leg executed.
         SETTLEMENT_NOTIFICATION,
@@ -88,7 +89,9 @@ library MessageTypesLib {
         BURN_PROOF
     }
 
-    /// @dev The envelope version this library serves. A payload carrying any other version is refused.
+    /// @dev The envelope version this library serves. A payload carrying any other version is refused. The body
+    ///  shapes changed while no token or Lite was live, so the version stayed 1. Once anything is live, a change to
+    ///  a body's shape bumps it, so a peer on the old shape refuses the new one instead of decoding it wrong.
     uint8 internal constant VERSION = 1;
 
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
@@ -137,14 +140,41 @@ library MessageTypesLib {
         uint256 amount;
     }
 
-    /// @dev Body of a `BURN_PROOF`: a satellite's proof that it burned a position, so a recall can credit
-    /// the holder on the reference chain.
-    struct BurnProof {
-        /// ERC-7930 wallet the satellite burned.
-        bytes burnedWallet;
+    /// @dev Body of a `MINT_INSTRUCTION`: the reference chain already burned `amount` of `holder`'s native balance
+    /// and credited `toWallet`'s bridged position, so the satellite mints the same amount there, once per
+    /// `delegationId`. A resend carries the same body byte for byte.
+    struct MintInstruction {
+        /// Unique per token, sequential from 1: the Lite mints at most once per id.
+        uint256 delegationId;
+        /// ERC-7930 satellite wallet to mint to, linked to the same identity as `holder`.
+        bytes toWallet;
         uint256 amount;
-        /// Reference-chain wallet to credit as free balance. Must be linked to the same identity as`burnedWallet`.
+        /// Reference-chain wallet the tokens left. Informational for the satellite.
+        address holder;
+    }
+
+    /// @dev Body of a `RECALL_INSTRUCTION`: an order to burn up to `amount` of `wallet` on the satellite and answer
+    /// with a `BurnProof` under the same `recallId`. A resend carries the same body byte for byte.
+    struct RecallInstruction {
+        /// Unique per token, sequential from 1: keys the pending recall the proof must answer.
+        uint256 recallId;
+        /// ERC-7930 satellite wallet to burn.
+        bytes wallet;
+        /// Upper bound: the satellite may burn less when a validation moved part of the position first.
+        uint256 amount;
+        /// Reference-chain wallet the token will credit. Informational for the satellite.
         address nativeWallet;
+    }
+
+    /// @dev Body of a `BURN_PROOF`: a satellite's proof that it burned a position under a recall instruction. The
+    /// token credits the native wallet the instruction recorded, never one the proof could name.
+    struct BurnProof {
+        /// The recall this proof answers.
+        uint256 recallId;
+        /// ERC-7930 wallet the satellite burned. Must be the instructed one.
+        bytes burnedWallet;
+        /// What was burned: at most the instructed amount, possibly zero.
+        uint256 amount;
     }
 
     /// @dev Wraps `body` in the envelope.
@@ -199,6 +229,16 @@ library MessageTypesLib {
     /// @dev Unwraps a `SETTLEMENT_NOTIFICATION` body. Reverts on a body that is not one.
     function decodeSettlement(bytes memory body) internal pure returns (SettlementNotification memory) {
         return abi.decode(body, (SettlementNotification));
+    }
+
+    /// @dev Unwraps a `MINT_INSTRUCTION` body, as a satellite's Lite does. Reverts on a body that is not one.
+    function decodeMintInstruction(bytes memory body) internal pure returns (MintInstruction memory) {
+        return abi.decode(body, (MintInstruction));
+    }
+
+    /// @dev Unwraps a `RECALL_INSTRUCTION` body, as a satellite's Lite does. Reverts on a body that is not one.
+    function decodeRecallInstruction(bytes memory body) internal pure returns (RecallInstruction memory) {
+        return abi.decode(body, (RecallInstruction));
     }
 
     /// @dev Wraps a burn proof in the envelope, as a satellite's Lite does before sending.

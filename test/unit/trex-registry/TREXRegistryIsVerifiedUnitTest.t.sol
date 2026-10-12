@@ -81,15 +81,77 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
     /// @notice A wallet resolved through the factory fallback fails the same way once revoked, so both
     ///  registration paths give one answer.
     function test_isVerified_ReturnsFalse_WhenGloballyResolvedWalletIsRevoked() public {
+        address globalWallet = makeAddr("globalWallet");
+        IIdentity globalIdentity = _deployIdentity(globalWallet, "globalWallet");
+        _addClaim(globalIdentity, CLAIM_TOPIC_1, "KYC data", claimIssuerSigner.key, address(claimIssuer), globalWallet);
+        assertFalse(registry.isLocallyRegistered(globalWallet));
+        assertTrue(registry.isVerified(globalWallet));
+
+        vm.prank(address(globalIdentity));
+        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, globalWallet));
+
+        assertFalse(registry.isVerified(globalWallet));
+        assertEq(address(registry.identity(globalWallet)), address(globalIdentity));
+    }
+
+    // ============ Local and global mismatch ============
+
+    /// @notice The agent binds a wallet locally, then the wallet links itself to another identity in the factory.
+    ///  The two disagree, so the wallet keeps its owner but may no longer act.
+    function test_isVerified_ReturnsFalse_WhenFactoryLinksTheWalletToAnotherIdentity() public {
+        address wallet = makeAddr("mismatchedWallet");
+        vm.prank(agent);
+        registry.registerIdentity(wallet, aliceIdentity, 0);
+        assertTrue(registry.isVerified(wallet), "verified while only the storage knows it");
+
+        IIdentity otherIdentity = _deployIdentity(wallet, "mismatchedWallet");
+
+        assertFalse(registry.isVerified(wallet));
+        assertTrue(registry.contains(wallet));
+        assertEq(address(registry.identity(wallet)), address(aliceIdentity), "the local owner stays");
+        assertNotEq(address(otherIdentity), address(aliceIdentity));
+    }
+
+    /// @notice The wallet lookup by envelope gives the same answer.
+    function test_isWalletVerified_ReturnsFalse_WhenFactoryLinksTheWalletToAnotherIdentity() public {
+        address wallet = makeAddr("mismatchedWallet");
+        vm.prank(agent);
+        registry.registerIdentity(wallet, aliceIdentity, 0);
+        _deployIdentity(wallet, "mismatchedWallet");
+
+        assertFalse(registry.isWalletVerified(InteroperableAddress.formatEvmV1(block.chainid, wallet)));
+    }
+
+    /// @notice Revoking the factory link does not clear the mismatch: the factory still names the other identity.
+    function test_isVerified_ReturnsFalse_WhenTheMismatchedFactoryLinkIsRevoked() public {
+        address wallet = makeAddr("mismatchedWallet");
+        vm.prank(agent);
+        registry.registerIdentity(wallet, aliceIdentity, 0);
+        IIdentity otherIdentity = _deployIdentity(wallet, "mismatchedWallet");
+
+        vm.prank(address(otherIdentity));
+        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, wallet));
+
+        assertFalse(registry.isVerified(wallet));
+    }
+
+    /// @notice A factory link to the same identity as the storage is no mismatch.
+    function test_isVerified_ReturnsTrue_WhenFactoryLinksTheSameIdentity() public view {
+        assertTrue(registry.isLocallyRegistered(alice));
+        assertEq(idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, alice)), address(aliceIdentity));
+        assertTrue(registry.isVerified(alice));
+    }
+
+    /// @notice Deleting a wallet revokes its local binding like the factory's revoke: it keeps its owner but is
+    ///  no longer admitted, and it never falls back to the factory's still-active link.
+    function test_isVerified_ReturnsFalse_WhenLocalBindingIsRevoked() public {
         vm.prank(agent);
         registry.deleteIdentity(alice);
-        assertFalse(registry.isLocallyRegistered(alice));
-        assertTrue(registry.isVerified(alice));
-
-        vm.prank(address(aliceIdentity));
-        idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, alice));
 
         assertFalse(registry.isVerified(alice));
+        assertFalse(registry.isLocallyRegistered(alice));
+        assertTrue(registry.contains(alice));
+        assertEq(address(registry.identity(alice)), address(aliceIdentity));
     }
 
     /// @notice A locally registered wallet the factory never linked keeps verifying: only a `Revoked`
@@ -102,15 +164,15 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
         assertTrue(registry.isVerified(another));
     }
 
-    /// @notice The kill switch still admits a revoked wallet: it bypasses the binding check as well.
-    function test_isVerified_ReturnsTrue_WhenWalletIsRevokedAndChecksAreDisabled() public {
+    /// @notice The kill switch does not admit a revoked wallet: it skips the claims, never the binding.
+    function test_isVerified_ReturnsFalse_WhenWalletIsRevokedAndChecksAreDisabled() public {
         vm.prank(address(aliceIdentity));
         idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, alice));
         assertFalse(registry.isVerified(alice));
 
         vm.prank(deployer);
         registry.disableEligibilityChecks();
-        assertTrue(registry.isVerified(alice));
+        assertFalse(registry.isVerified(alice));
     }
 
     // ============ Topic / issuer mutations ============

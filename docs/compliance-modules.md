@@ -55,7 +55,7 @@ undeliverable until `forceRemoveModule` drops the module, and with it the veto o
 forced transfer and a recovery, which are the agent's override, usually the movement that has to get
 through; and on a burn, which only an agent can call, so a revert there blocks a redemption the same way.
 So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only, letting
-`BURN`, `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
+`BURN`, `CROSS_CHAIN`, `DELEGATION`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
 `checkTransfer`, which narrows the issuance before anything leaves.
 
 ## checkTransfer
@@ -88,7 +88,7 @@ struct TransferContext {
     bytes32 toWallet;       // zero on a burn
     uint256 amountMin;      // equal to amountMax on a native movement
     uint256 amountMax;      // the amount that moved, or the requested maximum on an issuance
-    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN; never zero
+    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
     bytes   data;           // empty today; room for a later compliance to say more without a selector change
@@ -103,6 +103,18 @@ reads `kind` and leaves `FORCED_TRANSFER` and `RECOVERY` out. A tracker that fol
 a forced transfer always moves the position between identities, and a recovery does when the new wallet
 belongs to another identity, so a holder count or a per-identity tracker records both. No rule is ever
 asked about those two, so a `TRANSFER_CHECK` module only ever sees `TRANSFER`, `MINT` and `CROSS_CHAIN`.
+
+`DELEGATION` is a holder moving native balance onto a satellite wallet of the same identity, reported with
+`fromWallet == toWallet`, both the native wallet, and no rule asked: location changes, ownership does not, and the
+position does not move. Like every hook it runs after the move, so when the registry relinked the holder, the
+migration counts the delegated amount back in and the whole pre-delegation balance lands on the new owner. A tracker
+of the investor's own activity leaves it out like `FORCED_TRANSFER` and `RECOVERY`; a holder count sees no change of
+ownership.
+
+The way back, a recall answered by a satellite's burn proof, is not a movement and no module is told. Before the
+credit lands the token calls `syncOwner(nativeWallet)`, which follows a registry relink of that wallet at adjustment
+zero: the wallet's existing balance moves to the identity the registry names now, and nothing else. The credit is
+already counted in that identity's position as a bridged one, so it must not be migrated with it.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
@@ -186,18 +198,21 @@ changed through its modules; wallet bindings are changed in the registry it has.
 A wallet keeps its identity after the investor revokes it, so a revoked wallet can still be burned,
 recovered or force-transferred against the right position; it just may not act.
 
-What a registry agent changes under a wallet that holds tokens, the ledger follows on its own. It
-remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When an agent relinks
-the wallet to another identity, the next movement through it moves the wallet's balance to the new
-owner first, then counts the movement; `WalletOwnerChanged` says so. When an agent deletes the entry
-and nothing else names the wallet, the remembered owner still answers. Nobody calls anything.
+Wallet bindings are sticky in the registry's storage, as in the ONCHAINID IdentityFactory. An agent
+cannot relink a wallet to another identity, and deleting an entry revokes it: the wallet keeps its
+identity but may no longer act, and it can never be registered again. Moving an investor to a new
+identity is a forced transfer to a wallet of that identity.
 
-A wallet the registry has never named can only hold tokens when the registry has eligibility checks
-disabled. The ledger counts such a wallet under its own address, so `ownerOf(wallet)` is the wallet and
-`positionOf(wallet)` is what it holds. When an agent later links it to an identity, its next movement
-moves that balance onto the identity like any relink. So `sum(positions) == totalSupply` always holds, and
-nothing is left for anyone to repair. A satellite wallet is not followed this way, so a validation is never
-issued toward a satellite wallet that has no identity, even with eligibility checks disabled.
+Who a wallet resolves to can still change when the owner swaps the registry's storage, or unbinds a
+registry from it. The ledger follows that on its own, so rules and positions always judge the same
+identity. It remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When the
+registry names another identity, the next movement through the wallet moves its balance to the new
+owner first, then counts the movement; `WalletOwnerChanged` says so. When the registry names nobody,
+the remembered owner still answers. Nobody calls anything.
+
+Every token has an owner. The registry admits no wallet without an active identity, even with its
+eligibility checks disabled, which skip the claims only. So `sum(positions) == totalSupply` always
+holds, and a debit the position cannot cover reverts.
 
 ## Binding
 

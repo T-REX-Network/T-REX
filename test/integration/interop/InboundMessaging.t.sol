@@ -20,7 +20,6 @@ contract InboundMessagingTest is InteropSuiteTest {
     ERC7786GatewayMock untrustedGateway;
 
     address impostor = makeAddr("Impostor");
-    address holder = makeAddr("Holder");
 
     address compliance;
 
@@ -170,27 +169,40 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /* ----- Burn proof: the recall path ----- */
 
-    /// @dev The proof reaches the recall path with every field intact, and the compliance never sees it.
-    function testBurnProofReachesTheRecallPathWithItsDestinationWalletIntact() public {
-        address burned = makeAddr("BurnedSatelliteWallet");
-        MessageTypesLib.BurnProof memory proof = _burnProof(POLYGON, burned, amount, holder);
-        uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(proof));
+    /// @dev The proof reaches the recall path with every field intact and credits the instructed wallet; the
+    ///      settlement handler never sees it.
+    function testBurnProofReachesTheRecallPathIntact() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 index =
+            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+        uint256 nativeBefore = token.balanceOf(alice);
 
         vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 0);
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.BurnProofReceived(originChain, InteroperableAddress.formatEvmV1(POLYGON, burned), holder, amount);
-
+        emit EventsLib.BurnProofReceived(originChain, recallId, satelliteFrom, 100);
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.RecallSettled(recallId, originChain, 100);
         routedGateway.relay(index);
+
+        assertEq(token.balanceOf(alice), nativeBefore + 100);
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 900);
     }
 
-    function testBurnProofWithNoDestinationWalletIsRefused() public {
-        MessageTypesLib.BurnProof memory proof = _burnProof(POLYGON, makeAddr("Burned"), amount, address(0));
-        uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(proof));
+    /// @dev A proof answering a recall this token never issued is the never-issued emergency: nothing moves and
+    ///      the token pauses itself.
+    function testBurnProofForANeverIssuedRecallHaltsTheToken() public {
+        uint256 index =
+            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(99, satelliteFrom, amount)));
+        uint256 nativeBefore = token.balanceOf(alice);
 
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.ReplayedBurnProof(99, originChain);
         routedGateway.relay(index);
 
-        _assertNothingApplied(routedGateway, index);
+        assertTrue(token.paused());
+        assertEq(token.balanceOf(alice), nativeBefore);
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 1000);
     }
 
     /* ----- Outbound-only types have no inbound handler ----- */

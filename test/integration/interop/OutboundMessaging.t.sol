@@ -26,8 +26,8 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     uint256 validationId = 1;
     bytes validationBody = abi.encode(uint256(1), "validation");
-    bytes mintBody = abi.encode(uint256(2), "mint");
-    bytes recallBody = abi.encode(uint256(3), "recall");
+
+    bytes aliceSat;
 
     function setUp() public override {
         super.setUp();
@@ -36,6 +36,24 @@ contract OutboundMessagingTest is InteropSuiteTest {
         compliance = address(token.compliance());
 
         _openEvmChain(token, POLYGON, address(gateway));
+
+        aliceSat = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
+        vm.startPrank(agent);
+        token.mint(alice, 1000);
+        token.unpause();
+        vm.stopPrank();
+    }
+
+    /// @dev Alice delegates `amount` of her own balance to her Polygon wallet: the one way a mint instruction leaves.
+    function _delegate(uint256 amount) private returns (bytes32) {
+        vm.prank(alice);
+        return token.delegateOut(alice, aliceSat, amount);
+    }
+
+    /// @dev The agent orders `amount` of Alice's Polygon wallet back: the one way a recall instruction leaves.
+    function _instruct(uint256 amount) private returns (uint256) {
+        vm.prank(agent);
+        return token.instructRecall(aliceSat, amount, alice);
     }
 
     function _dispatch(uint256 id, bytes32 chainKey) private returns (bytes32) {
@@ -76,9 +94,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     function testBothTypesQueueSeparately() public {
         _dispatch(validationId, satellite);
-
-        vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
+        _delegate(10);
 
         assertEq(gateway.queueLength(), 2);
     }
@@ -134,63 +150,71 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(optimismGateway.queueLength(), 1);
     }
 
-    /* ----- Mint instruction: fire and forget ----- */
+    /* ----- Mint instruction: one per delegation ----- */
 
-    function testAgentDispatchesAMintInstructionAndItIsAnnounced() public {
+    function testADelegationOutSendsAMintInstructionAndItIsAnnounced() public {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.MINT_INSTRUCTION, satellite, gateway.receiveIdFor(0));
 
-        vm.prank(agent);
-        bytes32 sendId = token.dispatchMintInstruction(satellite, mintBody);
+        bytes32 sendId = _delegate(10);
 
         assertEq(gateway.queueLength(), 1);
         assertEq(sendId, gateway.receiveIdFor(0));
 
         (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
         assertEq(messageType, uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
-        assertEq(body, mintBody);
+        MessageTypesLib.MintInstruction memory instruction = MessageTypesLib.decodeMintInstruction(body);
+        assertEq(instruction.delegationId, 1);
+        assertEq(instruction.toWallet, aliceSat);
+        assertEq(instruction.amount, 10);
+        assertEq(instruction.holder, alice);
     }
 
-    /// @dev Nothing is reconciled, so nothing is pinned: the token keeps no record of a mint instruction.
-    function testAMintInstructionLeavesNoRecordBehind() public {
-        vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
-
-        // Neither dropping nor never relaying the message changes anything on the token's side.
-        gateway.drop(0);
-
-        vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
+    /// @dev A mint instruction pins no route: its validation-free resend goes through the current one.
+    function testAMintInstructionPinsNothing() public {
+        _delegate(10);
+        _delegate(10);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(token.pinnedRouteFor(0, satellite), address(0));
+        assertEq(token.pinnedRouteFor(1, satellite), address(0));
+        assertEq(token.pinnedRouteFor(2, satellite), address(0));
     }
 
     /* ----- Recall instruction: an order out, a proof back ----- */
 
-    function testAgentDispatchesARecallInstructionAndItIsAnnounced() public {
+    function testARecallInstructionIsAnnouncedAndRecorded() public {
+        _delegate(100);
+
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ProtocolMessageSent(
-            MessageTypesLib.Message.RECALL_INSTRUCTION, satellite, gateway.receiveIdFor(0)
+            MessageTypesLib.Message.RECALL_INSTRUCTION, satellite, gateway.receiveIdFor(1)
         );
 
-        vm.prank(agent);
-        bytes32 sendId = token.dispatchRecallInstruction(satellite, recallBody);
+        uint256 recallId = _instruct(40);
 
-        assertEq(gateway.queueLength(), 1);
-        assertEq(sendId, gateway.receiveIdFor(0));
+        assertEq(recallId, 1);
+        assertEq(gateway.queueLength(), 2);
 
-        (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
+        (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(1).payload, (uint8, uint8, bytes));
         assertEq(messageType, uint8(MessageTypesLib.Message.RECALL_INSTRUCTION));
-        assertEq(body, recallBody);
+        MessageTypesLib.RecallInstruction memory instruction = MessageTypesLib.decodeRecallInstruction(body);
+        assertEq(instruction.recallId, 1);
+        assertEq(instruction.wallet, aliceSat);
+        assertEq(instruction.amount, 40);
+        assertEq(instruction.nativeWallet, alice);
+
+        assertEq(token.pendingRecall(1).amount, 40);
+        assertEq(token.pendingRecall(1).gateway, address(gateway), "the dispatch gateway is recorded");
+        assertEq(token.pendingRecall(1).peerKey, keccak256(token.peerFor(satellite)), "and the dispatch peer");
     }
 
-    /// @dev The order changes nothing here: the position only moves when the answering proof arrives.
-    function testARecallInstructionPinsNothing() public {
-        vm.prank(agent);
-        token.dispatchRecallInstruction(satellite, recallBody);
+    /// @dev The order changes nothing on the ledger: the position only moves when the answering proof arrives.
+    function testARecallInstructionMovesNothing() public {
+        _delegate(100);
+        _instruct(40);
 
-        assertEq(token.pinnedRouteFor(0, satellite), address(0));
+        assertEq(token.bridgedBalanceOf(aliceSat), 100);
+        assertEq(token.balanceOf(alice), 900);
     }
 
     /* ----- Fail closed ----- */
@@ -225,13 +249,17 @@ contract OutboundMessagingTest is InteropSuiteTest {
         vm.prank(alice);
         token.dispatchComplianceValidation(satellite, validationId, validationBody);
 
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
-        vm.prank(alice);
-        token.dispatchMintInstruction(satellite, mintBody);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, bob));
+        vm.prank(bob);
+        token.delegateOut(alice, aliceSat, 1);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
         vm.prank(alice);
-        token.dispatchRecallInstruction(satellite, recallBody);
+        token.instructRecall(aliceSat, 1, alice);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
+        vm.prank(alice);
+        token.resend(0, 1, "");
 
         assertEq(gateway.queueLength(), 0);
     }
@@ -239,14 +267,14 @@ contract OutboundMessagingTest is InteropSuiteTest {
     /// @dev The agent issues instructions, never a validation: the body and the id it travels under are
     ///      the compliance's to author, and no role reaches past that.
     function testAgentCannotDispatchAValidationEvenThoughItDispatchesInstructions() public {
-        vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
+        _delegate(100);
+        _instruct(40);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, agent));
         vm.prank(agent);
         token.dispatchComplianceValidation(satellite, validationId, validationBody);
 
-        assertEq(gateway.queueLength(), 1);
+        assertEq(gateway.queueLength(), 2);
         assertEq(token.pinnedRouteFor(validationId, satellite), address(0));
     }
 

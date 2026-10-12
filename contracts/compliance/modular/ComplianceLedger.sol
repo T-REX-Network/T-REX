@@ -31,7 +31,7 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
 
 /**
  * @title ComplianceLedger
- * @dev The three numbers the compliance keeps about identities, and who owns each native wallet, in its own ERC-7201 namespace.
+ * @dev The four numbers the compliance keeps about identities, in its own ERC-7201 namespace.
  *
  * The rule: a number is kept by the contract that produces it. The compliance sees every movement through the
  * token's hooks and issues every cross-chain validation itself, so it is the one contract that can keep an
@@ -40,17 +40,17 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * Only this contract writes them, from the hooks and from the issuance, settlement and discard paths. There is
  * no setter, no writer role and no key: four mappings and four views.
  *
- * The registry can change who owns a wallet under the ledger's feet: an agent relinks a local entry, or deletes
- * it. The ledger keeps up on its own. It remembers which identity it credited each native wallet to, and the
- * next movement through that wallet notices the registry now names someone else and moves the wallet's balance
- * to them first, so no owner call is needed. When the registry names nobody, the remembered owner still
- * answers. A wallet the registry has never named, which only a registry with eligibility checks disabled lets
- * hold tokens, owns itself: it is counted under its own address, and followed to its identity like any relink
- * once an agent links it. Satellite wallets need none of this: the IdentityFactory's bindings are sticky, and
- * a validation is never issued toward a satellite wallet that has no identity.
+ * Registry writes never move a wallet to another identity. Its owner can still change when the owner swaps the
+ * registry's storage, or unbinds a registry from that storage. The ledger follows the registry so that rules
+ * and positions always agree. It remembers which identity it credited each native wallet to, and the next
+ * movement through that wallet moves the wallet's balance to the identity the registry names now. When the
+ * registry names nobody, the remembered owner still answers. Satellite wallets resolve through the
+ * IdentityFactory only, so they never change owner.
  *
- * So every token is always counted under exactly one owner, and `sum(positions) == totalSupply`. Every write
- * uses checked arithmetic: a debit larger than the position can only be a bug in this contract, and reverts.
+ * Every token has an owner: the registry admits no wallet without an active identity, even with its
+ * eligibility checks disabled, and each native wallet's balance is always counted under its recorded owner.
+ * So `sum(positions) == totalSupply` always holds, and every write uses checked arithmetic: a debit the
+ * position cannot cover is a bug in this contract, and reverts.
  */
 abstract contract ComplianceLedger is IComplianceLedger {
 
@@ -75,29 +75,25 @@ abstract contract ComplianceLedger is IComplianceLedger {
     }
 
     /// @dev Who a native wallet's tokens belong to now, given who the registry names. Records the first owner
-    ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody. A wallet
-    ///  the registry has never named owns itself, until an agent links it.
+    ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody.
     /// @return owner the identity to debit or credit for this wallet
     /// @return previous the identity that was credited before, when the owner just changed and the wallet's
     ///  balance has to follow; zero otherwise
     function _followOwner(address wallet, address resolved) internal returns (address owner, address previous) {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        address recorded = ledger.ownerOf[wallet];
-
-        owner = resolved;
-        if (owner == address(0)) owner = recorded;
-        if (owner == address(0)) owner = wallet;
-
-        if (owner == recorded) return (owner, address(0));
-        ledger.ownerOf[wallet] = owner;
-        return (owner, recorded);
+        mapping(address => address) storage ownerOf = _ledger().ownerOf;
+        address recorded = ownerOf[wallet];
+        if (resolved == address(0)) return (recorded, address(0));
+        if (recorded == resolved) return (resolved, address(0));
+        ownerOf[wallet] = resolved;
+        return (resolved, recorded);
     }
 
     /// @dev Moves what `wallet` held from the identity it was credited to onto the one the registry names now.
     function _moveWalletBalance(address wallet, address previous, address owner, uint256 balance) internal {
         if (balance != 0) {
-            _debitPosition(previous, balance);
-            _creditPosition(owner, balance);
+            mapping(address identity => uint256 amount) storage position = _ledger().position;
+            position[previous] -= balance;
+            position[owner] += balance;
         }
         emit EventsLib.WalletOwnerChanged(wallet, previous, owner, balance);
     }
@@ -114,16 +110,9 @@ abstract contract ComplianceLedger is IComplianceLedger {
         uint256 amount
     ) internal {
         if (_isRelocation(fromIdentity, toIdentity)) return;
-        if (fromWallet != bytes32(0)) _debitPosition(fromIdentity, amount);
-        if (toWallet != bytes32(0)) _creditPosition(toIdentity, amount);
-    }
-
-    function _debitPosition(address identity, uint256 amount) private {
-        _ledger().position[identity] -= amount;
-    }
-
-    function _creditPosition(address identity, uint256 amount) private {
-        _ledger().position[identity] += amount;
+        mapping(address identity => uint256 amount) storage position = _ledger().position;
+        if (fromWallet != bytes32(0)) position[fromIdentity] -= amount;
+        if (toWallet != bytes32(0)) position[toIdentity] += amount;
     }
 
     /// @dev Undoes the identities' half of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation

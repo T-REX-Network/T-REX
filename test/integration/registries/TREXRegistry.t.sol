@@ -79,6 +79,7 @@ import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TREXSuiteTest } from "../helpers/TREXSuiteTest.sol";
 import { ClaimIssuerTrick } from "../mocks/ClaimIssuerTrick.sol";
+import { Utils } from "test/unit/helpers/Utils.sol";
 
 /// @title TREXRegistryTest
 /// @notice Integration coverage for `TREXRegistry`: identity registration, trusted issuers, claim
@@ -120,7 +121,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         address irs = address(registry.identityStorage());
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        registry.init(irs, address(accessManager), new uint256[](0), new address[](0), new uint256[][](0));
+        registry.init(irs, address(suiteManager), new uint256[](0), new address[](0), new uint256[][](0));
     }
 
     // =============================================================================================
@@ -128,16 +129,14 @@ contract TREXRegistryTest is TREXSuiteTest {
     // =============================================================================================
 
     /// @notice Updating an identity emits `IdentityUpdated` and persists the new identity.
-    function test_identity_updateIdentity_Success() public {
-        IIdentity oldIdentity = registry.identity(bob);
-        assertEq(address(oldIdentity), address(bobIdentity));
-
-        vm.expectEmit(true, true, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityUpdated(oldIdentity, charlieIdentity);
+    function test_identity_updateIdentity_RevertWhen_WalletIsBound() public {
         vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
         registry.updateIdentity(bob, charlieIdentity);
 
-        assertEq(address(registry.identity(bob)), address(charlieIdentity));
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
     }
 
     /// @notice `setIdentityRegistryStorage` is OWNER-only — non-owner callers are rejected by the
@@ -318,7 +317,8 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.disableEligibilityChecks();
     }
 
-    /// @notice Disabling eligibility checks short-circuits `isVerified` to true for every address.
+    /// @notice Disabling eligibility checks skips the claims: a registered wallet without them passes, an address
+    ///         with no identity does not.
     function test_eligibility_disableEligibilityChecks_Success() public {
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false);
@@ -326,6 +326,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.disableEligibilityChecks();
 
         assertTrue(registry.isVerified(charlie));
+        assertFalse(registry.isVerified(another));
     }
 
     /// @notice Disabling twice in a row reverts with `EligibilityChecksDisabledAlready`.
@@ -349,14 +350,14 @@ contract TREXRegistryTest is TREXSuiteTest {
     function test_eligibility_enableEligibilityChecks_Success() public {
         vm.prank(deployer);
         registry.disableEligibilityChecks();
-        assertTrue(registry.isVerified(another));
+        assertTrue(registry.isVerified(charlie));
 
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false);
         emit EventsLib.EligibilityChecksEnabled();
         registry.enableEligibilityChecks();
 
-        assertFalse(registry.isVerified(another));
+        assertFalse(registry.isVerified(charlie), "charlie holds no claim for the token's topic");
     }
 
     /// @notice Enabling when already enabled reverts with `EligibilityChecksEnabledAlready`.
@@ -392,7 +393,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         uint256[] memory claimTopics = new uint256[](1);
         claimTopics[0] = CLAIM_TOPIC_1;
 
-        address anotherClaimIssuer = makeAddr("anotherClaimIssuer");
+        address anotherClaimIssuer = Utils.addressWithCode("anotherClaimIssuer");
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         registry.addTrustedIssuer(address(anotherClaimIssuer), claimTopics);
@@ -420,7 +421,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `addTrustedIssuer` rejects an empty topics array.
     function test_trustedIssuer_addTrustedIssuer_RevertWhen_ClaimTopicsEmpty() public {
-        address newClaimIssuer = makeAddr("newClaimIssuer");
+        address newClaimIssuer = Utils.addressWithCode("newClaimIssuer");
         uint256[] memory emptyClaimTopics = new uint256[](0);
 
         vm.prank(deployer);
@@ -430,7 +431,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `addTrustedIssuer` enforces the 15-topic cap per issuer.
     function test_trustedIssuer_addTrustedIssuer_RevertWhen_MoreThan15ClaimTopics() public {
-        address newClaimIssuer = makeAddr("newClaimIssuer");
+        address newClaimIssuer = Utils.addressWithCode("newClaimIssuer");
         uint256[] memory claimTopics = new uint256[](16);
         for (uint256 i = 0; i < 16; i++) {
             claimTopics[i] = i;
@@ -449,11 +450,12 @@ contract TREXRegistryTest is TREXSuiteTest {
 
         for (uint256 i = 0; i < 49; i++) {
             address issuerAddress = address(uint160(uint256(keccak256(abi.encodePacked("issuer", i)))));
+            vm.etch(issuerAddress, hex"00");
             vm.prank(deployer);
             registry.addTrustedIssuer(issuerAddress, claimTopics);
         }
 
-        address fiftyFirstClaimIssuer = makeAddr("fiftyFirstClaimIssuer");
+        address fiftyFirstClaimIssuer = Utils.addressWithCode("fiftyFirstClaimIssuer");
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxTrustedIssuersReached.selector, 50));
         registry.addTrustedIssuer(address(fiftyFirstClaimIssuer), claimTopics);
@@ -461,7 +463,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `removeTrustedIssuer` is OWNER-only.
     function test_trustedIssuer_removeTrustedIssuer_RevertWhen_NotOwner() public {
-        address anotherClaimIssuerForRemove = makeAddr("anotherClaimIssuerForRemove");
+        address anotherClaimIssuerForRemove = Utils.addressWithCode("anotherClaimIssuerForRemove");
 
         vm.prank(another);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
@@ -477,7 +479,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `removeTrustedIssuer` reverts when the issuer is unknown.
     function test_trustedIssuer_removeTrustedIssuer_RevertWhen_NotRegistered() public {
-        address newClaimIssuer = makeAddr("newClaimIssuer");
+        address newClaimIssuer = Utils.addressWithCode("newClaimIssuer");
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.NotATrustedIssuer.selector);
@@ -486,9 +488,9 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice Removing a middle issuer drops it from the list and `TrustedIssuerRemoved` is emitted.
     function test_trustedIssuer_removeTrustedIssuer_Success() public {
-        address bobClaimIssuer = makeAddr("bobClaimIssuer");
-        address anotherClaimIssuer = makeAddr("anotherClaimIssuer");
-        address charlieClaimIssuer = makeAddr("charlieClaimIssuer");
+        address bobClaimIssuer = Utils.addressWithCode("bobClaimIssuer");
+        address anotherClaimIssuer = Utils.addressWithCode("anotherClaimIssuer");
+        address charlieClaimIssuer = Utils.addressWithCode("charlieClaimIssuer");
 
         uint256[] memory topicsBob = new uint256[](3);
         topicsBob[0] = CLAIM_TOPIC_3;
@@ -529,7 +531,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `updateIssuerClaimTopics` is OWNER-only.
     function test_trustedIssuer_updateIssuerClaimTopics_RevertWhen_NotOwner() public {
-        address anotherClaimIssuerForUpdate = makeAddr("anotherClaimIssuerForUpdate");
+        address anotherClaimIssuerForUpdate = Utils.addressWithCode("anotherClaimIssuerForUpdate");
         uint256[] memory claimTopics = new uint256[](1);
         claimTopics[0] = CLAIM_TOPIC_1;
 
@@ -550,7 +552,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `updateIssuerClaimTopics` reverts when the issuer is unknown.
     function test_trustedIssuer_updateIssuerClaimTopics_RevertWhen_NotRegistered() public {
-        address newClaimIssuer = makeAddr("newClaimIssuer");
+        address newClaimIssuer = Utils.addressWithCode("newClaimIssuer");
         uint256[] memory claimTopics = new uint256[](1);
         claimTopics[0] = CLAIM_TOPIC_1;
 
@@ -608,8 +610,8 @@ contract TREXRegistryTest is TREXSuiteTest {
     /// @notice Covers the inner-loop increment in `updateIssuerClaimTopics`: the updated issuer
     ///         must not be the first entry in the per-topic array.
     function test_trustedIssuer_updateIssuerClaimTopics_CoversInnerLoopIncrement() public {
-        address firstIssuer = makeAddr("firstIssuer");
-        address secondIssuer = makeAddr("secondIssuer");
+        address firstIssuer = Utils.addressWithCode("firstIssuer");
+        address secondIssuer = Utils.addressWithCode("secondIssuer");
 
         uint256[] memory topics = new uint256[](1);
         topics[0] = CLAIM_TOPIC_1;
@@ -633,7 +635,7 @@ contract TREXRegistryTest is TREXSuiteTest {
 
     /// @notice `getTrustedIssuerClaimTopics` returns an empty set when the issuer is unknown.
     function test_trustedIssuer_getTrustedIssuerClaimTopics_ReturnsEmptyWhen_NotRegistered() public {
-        address newClaimIssuer = makeAddr("newClaimIssuer");
+        address newClaimIssuer = Utils.addressWithCode("newClaimIssuer");
         assertEq(registry.getTrustedIssuerClaimTopics(address(newClaimIssuer)).length, 0);
     }
 

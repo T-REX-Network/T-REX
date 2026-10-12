@@ -33,7 +33,7 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
 
         // The harness only registers INDIVIDUAL / CLAIM_ISSUER / ASSET policies; open CORPORATE too
         // (this contract is the AccessManager admin) so corporate identities can be minted.
-        idFactory.setIdentityTypePolicy(IdentityTypes.CORPORATE, accessManager.PUBLIC_ROLE(), true, false);
+        idFactory.setIdentityTypePolicy(IdentityTypes.CORPORATE, suiteManager.PUBLIC_ROLE(), true, false);
         idFactory.setIdentityTypeModules(
             IdentityTypes.CORPORATE,
             IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule))
@@ -211,7 +211,8 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_isVerified_ReflectsIdentityTypeChange() public {
-        // The ONCHAINID type is immutable, so a type change happens by swapping the stored identity.
+        // The ONCHAINID type is immutable and bindings are sticky, so a type change takes a new identity with
+        // its own wallet.
         vm.prank(deployer);
         registry.addClaimTopicForIdentityType(IdentityTypes.CORPORATE, CLAIM_TOPIC_KYB);
         assertFalse(registry.isVerified(corp));
@@ -223,10 +224,11 @@ contract TREXRegistryClaimTopicsByTypeUnitTest is TREXRegistryBaseUnitTest {
             individualIdentity, CLAIM_TOPIC_1, "KYC data", claimIssuerSigner.key, address(claimIssuer), corpSigner
         );
         vm.prank(agent);
-        registry.updateIdentity(corp, individualIdentity);
+        registry.registerIdentity(corpSigner, individualIdentity, 0);
 
-        // The next verification reads the new type and resolves the default set.
-        assertTrue(registry.isVerified(corp));
+        // The new wallet's verification reads the new type and resolves the default set; the old one keeps its own.
+        assertTrue(registry.isVerified(corpSigner));
+        assertFalse(registry.isVerified(corp));
     }
 
     function test_isVerified_ReadsTypeFromFactoryRecord_NotFromIdentity() public {

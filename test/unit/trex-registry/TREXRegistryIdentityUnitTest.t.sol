@@ -5,8 +5,8 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
@@ -49,16 +49,15 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         registry.updateIdentity(bob, charlieIdentity);
     }
 
-    function test_updateIdentity_Success_EmitsEvent() public {
-        IIdentity old = registry.identity(bob);
-        assertEq(address(old), address(bobIdentity));
-
+    /// @dev Bindings are sticky: `updateIdentity` never moves a wallet to another identity.
+    function test_updateIdentity_RevertWhen_WalletIsBound() public {
         vm.prank(agent);
-        vm.expectEmit(true, true, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityUpdated(old, charlieIdentity);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
         registry.updateIdentity(bob, charlieIdentity);
 
-        assertEq(address(registry.identity(bob)), address(charlieIdentity));
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
     }
 
     // ============ updateCountry() — deprecated ============
@@ -89,11 +88,10 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityRemoved(bob, old);
+        emit EventsLib.IdentityRevoked(bob, old);
         registry.deleteIdentity(bob);
 
-        // The local entry is gone; `contains` still resolves bob through the global IdFactory
-        // fallback, so the local view is the one that moves.
+        // The binding is revoked, not deleted: bob keeps his identity and only the local status moves.
         assertFalse(registry.isLocallyRegistered(bob));
         assertTrue(registry.contains(bob));
     }
@@ -122,7 +120,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
     ///         selectors; an agent can still batch-register.
     function test_batchRegisterIdentity_Success_WithProductionRoleWiring() public {
         // Re-wire with the real library (this contract is the AccessManager admin).
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
+        _setupRegistryRoles(address(registry));
 
         address second = makeAddr("secondBatchUser");
 
@@ -227,7 +225,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
         registry.setIdentityRegistryStorage(address(replacement));
 
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(replacement), DOMAIN);
+        _setupStorageRoles(address(replacement));
         vm.prank(deployer);
         replacement.bindIdentityRegistry(address(registry));
 
@@ -244,7 +242,7 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
             address(
                 new ERC1967Proxy(
                     address(identityRegistryStorageImpl),
-                    abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), initialIR))
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), initialIR))
                 )
             )
         );

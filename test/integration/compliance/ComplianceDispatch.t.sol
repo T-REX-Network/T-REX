@@ -255,33 +255,28 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     // ==== .canTransfer routing Tests ====
 
-    /// @notice A recipient that resolves to no identity is refused while a rule is bound. Every rule about
-    ///         distribution keys on the identity and would read a zero one as the absent side of a burn,
-    ///         answering "no limit", so the tokens would land where no cap could ever reach them. Only a token
-    ///         whose registry has eligibility checks disabled gets this far, since `isVerified` otherwise
-    ///         refuses the recipient first.
-    function test_canTransfer_Success_WhenTheRecipientResolvesToNoIdentity() public {
+    /// @notice A recipient with no identity never reaches the rules: the token refuses it first, even with the
+    ///         eligibility checks disabled, since disabling them skips the claims and not the identity.
+    function test_transfer_RevertWhen_TheRecipientHasNoIdentity_EvenWithChecksDisabled() public {
         vm.prank(deployer);
         ITREXRegistry(address(token.identityRegistry())).disableEligibilityChecks();
         address unregistered = makeAddr("walletWithNoIdentity");
 
-        assertFalse(mc.canTransfer(alice, unregistered, 1), "an unattributable recipient is refused");
-
         vm.prank(alice);
-        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
         token.transfer(unregistered, 1);
     }
 
-    /// @notice With no rule bound there is nothing to mis-decide, so the same transfer goes through: the guard
-    ///         costs a token without distribution rules nothing.
-    function test_canTransfer_Success_WhenNoRuleIsBoundAndTheRecipientIsUnattributable() public {
-        vm.startPrank(deployer);
-        ITREXRegistry(address(token.identityRegistry())).disableEligibilityChecks();
-        mc.removeModule(address(rule));
-        vm.stopPrank();
-        address unregistered = makeAddr("walletWithNoIdentity");
+    /// @notice A sender the registry no longer attributes, as after its storage was swapped, is refused while a
+    ///         rule is bound: it would otherwise read as a mint and escape every rule about leaving.
+    function test_canTransfer_Success_WhenTheSenderResolvesToNoIdentity() public {
+        vm.mockCall(
+            address(token.identityRegistry()),
+            abi.encodeWithSignature("identity(address)", alice),
+            abi.encode(address(0))
+        );
 
-        assertTrue(mc.canTransfer(alice, unregistered, 1));
+        assertFalse(mc.canTransfer(alice, bob, 1), "an unattributable sender is refused");
     }
 
     /// @notice A rejecting module that declared the check blocks the transfer.
@@ -406,7 +401,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
         envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
         vm.prank(agent);
-        TokenLedgerHarness(address(token)).delegateOut(alice, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerDelegateOut(alice, envelope, amount);
     }
 
 }

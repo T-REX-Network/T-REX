@@ -64,11 +64,9 @@ interface IModule {
         /// The compliance asking. Modules read the ledger and their settings from it, never from
         /// `msg.sender`, so that tooling can ask the same question from any address.
         address compliance;
-        /// Identity of the sender. Zero on a mint. On an `AFTER` call, a native wallet no registry names stands for
-        /// itself here, as the ledger counts it.
+        /// Identity of the sender. Zero on a mint.
         address fromIdentity;
-        /// Identity of the recipient. Zero on a burn. On an `AFTER` call or a late settlement's check, a native
-        /// wallet no registry names stands for itself here, as the ledger counts it.
+        /// Identity of the recipient. Zero on a burn.
         address toIdentity;
         /// Canonical key of the sending wallet: a native address padded on the left, or `keccak256` of a
         /// satellite envelope. Zero on a mint.

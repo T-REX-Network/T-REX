@@ -70,15 +70,13 @@ library ComplianceLedgerLib {
 
     /// @custom:storage-location erc7201:erc3643.storage.ComplianceLedger
     struct Ledger {
-        /// What each identity owns over every wallet and every chain, and what a wallet the registry never named
-        /// holds, under the wallet's own address.
+        /// What each identity owns over every wallet and every chain.
         mapping(address identity => uint256 amount) position;
         /// What open validations promise to each identity.
         mapping(address identity => uint256 amount) pendingIn;
         /// What open validations promise out of each identity.
         mapping(address identity => uint256 amount) pendingOut;
-        /// The identity each native wallet was last credited to, so a relink is noticed and followed. The wallet
-        /// itself when the registry named nobody.
+        /// The identity each native wallet was last credited to, so a change of owner is noticed and followed.
         mapping(address wallet => address identity) ownerOf;
     }
 

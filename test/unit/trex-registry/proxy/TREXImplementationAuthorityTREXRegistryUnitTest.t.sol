@@ -27,7 +27,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
     address public accessManagerAdmin = makeAddr("accessManagerAdmin");
     address public another = makeAddr("another");
 
-    AccessManager public accessManager;
+    AccessManager public suiteManager;
     TREXImplementationAuthority public ia;
 
     DummyImpl public tokenImpl;
@@ -44,15 +44,15 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
         mcImpl = new DummyImpl();
         trexRegistryImpl = new DummyImpl();
 
-        accessManager = new AccessManager(accessManagerAdmin);
+        suiteManager = new AccessManager(accessManagerAdmin);
 
-        ia = new TREXImplementationAuthority(address(accessManager), v0, _baseImpls());
+        ia = new TREXImplementationAuthority(address(suiteManager), v0, _baseImpls());
 
         vm.startPrank(accessManagerAdmin);
         AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(
-            accessManager, address(ia), RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER)
+            suiteManager, address(ia), RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER)
         );
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), deployer, 0);
+        suiteManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), deployer, 0);
         vm.stopPrank();
     }
 
@@ -173,7 +173,7 @@ contract TREXImplementationAuthorityTREXRegistryUnitTest is Test {
         impls.trexRegistryImplementation = address(0);
 
         vm.expectRevert(ErrorsLib.EmptyImplementations.selector);
-        new TREXImplementationAuthority(address(accessManager), v0, impls);
+        new TREXImplementationAuthority(address(suiteManager), v0, impls);
     }
 
 }
