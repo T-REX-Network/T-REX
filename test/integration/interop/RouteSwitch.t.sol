@@ -162,7 +162,7 @@ contract RouteSwitchTest is InteropSuiteTest {
     /// @dev A recall carries no validation, so it checks against the current route: old gateway refused.
     function testBurnProofFollowsTheCurrentRoute() public {
         bytes memory payload =
-            MessageTypesLib.encodeBurnProof(_burnProof(POLYGON, makeAddr("Burned"), amount, makeAddr("Holder")));
+            MessageTypesLib.encodeBurnProof(_burnProof(1, _satelliteEnvelope(POLYGON, makeAddr("Burned")), amount));
 
         uint256 viaOld = _liteSends(oldGateway, token, payload);
         uint256 viaNew = _liteSends(newGateway, token, payload);

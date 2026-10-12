@@ -17,7 +17,7 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.delegateOut(user1, satellite1, 60);
+        ledger.ledgerDelegateOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
@@ -94,7 +94,7 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
     function test_bridgedTransfer_ThenRecallFromTheReceiver() public {
         vm.startPrank(agent);
         ledger.bridgedTransfer(satellite1, satellite2, 30, VALIDATION_ID);
-        ledger.recall(satellite2, user2, 30);
+        ledger.ledgerRecall(satellite2, user2, 30);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 30);

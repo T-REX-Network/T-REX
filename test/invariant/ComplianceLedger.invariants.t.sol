@@ -190,18 +190,21 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         try gateway.relay(index) { } catch { }
     }
 
-    /// @dev The keeper discards a validation past its release time; the clock moves forward to get there.
-    function discard(uint256 idSeed) external {
+    /// @dev The keeper discards a validation past its release time, or this handler, holding no role, past the
+    ///      second window; the clock moves forward to get there.
+    function discard(uint256 idSeed, bool asKeeper) external {
         callsDiscard++;
         if (issued.length == 0) return;
         uint256 id = issued[idSeed % issued.length];
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
         if (validation.status != ITransferValidation.ValidationStatus.Pending) return;
 
-        if (block.timestamp <= validation.releaseAt) vm.warp(validation.releaseAt + 1);
+        uint64 openAt =
+            asKeeper ? validation.releaseAt : validation.releaseAt + (validation.releaseAt - validation.expiry);
+        if (block.timestamp <= openAt) vm.warp(openAt + 1);
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
-        vm.prank(keeper);
+        if (asKeeper) vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);
     }
 

@@ -19,14 +19,14 @@ contract TokenLedgerHarness is Token {
         _;
     }
 
-    function delegateOut(address holder, bytes calldata toWallet, uint256 amount)
+    function ledgerDelegateOut(address holder, bytes calldata toWallet, uint256 amount)
         external
         restrictedFor(this.mint.selector)
     {
-        _delegateOut(holder, toWallet, amount);
+        _delegateOut(holder, toWallet, amount, 0);
     }
 
-    function recall(bytes calldata fromWallet, address holder, uint256 amount)
+    function ledgerRecall(bytes calldata fromWallet, address holder, uint256 amount)
         external
         restrictedFor(this.mint.selector)
     {

@@ -31,5 +31,9 @@ library MovementKindLib {
     /// A movement a satellite executes under a validation: the issuance of that validation while
     /// `isIssuance` is set, its settlement otherwise.
     uint8 internal constant CROSS_CHAIN = 6;
+    /// A holder's native balance delegated out to a satellite wallet of the same identity. `fromWallet` and
+    /// `toWallet` are both the native wallet: the position keeps its owner. Reported after the burn, like every
+    /// movement, so the ledger follows a registry relink of the holder with the delegated amount counted back in.
+    uint8 internal constant DELEGATION = 7;
 
 }

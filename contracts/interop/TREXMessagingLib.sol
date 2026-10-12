@@ -68,6 +68,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
+import { TokenLedgerLib } from "../token/TokenLedgerLib.sol";
 import { ISettlementHandler } from "./ISettlementHandler.sol";
 import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
 
@@ -252,12 +253,14 @@ library TREXMessagingLib {
 
     /// @dev Attributes and admits one inbound delivery, and hands back what the token must act on.
     ///
-    /// Everything that decides whether a message is accepted happens here, in the order it always did:
-    /// the sender must be this token's peer on the chain it claims, the envelope must decode, the
-    /// delivery must be new (and is recorded), the type must be one a token receives, and the gateway
-    /// must be the one this leg is expected through. Acting on the message is left to the token, since
-    /// only it knows its compliance and its pause. The gateway's trust is the caller's check, made
-    /// before this is reached.
+    /// Everything that decides whether a message is accepted happens here: the envelope must decode, the
+    /// delivery must be new (and is recorded), the type must be one a token receives, and the author and the
+    /// gateway must be the ones this message is expected from. A settlement comes from the chain's current
+    /// peer, through the gateway its validation was pinned to; a burn proof for a recall still open comes
+    /// from the peer and gateway that recall was dispatched to, so a later route or peer change cannot strand
+    /// it, and any other burn proof from the current peer and route. Acting on the message is left to the
+    /// token, since only it knows its compliance and its pause. The gateway's trust is the caller's check,
+    /// made before this is reached, so a gateway the registry no longer trusts is refused even when pinned.
     /// @return messageType `SETTLEMENT_NOTIFICATION` or `BURN_PROOF`; anything else reverts.
     /// @return chainKey The chain the message is attributed to.
     /// @return body The still-encoded body, of the type `messageType` names.
@@ -270,17 +273,16 @@ library TREXMessagingLib {
 
         MessagingStorage storage s = layout();
 
-        require(keccak256(sender) == keccak256(peerFor(chainKey)), ErrorsLib.SenderNotPeer(chainKey, sender));
-
         (messageType, body) = MessageTypesLib.decode(payload);
 
         require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
         s.received[gateway][receiveId] = true;
 
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
+            _requireCurrentPeer(chainKey, sender);
             _requireExpectedGateway(s, gateway, chainKey, MessageTypesLib.decodeSettlement(body).validationId);
         } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
-            _requireCurrentRoute(s, gateway, chainKey);
+            _requireRecallOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeBurnProof(body).recallId);
         } else {
             revert ErrorsLib.MessageTypeNotInbound(messageType);
         }
@@ -295,16 +297,6 @@ library TREXMessagingLib {
     /// @return halt Whether the handler reported a replayed or never-issued settlement.
     function forwardSettlement(address handler, bytes32 chainKey, bytes memory body) external returns (bool halt) {
         return ISettlementHandler(handler).handleSettlement(chainKey, MessageTypesLib.decodeSettlement(body));
-    }
-
-    /// @dev Checks an admitted burn proof for a destination and announces it with its fields intact.
-    /// @param body A burn-proof body, as {acceptMessage} returned it.
-    function announceBurnProof(bytes32 chainKey, bytes memory body) external {
-        MessageTypesLib.BurnProof memory proof = MessageTypesLib.decodeBurnProof(body);
-
-        require(proof.nativeWallet != address(0), ErrorsLib.ZeroAddress());
-
-        emit EventsLib.BurnProofReceived(chainKey, proof.burnedWallet, proof.nativeWallet, proof.amount);
     }
 
     /* ----- Storage ----- */
@@ -380,6 +372,29 @@ library TREXMessagingLib {
         } else {
             require(pinned == gateway, ErrorsLib.GatewayNotPinned(gateway, validationId, chainKey));
         }
+    }
+
+    function _requireCurrentPeer(bytes32 chainKey, bytes calldata sender) private view {
+        require(keccak256(sender) == keccak256(peerFor(chainKey)), ErrorsLib.SenderNotPeer(chainKey, sender));
+    }
+
+    /// @dev The peer and gateway the recall was dispatched to while it is open; the current ones once it is not,
+    ///  so a settled or never-issued id still reaches the token's duplicate and replay handling.
+    function _requireRecallOrigin(
+        MessagingStorage storage s,
+        address gateway,
+        bytes32 chainKey,
+        bytes calldata sender,
+        uint256 recallId
+    ) private view {
+        TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[recallId];
+        if (recall.amount == 0) {
+            _requireCurrentPeer(chainKey, sender);
+            _requireCurrentRoute(s, gateway, chainKey);
+            return;
+        }
+        require(keccak256(sender) == recall.peerKey, ErrorsLib.SenderNotPeer(chainKey, sender));
+        require(recall.gateway == gateway, ErrorsLib.GatewayNotPinned(gateway, recallId, chainKey));
     }
 
     function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {
