@@ -311,9 +311,9 @@ contract ModularCompliance is
     ///  Nothing is resolved when no rule is bound.
     ///
     ///  A sender that resolves to no identity is refused outright while a rule is bound: it would read as a mint
-    ///  and escape every rule about leaving. A holding wallet resolves to nobody only after the registry's storage
-    ///  was swapped. The recipient needs no such guard, since the token asks `isVerified` first, and that
-    ///  requires an active identity even with the eligibility checks disabled.
+    ///  and escape every rule about leaving. A holding wallet resolves to nobody only after the owner swaps the
+    ///  registry's storage or unbinds a registry from it. The recipient needs no such guard, since the token asks
+    ///  `isVerified` first, and that requires an active identity even with the eligibility checks disabled.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);

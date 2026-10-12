@@ -76,7 +76,7 @@ library ComplianceLedgerLib {
         mapping(address identity => uint256 amount) pendingIn;
         /// What open validations promise out of each identity.
         mapping(address identity => uint256 amount) pendingOut;
-        /// The identity each native wallet was first credited to, kept for good.
+        /// The identity each native wallet was last credited to, so a change of owner is noticed and followed.
         mapping(address wallet => address identity) ownerOf;
     }
 

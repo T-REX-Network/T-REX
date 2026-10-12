@@ -48,8 +48,8 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * IdentityFactory only, so they never change owner.
  *
  * Every token has an owner: the registry admits no wallet without an active identity, even with its
- * eligibility checks disabled, and a native wallet's owner is recorded when it is first credited. So
- * `sum(positions) == totalSupply` always holds, and every write uses checked arithmetic: a debit the
+ * eligibility checks disabled, and each native wallet's balance is always counted under its recorded owner.
+ * So `sum(positions) == totalSupply` always holds, and every write uses checked arithmetic: a debit the
  * position cannot cover is a bug in this contract, and reverts.
  */
 abstract contract ComplianceLedger is IComplianceLedger {

@@ -39,11 +39,12 @@ pragma solidity 0.8.30;
 ///
 /// The positions are exact: `sum(positions) == totalSupply`. The token's identity registry admits no wallet
 /// without an active identity, even with its eligibility checks disabled, so every token lands on a wallet with
-/// an owner. Registry writes never relink a wallet, but the owner can still change who a wallet resolves to by
-/// swapping the registry's storage or unbinding a registry from it. The ledger keeps up on its own: it remembers
-/// which identity it credited each native wallet to (`ownerOf`), and the next movement through a wallet whose
-/// owner changed moves its balance to the new owner before applying the movement. A wallet the registry no longer
-/// names keeps its remembered owner.
+/// an owner. A wallet keeps resolving after its investor revokes it, and a token that circulates may not change its
+/// registry or its compliance. Registry writes never relink a wallet, but the owner can still change who a wallet
+/// resolves to by swapping the registry's storage or unbinding a registry from it. The ledger keeps up on its own:
+/// it remembers which identity it credited each native wallet to (`ownerOf`), and the next movement through a
+/// wallet whose owner changed moves its balance to the new owner before applying the movement. A wallet the
+/// registry no longer names keeps its remembered owner.
 interface IComplianceLedger {
 
     /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
