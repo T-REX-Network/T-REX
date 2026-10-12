@@ -243,7 +243,7 @@ contract SpenderWhitelistModuleTest is TREXSuiteTest {
     function _deployModule() private returns (SpenderWhitelistModule) {
         SpenderWhitelistModule implementation = new SpenderWhitelistModule();
         ModuleProxy proxy = new ModuleProxy(
-            address(implementation), abi.encodeCall(SpenderWhitelistModule.initialize, (address(accessManager)))
+            address(implementation), abi.encodeCall(SpenderWhitelistModule.initialize, (address(suiteManager)))
         );
         return SpenderWhitelistModule(address(proxy));
     }

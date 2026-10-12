@@ -13,10 +13,10 @@ import { TREXSuiteTest } from "../integration/helpers/TREXSuiteTest.sol";
 contract AuthFuzzTest is TREXSuiteTest {
 
     function _assumeNoRole(address caller, uint64 role) internal view {
-        (bool has,) = accessManager.hasRole(role, caller);
+        (bool has,) = suiteManager.hasRole(role, caller);
         vm.assume(!has);
         // role 0 (admin) can call anything via the manager; exclude it too.
-        (bool isAdmin,) = accessManager.hasRole(0, caller);
+        (bool isAdmin,) = suiteManager.hasRole(0, caller);
         vm.assume(!isAdmin);
         vm.assume(caller != address(0));
     }

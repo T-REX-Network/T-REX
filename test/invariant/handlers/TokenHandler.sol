@@ -184,7 +184,8 @@ contract TokenHandler is Test {
         } catch { }
     }
 
-    /// @dev Same-chain and cross-chain settlements alike: the wallets carry the chains.
+    /// @dev Same-chain and cross-chain settlements alike: the wallets carry the chains. A fuzzed id can land on
+    ///  a live hold: the token then settles that hold instead of debiting `from`, so the model follows it.
     function bridgedTransfer(
         uint256 fromActorSeed,
         uint256 fromWalletSeed,
@@ -197,8 +198,11 @@ contract TokenHandler is Test {
         bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
         bytes memory to = _satellite(_actor(toActorSeed), toWalletSeed);
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        uint256 held = token.inTransitOf(validationId);
         vm.prank(agent);
-        try token.bridgedTransfer(from, to, amount, validationId) { } catch { }
+        try token.bridgedTransfer(from, to, amount, validationId) {
+            if (held != 0) _settledHold(validationId, held);
+        } catch { }
     }
 
     /// @dev A satellite position lands on another identity's native wallet: the seeds are independent, so the
@@ -237,10 +241,19 @@ contract TokenHandler is Test {
         uint256 amount = exact ? hold.amount : hold.amount + 1;
         vm.prank(agent);
         try token.bridgedTransfer(hold.from, to, amount, hold.validationId) {
-            ghostInTransit -= hold.amount;
+            _settledHold(hold.validationId, hold.amount);
+        } catch { }
+    }
+
+    /// @dev A hold left the token: the model lets go of it too.
+    function _settledHold(uint256 validationId, uint256 amount) internal {
+        ghostInTransit -= amount;
+        for (uint256 i = 0; i < holds.length; i++) {
+            if (holds[i].validationId != validationId) continue;
             holds[i] = holds[holds.length - 1];
             holds.pop();
-        } catch { }
+            return;
+        }
     }
 
     // ------------------------------------------------------------------

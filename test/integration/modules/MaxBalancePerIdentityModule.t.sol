@@ -35,7 +35,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
             address(
                 new ModuleProxy(
                     address(new MaxBalancePerIdentityModule()),
-                    abi.encodeCall(MaxBalancePerIdentityModule.initialize, (address(accessManager)))
+                    abi.encodeCall(MaxBalancePerIdentityModule.initialize, (address(suiteManager)))
                 )
             )
         );

@@ -39,7 +39,7 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
             ONCHAINID: address(0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager),
+            accessManager: address(suiteManager),
             accessManagerAdmin: address(0)
         });
     }
@@ -101,22 +101,22 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
         // each cloned beacon must be owned by the suite AccessManager
         assertEq(
             UpgradeableBeacon(beacons.tokenBeacon).owner(),
-            address(accessManager),
+            address(suiteManager),
             "token beacon owner must be the suite AccessManager"
         );
         assertEq(
             UpgradeableBeacon(beacons.trexRegistryBeacon).owner(),
-            address(accessManager),
+            address(suiteManager),
             "registry beacon owner must be the suite AccessManager"
         );
         assertEq(
             UpgradeableBeacon(beacons.irsBeacon).owner(),
-            address(accessManager),
+            address(suiteManager),
             "irs beacon owner must be the suite AccessManager"
         );
         assertEq(
             UpgradeableBeacon(beacons.mcBeacon).owner(),
-            address(accessManager),
+            address(suiteManager),
             "mc beacon owner must be the suite AccessManager"
         );
 
@@ -215,7 +215,7 @@ contract TREXFactoryIsolatedSuiteTest is TREXSuiteTest {
 
         // the suite's AccessManager upgrades only the isolated token beacon
         MockTokenV2 v2Implementation = new MockTokenV2();
-        accessManager.execute(
+        suiteManager.execute(
             beacons.tokenBeacon, abi.encodeCall(UpgradeableBeacon.upgradeTo, (address(v2Implementation)))
         );
 

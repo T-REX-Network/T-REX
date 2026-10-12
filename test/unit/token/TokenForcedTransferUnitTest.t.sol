@@ -43,7 +43,7 @@ contract TokenTransferUnitTest is TokenBaseUnitTest {
 
     function testTokenForcedTransferRevertsWhenCallerOnlyMinter() public {
         address minter = makeAddr("Minter");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
         vm.prank(minter);
