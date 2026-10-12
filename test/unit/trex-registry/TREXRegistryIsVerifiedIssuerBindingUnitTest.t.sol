@@ -84,10 +84,11 @@ contract TREXRegistryIsVerifiedIssuerBindingUnitTest is TREXRegistryBaseUnitTest
     function test_isVerified_ReturnsFalse_WhenIdentityNamesTrustedIssuerWithoutAValidClaim() public {
         IssuerSpoofingIdentity spoofer = new IssuerSpoofingIdentity(CLAIM_TOPIC_1, address(claimIssuer));
 
+        address spoofedWallet = makeAddr("spoofedWallet");
         vm.prank(agent);
-        registry.updateIdentity(another, IIdentity(address(spoofer)));
+        registry.registerIdentity(spoofedWallet, IIdentity(address(spoofer)), 0);
 
-        assertFalse(registry.isVerified(another));
+        assertFalse(registry.isVerified(spoofedWallet));
     }
 
 }

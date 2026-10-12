@@ -11,10 +11,11 @@ interface implementing exactly that interface over its own ERC-7201 namespace. T
 inherit those bases and add everything T-REX-specific through internal virtual hooks. No base refers to
 anything in the T-REX layer; no extension writes a base namespace directly.
 
-The one exception to "extensions never change a standard function's semantics": `TREXRegistry` reverts
+Two exceptions to "extensions never change a standard function's semantics". First, `TREXRegistry` reverts
 the inherited `setClaimTopicsRegistry` and `setTrustedIssuersRegistry` with `Deprecated`, because it is
 its own topics and issuers registry and there is nothing for either setter to point at. Both reverted
 before the split too. Splitting the registries apart would restore the base implementations unchanged.
+Second, identity bindings are sticky, see below.
 
 ## Procedure
 
@@ -111,6 +112,23 @@ way. Returning the standard interface keeps `Token` swappable, so the getters ar
 ERC-3643. The bases expose `_maxClaimTopics`, `_maxTrustedIssuers` and `_maxIssuerClaimTopics`,
 defaulting to unlimited; `TREXRegistry` overrides them with the v4 values, which is what keeps them
 after the swap.
+
+### Identity bindings are sticky (#117)
+
+`IdentityRegistryStorage` follows the ONCHAINID IdentityFactory: a wallet is never moved to another
+identity, and a revoked wallet is never bound again. This changes three standard functions. Integrators
+that rebuild the registry from events, or fix a binding by deleting and registering again, must know it.
+
+| Call | ERC-3643 | T-REX |
+|---|---|---|
+| `updateIdentity` / `modifyStoredIdentity` | Replaces the identity | Always reverts |
+| `deleteIdentity` / `removeIdentityFromStorage` | Removes the wallet, emits `IdentityRemoved` / `IdentityUnstored` | Revokes it, emits `IdentityRevoked` from both contracts |
+| `registerIdentity` / `addIdentityToStorage` | Any identity | Refuses a revoked wallet, or a wallet the factory links to another identity |
+
+After `deleteIdentity`, `contains` and `identity` keep answering, `isVerified` is false, and
+`localAccountStatus` is `Revoked`. A wrong binding is never corrected: register a new wallet of the right
+identity, then recover or force transfer the tokens to it. The bases keep the standard behavior; the
+departure lives in the T-REX layer only.
 
 ## Divergences to re-decide at swap time
 
