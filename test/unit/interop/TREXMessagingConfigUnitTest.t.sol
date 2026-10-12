@@ -43,7 +43,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         // The network's registry the token was deployed against; the token exposes no way to move it.
         registry = trustedGatewayRegistry;
         AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
-            accessManager, address(registry), RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
+            platformManager, address(registry), RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
         );
 
         _grantManagerRoles(identityManager);

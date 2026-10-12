@@ -2,12 +2,11 @@
 pragma solidity 0.8.30;
 
 import { Test } from "@forge-std/Test.sol";
-import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -15,10 +14,9 @@ import { TestModule } from "test/integration/mocks/TestModule.sol";
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 import { Utils } from "test/unit/helpers/Utils.sol";
 
-contract ModularComplianceInitUnitTest is Test {
+contract ModularComplianceInitUnitTest is AccessManagerHelper {
 
     ModularCompliance private mcImplementation;
-    AccessManager private accessManager;
     address private mcBeacon;
 
     address private notOwner = makeAddr("NotOwner");
@@ -26,15 +24,15 @@ contract ModularComplianceInitUnitTest is Test {
 
     function setUp() public {
         mcImplementation = new ModularCompliance();
-        accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
+        _deploySuiteManager();
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
         mcBeacon = BeaconProxyDeployer.newBeacon(address(mcImplementation));
     }
 
     function test_init_SetsAccessManagerFromArgument_NotDeployer() public {
         ModularCompliance mc = _deployProxy(token, _emptyModules(), _emptySettings());
 
-        assertEq(IAccessManaged(address(mc)).authority(), address(accessManager));
+        assertEq(IAccessManaged(address(mc)).authority(), address(suiteManager));
         assertNotEq(IAccessManaged(address(mc)).authority(), address(this));
     }
 
@@ -104,7 +102,7 @@ contract ModularComplianceInitUnitTest is Test {
 
     function test_init_RevertWhen_TokenIsZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        _newMcProxy(address(0), address(accessManager), _emptyModules(), _emptySettings());
+        _newMcProxy(address(0), address(suiteManager), _emptyModules(), _emptySettings());
     }
 
     function test_init_RevertWhen_OwnerIsZeroAddress() public {
@@ -121,7 +119,7 @@ contract ModularComplianceInitUnitTest is Test {
         settings[1] = abi.encodeWithSignature("blockModule(bool)", false);
 
         vm.expectRevert(ErrorsLib.InvalidCompliancePattern.selector);
-        _newMcProxy(token, address(accessManager), modules, settings);
+        _newMcProxy(token, address(suiteManager), modules, settings);
     }
 
     function test_init_RevertWhen_MoreThan25Modules() public {
@@ -131,7 +129,7 @@ contract ModularComplianceInitUnitTest is Test {
         }
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxModulesReached.selector, 25));
-        _newMcProxy(token, address(accessManager), modules, _emptySettings());
+        _newMcProxy(token, address(suiteManager), modules, _emptySettings());
     }
 
     function test_bindToken_RevertWhen_DifferentTokenTriesToBindOverExistingBinding() public {
@@ -167,8 +165,8 @@ contract ModularComplianceInitUnitTest is Test {
         private
         returns (ModularCompliance)
     {
-        ModularCompliance mc = ModularCompliance(_newMcProxy(_token, address(accessManager), _modules, _moduleSettings));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(mc), 1);
+        ModularCompliance mc = ModularCompliance(_newMcProxy(_token, address(suiteManager), _modules, _moduleSettings));
+        _setupComplianceRoles(address(mc));
         return mc;
     }
 
