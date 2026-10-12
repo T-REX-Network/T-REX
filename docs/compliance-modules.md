@@ -214,6 +214,10 @@ Every token has an owner. The registry admits no wallet without an active identi
 eligibility checks disabled, which skip the claims only. So `sum(positions) == totalSupply` always
 holds, and a debit the position cannot cover reverts.
 
+Nothing repairs a position. A debit that reverts means the invariant is broken, so the agent's own
+calls on that identity (burn, forced transfer, recovery) revert with it. The fix is a compliance
+implementation upgrade through the version manager, not an owner call.
+
 ## Binding
 
 The owner binds a module with `addModule`, or with `addAndSetModule` to configure it in the same

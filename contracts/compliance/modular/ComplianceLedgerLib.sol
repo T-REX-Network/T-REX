@@ -76,6 +76,8 @@ library ComplianceLedgerLib {
         mapping(address identity => uint256 amount) pendingIn;
         /// What open validations promise out of each identity.
         mapping(address identity => uint256 amount) pendingOut;
+        /// Was the gap between the positions and the supply. Kept so `ownerOf` stays in its slot for a deployed proxy.
+        int256 __deprecatedGap;
         /// The identity each native wallet was last credited to, so a change of owner is noticed and followed.
         mapping(address wallet => address identity) ownerOf;
     }
