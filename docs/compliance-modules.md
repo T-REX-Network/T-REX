@@ -203,10 +203,12 @@ cannot relink a wallet to another identity, and deleting an entry revokes it: th
 identity but may no longer act, and it can never be registered again. Moving an investor to a new
 identity is a forced transfer to a wallet of that identity.
 
-The ledger is sticky too. It records each native wallet's first owner (`ownerOf(wallet)`) and keeps it.
-The registry could still name another identity later, for example after its storage is swapped. The
-ledger then keeps counting the wallet under the recorded owner and emits `WalletOwnerMismatch`. If the
-registry names nobody, the recorded owner is used as well.
+Who a wallet resolves to can still change when the owner swaps the registry's storage, or unbinds a
+registry from it. The ledger follows that on its own, so rules and positions always judge the same
+identity. It remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When the
+registry names another identity, the next movement through the wallet moves its balance to the new
+owner first, then counts the movement; `WalletOwnerChanged` says so. When the registry names nobody,
+the remembered owner still answers. Nobody calls anything.
 
 One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
 does not know, which only a registry with eligibility checks disabled allows. That amount is counted

@@ -582,8 +582,9 @@ All notable changes to this project will be documented in this file.
     revoked wallet.
   - `removeIdentityFromStorage`, and so `deleteIdentity`, revokes instead of deleting. The wallet keeps its
     identity for `identity` and `contains`, `isVerified` turns false, and the wallet can never be
-    registered again. Revoking twice reverts with `WalletNotActive`. The standard `IdentityUnstored` and
-    `IdentityRemoved` events are still emitted.
+    registered again. Revoking twice reverts with `WalletNotActive`. The storage and the registry emit
+    `IdentityRevoked` instead of the standard `IdentityUnstored` and `IdentityRemoved`, which mean the
+    wallet left the registry. See docs/erc3643-oz-swap.md for integrators.
   - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
     factory links the wallet, actively or revoked, to a different identity, and with
     `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
@@ -598,10 +599,8 @@ All notable changes to this project will be documented in this file.
   - `isVerified` and `isWalletVerified` return false when the IdentityFactory links a wallet to another
     identity than the storage does, even if that link was revoked. The wallet keeps its owner for
     `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
-  - The compliance ledger keeps each wallet's first recorded owner for good. If the registry later names
-    another identity, for example after its storage is swapped, the ledger keeps the recorded owner and
-    emits `WalletOwnerMismatch`. It no longer moves a wallet's balance to a new owner. Removed: the event
-    `WalletOwnerChanged`.
+  - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
+    ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
 
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From

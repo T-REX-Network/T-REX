@@ -62,6 +62,8 @@
  */
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { MessageTypesLib } from "./MessageTypesLib.sol";
@@ -161,6 +163,11 @@ library EventsLib {
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
+    /// @notice A wallet's binding was revoked, like the IdentityFactory's `AccountRevoked`. The wallet keeps
+    ///         `identity` but may no longer act, and it can never be bound again. Emitted by the storage and
+    ///         by the registry in place of the standard `IdentityUnstored` and `IdentityRemoved`, which mean
+    ///         the wallet left the registry.
+    event IdentityRevoked(address indexed investor, IIdentity indexed identity);
 
     // Token Events
     event ForcedTransfer(address indexed agent);
@@ -230,9 +237,11 @@ library EventsLib {
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
 
-    /// The registry names another identity for a wallet than the one the ledger recorded. The ledger keeps
-    /// counting the wallet under the recorded identity.
-    event WalletOwnerMismatch(address indexed wallet, address indexed identity, address indexed resolvedIdentity);
+    /// The registry now names another identity for a wallet that holds tokens, so its balance followed it: what
+    /// the previous identity's position counted for this wallet is now the new one's.
+    event WalletOwnerChanged(
+        address indexed wallet, address indexed previousIdentity, address indexed identity, uint256 amount
+    );
 
     /// The owner moved `amount` of position between two sides; a zero side is the gap.
     event PositionFixed(address indexed from, address indexed to, uint256 amount);

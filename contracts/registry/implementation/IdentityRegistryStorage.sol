@@ -69,6 +69,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { ERC3643IdentityRegistryStorage } from "../../ERC-3643/base/ERC3643IdentityRegistryStorage.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
@@ -222,7 +223,8 @@ contract IdentityRegistryStorage is
     }
 
     /// @dev Revokes the wallet, like the IdentityFactory's `revokeAccount`. The wallet keeps its identity, but
-    ///  `isVerified` returns false and it can never be bound again.
+    ///  `isVerified` returns false and it can never be bound again. Emits `IdentityRevoked`, not the standard
+    ///  `IdentityUnstored`, since the wallet stays in the registry.
     function _removeIdentityFromStorage(address userAddress) internal override {
         require(userAddress != address(0), ErrorsLib.ZeroAddress());
         IIdentity boundIdentity = _storedIdentity(userAddress);
@@ -233,7 +235,7 @@ contract IdentityRegistryStorage is
         );
 
         _getStorage().accountStatus[userAddress] = IIdentityFactory.AccountStatus.Revoked;
-        emit IdentityUnstored(userAddress, boundIdentity);
+        emit EventsLib.IdentityRevoked(userAddress, boundIdentity);
     }
 
     /// @dev T-REX keeps no country here, so nothing is written and no `CountryModified` is emitted. The

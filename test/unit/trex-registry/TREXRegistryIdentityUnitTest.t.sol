@@ -6,6 +6,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
@@ -87,11 +88,10 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
 
         vm.prank(agent);
         vm.expectEmit(true, true, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityRemoved(bob, old);
+        emit EventsLib.IdentityRevoked(bob, old);
         registry.deleteIdentity(bob);
 
-        // The local entry is gone; `contains` still resolves bob through the global IdFactory
-        // fallback, so the local view is the one that moves.
+        // The binding is revoked, not deleted: bob keeps his identity and only the local status moves.
         assertFalse(registry.isLocallyRegistered(bob));
         assertTrue(registry.contains(bob));
     }
