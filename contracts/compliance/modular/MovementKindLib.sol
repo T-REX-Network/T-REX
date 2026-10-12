@@ -25,7 +25,8 @@ library MovementKindLib {
     uint8 internal constant BURN = 3;
     /// A transfer an agent forced. No rule was asked; trackers are told.
     uint8 internal constant FORCED_TRANSFER = 4;
-    /// A lost wallet's balance moved to a new wallet by an agent, usually one of the same investor.
+    /// A lost wallet's balance moved to a new wallet of the same investor by an agent: recovery refuses an
+    /// identity that does not own the lost wallet.
     uint8 internal constant RECOVERY = 5;
     /// A movement a satellite executes under a validation: the issuance of that validation while
     /// `isIssuance` is set, its settlement otherwise.
