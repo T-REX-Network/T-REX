@@ -240,6 +240,9 @@ library ErrorsLib {
     error ValidationNotDiscardable(uint256 validationId, uint8 status);
     /// @dev The validation's release deadline has not passed yet.
     error ValidationNotReleasable(uint256 validationId, uint64 releaseAt);
+    /// @dev Between `releaseAt` and the end of the second window only the keeper may discard; `publicAt` is when
+    ///  anyone may.
+    error ValidationNotPubliclyDiscardable(uint256 validationId, uint64 publicAt);
     /// @dev The leg's wallets, their emptiness, or its origin chain do not match the issued validation.
     error SettlementLegMismatch(uint256 validationId);
     /// @dev The executed amount sits outside the issued `[amountMin, amountMax]`.

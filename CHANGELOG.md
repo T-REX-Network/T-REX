@@ -533,6 +533,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
+  a keeper that stopped running left every expired reservation locked until an admin found a new one. From
+  `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where
+  `resolveStuckValidation` already opens, any caller may, and is refused `ValidationNotPubliclyDiscardable` before
+  it. The `restricted` modifier is gone; the keeper is recognised through the selector's role binding.
 - `BurnProof` is `{ recallId, burnedWallet, amount }`; the token credits the native wallet the instruction recorded.
   `MessageTypesLib` gains `MintInstruction` and `RecallInstruction`. No token or Lite was live at this change, so
   `MessageTypesLib.VERSION` stays 1.

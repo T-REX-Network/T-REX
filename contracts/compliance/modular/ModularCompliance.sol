@@ -273,7 +273,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
+    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
+    function discardExpiredValidations(uint256[] calldata validationIds) external {
         _discardExpiredValidations(validationIds);
     }
 
