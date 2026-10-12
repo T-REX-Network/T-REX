@@ -163,13 +163,11 @@ library EventsLib {
 
     event EligibilityChecksDisabled();
     event EligibilityChecksEnabled();
-    event InvestorIdentityChanged(address indexed investor);
-    event IdentityOverridden(
-        address indexed investor, IIdentity indexed globalIdentity, IIdentity indexed localIdentity
-    );
-    event IdentityOverrideReleased(
-        address indexed investor, IIdentity indexed localIdentity, IIdentity indexed globalIdentity
-    );
+    /// @notice A wallet's binding was revoked, like the IdentityFactory's `AccountRevoked`. The wallet keeps
+    ///         `identity` but may no longer act, and it can never be bound again. Emitted by the storage and
+    ///         by the registry in place of the standard `IdentityUnstored` and `IdentityRemoved`, which mean
+    ///         the wallet left the registry.
+    event IdentityRevoked(address indexed investor, IIdentity indexed identity);
 
     // Token Events
     event ForcedTransfer(address indexed agent);
