@@ -41,11 +41,12 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * Only this contract writes them, from the hooks and from the issuance, settlement and discard paths. There is
  * no setter, no writer role and no key: four mappings and four views.
  *
- * The registry can change who owns a wallet under the ledger's feet: an agent relinks a local entry, or deletes
- * it. The ledger keeps up on its own. It remembers which identity it credited each native wallet to, and the
- * next movement through that wallet notices the registry now names someone else and moves the wallet's balance
- * to them first, so no owner call is needed. When the registry names nobody, the remembered owner still
- * answers. Satellite wallets need none of this: the IdentityFactory's bindings are sticky.
+ * Registry writes never move a wallet to another identity. Its owner can still change when the owner swaps the
+ * registry's storage, or unbinds a registry from that storage. The ledger follows the registry so that rules
+ * and positions always agree. It remembers which identity it credited each native wallet to, and the next
+ * movement through that wallet moves the wallet's balance to the identity the registry names now. When the
+ * registry names nobody, the remembered owner still answers. Satellite wallets resolve through the
+ * IdentityFactory only, so they never change owner.
  *
  * One rule decides what happens when a write still cannot be honoured. The compliance's own bookkeeping, the
  * pending amounts it reserves and releases, uses checked arithmetic and reverts: an inconsistency there is a
@@ -106,7 +107,7 @@ abstract contract ComplianceLedger is IComplianceLedger {
 
     /// @dev Moves `amount` of position from one side to the other. A zero side is the gap between the positions and
     ///  the supply, so this can give tokens that landed on nobody their owner, or take a stale position off an
-    ///  identity a relink left too high.
+    ///  identity a change of owner left too high.
     function _fixPosition(address from, address to, uint256 amount) internal {
         ComplianceLedgerLib.fixPosition(from, to, amount);
     }
