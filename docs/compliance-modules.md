@@ -214,12 +214,23 @@ Every token has an owner. The registry admits no wallet without an active identi
 eligibility checks disabled, which skip the claims only. So `sum(positions) == totalSupply` always
 holds, and a debit the position cannot cover reverts.
 
+Nothing repairs a position. A debit that reverts means the invariant is broken, so the agent's own
+calls on that identity (burn, forced transfer, recovery) revert with it. The fix is a compliance
+implementation upgrade through the version manager, not an owner call.
+
 ## Binding
 
 The owner binds a module with `addModule`, or with `addAndSetModule` to configure it in the same
 transaction. The compliance reads `moduleTypes()` once at binding and files the module under each type.
-An implementation upgrade that changes the types takes effect when the owner calls `resyncModuleTypes`.
-Do not remove and re-add the module instead: an unbind increments the module's bind nonce, which is how a
-module scopes its per-compliance settings, so it would come back with an empty allowlist or an unset cap.
+A module built on `AbstractModuleUpgradeable` cannot change its types in an upgrade, not even their order:
+the upgrade reverts with `ModuleTypesChanged`. A module that needs other types is a new module, deployed and
+bound in place of the old one, and configured again, since its settings belong to the old module.
+
+The guard lives in the module's own code, so it does not cover a module that is not built on
+`AbstractModuleUpgradeable`, one behind another kind of proxy, or one upgraded to code that dropped the
+override. Such a module can still change its types under every bound compliance. The owner then calls
+`resyncModuleTypes`, which files the module again by what it now names. Do not remove and re-add the module
+instead: an unbind increments the module's bind nonce, which is how a module scopes its per-compliance
+settings, so it would come back with an empty allowlist or an unset cap.
 
 `getModules()` lists every bound module; `getModulesByType(type)` lists the ones of one kind.

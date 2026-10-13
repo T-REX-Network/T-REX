@@ -51,6 +51,10 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * eligibility checks disabled, and each native wallet's balance is always counted under its recorded owner.
  * So `sum(positions) == totalSupply` always holds, and every write uses checked arithmetic: a debit the
  * position cannot cover is a bug in this contract, and reverts.
+ *
+ * Nothing repairs a position. A debit that reverts means the invariant is broken, so the agent's own calls on
+ * that identity (burn, forced transfer, recovery) revert with it. The fix is a compliance implementation upgrade
+ * through the version manager, not an owner call.
  */
 abstract contract ComplianceLedger is IComplianceLedger {
 
