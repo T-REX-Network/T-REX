@@ -239,10 +239,12 @@ library ErrorsLib {
     error UnverifiedWallet(bytes wallet);
     /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
     error SenderNotOnSatellite(bytes wallet);
-    /// @dev Only a stored `Pending` validation can be sent again; `status` is the `ValidationStatus` found instead.
+    /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
+    ///  it awaits the mint (`AwaitingMint`, `DiscardedAwaitingMint`); `status` is the `ValidationStatus` found instead.
     error ValidationNotRedispatchable(uint256 validationId, uint8 status);
-    /// @dev The satellite's deadline has passed, so a leg sent now could not be executed.
-    error ValidationExpired(uint256 validationId, uint64 expiry);
+    /// @dev The deadline for a resend has passed: `expiry` while `Pending`, since past it no satellite may execute;
+    ///  `releaseAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
+    error ValidationExpired(uint256 validationId, uint64 deadline);
     /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
     error ChainNotPartOfValidation(uint256 validationId, bytes32 chainKey);
     /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id.

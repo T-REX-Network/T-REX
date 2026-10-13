@@ -286,14 +286,23 @@ interface ITransferValidation {
     /// - It must be stored `Pending`, or, for the recipient's leg, `AwaitingMint` or `DiscardedAwaitingMint`: the
     ///   burn landed and the receiving Lite still needs the leg to check the burn message against; otherwise
     ///   reverts with `ValidationNotRedispatchable`.
-    /// - While `Pending`, `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
-    ///   Once the burn landed there is no deadline: the burn is final and the mint follows it.
+    /// - `block.timestamp` must be before `expiry` while `Pending`, and before `releaseAt` once the burn landed;
+    ///   otherwise reverts with `ValidationExpired`. Past `expiry` no satellite may execute; past `releaseAt` a
+    ///   resent leg could reach the Lite after the pair was resolved and the burned amount returned to the sender,
+    ///   and mint it a second time, so the last resend stays one reconciliation window ahead of the resolution.
     /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
     /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`.
-    /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
-    ///   otherwise reverts with `NotAuthorizedForWallet`.
+    /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `chainKey` is the
+    ///   recipient's chain, or authorised by the AccessManager for this selector; otherwise reverts with
+    ///   `NotAuthorizedForWallet`.
     /// - The leg's pinned gateway must still be the chain's route; otherwise the token reverts with
-    ///   `ValidationAlreadyRouted`, and the reservation returns through discard at `releaseAt`.
+    ///   `ValidationAlreadyRouted`. A `Pending` validation then returns its reservation through discard at
+    ///   `releaseAt`; one awaiting the mint cannot be discarded, and `resolveStuckValidation` returns the burned
+    ///   amount to the sender once the second window has passed.
+    ///
+    /// Nothing counts or spaces resends. The token forwards no value to the gateway, so a resend costs its caller
+    /// the gas and whatever the gateway charges, and the Lite ignores a leg it already holds. A deployment whose
+    /// relayer pays per message meters at the relayer.
     ///
     /// Emits `ValidationRedispatched`, then the token's `ProtocolMessageSent`.
     /// @param validationId The validation whose leg is sent again.

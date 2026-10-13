@@ -95,7 +95,7 @@ contract ValidationRedispatchTest is InteropSuiteTest {
     }
 
     /// @notice Once the burn landed the receiving Lite still needs its leg to check the burn message against, so the
-    ///         recipient's leg goes again with no deadline; the mint it then reports settles the pair.
+    ///         recipient's leg goes again past `expiry`, until `releaseAt`; the mint it then reports settles the pair.
     function test_redispatchValidation_Success_WhenTheRecipientsLegIsResentAfterTheBurnLanded() public {
         uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
         optimismGateway.drop(0);
@@ -112,6 +112,20 @@ contract ValidationRedispatchTest is InteropSuiteTest {
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(crossChain, token, bobOptimism, 10)));
         assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(token.bridgedBalanceOf(bobOptimism), 10);
+    }
+
+    /// @notice After the burn the recipient is the one left waiting, so their identity may resend the leg toward
+    ///         their chain; the sender's leg stays the sender's.
+    function test_redispatchValidation_Success_WhenTheRecipientResendsTheLegTowardTheirChain() public {
+        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
+        optimismGateway.drop(0);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
+
+        vm.prank(address(bobIdentity));
+        boundCompliance.redispatchValidation(crossChain, optimism, bobOptimism, "");
+
+        assertEq(optimismGateway.queueLength(), 2);
+        assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
     }
 
     /// @notice A spender travels with the object, so it is part of what must be supplied again.
@@ -155,12 +169,31 @@ contract ValidationRedispatchTest is InteropSuiteTest {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, stranger, aliceSat));
         boundCompliance.redispatchValidation(id, polygon, bobSat, "");
+    }
+
+    function test_redispatchValidation_RevertWhen_TheRecipientAsksForTheSendersLeg() public {
+        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
 
         vm.prank(address(bobIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(bobIdentity), aliceSat)
         );
-        boundCompliance.redispatchValidation(id, polygon, bobSat, "");
+        boundCompliance.redispatchValidation(crossChain, polygon, aliceSat, "");
+    }
+
+    /// @notice A leg resent from `releaseAt` on could land after the pair was resolved and the burned amount
+    ///         returned, and mint it a second time; the resend stops one window ahead of the resolution.
+    function test_redispatchValidation_RevertWhen_TheRecipientsLegIsResentFromReleaseAtOn() public {
+        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
+        optimismGateway.drop(0);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
+        uint64 releaseAt = boundCompliance.validationOf(crossChain).releaseAt;
+        vm.warp(releaseAt);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, crossChain, releaseAt));
+        boundCompliance.redispatchValidation(crossChain, optimism, bobOptimism, "");
+        assertEq(optimismGateway.queueLength(), 1);
     }
 
     function test_redispatchValidation_RevertWhen_PastTheSatelliteDeadline() public {

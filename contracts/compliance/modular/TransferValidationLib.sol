@@ -153,10 +153,18 @@ library TransferValidationLib {
     ///  which as the compliance's DELEGATECALL target sees the compliance as its caller, as {_record} relies on.
     ///
     ///  While `Pending` either leg may go again, before `expiry`, since past it no satellite may execute. Once the
-    ///  burn landed and the mint is owed, the recipient's leg alone may go again, with no deadline: the receiving
+    ///  burn landed and the mint is owed, the recipient's leg alone may go again, before `releaseAt`: the receiving
     ///  Lite mints on the sending Lite's burn message and checks it against this very leg, so without it the pair
-    ///  stays stuck, and the burn being final the clock no longer matters. Issuance paused toward `chainKey` refuses
-    ///  a resend as it refuses an issuance: the pause exists to send nothing more toward that chain.
+    ///  stays stuck; but a leg sent later could reach the Lite after the second window closed and the pair was
+    ///  resolved, when the burned amount is already back with the sender, and mint it a second time. `releaseAt`
+    ///  leaves one reconciliation window between the last resend and the resolution, as between the last execution
+    ///  and the discard. Issuance paused toward `chainKey` refuses a resend as it refuses an issuance: the pause
+    ///  exists to send nothing more toward that chain.
+    ///
+    ///  The sender's identity may resend either leg, the recipient's the leg toward the recipient's chain: both
+    ///  wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends: the
+    ///  token forwards no value to the gateway, a resend costs its caller the gas and whatever the gateway charges,
+    ///  and the Lite ignores a leg it already holds.
     /// @param token the token the compliance is bound to
     /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
     function redispatch(
@@ -173,7 +181,8 @@ library TransferValidationLib {
         _requireRedispatchable(stored, validationId, chainKey);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         require(
-            msg.sender == stored.fromIdentity || authorised,
+            msg.sender == stored.fromIdentity || (chainKey == stored.toChainKey && msg.sender == stored.toIdentity)
+                || authorised,
             ErrorsLib.NotAuthorizedForWallet(msg.sender, stored.fromWallet)
         );
 
@@ -213,9 +222,8 @@ library TransferValidationLib {
             pending || (mintOwed && chainKey == stored.toChainKey),
             ErrorsLib.ValidationNotRedispatchable(validationId, uint8(status))
         );
-        if (pending) {
-            require(block.timestamp < stored.expiry, ErrorsLib.ValidationExpired(validationId, stored.expiry));
-        }
+        uint64 deadline = pending ? stored.expiry : stored.releaseAt;
+        require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
     }
 
     function layout() internal pure returns (ValidationStorage storage $) {
