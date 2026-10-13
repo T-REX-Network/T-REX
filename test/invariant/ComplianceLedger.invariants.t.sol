@@ -60,7 +60,8 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     uint256 public callsSettle;
     uint256 public callsDiscard;
     uint256 public callsRevoke;
-    uint256 public callsToStranger;
+    uint256 public callsToStrangerRefused;
+    uint256 public callsToStrangerLanded;
     uint256 public callsLinkStranger;
     uint256 public callsFromStranger;
 
@@ -255,12 +256,14 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         if (balance == 0) return;
         amount = bound(amount, 1, balance);
 
-        callsToStranger++;
+        bool linked = strangerIdentity != address(0);
+        if (linked) callsToStrangerLanded++;
+        else callsToStrangerRefused++;
         ITREXRegistry registry = ITREXRegistry(address(token.identityRegistry()));
         vm.prank(deployer);
         registry.disableEligibilityChecks();
         vm.prank(agent);
-        if (strangerIdentity == address(0)) vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
+        if (!linked) vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
         token.forcedTransfer(from, stranger, amount);
         vm.prank(deployer);
         registry.enableEligibilityChecks();
@@ -355,7 +358,8 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         console.log("settle        ", callsSettle);
         console.log("discard       ", callsDiscard);
         console.log("revoke        ", callsRevoke);
-        console.log("toStranger    ", callsToStranger);
+        console.log("toStranger    ", callsToStrangerRefused, "refused before the link,", callsToStrangerLanded);
+        console.log("              ", "landed after it");
         console.log("linkStranger  ", callsLinkStranger);
         console.log("fromStranger  ", callsFromStranger);
         console.log("validations   ", issued.length);
