@@ -342,7 +342,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     // ==== .requestTransferValidation routing Tests ====
 
-    /// @notice Issuance asks every rule for an amount, and touches no tracker: nothing has moved yet.
+    /// @notice Issuance asks every rule for an amount, telling it who requested, and touches no tracker: nothing
+    ///         has moved yet.
     function test_requestTransferValidation_Success_WhenEveryRuleIsAsked() public {
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
@@ -366,7 +367,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             kind: MovementKindLib.CROSS_CHAIN,
             isIssuance: true,
             spender: "",
-            data: ""
+            data: abi.encode(address(aliceIdentity))
         });
         vm.expectCall(address(firstRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
         vm.expectCall(address(secondRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);

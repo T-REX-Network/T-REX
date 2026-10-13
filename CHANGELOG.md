@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **An institution can decide every satellite transfer from data it keeps offchain** (#127). On an
+  issuance, `TransferContext.data` now carries `abi.encode(address requester)`, the caller of
+  `requestTransferValidation`. `AuthorizedRequesterModule` answers 0 to an issuance the sender's identity
+  requested itself, so every validation comes from an address the AccessManager authorised for that selector:
+  the institution's backend, which runs its private check first and requests the amount it allows. Nothing
+  waits on chain, so no new validation state, reservation, expiry or cleanup is involved. Plug and play,
+  keeps nothing; relocations and native movements are not judged.
 - **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
   waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by
@@ -197,7 +204,7 @@ All notable changes to this project will be documented in this file.
     on the state a movement leaves behind is an `AFTER` module that reverts, on `TRANSFER` and `MINT` only: a
     settlement, a burn and an agent's movement run `afterTransfer` too, and a revert there is no veto. The issuance
     of a validation reaches `TRANSFER_CHECK` and `SPENDER` only; a settlement moves, then tells `AFTER`.
-  - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
+  - `TransferContext.data`, empty but on an issuance, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.
   - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys
