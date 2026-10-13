@@ -185,6 +185,7 @@ interface IModule {
      *  the compliance reads it once, at binding, and routes the module accordingly. A module that names none
      *  is refused, and so is one naming the same type twice
      *  MUST be pure: a value read from storage would let the recorded routing drift from the real behaviour
+     *  MUST NOT change in an upgrade, not even its order, for the same reason: {AbstractModuleUpgradeable} refuses such an upgrade
      *  @return the types this module implements
      */
     function moduleTypes() external pure returns (ModuleType[] memory);
