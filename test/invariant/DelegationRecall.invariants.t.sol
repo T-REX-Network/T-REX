@@ -27,7 +27,7 @@ import { Utils } from "test/unit/helpers/Utils.sol";
 ///         proof has not settled yet (the Lite no longer holds them, the token still counts them)
 ///   DR-4  the Lite minted exactly the delegations it received, once each
 ///   DR-5  every settled recall debited exactly what the Lite burned for it
-///   DR-6  an honest Lite never makes the token halt
+///   DR-6  an honest Lite never pauses its chain or halts the token
 contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     uint256 internal constant ACTORS = 3;
@@ -225,8 +225,9 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         assertEq(token.totalBridged(), delegated - settledBurns, "DR-5");
     }
 
-    function invariant_DR6_anHonestLiteNeverHaltsTheToken() public view {
+    function invariant_DR6_anHonestLiteNeverPausesItsChainOrHaltsTheToken() public view {
         assertFalse(token.paused(), "DR-6");
+        assertFalse(token.isInboundPaused(polygon), "DR-6");
     }
 
     function invariant_callSummary() public view {

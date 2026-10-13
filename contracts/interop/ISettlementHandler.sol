@@ -81,8 +81,11 @@ interface ISettlementHandler {
         /// The message names something the token issued but already accounted for, so that chain's reports can no
         /// longer be trusted: the token pauses its inbound from that chain only.
         PauseChain,
-        /// The message names something the token never issued, so nothing attributes it to a chain's history: the
-        /// token pauses itself.
+        /// The message names something the token never issued. The transport says which chain sent it, but not why
+        /// the id is unknown: a peer inventing ids, or the token's own records no longer matching what it dispatched
+        /// (a compliance replaced or reset with legs in flight). The second is local and taints what every chain
+        /// reports, and the message cannot tell the two apart, so the token pauses itself. The price, accepted: a
+        /// trusted peer can halt the token with one such message; the remedy is to distrust its gateway.
         HaltToken
     }
 
@@ -107,7 +110,8 @@ interface ISettlementHandler {
     /// something the protocol cannot account for. A leg already consumed, including one arriving after the keeper
     /// resolved the pair, is `PauseChain`: the validation is known, so the fault is pinned to the chain that sent
     /// it, and the token stops taking that chain's messages until an agent has investigated. An id that was never
-    /// issued is `HaltToken`: nothing ties it to any chain's history, so the token pauses itself.
+    /// issued is `HaltToken`: it may be the peer's invention or the token's own records out of step with what it
+    /// dispatched, and only the first could be contained to a chain, so the token pauses itself.
     /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
     /// @return verdict `Applied`, `PauseChain` on a replayed leg, `HaltToken` on a never-issued id.

@@ -180,6 +180,11 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "debited once");
         assertEq(token.inTransitOf(id), 95, "held once");
 
+        uint256 blocked = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        polygonGateway.relay(blocked);
+        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(blocked)));
+
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95)));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(token.bridgedBalanceOf(bobOptimism), 95);

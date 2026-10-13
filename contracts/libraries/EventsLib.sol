@@ -95,7 +95,8 @@ library EventsLib {
     event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when a burn proof answers a recall never issued, or differs from the proof that settled it.
     ///  Nothing is applied. As on a replayed settlement, the token pauses its inbound from `originChainKey` when
-    ///  the recall is one it issued, and pauses itself when it is not.
+    ///  the recall is one it issued, and pauses itself when it is not, since an unknown id may as well mean the
+    ///  token's own records are out of step, see {ISettlementHandler-Verdict}.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
@@ -258,7 +259,8 @@ library EventsLib {
     event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
     /// @notice Emergency: a trusted gateway delivered a leg already consumed, or an id never issued. Nothing is
     ///         applied. On a consumed leg the token pauses its inbound from `chainKey`; on an id never issued it
-    ///         pauses itself. Either is lifted by the pauser after an investigation.
+    ///         pauses itself, since an unknown id may as well mean the token's own records are out of step, see
+    ///         {ISettlementHandler-Verdict}. Either is lifted by the pauser after an investigation.
     event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXAccessManager Events
 

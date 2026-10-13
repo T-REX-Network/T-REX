@@ -214,7 +214,9 @@ library TREXMessagingLib {
     }
 
     /// @dev See {ITREXMessaging-setInboundPaused}. Authorization is the caller's. Idempotent: the same state again
-    /// changes nothing and emits nothing.
+    /// changes nothing and emits nothing. A chain registered by a route or a peer is never deregistered, and a
+    /// message is attributed only to a registered chain, so the token's own call on a verdict never meets the
+    /// registration refusal; it is there for a pauser's typo.
     function setInboundPaused(bytes32 chainKey, bool paused) external {
         MessagingStorage storage s = layout();
         require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));

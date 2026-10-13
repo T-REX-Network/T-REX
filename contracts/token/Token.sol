@@ -599,8 +599,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      incident under investigation settles nothing. When the compliance reports a replayed settlement, the
     ///      chain that sent it is misbehaving and everything it reports is suspect: the token stops taking that
     ///      chain's messages until an agent has investigated and called `setInboundPaused(chainKey, false)`. A
-    ///      never-issued id cannot be pinned on a chain's history, so the token halts itself through its pause
-    ///      instead, until an agent calls `unpause`.
+    ///      never-issued id may mean the token's own records are out of step with what it dispatched, which no
+    ///      chain pause contains, so the token halts itself through its pause instead, until an agent calls
+    ///      `unpause`; see {ISettlementHandler-Verdict} for the price of that choice.
     function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
         _applyVerdict(chainKey, TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body));
     }

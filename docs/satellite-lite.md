@@ -94,11 +94,28 @@ validation is requested.
 
 A reverted delivery can be redelivered once the cause is understood. Either pause is lifted by the pauser after an
 investigation: `setInboundPaused(chainKey, false)` for one chain, `unpause` for the token. While a chain's inbound is
-paused its deliveries revert with `ChainInboundPaused` and stay deliverable; native transfers, every other chain and
-outbound toward the paused chain are unaffected. Threat model, stated plainly: a trusted gateway, or the registered
-peer behind it, can stop its own chain's inbound with one message, and can pause the whole token with one message
-naming an id the token never issued, by design, since such a message means the token can no longer account for what
-that chain reports.
+paused its deliveries revert with `ChainInboundPaused` and stay deliverable, and a delegation toward it is refused;
+native transfers, every other chain, and recalls and resends toward the paused chain are unaffected.
+
+Threat model, stated plainly. A trusted gateway, or the registered peer behind it, can stop its own chain's inbound
+with one message. It can also pause the whole token with one message naming an id the token never issued. That halt
+is kept, with its price, because an unknown id on an attributed message has two readings the token cannot tell
+apart: the peer invented it, which a chain pause would contain, or the token's own records are out of step with what
+it dispatched (a compliance replaced or reset with legs in flight), which is local, taints what every chain reports,
+and must not keep running. The remedy against a peer abusing it is to distrust its gateway.
+
+### The four brakes
+
+| Brake | Stops | Set by | Lifted by |
+|---|---|---|---|
+| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof | the pauser; the token itself on a settlement or proof for an id it never issued | the pauser, `unpause` |
+| chain inbound pause, `setInboundPaused` | every message from one chain, and delegations toward it | the pauser; the token itself on a replayed settlement or a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
+| chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
+| route close, `setRoute(..., 0)` | every message to and from one chain | the identity manager | the identity manager, with a trusted gateway |
+
+Before lifting the token pause or a chain pause, the operator has the gateway discard the deliveries refused while
+it was paused that should never land: lifting a pause lets every pending delivery through, and while the replay that
+triggered it is consumed, a misbehaving peer may have queued more.
 
 A peer replaced with `setPeer` while recalls are open keeps the authority to settle those recalls, through their
 pinned gateway, for up to the instructed amounts: that is what lets a recall survive a planned peer change. When the

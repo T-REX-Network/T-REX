@@ -101,9 +101,10 @@ library TokenDelegationLib {
 
     /// @dev The rest of a delegation-out, once the token has burned `amount` of `holder`'s native balance: the burn
     ///  stayed inside the free balance, the bridged position of `toWallet` is credited under a fresh delegation id
-    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the compliance is told,
-    ///  the instruction is committed and sent. Any refusal reverts the burn with it, so nothing is delegated that the
-    ///  satellite is not told to mint.
+    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the chain's inbound is
+    ///  not paused (no more supply goes to a chain whose reports are suspect), the compliance is told, the instruction
+    ///  is committed and sent. Any refusal reverts the burn with it, so nothing is delegated that the satellite is not
+    ///  told to mint.
     /// @return sendId The gateway's id for the instruction.
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId) {
         uint256 delegationId = _creditDelegation(holder, toWallet, amount);
@@ -114,6 +115,7 @@ library TokenDelegationLib {
         _compliance().agentTransferred(holder, holder, amount, MovementKindLib.DELEGATION);
 
         bytes32 chainKey = _chainKeyOf(toWallet);
+        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
         TokenLedgerLib.layout().delegations[delegationId] =
             _commitment(chainKey, keccak256(TREXMessagingLib.peerFor(chainKey)), toWallet, amount, holder);
 
@@ -185,7 +187,7 @@ library TokenDelegationLib {
     ///  With no open recall: the very proof that settled it, from the same chain, is a duplicate and changes
     ///  nothing; anything else is a message the token cannot account for, judged as a replayed settlement is. A
     ///  different proof for a recall the token issued and settled is `PauseChain`: the chain that sent it is at
-    ///  fault. A proof for a recall never issued is `HaltToken`.
+    ///  fault. A proof for a recall never issued is `HaltToken`, see {ISettlementHandler-Verdict}.
     /// @return verdict `Applied` when the proof settled its recall or duplicated the one that did; else the pause.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.

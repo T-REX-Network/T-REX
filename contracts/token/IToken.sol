@@ -219,7 +219,8 @@ interface IToken is IERC3643 {
     /// @dev Callable by `holder`, by the identity `holder` is linked to, or by an address the AccessManager authorises
     ///  for this selector; otherwise reverts with `AccessManagedUnauthorized`. Reverts with `EnforcedPause`,
     ///  `FrozenWallet`, `ZeroValue`, `WalletsNotLinked`, `UnverifiedWallet`, `NotASatelliteWallet`,
-    ///  `ERC20InsufficientBalance` and `ChainNotOpen`; nothing moves in any of these cases. Emits `Transfer`,
+    ///  `ERC20InsufficientBalance`, `ChainInboundPaused` and `ChainNotOpen`; nothing moves in any of these cases.
+    ///  Emits `Transfer`,
     ///  `DelegatedOut` and `ProtocolMessageSent`.
     /// @param holder the native wallet the tokens leave
     /// @param toWallet the ERC-7930 envelope of the satellite wallet to credit

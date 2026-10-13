@@ -131,8 +131,10 @@ interface ITREXMessaging {
     /// attributed to that chain reverts with `ChainInboundPaused` and stays deliverable; nothing else on the
     /// token is affected, native transfers and every other chain included. The token sets it on its own when a
     /// chain reports a settlement or a burn proof for something already accounted for, see
-    /// `ISettlementHandler.Verdict`; lifting it is the pauser's, after an investigation. Outbound is not gated:
-    /// an instruction or a resend toward a paused chain still goes out.
+    /// `ISettlementHandler.Verdict`; lifting it is the pauser's, after an investigation. Outbound: a delegation
+    /// toward a paused chain is refused with `ChainInboundPaused`, so no more supply reaches a chain whose reports
+    /// are suspect; a recall instruction, a resend and a validation leg still go out, they are how that chain is
+    /// drained or repaired, and validations have the compliance's own issuance pause.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

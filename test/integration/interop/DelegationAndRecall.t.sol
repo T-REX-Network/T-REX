@@ -191,6 +191,21 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         token.delegateOut(alice, aliceSat, 1);
     }
 
+    /// @notice No more supply goes to a chain whose reports are suspect; the burn is undone with the refusal.
+    function test_delegateOut_RevertWhen_TheChainsInboundIsPaused() public {
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        uint256 nativeBefore = token.balanceOf(alice);
+        uint256 bridgedBefore = token.bridgedBalanceOf(aliceSat);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        token.delegateOut(alice, aliceSat, 1);
+
+        assertEq(token.balanceOf(alice), nativeBefore);
+        assertEq(token.bridgedBalanceOf(aliceSat), bridgedBefore);
+    }
+
     function test_delegateOut_RevertWhen_TheHolderIsFrozen() public {
         vm.prank(agent);
         token.setAddressFrozen(alice, true);

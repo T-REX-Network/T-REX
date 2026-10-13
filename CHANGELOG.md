@@ -633,6 +633,8 @@ All notable changes to this project will be documented in this file.
     `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
   - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
     ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
+  it. A delegation toward a paused chain is refused with `ChainInboundPaused`; recalls and resends still go out.
+  `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`.
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where
