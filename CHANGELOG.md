@@ -582,6 +582,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
+  after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
+  token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
+  `TokenDelegationLib.consumeBurnProof` now return an `ISettlementHandler.Verdict`: `PauseChain` on those, and the
+  token stops taking that chain's messages (`InboundPaused`; deliveries revert with `ChainInboundPaused` and stay
+  deliverable); `HaltToken`, the token pause as before, only for an id the token never issued. The pauser lifts a
+  chain pause with `setInboundPaused(chainKey, false)` and can set one ahead of an incident; `isInboundPaused` reads
+  it. `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`.
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where

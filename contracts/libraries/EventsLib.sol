@@ -94,7 +94,8 @@ library EventsLib {
     /// @notice Emitted when the proof that already settled a recall is delivered again: nothing is applied.
     event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when a burn proof answers a recall never issued, or differs from the proof that settled it.
-    ///  The token pauses itself until an agent unpauses it, as it does on a replayed settlement.
+    ///  Nothing is applied. As on a replayed settlement, the token pauses its inbound from `originChainKey` when
+    ///  the recall is one it issued, and pauses itself when it is not.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
@@ -205,6 +206,11 @@ library EventsLib {
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
+    /// @notice Emitted when the token stops taking messages from `chainKey`: by the pauser, or on a message that
+    ///  chain sent for something already accounted for. Deliveries from that chain revert and stay deliverable.
+    event InboundPaused(bytes32 indexed chainKey);
+    /// @notice Emitted when the pauser takes messages from `chainKey` again.
+    event InboundUnpaused(bytes32 indexed chainKey);
 
     // ModularCompliance Interop Events
 
@@ -253,7 +259,8 @@ library EventsLib {
     ///         `chainKey` is the chain of the leg that completed it.
     event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
     /// @notice Emergency: a trusted gateway delivered a leg already consumed, or an id never issued. Nothing is
-    ///         applied and the token pauses itself until an agent unpauses it.
+    ///         applied. On a consumed leg the token pauses its inbound from `chainKey`; on an id never issued it
+    ///         pauses itself. Either is lifted by the pauser after an investigation.
     event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXAccessManager Events
 

@@ -113,7 +113,8 @@ interface ITransferValidation {
         /// that leg's chain paused for issuance when the executed amount breached a rule.
         LateReconciled,
         /// The keeper gave up on a pair whose other leg never arrived: whatever was held in transit went back to
-        /// the wallet it was burned from, and the reservation was released. A leg arriving now halts the token.
+        /// the wallet it was burned from, and the reservation was released. A leg arriving now is a replay: the
+        /// token stops taking its chain's messages.
         Resolved
     }
 
@@ -262,7 +263,7 @@ interface ITransferValidation {
     /// @dev Gives up on a pair of which exactly one leg ever arrived, a second reconciliation window past
     /// `releaseAt` so a merely slow leg still reconciles late instead. The burned amount goes back to the wallet
     /// it left, whatever is still reserved is released, and the validation ends in `Resolved`, where any leg
-    /// arriving afterwards halts the token. When it was the mint leg that landed there is nothing on this chain
+    /// arriving afterwards pauses its chain's inbound. When it was the mint leg that landed there is nothing on this chain
     /// to return, so the chain that owes the burn is paused for issuance instead.
     ///
     /// Requirements:

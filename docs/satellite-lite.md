@@ -77,17 +77,23 @@ validation is requested.
 
 | Broken rule | Reference-chain reaction |
 |---|---|
-| 3, 7: a settlement leg delivered again | `ReplayedSettlement`, the token pauses itself |
+| 3, 7: a settlement leg delivered again, or a leg for a pair the keeper already resolved | `ReplayedSettlement`, the token stops taking that chain's messages (`setInboundPaused`) |
+| a settlement for a validation never issued | `ReplayedSettlement`, the token pauses itself |
 | 5: amount outside the range | `SettlementOutOfBounds`, stays deliverable |
 | 6: wrong wallets or chain | `SettlementLegMismatch`, stays deliverable |
 | 8: two legs with two amounts | `SettlementAmountMismatch` on the second; the keeper resolves the pair after the second window |
 | 10: proof above the instruction | `RecallAmountExceeded`, stays deliverable |
 | 10: proof for another wallet | `RecallMismatch`, stays deliverable |
-| 10: a different proof for a settled recall, or a proof for a recall never issued | `ReplayedBurnProof`, the token pauses itself |
+| 10: a different proof for a settled recall | `ReplayedBurnProof`, the token stops taking that chain's messages |
+| a proof for a recall never issued | `ReplayedBurnProof`, the token pauses itself |
 
-A reverted delivery can be redelivered once the cause is understood. A pause is lifted by an agent after an
-investigation. Threat model, stated plainly: a trusted gateway, or the registered peer behind it, can pause the token
-with one message, by design, since such a message means the token can no longer account for what that chain reports.
+A reverted delivery can be redelivered once the cause is understood. Either pause is lifted by the pauser after an
+investigation: `setInboundPaused(chainKey, false)` for one chain, `unpause` for the token. While a chain's inbound is
+paused its deliveries revert with `ChainInboundPaused` and stay deliverable; native transfers, every other chain and
+outbound toward the paused chain are unaffected. Threat model, stated plainly: a trusted gateway, or the registered
+peer behind it, can stop its own chain's inbound with one message, and can pause the whole token with one message
+naming an id the token never issued, by design, since such a message means the token can no longer account for what
+that chain reports.
 
 A peer replaced with `setPeer` while recalls are open keeps the authority to settle those recalls, through their
 pinned gateway, for up to the instructed amounts: that is what lets a recall survive a planned peer change. When the

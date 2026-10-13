@@ -116,6 +116,9 @@ library TREXMessagingLib {
 
         /// The gateway each validation leg went out through, snapshot at dispatch and never rewritten.
         mapping(uint256 validationId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
+
+        /// Chains whose messages are refused, and left deliverable, until the pauser lifts it.
+        mapping(bytes32 chainKey => bool paused) inboundPaused;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
@@ -210,6 +213,17 @@ library TREXMessagingLib {
         emit EventsLib.PeerSet(chainKey, peer);
     }
 
+    /// @dev See {ITREXMessaging-setInboundPaused}. Authorization is the caller's. Idempotent: the same state again
+    /// changes nothing and emits nothing.
+    function setInboundPaused(bytes32 chainKey, bool paused) external {
+        MessagingStorage storage s = layout();
+        require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
+        if (s.inboundPaused[chainKey] == paused) return;
+        s.inboundPaused[chainKey] = paused;
+        if (paused) emit EventsLib.InboundPaused(chainKey);
+        else emit EventsLib.InboundUnpaused(chainKey);
+    }
+
     /* ----- Outbound ----- */
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
@@ -288,14 +302,17 @@ library TREXMessagingLib {
         }
     }
 
-    /// @dev Hands an admitted settlement to `handler`, decoded, and reports whether the token must halt.
+    /// @dev Hands an admitted settlement to `handler`, decoded, and reports the handler's verdict.
     ///
     /// The token calls this from inside its own pause and reentrancy checks. Run by DELEGATECALL, so
     /// the handler sees the token as its caller, which is the only caller a compliance accepts.
     /// @param handler The token's bound compliance.
     /// @param body A settlement body, as {acceptMessage} returned it.
-    /// @return halt Whether the handler reported a replayed or never-issued settlement.
-    function forwardSettlement(address handler, bytes32 chainKey, bytes memory body) external returns (bool halt) {
+    /// @return verdict `Applied`, or the pause the handler asks for on a replayed or never-issued settlement.
+    function forwardSettlement(address handler, bytes32 chainKey, bytes memory body)
+        external
+        returns (ISettlementHandler.Verdict verdict)
+    {
         return ISettlementHandler(handler).handleSettlement(chainKey, MessageTypesLib.decodeSettlement(body));
     }
 

@@ -8,6 +8,7 @@ import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUn
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -150,9 +151,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationIssuancePaused(polygon);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
         assertEq(mc.validationOf(id).executedAmount, 50);
         assertTrue(mc.isIssuancePaused(polygon));
@@ -170,9 +171,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.LateReconciliation(id, polygon);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
         assertFalse(mc.isIssuancePaused(polygon), "a late delivery is cheap to force; pausing on it would be a DoS");
         assertEq(mc.positionOf(bobId), 50);
@@ -205,9 +206,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertTrue(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
     }
 
@@ -304,9 +305,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationSettled(id, polygon, 50);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         ITransferValidation.Validation memory state = mc.validationOf(id);
         assertEq(state.executedAmount, 50);
@@ -391,9 +392,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, nativeBob, 40, id)), 1);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, nativeBob, 40));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, nativeBob, 40));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(mc.positionOf(bobId), 40);
         (,,,, bytes32 toWallet,,,,,,) = TrackerOnlyModule(recorder).lastContext();
@@ -416,9 +417,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
 
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertFalse(mc.isIssuancePaused(polygon));
         assertEq(mc.pendingInOf(bobId), 0, "the reservation was still live and is released");
@@ -453,9 +454,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertTrue(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(mc.validationOf(id).executedAmount, 50);
         assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
@@ -469,9 +470,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id + 1, polygon);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id + 1, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id + 1, fromSat, toSat, 50));
 
-        assertTrue(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.HaltToken));
         assertEq(mc.validationOf(id + 1).executedAmount, 0);
         assertEq(
             uint8(mc.validationOf(id + 1).status),
@@ -480,7 +481,10 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         );
 
         vm.prank(token);
-        assertTrue(mc.handleSettlement(polygon, _leg(0, fromSat, toSat, 50)));
+        assertEq(
+            uint8(mc.handleSettlement(polygon, _leg(0, fromSat, toSat, 50))),
+            uint8(ISettlementHandler.Verdict.HaltToken)
+        );
     }
 
     /* ----- Two legs ----- */
@@ -494,9 +498,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(RecordingModule(recorder).transferActionCalls(), 0, "nothing moved on the first leg");
         assertEq(mc.pendingInOf(bobId), 90, "the reservation stays live");
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
@@ -508,9 +512,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationSettled(id, optimism, 50);
         vm.prank(token);
-        halt = mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+        verdict = mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
 
-        assertFalse(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.Applied));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
@@ -559,9 +563,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        bool halt = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
 
-        assertTrue(halt);
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
     }

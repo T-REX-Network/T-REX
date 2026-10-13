@@ -284,5 +284,6 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:forcedTransfer(address,address,uint256).selector
     || f.selector == sig:pause().selector
     || f.selector == sig:unpause().selector
+    || f.selector == sig:setInboundPaused(bytes32,bool).selector
     || f.selector == sig:instructRecall(bytes,uint256,address).selector
     || f.selector == sig:resend(uint8,uint256,bytes).selector;

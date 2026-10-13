@@ -161,19 +161,28 @@ contract CrossChainSettlementTest is InteropSuiteTest {
 
     // ==== refusal Tests ====
 
-    /// @notice A consumed leg delivered again as a fresh message halts the token and moves nothing.
+    /// @notice A consumed leg delivered again as a fresh message moves nothing and pauses the inbound of the chain
+    ///         that sent it: the other chain's leg still lands and settles the pair, and the token is not paused.
     function test_handleSettlement_Success_WhenAConsumedLegIsReplayed() public {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
         uint256 replay = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReplayedSettlement(id, polygon);
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(replay);
 
-        assertTrue(token.paused());
+        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.isInboundPaused(optimism));
+        assertFalse(token.paused());
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "debited once");
         assertEq(token.inTransitOf(id), 95, "held once");
+
+        optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95)));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
     }
 
     /// @notice The two legs must carry one amount.

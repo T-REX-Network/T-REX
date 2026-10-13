@@ -320,10 +320,11 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         uint64 recoveryRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
         _setTargetFunctionRole(token, IERC3643.recoveryAddress.selector, recoveryRole);
 
-        // Stopping every transfer, and resuming.
+        // Stopping every transfer, or one chain's messages, and resuming.
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
         _setTargetFunctionRole(token, IERC3643.pause.selector, pauserRole);
         _setTargetFunctionRole(token, IERC3643.unpause.selector, pauserRole);
+        _setTargetFunctionRole(token, ITREXMessaging.setInboundPaused.selector, pauserRole);
     }
 
     function _setRegistryFunctionRoles(address registry, uint32 domainId) private {

@@ -135,7 +135,7 @@ contract LateReconciliationTest is InteropSuiteTest {
         assertFalse(boundCompliance.isIssuancePaused(optimism), "95 against a cap of 100 breaches nothing");
     }
 
-    /// @notice A late leg delivered twice is a replay like any other: the token halts.
+    /// @notice A late leg delivered twice is a replay like any other: its chain's inbound pauses.
     function test_handleSettlement_Success_WhenALateLegIsReplayed() public {
         uint256 late = _issue(aliceSat, bobSat, 10, CAP);
         _discard(late);
@@ -146,7 +146,8 @@ contract LateReconciliationTest is InteropSuiteTest {
         emit EventsLib.ReplayedSettlement(late, polygon);
         polygonGateway.relay(replay);
 
-        assertTrue(token.paused());
+        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.paused());
         assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
         assertEq(token.bridgedBalanceOf(bobSat), CAP, "applied once");
     }

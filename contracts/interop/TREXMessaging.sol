@@ -64,6 +64,7 @@ pragma solidity 0.8.30;
 
 import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Recipient.sol";
 
+import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 import { ITREXMessaging } from "./ITREXMessaging.sol";
@@ -126,6 +127,11 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         return TREXMessagingLib.isChainOpen(chainKey);
     }
 
+    /// @inheritdoc ITREXMessaging
+    function isInboundPaused(bytes32 chainKey) public view returns (bool) {
+        return TREXMessagingLib.layout().inboundPaused[chainKey];
+    }
+
     /// @dev Whether `gateway` has already delivered `receiveId` to this token.
     function messageReceived(address gateway, bytes32 receiveId) public view returns (bool) {
         return TREXMessagingLib.layout().received[gateway][receiveId];
@@ -138,13 +144,16 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @inheritdoc ERC7786Recipient
     /// @dev Admission is the library's: attribution to the peer, the replay guard, the expected gateway.
-    /// What an admitted message does is the token's, so the hooks are called from here.
+    /// What an admitted message does is the token's, so the hooks are called from here. A message from a chain
+    /// whose inbound is paused reverts once attributed, which undoes the replay guard's record of it in the same
+    /// transaction: it stays deliverable, and lands once the pauser lifts the pause.
     function _processMessage(address gateway, bytes32 receiveId, bytes calldata sender, bytes calldata payload)
         internal
         override
     {
         (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
             TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
+        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
 
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _handleSettlement(chainKey, body);
@@ -178,6 +187,12 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
         TREXMessagingLib.setPeer(chainKey, peer);
+    }
+
+    /// @dev Stops, or resumes, taking messages from `chainKey`. The token calls it with `true` on its own when a
+    /// handler returns `PauseChain`; the pauser calls it either way.
+    function _setInboundPaused(bytes32 chainKey, bool paused) internal {
+        TREXMessagingLib.setInboundPaused(chainKey, paused);
     }
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.

@@ -74,6 +74,18 @@ import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
  */
 interface ISettlementHandler {
 
+    /// @dev What the token does once a handler has judged an inbound message it could not apply.
+    enum Verdict {
+        /// The message was applied, or was a harmless duplicate: nothing for the token to do.
+        Applied,
+        /// The message names something the token issued but already accounted for, so that chain's reports can no
+        /// longer be trusted: the token pauses its inbound from that chain only.
+        PauseChain,
+        /// The message names something the token never issued, so nothing attributes it to a chain's history: the
+        /// token pauses itself.
+        HaltToken
+    }
+
     /// @dev Acts on a settlement the token has already attributed to its peer on `originChainKey`.
     ///
     /// The token guarantees three things:
@@ -91,14 +103,16 @@ interface ISettlementHandler {
     /// leg's chain paused for issuance until the manager unpauses it.
     /// A silent failure would instead leave the message marked as received and unretryable.
     ///
-    /// Two emergencies never revert and return `haltToken` instead: a leg already consumed, and an id that was
-    /// never issued. Both mean a trusted gateway delivered something the protocol cannot account for, so the
-    /// token pauses itself until an agent has investigated.
+    /// Two emergencies never revert and return a verdict instead, both meaning a trusted gateway delivered
+    /// something the protocol cannot account for. A leg already consumed, including one arriving after the keeper
+    /// resolved the pair, is `PauseChain`: the validation is known, so the fault is pinned to the chain that sent
+    /// it, and the token stops taking that chain's messages until an agent has investigated. An id that was never
+    /// issued is `HaltToken`: nothing ties it to any chain's history, so the token pauses itself.
     /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
-    /// @return haltToken Whether the token must pause itself: a replayed or never-issued settlement.
+    /// @return verdict `Applied`, `PauseChain` on a replayed leg, `HaltToken` on a never-issued id.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
-        returns (bool haltToken);
+        returns (Verdict verdict);
 
 }

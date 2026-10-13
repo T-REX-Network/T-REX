@@ -468,17 +468,21 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
 
-    /// @notice A different proof for a settled recall is a message the token cannot account for: it pauses itself.
-    function test_handleBurnProof_HaltsTheToken_WhenAConflictingProofArrivesForASettledRecall() public {
+    /// @notice A different proof for a settled recall is a message the token cannot account for, from a chain it
+    ///         can name: that chain's inbound pauses, the token keeps running.
+    function test_handleBurnProof_PausesTheChain_WhenAConflictingProofArrivesForASettledRecall() public {
         uint256 recallId = _instructed();
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 200));
         uint256 conflicting = _proof(polygonGateway, recallId, aliceSat, 150);
 
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ReplayedBurnProof(recallId, polygon);
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(conflicting);
 
-        assertTrue(token.paused());
+        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.paused());
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
 
@@ -577,7 +581,8 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ReplayedBurnProof(recallId, polygon);
         polygonGateway.relay(tooMuch);
-        assertTrue(token.paused(), "the stale 200 proof conflicts with the 100 that settled");
+        assertTrue(token.isInboundPaused(polygon), "the stale 200 proof conflicts with the 100 that settled");
+        assertFalse(token.paused());
     }
 
     /* ----- resend ----- */
