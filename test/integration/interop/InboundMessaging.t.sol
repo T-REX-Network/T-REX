@@ -327,8 +327,39 @@ contract InboundMessagingTest is InteropSuiteTest {
         emit EventsLib.ReplayedSettlement(validationId, originChain);
         routedGateway.relay(second);
 
-        assertTrue(token.paused(), "the emergency halts the token");
+        assertTrue(token.isInboundPaused(originChain), "the emergency pauses the chain's inbound");
+        assertFalse(token.paused(), "and nothing else");
         assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
+    }
+
+    /// @dev A paused chain's messages, settlements and burn proofs alike, are refused after attribution and before
+    ///      any handler, so nothing is recorded and the same deliveries land once the pauser lifts the pause.
+    function testInboundPausedChainRefusesEveryMessageAndKeepsItDeliverable() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 settlement = _peerSendsSettlement();
+        uint256 proof =
+            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+        uint256 nativeBefore = token.balanceOf(alice);
+        vm.prank(agent);
+        token.setInboundPaused(originChain, true);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, originChain));
+        routedGateway.relay(settlement);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, originChain));
+        routedGateway.relay(proof);
+        _assertNothingApplied(routedGateway, settlement);
+        _assertNothingApplied(routedGateway, proof);
+        assertTrue(token.isChainOpen(originChain), "outbound is not gated");
+        assertFalse(token.paused());
+
+        vm.prank(agent);
+        token.setInboundPaused(originChain, false);
+        routedGateway.relay(settlement);
+        routedGateway.relay(proof);
+
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount);
+        assertEq(token.balanceOf(alice), nativeBefore + 100);
     }
 
     /* ----- Envelope refusals ----- */

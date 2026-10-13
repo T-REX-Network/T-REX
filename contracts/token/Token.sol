@@ -78,6 +78,7 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
+import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
@@ -165,6 +166,13 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc ITREXMessaging
     function setPeer(bytes32 chainKey, bytes calldata peer) external restricted {
         _setPeer(chainKey, peer);
+    }
+
+    /// @inheritdoc ITREXMessaging
+    /// @dev Bound to the pauser, like `pause` and `unpause`: it is the per-chain brake, the one the token pulls on
+    ///  its own when a chain reports something already accounted for, and only an agent releases it.
+    function setInboundPaused(bytes32 chainKey, bool pause) external restricted {
+        _setInboundPaused(chainKey, pause);
     }
 
     /* ----- Interop Dispatch ----- */
@@ -588,20 +596,23 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      compliance's business, not the token's.
     ///
     ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
-    ///      incident under investigation settles nothing. When the compliance reports a replayed or a never-issued
-    ///      settlement, the token halts itself through its pause: the interop layer is misbehaving and every
-    ///      notification is suspect until an agent has investigated, resolved and called `unpause`.
+    ///      incident under investigation settles nothing. When the compliance reports a replayed settlement, the
+    ///      chain that sent it is misbehaving and everything it reports is suspect: the token stops taking that
+    ///      chain's messages until an agent has investigated and called `setInboundPaused(chainKey, false)`. A
+    ///      never-issued id may mean the token's own records are out of step with what it dispatched, which no
+    ///      chain pause contains, so the token halts itself through its pause instead, until an agent calls
+    ///      `unpause`; see {ISettlementHandler-Verdict} for the price of that choice.
     function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
-        bool halt = TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body);
-        if (halt) _pause();
+        _applyVerdict(chainKey, TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body));
     }
 
     /// @inheritdoc TREXMessaging
     /// @dev The recall path: the proof is judged against the instruction it answers and the bridged position
     ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
-    ///      minted to: together, the transition {_recall} describes. Same pause and halt policy as
-    ///      {_handleSettlement}: a paused token leaves the proof deliverable, and a proof the token cannot account
-    ///      for pauses it. A duplicate of a settled proof changes nothing.
+    ///      minted to: together, the transition {_recall} describes. Same pause policy as {_handleSettlement}: a
+    ///      paused token leaves the proof deliverable, a proof for a recall already settled pauses the chain's
+    ///      inbound, a proof for a recall never issued pauses the token. A duplicate of a settled proof changes
+    ///      nothing.
     function _handleBurnProof(bytes32 chainKey, bytes memory body)
         internal
         virtual
@@ -609,12 +620,19 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
         nonReentrant
     {
-        (bool halt, address nativeWallet, uint256 amount) = TokenDelegationLib.consumeBurnProof(chainKey, body);
-        if (halt) {
-            _pause();
+        (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount) =
+            TokenDelegationLib.consumeBurnProof(chainKey, body);
+        if (verdict != ISettlementHandler.Verdict.None) {
+            _applyVerdict(chainKey, verdict);
             return;
         }
         if (amount != 0) ERC20Upgradeable._update(address(0), nativeWallet, amount);
+    }
+
+    /// @dev The two brakes a handler can ask for, see {ISettlementHandler-Verdict}.
+    function _applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) private {
+        if (verdict == ISettlementHandler.Verdict.HaltToken) _pause();
+        else if (verdict == ISettlementHandler.Verdict.PauseChain) _setInboundPaused(chainKey, true);
     }
 
     /// @inheritdoc ERC3643Token

@@ -71,8 +71,8 @@ contract StuckValidationTest is InteropSuiteTest {
     }
 
     /// @notice A mint leg arriving after the resolution is a leg for tokens that no longer wait anywhere, so it
-    ///         halts the token the way a replayed leg does.
-    function test_handleSettlement_HaltsTheToken_WhenAMintArrivesAfterTheResolution() public {
+    ///         pauses its chain's inbound the way a replayed leg does; the token itself keeps running.
+    function test_handleSettlement_PausesTheChain_WhenAMintArrivesAfterTheResolution() public {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
         vm.warp(resolvableAt + 1);
         vm.prank(keeper);
@@ -80,9 +80,46 @@ contract StuckValidationTest is InteropSuiteTest {
 
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, EXECUTED)));
 
-        assertTrue(token.paused(), "the token halted itself");
+        assertTrue(token.isInboundPaused(optimism), "the chain that minted against nothing is paused");
+        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(token.paused(), "the token is not");
         assertEq(token.bridgedBalanceOf(bobOptimism), 0, "nothing was credited");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+    }
+
+    /// @notice While the chain owing the mint has its inbound paused, its report may be waiting at the gateway;
+    ///         resolving on its absence would return a hold that report settles. The keeper waits for the pauser.
+    function test_resolveStuckValidation_RevertWhen_TheOwedLegsChainIsPaused_ThenResolvesOnceLifted() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.setInboundPaused(optimism, true);
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, optimism));
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(token.inTransitOf(id), EXECUTED, "the hold stays where it is");
+
+        vm.prank(agent);
+        token.setInboundPaused(optimism, false);
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+    }
+
+    /// @notice The chain whose leg already landed has nothing left to say about the pair, so its pause does not
+    ///         hold the resolution.
+    function test_resolveStuckValidation_Success_WhenOnlyTheArrivedLegsChainIsPaused() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
     }
 
     /// @notice A pair discarded before its late burn leg landed is stuck in the same way, and resolves the same

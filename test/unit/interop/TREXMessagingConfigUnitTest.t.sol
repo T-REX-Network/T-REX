@@ -261,6 +261,54 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         token.setPeer(nonEvmChain, nonEvmPeer);
     }
 
+    /* ----- Inbound pause ----- */
+
+    function testPauserPausesAndResumesAChainsInbound() public {
+        vm.prank(identityManager);
+        token.setRoute(evmType, evmRef, trustedGateway);
+
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(evmChain);
+        vm.prank(agent);
+        token.setInboundPaused(evmChain, true);
+        assertTrue(token.isInboundPaused(evmChain));
+        assertTrue(token.isChainOpen(evmChain), "outbound is not gated");
+
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundUnpaused(evmChain);
+        vm.prank(agent);
+        token.setInboundPaused(evmChain, false);
+        assertFalse(token.isInboundPaused(evmChain));
+    }
+
+    function testInboundPauseIsIdempotent() public {
+        vm.prank(identityManager);
+        token.setRoute(evmType, evmRef, trustedGateway);
+        vm.prank(agent);
+        token.setInboundPaused(evmChain, true);
+
+        vm.recordLogs();
+        vm.prank(agent);
+        token.setInboundPaused(evmChain, true);
+        assertEq(vm.getRecordedLogs().length, 0, "the same state again emits nothing");
+        assertTrue(token.isInboundPaused(evmChain));
+    }
+
+    function testInboundPauseRevertsOnAChainNeverRegistered() public {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotRegistered.selector, evmChain));
+        vm.prank(agent);
+        token.setInboundPaused(evmChain, true);
+    }
+
+    function testInboundPauseIsThePausers() public {
+        vm.prank(identityManager);
+        token.setRoute(evmType, evmRef, trustedGateway);
+
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, identityManager));
+        vm.prank(identityManager);
+        token.setInboundPaused(evmChain, true);
+    }
+
     /* ----- Storage isolation ----- */
 
     function testRoutingDoesNotDisturbTheTokenLedger() public {

@@ -62,6 +62,7 @@
 
 pragma solidity 0.8.30;
 
+import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -182,6 +183,7 @@ library TransferValidationLib {
         ITransferValidation.Validation storage validation = store.validations[validationId];
         _requireResendable(validation, validationId, chainKey);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
+        _requireInboundOpen(token, chainKey);
         require(
             msg.sender == validation.fromIdentity
                 || (chainKey == validation.toChainKey && msg.sender == validation.toIdentity) || authorised,
@@ -227,6 +229,57 @@ library TransferValidationLib {
         );
         uint64 deadline = pending ? validation.expiry : validation.releaseAt;
         require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
+    }
+
+    /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
+    ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
+    function expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
+        external
+        view
+        returns (uint64 expiry, uint64 window)
+    {
+        ValidationStorage storage store = layout();
+        require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
+        window = _openChainWindow(store, token, fromChainKey);
+        if (twoLegs) {
+            uint64 toWindow = _openChainWindow(store, token, toChainKey);
+            if (toWindow > window) window = toWindow;
+        }
+        expiry = uint64(block.timestamp) + store.defaultValidityWindow;
+    }
+
+    /// @dev The reconciliation window of a chain a leg may go to: issuance toward it not paused by the compliance,
+    ///  its inbound not paused by the token, and a window configured.
+    function _openChainWindow(ValidationStorage storage store, address token, bytes32 chainKey)
+        private
+        view
+        returns (uint64 window)
+    {
+        require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
+        _requireInboundOpen(token, chainKey);
+        window = store.reconciliationWindows[chainKey];
+        require(window != 0, ErrorsLib.ReconciliationWindowNotSet(chainKey));
+    }
+
+    /// @dev Nothing goes toward a chain whose inbound the token has paused: its reports are held at the gateway,
+    ///  so a leg sent now could only add to what cannot land, see {ITREXMessaging-setInboundPaused}.
+    function _requireInboundOpen(address token, bytes32 chainKey) private view {
+        require(!ITREXMessaging(token).isInboundPaused(chainKey), ErrorsLib.ChainInboundPaused(chainKey));
+    }
+
+    /// @dev Nothing is decided about a validation while a chain it still awaits has its inbound paused. The
+    ///  reports held at that chain's gateway may already answer it: discarding or resolving on their absence
+    ///  would release or return what they move, and they would then land on a validation that no longer expects
+    ///  them. Which chains count follows the status: both while `Pending`, the one owing the missing leg once the
+    ///  other landed.
+    function requireAwaitedInboundOpen(address token, ITransferValidation.Validation storage validation) external view {
+        ITransferValidation.ValidationStatus status = validation.status;
+        bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint
+            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint;
+        bool burnOwed = status == ITransferValidation.ValidationStatus.AwaitingBurn
+            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingBurn;
+        if (!mintOwed) _requireInboundOpen(token, validation.fromChainKey);
+        if (!burnOwed && validation.twoLegs) _requireInboundOpen(token, validation.toChainKey);
     }
 
     function layout() internal pure returns (ValidationStorage storage $) {

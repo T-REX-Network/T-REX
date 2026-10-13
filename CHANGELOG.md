@@ -593,6 +593,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
+  after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
+  token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
+  `TokenDelegationLib.consumeBurnProof` now return an `ISettlementHandler.Verdict`: `PauseChain` on those, and the
+  token stops taking that chain's messages (`InboundPaused`; deliveries revert with `ChainInboundPaused` and stay
+  deliverable); `HaltToken`, the token pause as before, only for an id the token never issued. The pauser lifts a
+  chain pause with `setInboundPaused(chainKey, false)` and can set one ahead of an incident; `isInboundPaused` reads
+  it, `isChainOpen` does not. A delegation toward a paused chain is refused with `ChainInboundPaused`, and the
+  compliance reads the pause too: nothing is issued or resent toward a paused chain (`ChainInboundPaused`), and a
+  validation still awaiting that chain's leg is neither discarded nor resolved while it lasts, since the reports
+  held at the gateway may answer it. Recall instructions and instruction resends still go out.
+  `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`. Upgrade order is free: an old
+  compliance answering a new token reads `true` as `PauseChain`, a new compliance answering an old token fails to
+  decode and the delivery waits.
 - **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
   The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
   register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
@@ -620,7 +634,6 @@ All notable changes to this project will be documented in this file.
     `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
   - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
     ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
-
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where

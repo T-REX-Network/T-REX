@@ -20,8 +20,8 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 import { ReentrantModule } from "test/integration/mocks/ReentrantModule.sol";
 
 /// @dev One-leg settlements through the real messaging layer: a same-chain movement, a native sender, a native
-///      recipient, the deadline that never refuses a leg, every mismatch that does, and the two emergencies that
-///      halt the token.
+///      recipient, the deadline that never refuses a leg, every mismatch that does, and the two emergencies: a replay
+///      pauses its chain's inbound, a never-issued id halts the token.
 contract ValidationSettlementTest is InteropSuiteTest {
 
     uint256 internal constant BALANCE = 1000;
@@ -172,8 +172,9 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     // ==== emergency Tests ====
 
-    /// @notice The same content delivered again as a fresh message applies nothing and halts the token.
-    function test_handleSettlement_Success_WhenAReplayedSettlementHaltsTheToken() public {
+    /// @notice The same content delivered again as a fresh message applies nothing and pauses the inbound of the
+    ///         chain it came from; the token itself keeps running. The replay is consumed, not left deliverable.
+    function test_handleSettlement_Success_WhenAReplayedSettlementPausesTheChain() public {
         uint256 id = _issue(aliceSat, bobSat, 90, 100);
         MessageTypesLib.SettlementNotification memory leg = _settlement(id, aliceSat, bobSat, 95);
         polygonGateway.relay(_liteSettles(polygonGateway, token, leg));
@@ -181,13 +182,36 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReplayedSettlement(id, polygon);
-        vm.expectEmit(false, false, false, true, address(token));
-        emit PausableUpgradeable.Paused(address(polygonGateway));
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(replay);
 
-        assertTrue(token.paused());
+        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.paused());
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(replay)));
         assertEq(token.bridgedBalanceOf(bobSat), 95);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+    }
+
+    /// @notice Once a chain's inbound is paused its next leg is refused and stays deliverable; the pauser lifts
+    ///         the pause and the same delivery settles.
+    function test_handleSettlement_RevertWhen_TheChainsInboundIsPaused_ThenSettlesOnceLifted() public {
+        uint256 id = _issue(aliceSat, bobSat, 90, 100);
+        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95));
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        polygonGateway.relay(index);
+        _assertNothingApplied(polygonGateway, index);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundUnpaused(polygon);
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
+        polygonGateway.relay(index);
+
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
     }
 

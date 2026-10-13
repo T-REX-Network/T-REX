@@ -85,17 +85,47 @@ peer change with validations in flight is to be avoided as a route change is.
 
 | Broken rule | Reference-chain reaction |
 |---|---|
-| 3, 7: a settlement leg delivered again | `ReplayedSettlement`, the token pauses itself |
+| 3, 7: a settlement leg delivered again, or a leg for a pair the keeper already resolved | `ReplayedSettlement`, the token stops taking that chain's messages (`setInboundPaused`) |
+| a settlement for a validation never issued | `ReplayedSettlement`, the token pauses itself |
 | 5: amount outside the range | `SettlementOutOfBounds`, stays deliverable |
 | 6: wrong wallets or chain | `SettlementLegMismatch`, stays deliverable |
 | 8: two legs with two amounts | `SettlementAmountMismatch` on the second; the keeper resolves the pair after the second window |
 | 10: proof above the instruction | `RecallAmountExceeded`, stays deliverable |
 | 10: proof for another wallet | `RecallMismatch`, stays deliverable |
-| 10: a different proof for a settled recall, or a proof for a recall never issued | `ReplayedBurnProof`, the token pauses itself |
+| 10: a different proof for a settled recall | `ReplayedBurnProof`, the token stops taking that chain's messages |
+| a proof for a recall never issued | `ReplayedBurnProof`, the token pauses itself |
 
-A reverted delivery can be redelivered once the cause is understood. A pause is lifted by an agent after an
-investigation. Threat model, stated plainly: a trusted gateway, or the registered peer behind it, can pause the token
-with one message, by design, since such a message means the token can no longer account for what that chain reports.
+A reverted delivery can be redelivered once the cause is understood, on the assumption that the ERC-7786 gateway
+keeps a reverted execution retryable; a gateway that marks it failed for good loses the message, and its author has
+to send it again. Either pause is lifted by the pauser after an investigation: `setInboundPaused(chainKey, false)`
+for one chain, `unpause` for the token. While a chain's inbound is paused its deliveries revert with
+`ChainInboundPaused` and wait at the gateway; a delegation toward it is refused, and the compliance neither issues a
+validation toward it nor resends one, nor discards or resolves a validation still awaiting that chain's leg, since
+the held reports may answer it and acting on their absence would release or return what they move. Native transfers,
+every other chain, and recall instructions and instruction resends toward the paused chain are unaffected; the proof
+answering a recall lands once the pause is lifted. To abandon a chain for good: distrust its gateway or close its
+route, then lift the pause so its validations can be discarded and resolved.
+
+Threat model, stated plainly. A trusted gateway, or the registered peer behind it, can stop its own chain's inbound
+with one message. It can also pause the whole token with one message naming an id the token never issued. That halt
+is kept, with its price, because an unknown id on an attributed message has two readings the token cannot tell
+apart: the peer invented it, which a chain pause would contain, or the token's own records are out of step with what
+it dispatched (a compliance replaced or reset with legs in flight), which is local, taints what every chain reports,
+and must not keep running. The remedy against a peer abusing it is to distrust its gateway.
+
+### The brakes
+
+| Brake | Stops | Set by | Lifted by |
+|---|---|---|---|
+| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof | the pauser; the token itself on a settlement or proof for an id it never issued | the pauser, `unpause` |
+| chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new validations and validation resends toward it; discards and resolutions of validations still awaiting its leg | the pauser; the token itself on a replayed settlement or a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
+| chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
+| route close, `setRoute(..., 0)` | new sends toward one chain and new admissions from it; a settlement pinned to the old gateway and a proof for a recall dispatched through it still land while that gateway stays trusted | the identity manager | the identity manager, with a trusted gateway |
+| gateway distrust, `TrustedGatewayRegistry` | every message through that gateway, pinned or not, for every token | the registry's owner | the registry's owner |
+
+Before lifting the token pause or a chain pause, the operator has the gateway discard the deliveries refused while
+it was paused that should never land: lifting a pause lets every pending delivery through, and while the replay that
+triggered it is consumed, a misbehaving peer may have queued more.
 
 A peer replaced with `setPeer` while recalls are open keeps the authority to settle those recalls, through their
 pinned gateway, for up to the instructed amounts: that is what lets a recall survive a planned peer change. When the

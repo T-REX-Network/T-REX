@@ -267,6 +267,7 @@ library ErrorsLib {
     error SettlementAmountMismatch(uint256 validationId, uint256 expected, uint256 amount);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
+    error ChainInboundPaused(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);

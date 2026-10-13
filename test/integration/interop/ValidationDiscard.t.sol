@@ -155,6 +155,25 @@ contract ValidationDiscardTest is InteropSuiteTest {
         boundCompliance.discardExpiredValidations(_ids(id));
     }
 
+    /// @notice A chain whose inbound is paused may hold the report that settles the validation at its gateway;
+    ///         the discard waits for the pauser.
+    function test_discardExpiredValidations_RevertWhen_TheChainsInboundIsPaused_ThenDiscardsOnceLifted() public {
+        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        boundCompliance.discardExpiredValidations(_ids(id));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
+        vm.prank(keeper);
+        boundCompliance.discardExpiredValidations(_ids(id));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+    }
+
     /// @notice One refused id reverts the whole batch and releases nothing.
     function test_discardExpiredValidations_RevertWhen_OneIdOfTheBatchIsPending() public {
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);

@@ -72,10 +72,13 @@ interface ITREXMessaging {
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
+    event InboundPaused(bytes32 indexed chainKey);
+    event InboundUnpaused(bytes32 indexed chainKey);
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
 
+    error ChainInboundPaused(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
@@ -124,6 +127,32 @@ interface ITREXMessaging {
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
 
+    /// @dev Stops taking messages from `chainKey`, or resumes. While paused, every settlement and burn proof
+    /// attributed to that chain reverts with `ChainInboundPaused` and stays deliverable, so the chain's reports
+    /// wait at the gateway; nothing else on the token is affected, native transfers and every other chain
+    /// included. The token sets it on its own when a chain reports a settlement or a burn proof for something
+    /// already accounted for, see `ISettlementHandler.Verdict`; lifting it is the pauser's, after an investigation.
+    ///
+    /// What waits with the chain: a delegation toward it is refused with `ChainInboundPaused`, so no more supply
+    /// reaches a chain whose reports are suspect, and the compliance neither issues a validation toward it nor
+    /// resends one, nor discards or resolves a validation still awaiting that chain's leg, since the held reports
+    /// may answer it. A recall instruction and an instruction resend still go out; the proof that answers a recall
+    /// lands once the pause is lifted. To abandon a chain for good, distrust its gateway or close its route, then
+    /// lift the pause so its validations can be discarded and resolved.
+    ///
+    /// Whether a refused delivery can be delivered again is the gateway's: this contract assumes an ERC-7786
+    /// gateway that keeps a reverted execution retryable. One that marks it failed for good loses the message,
+    /// and its author has to send it again.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - The chain must have been registered by a route or a peer; otherwise reverts with `ChainNotRegistered`.
+    ///
+    /// Emits `InboundPaused` or `InboundUnpaused` when the state changes; nothing when it does not.
+    /// @param chainKey The chain whose messages are refused or taken again.
+    /// @param pause True to refuse, false to take again.
+    function setInboundPaused(bytes32 chainKey, bool pause) external;
+
     /// @dev The gateway registry this token resolves trust against. It is the network's, wired at
     /// deployment, and no role on the token can move it: removing a gateway from the registry severs
     /// every route through it, for every token.
@@ -156,10 +185,17 @@ interface ITREXMessaging {
     /// @return The pinned gateway, or zero when the leg never went out.
     function pinnedRouteFor(uint256 validationId, bytes32 chainKey) external view returns (address);
 
-    /// @dev Whether `chainKey` can carry traffic right now: a route, a peer, and a still-trusted gateway.
-    /// Re-reads the registry, so an emergency gateway removal closes every chain routed through it.
+    /// @dev Whether `chainKey` is routed right now: a route, a peer, and a still-trusted gateway. Re-reads the
+    /// registry, so an emergency gateway removal closes every chain routed through it. The inbound pause is a
+    /// separate state, see `isInboundPaused`: a paused chain stays open for the instructions that still go out
+    /// while its deliveries are refused.
     /// @param chainKey The chain to check.
-    /// @return True when a message can be sent to, and accepted from, that chain.
+    /// @return True when the chain has a route, a peer and a trusted gateway.
     function isChainOpen(bytes32 chainKey) external view returns (bool);
+
+    /// @dev Whether messages from `chainKey` are currently refused, see `setInboundPaused`.
+    /// @param chainKey The chain to check.
+    /// @return True while that chain's inbound is paused.
+    function isInboundPaused(bytes32 chainKey) external view returns (bool);
 
 }
