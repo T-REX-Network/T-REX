@@ -118,6 +118,34 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(token.totalSupply(), MINTED);
     }
 
+    /// @notice The receiving Lite's copy of the validation was lost. The sender burns anyway; the burn message is
+    ///         refused for want of the terms to check it against, the leg is sent again, and the pair settles.
+    function test_twoLegs_Success_WhenTheReceivingLegIsLostAndResentAfterTheBurn() public {
+        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 90, 100);
+        optimismGateway.drop(_last(optimismGateway));
+        _relayAll(polygonGateway);
+        assertTrue(polygonLite.known(id));
+        assertFalse(optimismLite.known(id));
+
+        _execute(id, 95);
+        _relayAll(polygonGateway);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        uint256 burnMessage = _last(optimismGateway);
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.UnknownValidation.selector, id));
+        optimismGateway.relay(burnMessage);
+
+        vm.prank(address(aliceIdentity));
+        boundCompliance.resendValidation(id, optimism, bobOptimism, "");
+        optimismGateway.relay(_last(optimismGateway));
+        assertTrue(optimismLite.known(id));
+        optimismGateway.relay(burnMessage);
+        _relayAll(optimismGateway);
+
+        assertEq(optimismLite.balanceOf(bobOptimism), 95, "minted once the leg and the burn message were both held");
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
+    }
+
     function test_twoLegs_RevertWhen_TheReceivingLiteMintsBeforeTheBurnMessage() public {
         uint256 id = _issueAndDeliver(bobOptimism, 90, 100);
 
@@ -169,6 +197,30 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(token.bridgedBalanceOf(bobSat), 50);
         assertEq(polygonLite.balanceOf(bobSat), 50);
+    }
+
+    /// @notice The reference chain still sees `Pending` while the settlement travels, so a resend can go out after
+    ///         the Lite executed; the Lite holds the id already and ignores the copy, so nothing executes twice and
+    ///         the settlement lands as it would have.
+    function test_oneLeg_Success_WhenTheLegIsResentAfterTheLiteConsumedIt() public {
+        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        _execute(id, 50);
+        uint256 settlement = _last(polygonGateway);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+
+        vm.prank(address(aliceIdentity));
+        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        polygonGateway.relay(_last(polygonGateway));
+
+        assertTrue(polygonLite.consumed(id), "the copy did not reopen the validation");
+        assertEq(polygonLite.balanceOf(bobSat), 50, "nothing executed twice");
+        vm.prank(aliceOnPolygon.addr);
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.ValidationConsumed.selector, id));
+        polygonLite.execute(id, 50);
+
+        polygonGateway.relay(settlement);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertFalse(token.paused());
     }
 
     /* ----- The Lite's own rules ----- */

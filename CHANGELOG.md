@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
+  for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
+  waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by
+  the sender's identity, by the recipient's identity for the leg toward the recipient's chain, or by AGENT: either
+  leg while `Pending` and before `expiry`, and the recipient's leg once the burn landed (`AwaitingMint`) before
+  `releaseAt`, since the receiving Lite checks the burn message against that leg, and a leg sent later could land
+  after the pair was resolved, when the ledger has already returned the burned amount to the sender. `to` and
+  `spender`, the two fields the record does not keep, come from `TransferValidationIssued` and must rebuild the
+  stored hash (`ValidationBodyMismatch` otherwise). Refused otherwise (`ValidationNotResendable`), past the
+  deadline (`ValidationExpired`), toward a chain the validation does not involve (`ChainNotPartOfValidation`),
+  while issuance toward the chain is paused (`ValidationIssuancePaused`), and by the token after a route switch
+  (`ValidationAlreadyRouted`). Emits `ValidationResent`. Rebuild lives in `TransferValidationLib`.
 - **A module upgrade cannot change what the module names.** A compliance reads `moduleTypes()` once, at
   binding, so an upgrade that changed it left every bound compliance calling the module by the old types until
   its owner called `resyncModuleTypes`, and a module shared by several issuers needed every one of them to
@@ -12,7 +24,6 @@ All notable changes to this project will be documented in this file.
   upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
   as a new module and bound in place of the old one. `resyncModuleTypes` stays as the owner's repair for a
   module the guard does not cover: one not built on the base, or upgraded to code that dropped the override.
-
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
   - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits

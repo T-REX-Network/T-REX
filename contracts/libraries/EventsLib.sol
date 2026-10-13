@@ -223,6 +223,8 @@ library EventsLib {
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event ValidationDiscarded(uint256 indexed validationId);
+    /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
+    event ValidationResent(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);

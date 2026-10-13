@@ -62,6 +62,7 @@
 
 pragma solidity 0.8.30;
 
+import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
@@ -144,6 +145,88 @@ library TransferValidationLib {
         );
 
         body = abi.encode(issued);
+    }
+
+    /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the record does not
+    ///  keep, for a resend. The rebuilt object must hash to what was issued, so a resend repeats the issuance
+    ///  byte for byte and can neither widen nor retarget it. Announces the resend and sends it through the token,
+    ///  which as the compliance's DELEGATECALL target sees the compliance as its caller, as {_record} relies on.
+    ///
+    ///  While `Pending` either leg may go again, before `expiry`, since past it no satellite may execute. Once the
+    ///  burn landed and the mint is owed, the recipient's leg alone may go again, before `releaseAt`: the receiving
+    ///  Lite mints on the sending Lite's burn message and checks it against this very leg, so without it the pair
+    ///  stays stuck; but a leg sent later could reach the Lite after the second window closed and the pair was
+    ///  resolved, when the burned amount is already back with the sender on the ledger, and mint on the receiving
+    ///  chain an amount the ledger then attributes to the wrong wallet. `releaseAt` leaves one reconciliation
+    ///  window between the last resend and the resolution, as between the last execution and the discard. A burn
+    ///  that lands after a discard is past `releaseAt` by definition, so a discarded pair is never resendable.
+    ///  Issuance paused toward `chainKey` refuses a resend as it refuses an issuance: the pause exists to send
+    ///  nothing more toward that chain.
+    ///
+    ///  The sender's identity may resend either leg, the recipient's the leg toward the recipient's chain: both
+    ///  wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends: the
+    ///  token forwards no value to the gateway, a resend costs its caller the gas and whatever the gateway charges,
+    ///  and the Lite ignores a leg it already holds.
+    /// @param token the token the compliance is bound to
+    /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
+    function resend(
+        uint256 validationId,
+        bytes32 chainKey,
+        bytes calldata to,
+        bytes calldata spender,
+        address token,
+        bool authorised
+    ) external {
+        ValidationStorage storage store = layout();
+        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        ITransferValidation.Validation storage validation = store.validations[validationId];
+        _requireResendable(validation, validationId, chainKey);
+        require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
+        require(
+            msg.sender == validation.fromIdentity
+                || (chainKey == validation.toChainKey && msg.sender == validation.toIdentity) || authorised,
+            ErrorsLib.NotAuthorizedForWallet(msg.sender, validation.fromWallet)
+        );
+
+        MessageTypesLib.ComplianceValidation memory rebuilt = MessageTypesLib.ComplianceValidation({
+            validationId: validationId,
+            from: validation.fromWallet,
+            to: to,
+            spender: spender,
+            amountMin: validation.amountMin,
+            amountMax: validation.amountMax,
+            expiry: validation.expiry,
+            reconciliationWindow: validation.releaseAt - validation.expiry,
+            token: token
+        });
+        require(
+            MessageTypesLib.hashValidation(rebuilt) == validation.hash, ErrorsLib.ValidationBodyMismatch(validationId)
+        );
+
+        emit EventsLib.ValidationResent(validationId, chainKey);
+
+        IToken(token).dispatchComplianceValidation(chainKey, validationId, abi.encode(rebuilt));
+    }
+
+    /// @dev Whether the leg toward `chainKey` may go again: see {resend}.
+    function _requireResendable(
+        ITransferValidation.Validation storage validation,
+        uint256 validationId,
+        bytes32 chainKey
+    ) private view {
+        require(
+            chainKey == validation.fromChainKey || (validation.twoLegs && chainKey == validation.toChainKey),
+            ErrorsLib.ChainNotPartOfValidation(validationId, chainKey)
+        );
+        ITransferValidation.ValidationStatus status = validation.status;
+        bool pending = status == ITransferValidation.ValidationStatus.Pending;
+        bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint;
+        require(
+            pending || (mintOwed && chainKey == validation.toChainKey),
+            ErrorsLib.ValidationNotResendable(validationId, uint8(status))
+        );
+        uint64 deadline = pending ? validation.expiry : validation.releaseAt;
+        require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
     }
 
     function layout() internal pure returns (ValidationStorage storage $) {
