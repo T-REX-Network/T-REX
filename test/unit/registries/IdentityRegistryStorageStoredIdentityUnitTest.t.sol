@@ -77,9 +77,10 @@ contract IdentityRegistryStorageStoredIdentityUnitTest is AccessManagerHelper {
         assertEq(address(irs.storedIdentity(wallet)), globalIdentity);
     }
 
+    /// @dev The factory can link a wallet after the storage bound it locally; the local binding still answers.
     function test_storedIdentity_PrefersLocalBinding() public {
-        irs.bindIdentityRegistry(registry);
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
+        irs.bindIdentityRegistry(registry);
 
         assertEq(address(irs.storedIdentity(wallet)), localIdentity);
     }

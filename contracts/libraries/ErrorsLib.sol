@@ -138,6 +138,8 @@ library ErrorsLib {
     error ModuleHasNoType();
     /// @dev A module names the same type twice.
     error DuplicateModuleType(uint8 moduleType);
+    /// @dev An upgrade would change the types a module names, which every bound compliance read at binding.
+    error ModuleTypesChanged();
     error ModuleNotBound();
     error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
@@ -180,6 +182,15 @@ library ErrorsLib {
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
+    // Same names as the ONCHAINID IdentityFactory errors, but keyed by address.
+    /// @dev The wallet is bound to another identity.
+    error WalletBoundToAnotherIdentity(address wallet, address boundIdentity);
+    /// @dev The wallet is already bound to this identity.
+    error WalletAlreadyLinkedToIdentity(address wallet);
+    /// @dev The wallet was revoked and can never be bound again.
+    error WalletAlreadyRevoked(address wallet);
+    /// @dev The wallet is not active.
+    error WalletNotActive(address wallet);
 
     // AccessManagerSetupLib Errors
     error SuiteDeployerCannotConfigureFactory();

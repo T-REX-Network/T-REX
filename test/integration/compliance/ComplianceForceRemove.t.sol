@@ -5,6 +5,7 @@ import { Vm } from "@forge-std/Vm.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC1967Utils } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
@@ -280,7 +281,9 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     function _bindHostage(address implementation) private returns (address module) {
         module = _deploy(implementation);
         _bind(module);
-        UUPSUpgradeable(module).upgradeToAndCall(revertEverywhere, "");
+        // A hostile module owner is not held to the base contract's upgrade rules, so the code is swapped under
+        // the proxy directly.
+        vm.store(module, ERC1967Utils.IMPLEMENTATION_SLOT, bytes32(uint256(uint160(revertEverywhere))));
     }
 
     function _assertTokenOperationsWork() private {

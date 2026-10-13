@@ -198,11 +198,17 @@ changed through its modules; wallet bindings are changed in the registry it has.
 A wallet keeps its identity after the investor revokes it, so a revoked wallet can still be burned,
 recovered or force-transferred against the right position; it just may not act.
 
-What a registry agent changes under a wallet that holds tokens, the ledger follows on its own. It
-remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When an agent relinks
-the wallet to another identity, the next movement through it moves the wallet's balance to the new
-owner first, then counts the movement; `WalletOwnerChanged` says so. When an agent deletes the entry
-and nothing else names the wallet, the remembered owner still answers. Nobody calls anything.
+Wallet bindings are sticky in the registry's storage, as in the ONCHAINID IdentityFactory. An agent
+cannot relink a wallet to another identity, and deleting an entry revokes it: the wallet keeps its
+identity but may no longer act, and it can never be registered again. Moving an investor to a new
+identity is a forced transfer to a wallet of that identity.
+
+Who a wallet resolves to can still change when the owner swaps the registry's storage, or unbinds a
+registry from it. The ledger follows that on its own, so rules and positions always judge the same
+identity. It remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When the
+registry names another identity, the next movement through the wallet moves its balance to the new
+owner first, then counts the movement; `WalletOwnerChanged` says so. When the registry names nobody,
+the remembered owner still answers. Nobody calls anything.
 
 One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
 does not know, which only a registry with eligibility checks disabled allows. That amount is counted
@@ -214,8 +220,15 @@ in `positionGap()`, signed, so that `sum(positions) + positionGap == totalSupply
 
 The owner binds a module with `addModule`, or with `addAndSetModule` to configure it in the same
 transaction. The compliance reads `moduleTypes()` once at binding and files the module under each type.
-An implementation upgrade that changes the types takes effect when the owner calls `resyncModuleTypes`.
-Do not remove and re-add the module instead: an unbind increments the module's bind nonce, which is how a
-module scopes its per-compliance settings, so it would come back with an empty allowlist or an unset cap.
+A module built on `AbstractModuleUpgradeable` cannot change its types in an upgrade, not even their order:
+the upgrade reverts with `ModuleTypesChanged`. A module that needs other types is a new module, deployed and
+bound in place of the old one, and configured again, since its settings belong to the old module.
+
+The guard lives in the module's own code, so it does not cover a module that is not built on
+`AbstractModuleUpgradeable`, one behind another kind of proxy, or one upgraded to code that dropped the
+override. Such a module can still change its types under every bound compliance. The owner then calls
+`resyncModuleTypes`, which files the module again by what it now names. Do not remove and re-add the module
+instead: an unbind increments the module's bind nonce, which is how a module scopes its per-compliance
+settings, so it would come back with an empty allowlist or an unset cap.
 
 `getModules()` lists every bound module; `getModulesByType(type)` lists the ones of one kind.

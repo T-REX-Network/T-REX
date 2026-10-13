@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+
 - **`redispatchValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
   waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by
@@ -13,6 +14,21 @@ All notable changes to this project will be documented in this file.
   non-`Pending` id (`ValidationNotRedispatchable`), past `expiry` (`ValidationExpired`), toward a chain the
   validation does not involve (`ChainNotPartOfValidation`), and by the token after a route switch
   (`ValidationAlreadyRouted`). Emits `ValidationRedispatched`. Rebuild lives in `TransferValidationLib`.
+- **A module upgrade cannot change what the module names.** A compliance reads `moduleTypes()` once, at
+  binding, so an upgrade that changed it left every bound compliance calling the module by the old types until
+  its owner called `resyncModuleTypes`, and a module shared by several issuers needed every one of them to
+  notice. `AbstractModuleUpgradeable.upgradeToAndCall` now compares the list of types before and after the
+  upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
+  as a new module and bound in place of the old one. `resyncModuleTypes` stays as the owner's repair for a
+  module the guard does not cover: one not built on the base, or upgraded to code that dropped the override.
+  the sender's identity or AGENT: either leg while `Pending` and before `expiry`, and the recipient's leg once the
+  burn landed (`AwaitingMint`, `DiscardedAwaitingMint`) with no deadline, since the receiving Lite checks the burn
+  message against that leg and the burn is final. `to` and `spender`, the two fields the record does not keep, come
+  from `TransferValidationIssued` and must rebuild the stored hash (`ValidationBodyMismatch` otherwise). Refused
+  otherwise (`ValidationNotRedispatchable`), past `expiry` while `Pending` (`ValidationExpired`), toward a chain the
+  validation does not involve (`ChainNotPartOfValidation`), while issuance toward the chain is paused
+  (`ValidationIssuancePaused`), and by the token after a route switch (`ValidationAlreadyRouted`). Emits
+  `ValidationRedispatched`. Rebuild lives in `TransferValidationLib`.
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
   - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
@@ -192,8 +208,8 @@ All notable changes to this project will be documented in this file.
   - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys
     on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
     registry with eligibility checks disabled reaches that path.
-  - `resyncModuleTypes(address)` re-reads a bound module's declaration after an implementation
-    upgrade, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
+  - `resyncModuleTypes(address)` re-reads a bound module's declaration, for a module whose types changed
+    outside the upgrade guard, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
     `ModuleTypesRecorded(module, moduleTypes)` on bind and resync. `ModuleHasNoType` and
     `DuplicateModuleType` refuse a declaration the compliance cannot route.
   - `MaxBalancePerIdentityModule`: the first rule over the ledger, a cap per identity over every
@@ -590,6 +606,33 @@ All notable changes to this project will be documented in this file.
   deliverable); `HaltToken`, the token pause as before, only for an id the token never issued. The pauser lifts a
   chain pause with `setInboundPaused(chainKey, false)` and can set one ahead of an incident; `isInboundPaused` reads
   it. `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`.
+- **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
+  The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
+  register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
+  - `modifyStoredIdentity`, and so `updateIdentity`, always reverts: `WalletBoundToAnotherIdentity` for
+    another identity, `WalletAlreadyLinkedToIdentity` for the same one, `WalletAlreadyRevoked` for a
+    revoked wallet.
+  - `removeIdentityFromStorage`, and so `deleteIdentity`, revokes instead of deleting. The wallet keeps its
+    identity for `identity` and `contains`, `isVerified` turns false, and the wallet can never be
+    registered again. Revoking twice reverts with `WalletNotActive`. The storage and the registry emit
+    `IdentityRevoked` instead of the standard `IdentityUnstored` and `IdentityRemoved`, which mean the
+    wallet left the registry. See docs/erc3643-oz-swap.md for integrators.
+  - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
+    factory links the wallet, actively or revoked, to a different identity, and with
+    `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
+  - The storage records the status in a new namespace, `erc3643.storage.TREXIdentityRegistryStorage`.
+    Bindings stored before the upgrade read as `Active`.
+  - Removed: `IIdentityRegistryStorage.isLocallyRegistered`, replaced by `localAccountStatus`, which returns
+    the factory's `AccountStatus`. `ITREXRegistry.isLocallyRegistered` stays and now counts active local
+    bindings only. Also removed are the events `InvestorIdentityChanged`, `IdentityOverridden` and
+    `IdentityOverrideReleased`, which no write can produce any more.
+  - Moving an investor to a new identity is now a forced transfer to a wallet of that identity, reported
+    to the compliance as `FORCED_TRANSFER` rather than `RECOVERY`.
+  - `isVerified` and `isWalletVerified` return false when the IdentityFactory links a wallet to another
+    identity than the storage does, even if that link was revoked. The wallet keeps its owner for
+    `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
+  - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
+    ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where
@@ -762,8 +805,8 @@ All notable changes to this project will be documented in this file.
   `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
   `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.
   `AbstractModuleUpgradeable` ships the neutral default for every question, so a module implements
-  only what it enforces. What a module names is read at binding; an upgrade that changes it needs
-  `resyncModuleTypes` on every bound compliance.
+  only what it enforces. What a module names is read at binding, and an upgrade may not change it; a module
+  outside that guard is refiled with `resyncModuleTypes`.
 - **Breaking, `ITransferValidation`**: `Validation` replaces `ValidationRecord` and `ValidationState`,
   read through `validationOf` alone (`stateOf` is gone); it carries the identities resolved at
   issuance and the two reservation flags. `setIssuancePaused(chainKey, paused)`, idempotent, replaces
