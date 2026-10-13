@@ -197,6 +197,10 @@ contract LedgerAttributionTest is TREXSuiteTest {
         vm.prank(alice);
         vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
         token.transfer(stranger, 50);
+
+        vm.prank(agent);
+        vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
+        token.forcedTransfer(alice, stranger, 50);
     }
 
     /// @notice Bindings are sticky, so an agent cannot relink a wallet that holds tokens: the registration is
