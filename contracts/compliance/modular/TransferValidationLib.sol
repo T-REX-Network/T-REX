@@ -179,50 +179,53 @@ library TransferValidationLib {
     ) external {
         ValidationStorage storage store = layout();
         require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
-        ITransferValidation.Validation storage stored = store.validations[validationId];
-        _requireResendable(stored, validationId, chainKey);
+        ITransferValidation.Validation storage validation = store.validations[validationId];
+        _requireResendable(validation, validationId, chainKey);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         require(
-            msg.sender == stored.fromIdentity || (chainKey == stored.toChainKey && msg.sender == stored.toIdentity)
-                || authorised,
-            ErrorsLib.NotAuthorizedForWallet(msg.sender, stored.fromWallet)
+            msg.sender == validation.fromIdentity
+                || (chainKey == validation.toChainKey && msg.sender == validation.toIdentity) || authorised,
+            ErrorsLib.NotAuthorizedForWallet(msg.sender, validation.fromWallet)
         );
 
-        MessageTypesLib.ComplianceValidation memory issued = MessageTypesLib.ComplianceValidation({
+        MessageTypesLib.ComplianceValidation memory rebuilt = MessageTypesLib.ComplianceValidation({
             validationId: validationId,
-            from: stored.fromWallet,
+            from: validation.fromWallet,
             to: to,
             spender: spender,
-            amountMin: stored.amountMin,
-            amountMax: stored.amountMax,
-            expiry: stored.expiry,
-            reconciliationWindow: stored.releaseAt - stored.expiry,
+            amountMin: validation.amountMin,
+            amountMax: validation.amountMax,
+            expiry: validation.expiry,
+            reconciliationWindow: validation.releaseAt - validation.expiry,
             token: token
         });
-        require(MessageTypesLib.hashValidation(issued) == stored.hash, ErrorsLib.ValidationBodyMismatch(validationId));
+        require(
+            MessageTypesLib.hashValidation(rebuilt) == validation.hash, ErrorsLib.ValidationBodyMismatch(validationId)
+        );
 
         emit EventsLib.ValidationResent(validationId, chainKey);
 
-        IToken(token).dispatchComplianceValidation(chainKey, validationId, abi.encode(issued));
+        IToken(token).dispatchComplianceValidation(chainKey, validationId, abi.encode(rebuilt));
     }
 
     /// @dev Whether the leg toward `chainKey` may go again: see {resend}.
-    function _requireResendable(ITransferValidation.Validation storage stored, uint256 validationId, bytes32 chainKey)
-        private
-        view
-    {
+    function _requireResendable(
+        ITransferValidation.Validation storage validation,
+        uint256 validationId,
+        bytes32 chainKey
+    ) private view {
         require(
-            chainKey == stored.fromChainKey || (stored.twoLegs && chainKey == stored.toChainKey),
+            chainKey == validation.fromChainKey || (validation.twoLegs && chainKey == validation.toChainKey),
             ErrorsLib.ChainNotPartOfValidation(validationId, chainKey)
         );
-        ITransferValidation.ValidationStatus status = stored.status;
+        ITransferValidation.ValidationStatus status = validation.status;
         bool pending = status == ITransferValidation.ValidationStatus.Pending;
         bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint;
         require(
-            pending || (mintOwed && chainKey == stored.toChainKey),
+            pending || (mintOwed && chainKey == validation.toChainKey),
             ErrorsLib.ValidationNotResendable(validationId, uint8(status))
         );
-        uint64 deadline = pending ? stored.expiry : stored.releaseAt;
+        uint64 deadline = pending ? validation.expiry : validation.releaseAt;
         require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
     }
 
