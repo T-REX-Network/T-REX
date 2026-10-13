@@ -5,13 +5,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **An institution can decide every satellite transfer from data it keeps offchain** (#127). On an
-  issuance, `TransferContext.data` now carries `abi.encode(address requester)`, the caller of
-  `requestTransferValidation`. `AuthorizedRequesterModule` answers 0 to an issuance the sender's identity
-  requested itself, so every validation comes from an address the AccessManager authorised for that selector:
-  the institution's backend, which runs its private check first and requests the amount it allows. Nothing
-  waits on chain, so no new validation state, reservation, expiry or cleanup is involved. Plug and play,
-  keeps nothing; relocations and native movements are not judged.
+- **An institution can decide every satellite transfer from data it keeps offchain** (#127). The sender's
+  identity calls `askTransferValidation(from, to, requestedMin, requestedMax, spender)`, which checks the
+  caller and emits `TransferValidationAsked` without storing or reserving anything. The institution's backend
+  reads it, runs its private check and calls `requestTransferValidation` with the amount it allows. On an
+  issuance, `TransferContext.data` now carries `abi.encode(address requester)`.
+  `AuthorizedRequesterModule` answers 0 unless the requester holds the approver role
+  (`setApproverRole(uint64)`, `approverRoleOf(compliance)`, `ApproverRoleSet`), so neither the sender's
+  identity nor AGENT can request around the backend. No validation state, expiry or cleanup is added. Native
+  movements and relocations are not judged.
 - **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
   waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by

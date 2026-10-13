@@ -67,6 +67,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
+import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
@@ -146,6 +147,28 @@ library TransferValidationLib {
         );
 
         body = abi.encode(issued);
+    }
+
+    /// @dev Announces a movement the sender's identity asks for, see {ITransferValidation-askTransferValidation}.
+    ///  Only the identity `from` is linked to may ask: the event says whose movement it is, and the address that
+    ///  answers it trusts that. Nothing else is checked, since nothing is written; the request that answers runs
+    ///  every check of an issuance.
+    /// @param registry the registry of the token the compliance is bound to
+    function ask(
+        bytes calldata from,
+        bytes calldata to,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        bytes calldata spender,
+        address registry
+    ) external {
+        require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
+        (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
+        require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
+        address fromIdentity = address(ITREXRegistry(registry).resolveIdentity(from));
+        require(fromIdentity == msg.sender, ErrorsLib.NotAuthorizedForWallet(msg.sender, from));
+
+        emit EventsLib.TransferValidationAsked(fromIdentity, from, to, spender, requestedMin, requestedMax);
     }
 
     /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the record does not

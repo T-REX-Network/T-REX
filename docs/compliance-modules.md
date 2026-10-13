@@ -158,20 +158,33 @@ no cap could reach them. Only a token whose registry has eligibility checks disa
 
 Some institutions keep part of a rule in their own systems: an investor's holdings across every asset, for
 instance, which no chain sees. Such a rule cannot be a module, because `checkTransfer` is a view and cannot
-wait for an answer. The institution's backend answers it instead, and requests the validation itself:
+wait for an answer. The institution's backend answers it, and the approval is the request itself:
 
-1. The investor asks the institution's backend for the transfer.
-2. The backend runs its private check and calls `requestTransferValidation` with the amount it allows as
-   the maximum. Its address holds a role the AccessManager binds to that selector, and to nothing else.
+1. The sender's identity calls `askTransferValidation`. It checks the caller and emits
+   `TransferValidationAsked`; nothing is stored, reserved or sent.
+2. The backend reads the event, runs its private check and calls `requestTransferValidation` with the amount
+   it allows as the maximum.
 3. The validation is issued like any other: the modules still narrow the amount, it is reserved, and its
    expiry starts now.
 
-`AuthorizedRequesterModule` closes the one way around the backend: it answers 0 to an issuance the sender's
-identity requested itself. It keeps nothing and asks nothing, since the compliance already refuses any other
-requester the AccessManager did not authorise. Nothing waits on chain, so a refused or unanswered request
-leaves nothing to reserve, expire or clean up. The backend asks; it never executes: the sending wallet, or the
-spender the validation names, still executes on the satellite. A relocation between one identity's wallets
-never reaches the rules at issuance, so it stays the identity's own. Native movements are not judged.
+`AuthorizedRequesterModule` makes the backend the only way in: it answers 0 to an issuance unless the
+requester holds the approver role, a role of the compliance's AccessManager set with `setApproverRole`. The
+sender's identity is refused, and so is any other caller the AccessManager lets request, AGENT included,
+without that role. Bound with no role, it refuses every issuance. Bind `requestTransferValidation` to the
+approver role alone, so the backend holds none of AGENT's other powers.
+
+Nothing waits on chain, so an ask nobody answers leaves nothing to reserve, expire or clean up. The backend
+asks; it never executes: the sending wallet, or the spender the validation names, still executes on the
+satellite.
+
+Limits, stated plainly:
+
+- **Native movements are not judged.** A native transfer has no requester and cannot wait, so a rule over an
+  investor's total holdings holds over satellite movements only.
+- **Relocations are not judged.** Moving tokens between one identity's wallets never reaches the rules at
+  issuance and changes no position, so it stays the identity's own.
+- **The approver can lock a sender's balance.** Every validation reserves its maximum until it settles or is
+  discarded, so an approver, like AGENT today, can hold a wallet's balance by requesting for it.
 
 ## Two rules a module must follow
 

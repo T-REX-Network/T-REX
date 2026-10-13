@@ -138,6 +138,18 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validationId = _issueValidation(from, to, spender, draft);
     }
 
+    /// @inheritdoc ITransferValidation
+    /// @dev The checks and the event live in {TransferValidationLib-ask}, which keeps the compliance under EIP-170.
+    function askTransferValidation(
+        bytes calldata from,
+        bytes calldata to,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        bytes calldata spender
+    ) external {
+        TransferValidationLib.ask(from, to, requestedMin, requestedMax, spender, address(_boundRegistry()));
+    }
+
     /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
     ///  two when the wallets are on two different satellite chains. The spender is parsed here and judged in
     ///  {_requireSpenderAllowed}, once the range is known.

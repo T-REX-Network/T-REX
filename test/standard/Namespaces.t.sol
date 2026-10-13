@@ -107,6 +107,13 @@ contract DomainsTest is Test {
         );
     }
 
+    function test_authorizedRequesterModuleNamespace() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.AuthorizedRequesterModule"),
+            0xd15d50848072e33707d17a2f5ed411d4764b7e781faec1fe520c380d3c475900
+        );
+    }
+
     function test_trexMessagingNamespace() public pure {
         assertEq(
             Utils.erc7201("erc3643.storage.TREXMessaging"),

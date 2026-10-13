@@ -21,6 +21,7 @@ import { ITransferValidation } from "contracts/compliance/modular/ITransferValid
 import { ModuleSetLib } from "contracts/compliance/modular/ModuleSetLib.sol";
 import { TransferValidationLib } from "contracts/compliance/modular/TransferValidationLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
+import { AuthorizedRequesterModule } from "contracts/compliance/modular/modules/AuthorizedRequesterModule.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
@@ -341,6 +342,18 @@ contract NamespaceFieldsTest is Test {
         maxBalanceStorage.maxBalance[ALICE][NUMBER] = 11;
 
         assertEq(_word(_entry(_entry(_field(base, 0), _key(ALICE)), bytes32(NUMBER))), 11, "maxBalance");
+    }
+
+    function test_AuthorizedRequesterModule() public {
+        bytes32 base = Utils.erc7201("erc3643.storage.AuthorizedRequesterModule");
+        AuthorizedRequesterModule.AuthorizedRequesterStorage storage requesterStorage;
+        assembly ("memory-safe") {
+            requesterStorage.slot := base
+        }
+
+        requesterStorage.approverRole[ALICE][NUMBER] = 11;
+
+        assertEq(_word(_entry(_entry(_field(base, 0), _key(ALICE)), bytes32(NUMBER))), 11, "approverRole");
     }
 
     function test_SpenderWhitelistModule() public {
