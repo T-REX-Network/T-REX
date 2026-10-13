@@ -191,8 +191,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @dev Stops, or resumes, taking messages from `chainKey`. The token calls it with `true` on its own when a
     /// handler returns `PauseChain`; the pauser calls it either way.
-    function _setInboundPaused(bytes32 chainKey, bool paused) internal {
-        TREXMessagingLib.setInboundPaused(chainKey, paused);
+    function _setInboundPaused(bytes32 chainKey, bool pause) internal {
+        TREXMessagingLib.setInboundPaused(chainKey, pause);
     }
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.

@@ -87,6 +87,41 @@ contract StuckValidationTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
     }
 
+    /// @notice While the chain owing the mint has its inbound paused, its report may be waiting at the gateway;
+    ///         resolving on its absence would return a hold that report settles. The keeper waits for the pauser.
+    function test_resolveStuckValidation_RevertWhen_TheOwedLegsChainIsPaused_ThenResolvesOnceLifted() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.setInboundPaused(optimism, true);
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, optimism));
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(token.inTransitOf(id), EXECUTED, "the hold stays where it is");
+
+        vm.prank(agent);
+        token.setInboundPaused(optimism, false);
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+    }
+
+    /// @notice The chain whose leg already landed has nothing left to say about the pair, so its pause does not
+    ///         hold the resolution.
+    function test_resolveStuckValidation_Success_WhenOnlyTheArrivedLegsChainIsPaused() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
+    }
+
     /// @notice A pair discarded before its late burn leg landed is stuck in the same way, and resolves the same
     ///         way: the discard released the reservation, the late leg put tokens in transit, and those still
     ///         need a way home.

@@ -605,7 +605,13 @@ All notable changes to this project will be documented in this file.
   token stops taking that chain's messages (`InboundPaused`; deliveries revert with `ChainInboundPaused` and stay
   deliverable); `HaltToken`, the token pause as before, only for an id the token never issued. The pauser lifts a
   chain pause with `setInboundPaused(chainKey, false)` and can set one ahead of an incident; `isInboundPaused` reads
-  it. `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`.
+  it, `isChainOpen` does not. A delegation toward a paused chain is refused with `ChainInboundPaused`, and the
+  compliance reads the pause too: nothing is issued or resent toward a paused chain (`ChainInboundPaused`), and a
+  validation still awaiting that chain's leg is neither discarded nor resolved while it lasts, since the reports
+  held at the gateway may answer it. Recall instructions and instruction resends still go out.
+  `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`. Upgrade order is free: an old
+  compliance answering a new token reads `true` as `PauseChain`, a new compliance answering an old token fails to
+  decode and the delivery waits.
 - **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
   The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
   register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
@@ -633,8 +639,6 @@ All notable changes to this project will be documented in this file.
     `identity` and `contains`. Recovery to a fresh wallet of the local identity is the way out.
   - The compliance ledger still follows the registry. Registry writes no longer relink a wallet, so the
     ledger only follows when the owner swaps the registry's storage or unbinds a registry from it.
-  it. A delegation toward a paused chain is refused with `ChainInboundPaused`; recalls and resends still go out.
-  `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedRoutes`.
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where

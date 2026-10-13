@@ -206,6 +206,22 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 1);
     }
 
+    /// @notice A chain whose inbound is paused cannot report back, so nothing new is issued toward it; the other
+    ///         chains are issued to as before.
+    function test_requestTransferValidation_RevertWhen_AnInvolvedChainsInboundIsPaused() public {
+        vm.prank(agent);
+        token.setInboundPaused(optimism, true);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, optimism));
+        boundCompliance.requestTransferValidation(aliceSat, bobOptimism, 10, 90, "");
+        assertEq(polygonGateway.queueLength(), 0);
+        assertEq(optimismGateway.queueLength(), 0);
+
+        assertEq(_requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90), 1);
+        assertEq(polygonGateway.queueLength(), 1);
+    }
+
     function test_requestTransferValidation_Success_WhenAnnouncingBeforeDispatching() public {
         vm.warp(1_700_000_000);
 

@@ -76,8 +76,8 @@ interface ISettlementHandler {
 
     /// @dev What the token does once a handler has judged an inbound message it could not apply.
     enum Verdict {
-        /// The message was applied, or was a harmless duplicate: nothing for the token to do.
-        Applied,
+        /// Nothing for the token to do: the message was applied, or was a harmless duplicate.
+        None,
         /// The message names something the token issued but already accounted for, so that chain's reports can no
         /// longer be trusted: the token pauses its inbound from that chain only.
         PauseChain,
@@ -114,7 +114,7 @@ interface ISettlementHandler {
     /// dispatched, and only the first could be contained to a chain, so the token pauses itself.
     /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
-    /// @return verdict `Applied`, `PauseChain` on a replayed leg, `HaltToken` on a never-issued id.
+    /// @return verdict `None`, `PauseChain` on a replayed leg, `HaltToken` on a never-issued id.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
         returns (Verdict verdict);

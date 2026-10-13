@@ -188,7 +188,7 @@ library TokenDelegationLib {
     ///  nothing; anything else is a message the token cannot account for, judged as a replayed settlement is. A
     ///  different proof for a recall the token issued and settled is `PauseChain`: the chain that sent it is at
     ///  fault. A proof for a recall never issued is `HaltToken`, see {ISettlementHandler-Verdict}.
-    /// @return verdict `Applied` when the proof settled its recall or duplicated the one that did; else the pause.
+    /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the pause.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.
     function consumeBurnProof(bytes32 originChainKey, bytes memory body)
@@ -205,7 +205,7 @@ library TokenDelegationLib {
         if (recall.amount == 0) {
             if (s.settledProofs[proof.recallId] == proofHash) {
                 emit EventsLib.BurnProofDuplicate(proof.recallId, originChainKey);
-                return (ISettlementHandler.Verdict.Applied, address(0), 0);
+                return (ISettlementHandler.Verdict.None, address(0), 0);
             }
             emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
             bool issued = proof.recallId != 0 && proof.recallId <= s.lastRecallId;

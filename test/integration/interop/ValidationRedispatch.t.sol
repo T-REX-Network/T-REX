@@ -212,6 +212,18 @@ contract ValidationRedispatchTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 1);
     }
 
+    /// @notice A chain whose inbound is paused holds its reports at the gateway; a leg sent now could only add to
+    ///         what cannot land.
+    function test_redispatchValidation_RevertWhen_TheChainsInboundIsPaused() public {
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        boundCompliance.redispatchValidation(id, polygon, bobSat, "");
+        assertEq(polygonGateway.queueLength(), 1);
+    }
+
     /// @notice The leg's settlement is matched against the pinned gateway, so it is never resent through another.
     function test_redispatchValidation_RevertWhen_TheRouteWasSwitched() public {
         ERC7786GatewayMock replacement = _newTrustedGateway(POLYGON);

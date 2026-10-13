@@ -171,8 +171,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc ITREXMessaging
     /// @dev Bound to the pauser, like `pause` and `unpause`: it is the per-chain brake, the one the token pulls on
     ///  its own when a chain reports something already accounted for, and only an agent releases it.
-    function setInboundPaused(bytes32 chainKey, bool paused) external restricted {
-        _setInboundPaused(chainKey, paused);
+    function setInboundPaused(bytes32 chainKey, bool pause) external restricted {
+        _setInboundPaused(chainKey, pause);
     }
 
     /* ----- Interop Dispatch ----- */
@@ -622,7 +622,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     {
         (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount) =
             TokenDelegationLib.consumeBurnProof(chainKey, body);
-        if (verdict != ISettlementHandler.Verdict.Applied) {
+        if (verdict != ISettlementHandler.Verdict.None) {
             _applyVerdict(chainKey, verdict);
             return;
         }

@@ -171,14 +171,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
     ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
     function _setExpiryAndRelease(TransferValidationLib.Draft memory draft) private view {
-        TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
-        draft.reconciliationWindow = _openChainWindow(store, draft.fromChainKey);
-        if (draft.twoLegs) {
-            uint64 toWindow = _openChainWindow(store, draft.toChainKey);
-            if (toWindow > draft.reconciliationWindow) draft.reconciliationWindow = toWindow;
-        }
-        draft.expiry = uint64(block.timestamp) + store.defaultValidityWindow;
+        (draft.expiry, draft.reconciliationWindow) = TransferValidationLib.expiryAndWindow(
+            address(_boundToken()), draft.fromChainKey, draft.toChainKey, draft.twoLegs
+        );
     }
 
     /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
@@ -316,7 +311,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             emit EventsLib.LateReconciliation(notification.validationId, originChainKey);
             if (breachesRule) _setIssuancePaused(originChainKey, true);
         }
-        return ISettlementHandler.Verdict.Applied;
+        return ISettlementHandler.Verdict.None;
     }
 
     /// @dev Takes in what one chain reported and moves the validation on.
@@ -511,7 +506,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  When the burn leg is the one that landed, the tokens it burned are waiting in transit: they go back to
     ///  the wallet they left. When it was the mint leg, nothing on this chain can be returned, so the chain
     ///  that owes the burn stops being issued to instead and an operator investigates. Either way the
-    ///  validation ends in `Resolved`, where any leg arriving afterwards pauses its chain's inbound.
+    ///  validation ends in `Resolved`, where any leg arriving afterwards pauses its chain's inbound. While the
+    ///  chain owing the leg has its inbound paused on the token the leg may be waiting at its gateway, so the
+    ///  pair is not resolved under the pause, see {TransferValidationLib-requireAwaitedInboundOpen}.
     function _resolveStuckValidation(uint256 validationId) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
         require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
@@ -522,6 +519,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
         uint64 resolvableAt = _secondWindowEnd(validation);
         require(block.timestamp > resolvableAt, ErrorsLib.ValidationNotYetResolvable(validationId, resolvableAt));
+        _requireAwaitedInboundOpen(validation);
 
         uint256 returnedAmount = 0;
         if (_burnArrived(validation.status)) {
@@ -542,6 +540,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  leg that lands afterwards into a late reconciliation, which can pause its chain's issuance, so during the
     ///  first window the keeper alone judges that a leg is late rather than slow. Past the second window a pair
     ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
+    ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token: its leg may be
+    ///  waiting at that gateway, see {TransferValidationLib-requireAwaitedInboundOpen}.
     function _discardExpiredValidations(uint256[] calldata validationIds) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
         bool keeper = _canCallSelector(msg.sender, this.discardExpiredValidations.selector);
@@ -561,6 +561,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
                 uint64 publicAt = _secondWindowEnd(validation);
                 require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(validationId, publicAt));
             }
+            _requireAwaitedInboundOpen(validation);
 
             _moveTo(validation, ValidationStatus.Discarded, false);
 
@@ -792,15 +793,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _moveWalletBalance(wallet, previous, owner, balance);
     }
 
-    /// @dev The reconciliation window of a chain that is open and configured.
-    function _openChainWindow(TransferValidationLib.ValidationStorage storage store, bytes32 chainKey)
-        private
-        view
-        returns (uint64 window)
-    {
-        require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
-        window = store.reconciliationWindows[chainKey];
-        require(window != 0, ErrorsLib.ReconciliationWindowNotSet(chainKey));
+    /// @dev See {TransferValidationLib-requireAwaitedInboundOpen}.
+    function _requireAwaitedInboundOpen(Validation storage validation) private view {
+        TransferValidationLib.requireAwaitedInboundOpen(address(_boundToken()), validation);
     }
 
     function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {

@@ -217,12 +217,12 @@ library TREXMessagingLib {
     /// changes nothing and emits nothing. A chain registered by a route or a peer is never deregistered, and a
     /// message is attributed only to a registered chain, so the token's own call on a verdict never meets the
     /// registration refusal; it is there for a pauser's typo.
-    function setInboundPaused(bytes32 chainKey, bool paused) external {
+    function setInboundPaused(bytes32 chainKey, bool pause) external {
         MessagingStorage storage s = layout();
         require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
-        if (s.inboundPaused[chainKey] == paused) return;
-        s.inboundPaused[chainKey] = paused;
-        if (paused) emit EventsLib.InboundPaused(chainKey);
+        if (s.inboundPaused[chainKey] == pause) return;
+        s.inboundPaused[chainKey] = pause;
+        if (pause) emit EventsLib.InboundPaused(chainKey);
         else emit EventsLib.InboundUnpaused(chainKey);
     }
 
@@ -310,7 +310,7 @@ library TREXMessagingLib {
     /// the handler sees the token as its caller, which is the only caller a compliance accepts.
     /// @param handler The token's bound compliance.
     /// @param body A settlement body, as {acceptMessage} returned it.
-    /// @return verdict `Applied`, or the pause the handler asks for on a replayed or never-issued settlement.
+    /// @return verdict `None`, or the pause the handler asks for on a replayed or never-issued settlement.
     function forwardSettlement(address handler, bytes32 chainKey, bytes memory body)
         external
         returns (ISettlementHandler.Verdict verdict)

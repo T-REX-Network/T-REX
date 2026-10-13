@@ -187,6 +187,7 @@ interface ITransferValidation {
     ///   otherwise reverts with `NotAuthorizedForWallet`.
     /// - A validity window set, no involved satellite chain paused, and each with a reconciliation window;
     ///   otherwise `ValidityWindowNotSet`, `ValidationIssuancePaused` or `ReconciliationWindowNotSet`.
+    /// - No involved satellite chain with its inbound paused on the token; otherwise `ChainInboundPaused`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
@@ -255,6 +256,8 @@ interface ITransferValidation {
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
     ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
+    /// - No chain an id still awaits with its inbound paused on the token; otherwise reverts with
+    ///   `ChainInboundPaused`: the reports held at that gateway may answer the validation.
     ///
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.
@@ -270,6 +273,9 @@ interface ITransferValidation {
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - The validation must be awaiting its other leg; otherwise reverts with `ValidationNotStuck`.
     /// - `block.timestamp` must be past the second window; otherwise reverts with `ValidationNotYetResolvable`.
+    /// - The chain owing the missing leg must not have its inbound paused on the token; otherwise reverts with
+    ///   `ChainInboundPaused`: the leg may be waiting at that gateway, and returning the hold under it would leave
+    ///   the ledger crediting the sender for what the receiving chain minted.
     ///
     /// Emits `ValidationResolved`.
     function resolveStuckValidation(uint256 validationId) external;
@@ -290,6 +296,7 @@ interface ITransferValidation {
     /// - While `Pending`, `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
     ///   Once the burn landed there is no deadline: the burn is final and the mint follows it.
     /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
+    /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `ChainInboundPaused`.
     /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`.
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
     ///   otherwise reverts with `NotAuthorizedForWallet`.
