@@ -173,6 +173,10 @@ sender's identity is refused, and so is any other caller the AccessManager lets 
 without that role. Bound with no role, it refuses every issuance. Bind `requestTransferValidation` to the
 approver role alone, so the backend holds none of AGENT's other powers.
 
+The ask checks only who asks: `to` and `spender` are taken as given, so the backend checks them before it
+answers, and reads asks from the compliance's own address only. The request it sends then runs every check of
+an issuance.
+
 Nothing waits on chain, so an ask nobody answers leaves nothing to reserve, expire or clean up. The backend
 asks; it never executes: the sending wallet, or the spender the validation names, still executes on the
 satellite.

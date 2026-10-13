@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
+
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
@@ -115,6 +117,24 @@ contract AuthorizedRequesterModuleTest is InteropSuiteTest {
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidRequestedRange.selector, 150, 10));
         boundCompliance.askTransferValidation(aliceSat, bobSat, 150, 10, "");
+    }
+
+    /// @notice A native sender cannot be asked for: a validation only ever moves a satellite position.
+    function test_askTransferValidation_RevertWhen_TheSenderIsNative() public {
+        bytes memory nativeAlice = InteroperableAddress.formatEvmV1(block.chainid, alice);
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
+        boundCompliance.askTransferValidation(nativeAlice, bobSat, 10, 150, "");
+    }
+
+    /// @notice A wallet linked to no identity has nobody who may ask for it.
+    function test_askTransferValidation_RevertWhen_TheWalletIsLinkedToNoIdentity() public {
+        bytes memory unlinked = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("unlinkedOnPolygon"));
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(aliceIdentity), unlinked)
+        );
+        boundCompliance.askTransferValidation(unlinked, bobSat, 10, 150, "");
     }
 
     // ==== .requestTransferValidation Tests ====
