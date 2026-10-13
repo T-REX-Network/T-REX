@@ -281,10 +281,14 @@ interface ITransferValidation {
     ///
     /// Requirements:
     /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
-    /// - It must be stored `Pending`; otherwise reverts with `ValidationNotRedispatchable`.
-    /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
     /// - `chainKey` must be the sender's chain or, on two legs, the recipient's; otherwise reverts with
     ///   `ChainNotPartOfValidation`.
+    /// - It must be stored `Pending`, or, for the recipient's leg, `AwaitingMint` or `DiscardedAwaitingMint`: the
+    ///   burn landed and the receiving Lite still needs the leg to check the burn message against; otherwise
+    ///   reverts with `ValidationNotRedispatchable`.
+    /// - While `Pending`, `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
+    ///   Once the burn landed there is no deadline: the burn is final and the mint follows it.
+    /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
     /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`.
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
     ///   otherwise reverts with `NotAuthorizedForWallet`.

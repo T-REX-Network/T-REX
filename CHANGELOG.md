@@ -21,6 +21,14 @@ All notable changes to this project will be documented in this file.
   upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
   as a new module and bound in place of the old one. `resyncModuleTypes` stays as the owner's repair for a
   module the guard does not cover: one not built on the base, or upgraded to code that dropped the override.
+  the sender's identity or AGENT: either leg while `Pending` and before `expiry`, and the recipient's leg once the
+  burn landed (`AwaitingMint`, `DiscardedAwaitingMint`) with no deadline, since the receiving Lite checks the burn
+  message against that leg and the burn is final. `to` and `spender`, the two fields the record does not keep, come
+  from `TransferValidationIssued` and must rebuild the stored hash (`ValidationBodyMismatch` otherwise). Refused
+  otherwise (`ValidationNotRedispatchable`), past `expiry` while `Pending` (`ValidationExpired`), toward a chain the
+  validation does not involve (`ChainNotPartOfValidation`), while issuance toward the chain is paused
+  (`ValidationIssuancePaused`), and by the token after a route switch (`ValidationAlreadyRouted`). Emits
+  `ValidationRedispatched`. Rebuild lives in `TransferValidationLib`.
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
   - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits

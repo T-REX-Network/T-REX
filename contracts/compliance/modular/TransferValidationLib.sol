@@ -151,6 +151,12 @@ library TransferValidationLib {
     ///  keep, for a resend. The rebuilt object must hash to what was issued, so a resend repeats the issuance
     ///  byte for byte and can neither widen nor retarget it. Announces the resend and sends it through the token,
     ///  which as the compliance's DELEGATECALL target sees the compliance as its caller, as {_record} relies on.
+    ///
+    ///  While `Pending` either leg may go again, before `expiry`, since past it no satellite may execute. Once the
+    ///  burn landed and the mint is owed, the recipient's leg alone may go again, with no deadline: the receiving
+    ///  Lite mints on the sending Lite's burn message and checks it against this very leg, so without it the pair
+    ///  stays stuck, and the burn being final the clock no longer matters. Issuance paused toward `chainKey` refuses
+    ///  a resend as it refuses an issuance: the pause exists to send nothing more toward that chain.
     /// @param token the token the compliance is bound to
     /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
     function redispatch(
@@ -164,15 +170,8 @@ library TransferValidationLib {
         ValidationStorage storage store = layout();
         require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage stored = store.validations[validationId];
-        require(
-            stored.status == ITransferValidation.ValidationStatus.Pending,
-            ErrorsLib.ValidationNotRedispatchable(validationId, uint8(stored.status))
-        );
-        require(block.timestamp < stored.expiry, ErrorsLib.ValidationExpired(validationId, stored.expiry));
-        require(
-            chainKey == stored.fromChainKey || (stored.twoLegs && chainKey == stored.toChainKey),
-            ErrorsLib.ChainNotPartOfValidation(validationId, chainKey)
-        );
+        _requireRedispatchable(stored, validationId, chainKey);
+        require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         require(
             msg.sender == stored.fromIdentity || authorised,
             ErrorsLib.NotAuthorizedForWallet(msg.sender, stored.fromWallet)
@@ -194,6 +193,29 @@ library TransferValidationLib {
         emit EventsLib.ValidationRedispatched(validationId, chainKey);
 
         IToken(token).dispatchComplianceValidation(chainKey, validationId, abi.encode(issued));
+    }
+
+    /// @dev Whether the leg toward `chainKey` may go again: see {redispatch}.
+    function _requireRedispatchable(
+        ITransferValidation.Validation storage stored,
+        uint256 validationId,
+        bytes32 chainKey
+    ) private view {
+        require(
+            chainKey == stored.fromChainKey || (stored.twoLegs && chainKey == stored.toChainKey),
+            ErrorsLib.ChainNotPartOfValidation(validationId, chainKey)
+        );
+        ITransferValidation.ValidationStatus status = stored.status;
+        bool pending = status == ITransferValidation.ValidationStatus.Pending;
+        bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint
+            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint;
+        require(
+            pending || (mintOwed && chainKey == stored.toChainKey),
+            ErrorsLib.ValidationNotRedispatchable(validationId, uint8(status))
+        );
+        if (pending) {
+            require(block.timestamp < stored.expiry, ErrorsLib.ValidationExpired(validationId, stored.expiry));
+        }
     }
 
     function layout() internal pure returns (ValidationStorage storage $) {

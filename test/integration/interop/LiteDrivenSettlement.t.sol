@@ -118,6 +118,34 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(token.totalSupply(), MINTED);
     }
 
+    /// @notice The receiving Lite's copy of the validation was lost. The sender burns anyway; the burn message is
+    ///         refused for want of the terms to check it against, the leg is sent again, and the pair settles.
+    function test_twoLegs_Success_WhenTheReceivingLegIsLostAndResentAfterTheBurn() public {
+        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 90, 100);
+        optimismGateway.drop(_last(optimismGateway));
+        _relayAll(polygonGateway);
+        assertTrue(polygonLite.known(id));
+        assertFalse(optimismLite.known(id));
+
+        _execute(id, 95);
+        _relayAll(polygonGateway);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        uint256 burnMessage = _last(optimismGateway);
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.UnknownValidation.selector, id));
+        optimismGateway.relay(burnMessage);
+
+        vm.prank(address(aliceIdentity));
+        boundCompliance.redispatchValidation(id, optimism, bobOptimism, "");
+        optimismGateway.relay(_last(optimismGateway));
+        assertTrue(optimismLite.known(id));
+        optimismGateway.relay(burnMessage);
+        _relayAll(optimismGateway);
+
+        assertEq(optimismLite.balanceOf(bobOptimism), 95, "minted once the leg and the burn message were both held");
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
+    }
+
     function test_twoLegs_RevertWhen_TheReceivingLiteMintsBeforeTheBurnMessage() public {
         uint256 id = _issueAndDeliver(bobOptimism, 90, 100);
 

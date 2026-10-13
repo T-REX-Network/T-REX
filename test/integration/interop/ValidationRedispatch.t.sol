@@ -94,6 +94,26 @@ contract ValidationRedispatchTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 2, "the burn leg's queue holds the two issued legs only");
     }
 
+    /// @notice Once the burn landed the receiving Lite still needs its leg to check the burn message against, so the
+    ///         recipient's leg goes again with no deadline; the mint it then reports settles the pair.
+    function test_redispatchValidation_Success_WhenTheRecipientsLegIsResentAfterTheBurnLanded() public {
+        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
+        optimismGateway.drop(0);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        vm.warp(boundCompliance.validationOf(crossChain).expiry + 1);
+
+        vm.prank(address(aliceIdentity));
+        boundCompliance.redispatchValidation(crossChain, optimism, bobOptimism, "");
+
+        assertEq(optimismGateway.queueLength(), 2);
+        assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
+
+        optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(crossChain, token, bobOptimism, 10)));
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobOptimism), 10);
+    }
+
     /// @notice A spender travels with the object, so it is part of what must be supplied again.
     function test_redispatchValidation_Success_WhenTheSpenderIsSuppliedAgain() public {
         bytes memory spender = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
@@ -163,6 +183,33 @@ contract ValidationRedispatchTest is InteropSuiteTest {
             )
         );
         boundCompliance.redispatchValidation(id, polygon, bobSat, "");
+    }
+
+    /// @notice The sender's leg was consumed by the burn: sending it again could only make the Lite execute twice.
+    function test_redispatchValidation_RevertWhen_TheSendersLegIsResentAfterTheBurnLanded() public {
+        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.ValidationNotRedispatchable.selector,
+                crossChain,
+                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
+            )
+        );
+        boundCompliance.redispatchValidation(crossChain, polygon, aliceSat, "");
+    }
+
+    /// @notice The issuance pause means nothing more goes toward that chain; a resend is no exception.
+    function test_redispatchValidation_RevertWhen_IssuanceTowardTheChainIsPaused() public {
+        vm.prank(deployer);
+        boundCompliance.setIssuancePaused(polygon, true);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
+        boundCompliance.redispatchValidation(id, polygon, bobSat, "");
+        assertEq(polygonGateway.queueLength(), 1);
     }
 
     /// @notice The leg's settlement is matched against the pinned gateway, so it is never resent through another.

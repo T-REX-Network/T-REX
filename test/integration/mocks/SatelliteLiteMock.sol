@@ -39,6 +39,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
     error InsufficientBalance(bytes wallet, uint256 balance, uint256 amount);
     error BurnNotReceived(uint256 validationId);
     error AlreadyMinted(uint256 validationId);
+    error RecipientMismatch(uint256 validationId);
     error DelegationConflict(uint256 delegationId);
     error RecallConflict(uint256 recallId);
     error NoStoredProof(uint256 recallId);
@@ -118,8 +119,10 @@ contract SatelliteLiteMock is IERC7786Recipient {
 
         if (messageType == uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION)) {
             MessageTypesLib.ComplianceValidation memory validation = MessageTypesLib.decodeValidation(body);
-            _validations[validation.validationId] = validation;
-            known[validation.validationId] = true;
+            if (!known[validation.validationId]) {
+                _validations[validation.validationId] = validation;
+                known[validation.validationId] = true;
+            }
         } else if (messageType == uint8(MessageTypesLib.Message.MINT_INSTRUCTION)) {
             _mint(MessageTypesLib.decodeMintInstruction(body), keccak256(body));
         } else if (messageType == uint8(MessageTypesLib.Message.RECALL_INSTRUCTION)) {
@@ -215,9 +218,19 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _send(proof);
     }
 
-    /// @dev The receiving half of the two-leg rule: the burn message carries the amount, the mint repeats it.
+    /// @dev The receiving half of the two-leg rule: the burn message carries the amount, the mint repeats it, and
+    ///      the validation this Lite holds is what the message is checked against. Without it the message is refused
+    ///      and redelivered once the leg arrives.
     function _receiveBurn(BurnMessage memory message) private {
-        require(!minted[message.validationId], AlreadyMinted(message.validationId));
+        uint256 validationId = message.validationId;
+        require(known[validationId], UnknownValidation(validationId));
+        MessageTypesLib.ComplianceValidation storage validation = _validations[validationId];
+        require(keccak256(message.to) == keccak256(validation.to), RecipientMismatch(validationId));
+        require(
+            validation.amountMin <= message.amount && message.amount <= validation.amountMax,
+            AmountOutOfRange(validationId, message.amount)
+        );
+        require(!minted[validationId], AlreadyMinted(validationId));
         burnReceived[message.validationId] = message.amount;
         minted[message.validationId] = true;
         _balances[keccak256(message.to)] += message.amount;

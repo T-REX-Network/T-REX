@@ -26,7 +26,9 @@ that recall was dispatched to.
 ### Transport
 
 1. **Act on each delivery once.** A gateway may redeliver; the Lite dedupes on the receive id, and also on the
-   operation id (rules 9 and 10), since a resend arrives under a new receive id.
+   operation id, since a resend arrives under a new receive id: `validationId` for a validation, which delivered
+   again, before or after it was consumed, is ignored (a resend repeats the issuance byte for byte), and the
+   instruction ids of rules 9 and 10.
 2. **Accept only the reference token as author**, through its own gateway.
 
 ### Validations
@@ -42,7 +44,10 @@ that recall was dispatched to.
 
 8. **The receiving Lite mints only on the sending Lite's burn message**, carried by a trusted gateway and authored by
    that Lite, for the amount it carries, never from the validation alone. This is what makes a range safe on a
-   two-leg validation, and what the token's `SettlementAmountMismatch` check backs up.
+   two-leg validation, and what the token's `SettlementAmountMismatch` check backs up. The receiving Lite's own copy
+   of the validation is what it checks that message against: the recipient, the bounds and the token. A burn message
+   for a validation the Lite does not hold is refused, not minted, and redelivered once the leg arrives; rule 4 binds
+   the sending Lite, the mint follows the burn whatever the clock says, and the reference chain takes a late leg.
 
 ### Instructions
 
@@ -61,7 +66,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity or agent | `redispatchValidation(validationId, chainKey, to, spender)` before `expiry`; rebuilt from the record and checked against the issued hash; goes through the gateway the issuance pinned |
+| validation leg | sender's identity or agent | `redispatchValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, with no deadline; rebuilt from the record and checked against the issued hash; goes through the gateway the issuance pinned; refused while issuance toward that chain is paused |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
