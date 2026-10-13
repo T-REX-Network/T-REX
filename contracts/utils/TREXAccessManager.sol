@@ -394,7 +394,7 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         // Issuing a validation, and sending a lost leg of one again.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(compliance, ITransferValidation.requestTransferValidation.selector, agentRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.redispatchValidation.selector, agentRole);
+        _setTargetFunctionRole(compliance, ITransferValidation.resendValidation.selector, agentRole);
 
         // Cleaning up expired or stuck validations.
         uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);

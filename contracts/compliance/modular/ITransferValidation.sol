@@ -283,15 +283,17 @@ interface ITransferValidation {
     /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
     /// - `chainKey` must be the sender's chain or, on two legs, the recipient's; otherwise reverts with
     ///   `ChainNotPartOfValidation`.
-    /// - It must be stored `Pending`, or, for the recipient's leg, `AwaitingMint` or `DiscardedAwaitingMint`: the
-    ///   burn landed and the receiving Lite still needs the leg to check the burn message against; otherwise
-    ///   reverts with `ValidationNotRedispatchable`.
+    /// - It must be stored `Pending`, or, for the recipient's leg, `AwaitingMint`: the burn landed and the
+    ///   receiving Lite still needs the leg to check the burn message against; otherwise reverts with
+    ///   `ValidationNotResendable`. A discarded pair is never resendable: its burn landed past `releaseAt`.
     /// - `block.timestamp` must be before `expiry` while `Pending`, and before `releaseAt` once the burn landed;
     ///   otherwise reverts with `ValidationExpired`. Past `expiry` no satellite may execute; past `releaseAt` a
-    ///   resent leg could reach the Lite after the pair was resolved and the burned amount returned to the sender,
-    ///   and mint it a second time, so the last resend stays one reconciliation window ahead of the resolution.
+    ///   resent leg could reach the Lite after the pair was resolved and the burned amount returned to the sender
+    ///   on the ledger, so the receiving chain would mint an amount the ledger attributes to the sender, and its
+    ///   report would land on a resolved id. The last resend stays one reconciliation window ahead of the resolution.
     /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
-    /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`.
+    /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`. The
+    ///   bound token is part of the hash, so a compliance bound to another token since cannot resend old ids.
     /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `chainKey` is the
     ///   recipient's chain, or authorised by the AccessManager for this selector; otherwise reverts with
     ///   `NotAuthorizedForWallet`.
@@ -304,12 +306,17 @@ interface ITransferValidation {
     /// the gas and whatever the gateway charges, and the Lite ignores a leg it already holds. A deployment whose
     /// relayer pays per message meters at the relayer.
     ///
-    /// Emits `ValidationRedispatched`, then the token's `ProtocolMessageSent`.
+    /// The leg goes to the chain's current peer, as an issuance does: only the current peer's settlement is
+    /// accepted, so a leg at a former peer can never settle and the current peer is the only one worth sending
+    /// to. A peer change with validations in flight is to be avoided as a route change is. Neither the resend nor
+    /// the issuance is gated by the token pause: the pause stops movements, and a settlement is one.
+    ///
+    /// Emits `ValidationResent`, then the token's `ProtocolMessageSent`.
     /// @param validationId The validation whose leg is sent again.
     /// @param chainKey The chain the leg goes to, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param to ERC-7930 interoperable address of the recipient, as issued.
     /// @param spender ERC-7930 address of the spender, as issued, or empty.
-    function redispatchValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+    function resendValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
         external;
 
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.

@@ -589,7 +589,7 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(
             target, compliance, ITransferValidation.requestTransferValidation.selector, domainId, RolesLib.Role.AGENT
         );
-        _assertRow(target, compliance, ITransferValidation.redispatchValidation.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITransferValidation.resendValidation.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(
             target,
             compliance,

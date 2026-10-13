@@ -156,10 +156,12 @@ library TransferValidationLib {
     ///  burn landed and the mint is owed, the recipient's leg alone may go again, before `releaseAt`: the receiving
     ///  Lite mints on the sending Lite's burn message and checks it against this very leg, so without it the pair
     ///  stays stuck; but a leg sent later could reach the Lite after the second window closed and the pair was
-    ///  resolved, when the burned amount is already back with the sender, and mint it a second time. `releaseAt`
-    ///  leaves one reconciliation window between the last resend and the resolution, as between the last execution
-    ///  and the discard. Issuance paused toward `chainKey` refuses a resend as it refuses an issuance: the pause
-    ///  exists to send nothing more toward that chain.
+    ///  resolved, when the burned amount is already back with the sender on the ledger, and mint on the receiving
+    ///  chain an amount the ledger then attributes to the wrong wallet. `releaseAt` leaves one reconciliation
+    ///  window between the last resend and the resolution, as between the last execution and the discard. A burn
+    ///  that lands after a discard is past `releaseAt` by definition, so a discarded pair is never resendable.
+    ///  Issuance paused toward `chainKey` refuses a resend as it refuses an issuance: the pause exists to send
+    ///  nothing more toward that chain.
     ///
     ///  The sender's identity may resend either leg, the recipient's the leg toward the recipient's chain: both
     ///  wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends: the
@@ -167,7 +169,7 @@ library TransferValidationLib {
     ///  and the Lite ignores a leg it already holds.
     /// @param token the token the compliance is bound to
     /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
-    function redispatch(
+    function resend(
         uint256 validationId,
         bytes32 chainKey,
         bytes calldata to,
@@ -178,7 +180,7 @@ library TransferValidationLib {
         ValidationStorage storage store = layout();
         require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage stored = store.validations[validationId];
-        _requireRedispatchable(stored, validationId, chainKey);
+        _requireResendable(stored, validationId, chainKey);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         require(
             msg.sender == stored.fromIdentity || (chainKey == stored.toChainKey && msg.sender == stored.toIdentity)
@@ -199,28 +201,26 @@ library TransferValidationLib {
         });
         require(MessageTypesLib.hashValidation(issued) == stored.hash, ErrorsLib.ValidationBodyMismatch(validationId));
 
-        emit EventsLib.ValidationRedispatched(validationId, chainKey);
+        emit EventsLib.ValidationResent(validationId, chainKey);
 
         IToken(token).dispatchComplianceValidation(chainKey, validationId, abi.encode(issued));
     }
 
-    /// @dev Whether the leg toward `chainKey` may go again: see {redispatch}.
-    function _requireRedispatchable(
-        ITransferValidation.Validation storage stored,
-        uint256 validationId,
-        bytes32 chainKey
-    ) private view {
+    /// @dev Whether the leg toward `chainKey` may go again: see {resend}.
+    function _requireResendable(ITransferValidation.Validation storage stored, uint256 validationId, bytes32 chainKey)
+        private
+        view
+    {
         require(
             chainKey == stored.fromChainKey || (stored.twoLegs && chainKey == stored.toChainKey),
             ErrorsLib.ChainNotPartOfValidation(validationId, chainKey)
         );
         ITransferValidation.ValidationStatus status = stored.status;
         bool pending = status == ITransferValidation.ValidationStatus.Pending;
-        bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint;
+        bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint;
         require(
             pending || (mintOwed && chainKey == stored.toChainKey),
-            ErrorsLib.ValidationNotRedispatchable(validationId, uint8(status))
+            ErrorsLib.ValidationNotResendable(validationId, uint8(status))
         );
         uint64 deadline = pending ? stored.expiry : stored.releaseAt;
         require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
