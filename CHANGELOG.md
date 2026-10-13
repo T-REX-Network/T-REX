@@ -5,15 +5,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-
-- **`redispatchValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
+- **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
   waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by
-  the sender's identity or AGENT before `expiry`; `to` and `spender`, the two fields the record does not keep, come
-  from `TransferValidationIssued` and must rebuild the stored hash (`ValidationBodyMismatch` otherwise). Refused on a
-  non-`Pending` id (`ValidationNotRedispatchable`), past `expiry` (`ValidationExpired`), toward a chain the
-  validation does not involve (`ChainNotPartOfValidation`), and by the token after a route switch
-  (`ValidationAlreadyRouted`). Emits `ValidationRedispatched`. Rebuild lives in `TransferValidationLib`.
+  the sender's identity, by the recipient's identity for the leg toward the recipient's chain, or by AGENT: either
+  leg while `Pending` and before `expiry`, and the recipient's leg once the burn landed (`AwaitingMint`) before
+  `releaseAt`, since the receiving Lite checks the burn message against that leg, and a leg sent later could land
+  after the pair was resolved, when the ledger has already returned the burned amount to the sender. `to` and
+  `spender`, the two fields the record does not keep, come from `TransferValidationIssued` and must rebuild the
+  stored hash (`ValidationBodyMismatch` otherwise). Refused otherwise (`ValidationNotResendable`), past the
+  deadline (`ValidationExpired`), toward a chain the validation does not involve (`ChainNotPartOfValidation`),
+  while issuance toward the chain is paused (`ValidationIssuancePaused`), and by the token after a route switch
+  (`ValidationAlreadyRouted`). Emits `ValidationResent`. Rebuild lives in `TransferValidationLib`.
 - **A module upgrade cannot change what the module names.** A compliance reads `moduleTypes()` once, at
   binding, so an upgrade that changed it left every bound compliance calling the module by the old types until
   its owner called `resyncModuleTypes`, and a module shared by several issuers needed every one of them to
@@ -21,14 +24,6 @@ All notable changes to this project will be documented in this file.
   upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
   as a new module and bound in place of the old one. `resyncModuleTypes` stays as the owner's repair for a
   module the guard does not cover: one not built on the base, or upgraded to code that dropped the override.
-  the sender's identity or AGENT: either leg while `Pending` and before `expiry`, and the recipient's leg once the
-  burn landed (`AwaitingMint`, `DiscardedAwaitingMint`) with no deadline, since the receiving Lite checks the burn
-  message against that leg and the burn is final. `to` and `spender`, the two fields the record does not keep, come
-  from `TransferValidationIssued` and must rebuild the stored hash (`ValidationBodyMismatch` otherwise). Refused
-  otherwise (`ValidationNotRedispatchable`), past `expiry` while `Pending` (`ValidationExpired`), toward a chain the
-  validation does not involve (`ChainNotPartOfValidation`), while issuance toward the chain is paused
-  (`ValidationIssuancePaused`), and by the token after a route switch (`ValidationAlreadyRouted`). Emits
-  `ValidationRedispatched`. Rebuild lives in `TransferValidationLib`.
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
   - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
@@ -663,6 +658,27 @@ All notable changes to this project will be documented in this file.
   it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
   `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
   claim that names another issuer as the registry already did, so the two report the same result.
+
+- **Disabling the eligibility checks no longer admits a wallet without an identity** (#119). In 4.2,
+  `disableEligibilityChecks` made `isVerified` return true for every address, so tokens could be minted to and
+  moved between wallets no identity owns, and they stayed there after the checks were enabled again. The switch
+  now skips the claim checks only, required topics and trusted issuers: `isVerified` and `isWalletVerified`
+  still need an active identity, so an unbound or revoked wallet is refused in every mode. Every holder of an
+  open-mode token needs an ONCHAINID, contracts that hold tokens (pools, escrows, vaults) included; the agent
+  registers them like any investor. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
+  interfaces, so the standard is unaffected.
+  - Every token now has an owner, so the compliance ledger drops its repair path: `sum(positions) ==
+    totalSupply` always holds and a debit the position cannot cover reverts. Removed: `positionGap`,
+    `fixPosition` and its AccessManager row, the events `PositionUnresolved`, `PositionUnderflow` and
+    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`. The ledger's `gap` field
+    becomes `__deprecatedGap`, so `ownerOf` keeps its slot in `erc3643.storage.ComplianceLedger` and a
+    deployed compliance proxy can be upgraded.
+  - Nothing repairs a position any more. A debit that reverts means the invariant is broken, and the agent's
+    calls on that identity revert with it; the fix is a compliance implementation upgrade.
+  - `canTransfer` no longer refuses a recipient with no identity itself, since the token's `isVerified`
+    refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
+    resolve to nobody after the registry's storage is swapped.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced

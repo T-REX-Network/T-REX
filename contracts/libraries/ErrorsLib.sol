@@ -91,8 +91,6 @@ library ErrorsLib {
     error NothingInTransit(uint256 validationId);
     error ValidationNotStuck(uint256 validationId, uint8 status);
     error ValidationNotYetResolvable(uint256 validationId, uint64 resolvableAt);
-    error InsufficientPosition(address identity, uint256 held, uint256 amount);
-    error FromAndToAreTheSame();
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -241,13 +239,16 @@ library ErrorsLib {
     error UnverifiedWallet(bytes wallet);
     /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
     error SenderNotOnSatellite(bytes wallet);
-    /// @dev Only a stored `Pending` validation can be sent again; `status` is the `ValidationStatus` found instead.
-    error ValidationNotRedispatchable(uint256 validationId, uint8 status);
-    /// @dev The satellite's deadline has passed, so a leg sent now could not be executed.
-    error ValidationExpired(uint256 validationId, uint64 expiry);
+    /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
+    ///  it is `AwaitingMint`; `status` is the `ValidationStatus` found instead.
+    error ValidationNotResendable(uint256 validationId, uint8 status);
+    /// @dev The deadline for a resend has passed: `expiry` while `Pending`, since past it no satellite may execute;
+    ///  `releaseAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
+    error ValidationExpired(uint256 validationId, uint64 deadline);
     /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
     error ChainNotPartOfValidation(uint256 validationId, bytes32 chainKey);
-    /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id.
+    /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id. The bound token is part
+    ///  of the hash too, so a compliance bound to another token since the issuance gets this for every old id.
     error ValidationBodyMismatch(uint256 validationId);
     /// @dev The id was never issued by this compliance.
     error UnknownValidation(uint256 validationId);

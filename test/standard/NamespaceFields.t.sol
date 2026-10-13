@@ -251,13 +251,11 @@ contract NamespaceFieldsTest is Test {
         ledger.position[ALICE] = 11;
         ledger.pendingIn[ALICE] = 12;
         ledger.pendingOut[ALICE] = 13;
-        ledger.gap = -14;
         ledger.ownerOf[ALICE] = BOB;
 
         assertEq(_word(_entry(_field(base, 0), _key(ALICE))), 11, "position");
         assertEq(_word(_entry(_field(base, 1), _key(ALICE))), 12, "pendingIn");
         assertEq(_word(_entry(_field(base, 2), _key(ALICE))), 13, "pendingOut");
-        assertEq(int256(_word(_field(base, 3))), -14, "gap");
         assertEq(_word(_entry(_field(base, 4), _key(ALICE))), uint256(uint160(BOB)), "ownerOf");
     }
 

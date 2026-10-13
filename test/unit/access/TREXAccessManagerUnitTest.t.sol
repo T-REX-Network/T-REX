@@ -14,7 +14,6 @@ import { IERC3643ClaimTopicsRegistry } from "contracts/ERC-3643/IERC3643ClaimTop
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
-import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
@@ -566,7 +565,6 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, compliance, IModularCompliance.forceRemoveModule.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IModularCompliance.callModuleFunction.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IModularCompliance.resyncModuleTypes.selector, domainId, RolesLib.Role.OWNER);
-        _assertRow(target, compliance, IComplianceLedger.fixPosition.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, RolesLib.BIND_UNBIND_TOKEN, domainId, RolesLib.Role.OWNER);
         _assertRow(
             target,
@@ -592,7 +590,7 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(
             target, compliance, ITransferValidation.requestTransferValidation.selector, domainId, RolesLib.Role.AGENT
         );
-        _assertRow(target, compliance, ITransferValidation.redispatchValidation.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITransferValidation.resendValidation.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(
             target,
             compliance,

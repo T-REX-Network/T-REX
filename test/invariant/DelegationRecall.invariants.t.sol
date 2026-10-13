@@ -185,7 +185,6 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
             sum += ledger.positionOf(address(identities[i]));
         }
         assertEq(sum, token.totalSupply(), "DR-2");
-        assertEq(ledger.positionGap(), 0, "DR-2 gap");
     }
 
     function invariant_DR3_bridgedMatchesTheLitePlusWhatIsInFlight() public view {

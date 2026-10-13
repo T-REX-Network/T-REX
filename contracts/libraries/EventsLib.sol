@@ -140,16 +140,6 @@ library EventsLib {
     event ModuleRemoved(address indexed module);
     event ModuleForceRemoved(address indexed module);
 
-    // ComplianceLedger Events
-
-    /// @notice A movement touched a non-zero wallet that resolves to no identity, so no position was moved for
-    ///         that side. The token's balances and the positions now disagree by `amount` until an agent
-    ///         repairs the link.
-    event PositionUnresolved(bytes32 indexed wallet, uint256 amount);
-    /// @notice A debit asked for more position than the identity held, so its position was floored at zero.
-    ///         Only a registry unlink and relink can produce this; `missing` is what the recount owes.
-    event PositionUnderflow(address indexed identity, uint256 missing);
-
     // AbstractModule / AbstractModuleUpgradeable Events
 
     event ComplianceBound(address indexed compliance);
@@ -241,7 +231,7 @@ library EventsLib {
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event ValidationDiscarded(uint256 indexed validationId);
     /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
-    event ValidationRedispatched(uint256 indexed validationId, bytes32 indexed chainKey);
+    event ValidationResent(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
@@ -252,8 +242,6 @@ library EventsLib {
         address indexed wallet, address indexed previousIdentity, address indexed identity, uint256 amount
     );
 
-    /// The owner moved `amount` of position between two sides; a zero side is the gap.
-    event PositionFixed(address indexed from, address indexed to, uint256 amount);
     /// @notice Emitted when every expected leg of a validation was received: slots committed, ledger updated.
     ///         `chainKey` is the chain of the leg that completed it.
     event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
