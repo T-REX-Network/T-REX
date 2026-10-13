@@ -254,7 +254,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_entry(_field(base, 0), _key(ALICE))), 11, "position");
         assertEq(_word(_entry(_field(base, 1), _key(ALICE))), 12, "pendingIn");
         assertEq(_word(_entry(_field(base, 2), _key(ALICE))), 13, "pendingOut");
-        assertEq(_word(_entry(_field(base, 3), _key(ALICE))), uint256(uint160(BOB)), "ownerOf");
+        assertEq(_word(_entry(_field(base, 4), _key(ALICE))), uint256(uint160(BOB)), "ownerOf");
     }
 
     function test_TransferValidation() public {

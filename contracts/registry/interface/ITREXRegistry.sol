@@ -74,7 +74,10 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// @dev Disables the eligibility checks for token transfers and other operations.
     ///
     /// Once disabled, `isVerified` skips the required-claims and trusted-issuer verification. A wallet
-    /// still needs an active identity: one that is unbound or revoked is refused in every mode.
+    /// still needs an active identity: one that is unbound or revoked is refused in every mode. Unlike 4.2,
+    /// disabling the checks does not verify every address, so every holder of an open-mode token needs an
+    /// ONCHAINID, contracts that hold tokens (pools, escrows, vaults) included. The agent registers them
+    /// like any investor.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

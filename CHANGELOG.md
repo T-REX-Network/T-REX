@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **A module upgrade cannot change what the module names.** A compliance reads `moduleTypes()` once, at
+  binding, so an upgrade that changed it left every bound compliance calling the module by the old types until
+  its owner called `resyncModuleTypes`, and a module shared by several issuers needed every one of them to
+  notice. `AbstractModuleUpgradeable.upgradeToAndCall` now compares the list of types before and after the
+  upgrade, order included, and reverts with `ModuleTypesChanged` when they differ. A module that needs other types is deployed
+  as a new module and bound in place of the old one. `resyncModuleTypes` stays as the owner's repair for a
+  module the guard does not cover: one not built on the base, or upgraded to code that dropped the override.
+
 - **Delegation-out and recall, end to end, retryable** (`Token.delegateOut`, `Token.instructRecall`,
   `Token.resend`, the burn proof):
   - `delegateOut(holder, toWallet, amount)` burns `amount` of `holder`'s free native balance and credits
@@ -184,8 +192,8 @@ All notable changes to this project will be documented in this file.
   - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys
     on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
     registry with eligibility checks disabled reaches that path.
-  - `resyncModuleTypes(address)` re-reads a bound module's declaration after an implementation
-    upgrade, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
+  - `resyncModuleTypes(address)` re-reads a bound module's declaration, for a module whose types changed
+    outside the upgrade guard, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
     `ModuleTypesRecorded(module, moduleTypes)` on bind and resync. `ModuleHasNoType` and
     `DuplicateModuleType` refuse a declaration the compliance cannot route.
   - `MaxBalancePerIdentityModule`: the first rule over the ledger, a cap per identity over every
@@ -632,13 +640,17 @@ All notable changes to this project will be documented in this file.
   moved between wallets no identity owns, and they stayed there after the checks were enabled again. The switch
   now skips the claim checks only, required topics and trusted issuers: `isVerified` and `isWalletVerified`
   still need an active identity, so an unbound or revoked wallet is refused in every mode. Every holder of an
-  open-mode token needs an ONCHAINID. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
+  open-mode token needs an ONCHAINID, contracts that hold tokens (pools, escrows, vaults) included; the agent
+  registers them like any investor. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
   interfaces, so the standard is unaffected.
   - Every token now has an owner, so the compliance ledger drops its repair path: `sum(positions) ==
     totalSupply` always holds and a debit the position cannot cover reverts. Removed: `positionGap`,
     `fixPosition` and its AccessManager row, the events `PositionUnresolved`, `PositionUnderflow` and
-    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`, and the ledger's `gap` field,
-    which moves `ownerOf` one slot up in `erc3643.storage.ComplianceLedger`.
+    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`. The ledger's `gap` field
+    becomes `__deprecatedGap`, so `ownerOf` keeps its slot in `erc3643.storage.ComplianceLedger` and a
+    deployed compliance proxy can be upgraded.
+  - Nothing repairs a position any more. A debit that reverts means the invariant is broken, and the agent's
+    calls on that identity revert with it; the fix is a compliance implementation upgrade.
   - `canTransfer` no longer refuses a recipient with no identity itself, since the token's `isVerified`
     refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
     resolve to nobody after the registry's storage is swapped.
@@ -791,8 +803,8 @@ All notable changes to this project will be documented in this file.
   `moduleTransferAction`, `moduleMintAction` and `moduleBurnAction`.
   `reserveSlot`, `commitSlot` and `releaseSlot` are gone: the reservation lives in the ledger.
   `AbstractModuleUpgradeable` ships the neutral default for every question, so a module implements
-  only what it enforces. What a module names is read at binding; an upgrade that changes it needs
-  `resyncModuleTypes` on every bound compliance.
+  only what it enforces. What a module names is read at binding, and an upgrade may not change it; a module
+  outside that guard is refiled with `resyncModuleTypes`.
 - **Breaking, `ITransferValidation`**: `Validation` replaces `ValidationRecord` and `ValidationState`,
   read through `validationOf` alone (`stateOf` is gone); it carries the identities resolved at
   issuance and the two reservation flags. `setIssuancePaused(chainKey, paused)`, idempotent, replaces
