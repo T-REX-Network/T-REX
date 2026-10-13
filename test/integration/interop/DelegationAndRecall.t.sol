@@ -720,7 +720,12 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(ledger.positionOf(address(aliceIdentity)), 300, "the old owner keeps only its other wallet");
         assertEq(ledger.positionOf(address(bobIdentity)), 900 + 1000 + 100, "the new owner holds everything else");
         assertEq(token.balanceOf(alice), 1100);
-        assertEq(ledger.positionGap(), 0);
+        assertEq(
+            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
+                + ledger.positionOf(address(charlieIdentity)),
+            token.totalSupply(),
+            "positions != supply"
+        );
 
         vm.prank(alice);
         token.transfer(charlie, 100);
@@ -728,7 +733,12 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(ledger.positionOf(address(aliceIdentity)), 300);
         assertEq(ledger.positionOf(address(bobIdentity)), 1900);
         assertEq(ledger.positionOf(address(charlieIdentity)), 100);
-        assertEq(ledger.positionGap(), 0);
+        assertEq(
+            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
+                + ledger.positionOf(address(charlieIdentity)),
+            token.totalSupply(),
+            "positions != supply"
+        );
     }
 
     /// @notice A relink of a wallet the old owner held nothing in: the sync moves nothing and the credit lands.
@@ -742,7 +752,12 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(ledger.positionOf(address(aliceIdentity)), 300);
         assertEq(ledger.positionOf(address(bobIdentity)), 1000);
         assertEq(token.balanceOf(alice), 100);
-        assertEq(ledger.positionGap(), 0);
+        assertEq(
+            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
+                + ledger.positionOf(address(charlieIdentity)),
+            token.totalSupply(),
+            "positions != supply"
+        );
     }
 
     /// @notice The sync is the owner change alone: no movement is counted, so no tracker module is told.

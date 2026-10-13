@@ -62,17 +62,9 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
-import { EventsLib } from "../../libraries/EventsLib.sol";
-
 /**
  * @title ComplianceLedgerLib
- * @dev The layout of the compliance's ledger, and the part of it that is not on a transfer's path: the
- * owner's position repair, deployed once and linked, and the pending reservation an issuance writes.
- *
- * The compliance reaches {fixPosition} by DELEGATECALL, so the storage is its own
- * `erc3643.storage.ComplianceLedger` namespace at the slot it always had and the event is the compliance's.
- * The caller is checked by the compliance's entry point, before it reaches this.
+ * @dev The layout of the compliance's ledger, and the pending reservation an issuance writes.
  */
 library ComplianceLedgerLib {
 
@@ -84,37 +76,15 @@ library ComplianceLedgerLib {
         mapping(address identity => uint256 amount) pendingIn;
         /// What open validations promise out of each identity.
         mapping(address identity => uint256 amount) pendingOut;
-        /// The gap between the positions and the supply: credits that landed on nobody add to it,
-        /// debits that found nobody or found too little subtract from it. Zero while the registry is stable.
-        int256 gap;
-        /// The identity each native wallet was last credited to, so a relink is noticed and followed.
+        /// Was the gap between the positions and the supply. Kept so `ownerOf` stays in its slot for a deployed proxy.
+        int256 __deprecatedGap;
+        /// The identity each native wallet was last credited to, so a change of owner is noticed and followed.
         mapping(address wallet => address identity) ownerOf;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ComplianceLedger")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant LEDGER_STORAGE_LOCATION =
         0x37065f79446a9096383af794d27f19e665b7dd5afcf9e812ca702bcc08bee600;
-
-    /// @dev Moves `amount` of position from one side to the other. A zero side is the gap between the positions and
-    ///  the supply, so this can give tokens that landed on nobody their owner, or take a stale position off an
-    ///  identity a relink left too high.
-    function fixPosition(address from, address to, uint256 amount) external {
-        require(from != to, ErrorsLib.FromAndToAreTheSame());
-        Ledger storage ledger = layout();
-
-        if (from == address(0)) {
-            ledger.gap -= int256(amount);
-        } else {
-            uint256 held = ledger.position[from];
-            require(held >= amount, ErrorsLib.InsufficientPosition(from, held, amount));
-            ledger.position[from] = held - amount;
-        }
-
-        if (to == address(0)) ledger.gap += int256(amount);
-        else ledger.position[to] += amount;
-
-        emit EventsLib.PositionFixed(from, to, amount);
-    }
 
     /// @dev Counts an issued validation as pending at `amountMax`, the worst case for any additive rule. Only
     ///  when ownership really moves: relocating tokens between two wallets of one identity never eats that

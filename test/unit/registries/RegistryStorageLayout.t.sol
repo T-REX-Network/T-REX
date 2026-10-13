@@ -14,12 +14,15 @@ contract RegistryStorageLayoutTest is TREXRegistryBaseUnitTest {
         bytes32 slot = Utils.erc7201("erc3643.storage.TREXEligibility");
 
         assertEq(uint8(uint256(vm.load(address(registry), slot)) & 0xff), 0, "starts enabled");
+        vm.prank(deployer);
+        registry.addClaimTopic(CLAIM_TOPIC_1);
+        assertFalse(registry.isVerified(charlie), "enabled means the claim is required");
 
         vm.prank(deployer);
         registry.disableEligibilityChecks();
 
         assertEq(uint8(uint256(vm.load(address(registry), slot)) & 0xff), 1, "reads back as disabled");
-        assertTrue(registry.isVerified(makeAddr("anyone")), "disabled means everyone verifies");
+        assertTrue(registry.isVerified(charlie), "disabled means the claim is skipped");
     }
 
     function test_storageLayout_OldDomainUnused() public view {

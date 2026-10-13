@@ -72,7 +72,6 @@ import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegi
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
-import { IComplianceLedger } from "../compliance/modular/IComplianceLedger.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ITransferValidation } from "../compliance/modular/ITransferValidation.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
@@ -375,8 +374,8 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     }
 
     function _setComplianceFunctionRoles(address compliance, uint32 domainId) private {
-        // The rules themselves: which modules run, and a position fixed by hand. `bindToken` and `unbindToken`
-        // share one virtual selector, see {RolesLib.BIND_UNBIND_TOKEN}.
+        // The rules themselves: which modules run. `bindToken` and `unbindToken` share one virtual selector,
+        // see {RolesLib.BIND_UNBIND_TOKEN}.
         uint64 ownerRole = RolesLib.forDomain(domainId, RolesLib.Role.OWNER);
         _setTargetFunctionRole(compliance, IModularCompliance.addModule.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.addAndSetModule.selector, ownerRole);
@@ -384,7 +383,6 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(compliance, IModularCompliance.forceRemoveModule.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.callModuleFunction.selector, ownerRole);
         _setTargetFunctionRole(compliance, IModularCompliance.resyncModuleTypes.selector, ownerRole);
-        _setTargetFunctionRole(compliance, IComplianceLedger.fixPosition.selector, ownerRole);
         _setTargetFunctionRole(compliance, RolesLib.BIND_UNBIND_TOKEN, ownerRole);
 
         // Cross-chain validation policy.
