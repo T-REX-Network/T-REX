@@ -210,11 +210,13 @@ registry names another identity, the next movement through the wallet moves its 
 owner first, then counts the movement; `WalletOwnerChanged` says so. When the registry names nobody,
 the remembered owner still answers. Nobody calls anything.
 
-One case is beyond any lookup: tokens landing on a wallet the ledger never credited and the registry
-does not know, which only a registry with eligibility checks disabled allows. That amount is counted
-in `positionGap()`, signed, so that `sum(positions) + positionGap == totalSupply` holds regardless,
-`PositionUnresolved` names it, and the owner hands it to its identity with
-`fixPosition(from, to, amount)`, where a zero side is the gap.
+Every token has an owner. The registry admits no wallet without an active identity, even with its
+eligibility checks disabled, which skip the claims only. So `sum(positions) == totalSupply` always
+holds, and a debit the position cannot cover reverts.
+
+Nothing repairs a position. A debit that reverts means the invariant is broken, so the agent's own
+calls on that identity (burn, forced transfer, recovery) revert with it. The fix is a compliance
+implementation upgrade through the version manager, not an owner call.
 
 ## Binding
 
