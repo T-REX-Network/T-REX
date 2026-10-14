@@ -79,11 +79,12 @@ All notable changes to this project will be documented in this file.
     reset every role mapping the admin changed since, and a run into another domain would move the suite
     while its storage and the token's old `AGENT` grant stay behind. A contract's rows are written the first
     time it joins a domain and never again, so a registry, storage or compliance shared by a second token
-    keeps every row its admin changed. A registry or compliance already in another domain is refused with
-    the same error (remapping it would lock the first token out of its own registry); the storage keeps its
-    first domain as before. Who hands out which role is set once, in `createDomain`, so a second suite in a
-    domain no longer puts the default appointers back. The old library reset rows and appointers on every
-    run.
+    keeps every row its admin changed. A registry, storage or compliance already in another domain is
+    refused with the same error (remapping it would lock the first token out of its own registry). The
+    storage used to keep its first domain and let the second domain's registry write into it, which let an
+    agent of one domain register wallets under, and revoke the wallets of, another domain's holders. Who
+    hands out which role is set once, in `createDomain`, so a second suite in a domain no longer puts the
+    default appointers back. The old library reset rows and appointers on every run.
   - **Breaking, deployment order:** the factory initializes a fresh suite manager with `initializeSuite`,
     which only the new `TREXAccessManager` implementation has. Publish it in the same implementation
     authority version as this factory (`publishAndUpgrade`, one transaction for all five implementations);
@@ -257,8 +258,8 @@ All notable changes to this project will be documented in this file.
   - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
     gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
     domain administrator can hand it out, so this holds by construction. Agents edit investor
-    records through a registry, never directly, and a storage shared across domains gives the other
-    domain's agents nothing.
+    records through a registry, never directly, and a storage is never shared across domains: one record
+    per wallet serves every registry bound to it, so whoever writes it can admit and revoke any of its holders.
     Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's domain: whoever owns the
     storage's domain owns its bindings.
   - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns

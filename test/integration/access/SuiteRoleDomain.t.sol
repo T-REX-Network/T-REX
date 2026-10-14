@@ -332,44 +332,30 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         _assertCannotTouchStorage(agentA, irs);
     }
 
-    /// @notice A storage reused by a second fund keeps the domain of the first: the second fund's registry
-    ///         writes through the first domain's `IRS_WRITER`, and neither fund's agents reach the other's token.
-    function test_issuerManager_ReusedStorageKeepsItsDomainAcrossFunds() public {
+    /// @notice A storage reused by a second fund is refused: the second fund's registry would write into the
+    ///         first fund's records, and its agents could register and revoke the first fund's holders.
+    function test_issuerManager_RevertWhen_ReusedStorageIsSetUpInAnotherFund() public {
         Token tokenX = _deployBare("fund-x", address(0), address(issuerManager));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
         Token tokenY = _deployBare("fund-y", address(irs), address(issuerManager));
         uint32 fundX = issuerManager.createDomain("Fund X");
         uint32 fundY = issuerManager.createDomain("Fund Y");
         _setupSuiteInto(issuerManager, tokenX, fundX);
-        _setupSuiteInto(issuerManager, tokenY, fundY);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
+        issuerManager.setupSuite(fundY, address(tokenY));
+
         _grantStorageBinder(issuerManager, fundX);
         irs.bindIdentityRegistry(address(tokenY.identityRegistry()));
-
-        assertEq(issuerManager.domainOf(address(irs)), fundX);
-        assertEq(
-            issuerManager.getTargetFunctionRole(
-                address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
-            ),
-            RolesLib.forDomain(fundX, RolesLib.Role.IRS_WRITER)
-        );
         (bool registryYWrites,) = issuerManager.hasRole(
             RolesLib.forDomain(fundX, RolesLib.Role.IRS_WRITER), address(tokenY.identityRegistry())
         );
-        assertTrue(registryYWrites);
-
-        _grantAllAgentRoles(issuerManager, agentA, fundX);
+        assertFalse(registryYWrites, "a bound registry of another fund cannot write");
         _grantAllAgentRoles(issuerManager, agentB, fundY);
-        IERC3643IdentityRegistry registryX = tokenX.identityRegistry();
         IERC3643IdentityRegistry registryY = tokenY.identityRegistry();
-        vm.prank(agentA);
-        registryX.registerIdentity(alice, aliceIdentity, 0);
         vm.prank(agentB);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agentB));
         registryY.registerIdentity(bob, bobIdentity, 0);
-        assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
-        assertEq(address(irs.storedIdentity(bob)), address(bobIdentity));
-        _assertLockedOut(agentA, tokenY);
-        _assertLockedOut(agentB, tokenX);
-        _assertCannotTouchStorage(agentA, irs);
         _assertCannotTouchStorage(agentB, irs);
     }
 

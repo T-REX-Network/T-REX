@@ -138,42 +138,24 @@ contract TREXAccessManagerUnitTest is Test {
         _assertSuiteLayout(manager, fund, fund);
     }
 
-    /// @notice The storage keeps the domain it was first set up in, so a second fund sharing it writes
-    ///         through the first fund's `IRS_WRITER`, and its role admins are set for both domains.
-    function test_setupSuite_SharedStorageKeepsItsFirstDomain() public {
+    /// @notice A storage holds one record per wallet whichever registry wrote it, so a second domain writing
+    ///         into it could register and revoke the first domain's holders. Sharing it across domains is refused.
+    function test_setupSuite_RevertWhen_TheStorageIsSetUpInAnotherDomain() public {
         uint32 fundA = manager.createDomain("Fund A");
         uint32 fundB = manager.createDomain("Fund B");
         address otherToken = makeAddr("otherToken");
         address otherRegistry = makeAddr("otherRegistry");
-        address otherCompliance = makeAddr("otherCompliance");
         manager.setupSuite(fundA, token);
+        _mockSuite(otherToken, otherRegistry, identityStorage, makeAddr("otherCompliance"));
 
-        _mockSuite(otherToken, otherRegistry, identityStorage, otherCompliance);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, identityStorage, fundA));
         manager.setupSuite(fundB, otherToken);
 
-        assertEq(manager.domainOf(identityStorage), fundA, "storage stays in the first domain");
-        assertEq(manager.domainOf(otherToken), fundB);
-        assertEq(manager.domainOf(otherRegistry), fundB);
-        assertEq(manager.domainOf(otherCompliance), fundB);
-        _assertRow(manager, otherToken, IERC3643.mint.selector, fundB, RolesLib.Role.AGENT_MINTER);
-        _assertRow(
-            manager, otherRegistry, IERC3643IdentityRegistry.registerIdentity.selector, fundB, RolesLib.Role.AGENT
-        );
-        _assertRow(manager, otherCompliance, IModularCompliance.addModule.selector, fundB, RolesLib.Role.OWNER);
-        _assertRow(
-            manager,
-            identityStorage,
-            IERC3643IdentityRegistryStorage.addIdentityToStorage.selector,
-            fundA,
-            RolesLib.Role.IRS_WRITER
-        );
-        (bool otherTokenIsAgent,) = manager.hasRole(RolesLib.forDomain(fundB, RolesLib.Role.AGENT), otherToken);
+        assertEq(manager.domainOf(identityStorage), fundA, "the storage stays in its domain");
+        assertEq(manager.domainOf(otherToken), 0, "nothing of the second suite is set up");
         (bool otherRegistryWrites,) =
             manager.hasRole(RolesLib.forDomain(fundA, RolesLib.Role.IRS_WRITER), otherRegistry);
-        assertTrue(otherTokenIsAgent, "the second token acts as an agent of its own domain");
-        assertTrue(otherRegistryWrites, "the second registry writes through the first domain");
-        _assertAdmin(manager, fundB, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
-        _assertAdmin(manager, fundA, RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
+        assertFalse(otherRegistryWrites, "the second registry cannot write into the storage");
     }
 
     function test_setupSuite_RevertWhen_DomainDoesNotExist() public {
@@ -285,32 +267,6 @@ contract TREXAccessManagerUnitTest is Test {
         manager.setupSuite(fund, otherToken);
 
         assertEq(manager.getRoleAdmin(agentRole), suiteAdminRole, "the admin's appointer is kept");
-    }
-
-    /// @notice The same holds for the first domain of a shared storage: a second domain joining the storage
-    ///         does not touch the first domain's role admins or the storage's rows.
-    function test_setupSuite_ASharedStorageKeepsTheRowsAndRoleAdminsOfItsFirstDomain() public {
-        uint32 fundA = manager.createDomain("Fund A");
-        uint32 fundB = manager.createDomain("Fund B");
-        address otherToken = makeAddr("otherToken");
-        manager.setupSuite(fundA, token);
-        uint64 custodianRole = RolesLib.forDomain(fundA, bytes32("CUSTODIAN"));
-        bytes4[] memory unbind = new bytes4[](1);
-        unbind[0] = IERC3643IdentityRegistryStorage.unbindIdentityRegistry.selector;
-        manager.setTargetFunctionRole(identityStorage, unbind, custodianRole);
-        uint64 binderRole = RolesLib.forDomain(fundA, RolesLib.Role.IRS_BINDER);
-        manager.setRoleAdmin(binderRole, RolesLib.forDomain(fundA, RolesLib.Role.SUITE_ADMIN));
-        _mockSuite(otherToken, makeAddr("otherRegistry"), identityStorage, makeAddr("otherCompliance"));
-
-        manager.setupSuite(fundB, otherToken);
-
-        assertEq(manager.domainOf(identityStorage), fundA, "storage stays in the first domain");
-        assertEq(manager.getTargetFunctionRole(identityStorage, unbind[0]), custodianRole, "the admin's row is kept");
-        assertEq(
-            manager.getRoleAdmin(binderRole),
-            RolesLib.forDomain(fundA, RolesLib.Role.SUITE_ADMIN),
-            "the first domain's appointer is kept"
-        );
     }
 
     /// @notice The factory path sets the suite up at initialization, so the issuer cannot run it a second time.

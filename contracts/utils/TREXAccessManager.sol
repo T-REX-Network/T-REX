@@ -158,12 +158,13 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     ///      and compliance while the storage and the token's old `AGENT` grant stay behind. A function added
     ///      by a later manager version is mapped with `setTargetFunctionRole`.
     /// @dev A contract's rows are written the first time it joins a domain, never again: a registry, a storage
-    ///      or a compliance shared by a second token keeps every row its admin changed since. A registry or a
-    ///      compliance already set up in another domain is refused, since remapping its rows would lock the
-    ///      first token out of its own registry. The identity storage instead keeps the domain it was first set
-    ///      up in, so a storage shared by several domains is written only through roles of the first. Binding
-    ///      a registry to a shared storage is not done here: a fresh storage binds its first registry at init,
-    ///      a reused one is bound by a holder of `IRS_BINDER`.
+    ///      or a compliance shared by a second token keeps every row its admin changed since. A registry, a
+    ///      storage or a compliance already set up in another domain is refused, since remapping its rows would
+    ///      lock the first token out of its own suite. For the storage it would also be unsafe: the storage holds
+    ///      one record per wallet whichever registry wrote it, so an agent of a domain whose registry writes into
+    ///      it could register and revoke the wallets of every other domain's holders. Binding a registry to a
+    ///      shared storage is not done here: a fresh storage binds its first registry at init, a reused one is
+    ///      bound by a holder of `IRS_BINDER`.
     /// @dev A new domain and its first suite take one transaction: the manager inherits OpenZeppelin's
     ///      `multicall`, so the admin sends `createDomain(name)` and `setupSuite(domainCount() + 1, token)`
     ///      together. The id is `domainCount() + 1` because ids are dense and only admins create domains.
@@ -220,25 +221,22 @@ contract TREXAccessManager is AccessManagerUpgradeable {
 
         _assignToDomain(domainId, token);
         _setTokenFunctionRoles(token, domainId);
-        // A registry or a compliance shared by a second token in the same domain keeps its rows; see {setupSuite}.
+        // A registry, a storage or a compliance shared by a second token in the same domain keeps its rows; see
+        // {setupSuite}.
         if (_joinDomain(domainId, registry)) {
             _setRegistryFunctionRoles(registry, domainId);
         }
+        if (_joinDomain(domainId, identityStorage)) {
+            _setStorageFunctionRoles(identityStorage, domainId);
+        }
         if (_joinDomain(domainId, compliance)) {
             _setComplianceFunctionRoles(compliance, domainId);
-        }
-        // A storage shared across domains keeps the domain, and the rows, of its first suite; see {setupSuite}.
-        uint32 storageDomainId = _getDomainStorage().domainOf[identityStorage];
-        if (storageDomainId == 0) {
-            _assignToDomain(domainId, identityStorage);
-            _setStorageFunctionRoles(identityStorage, domainId);
-            storageDomainId = domainId;
         }
 
         // The token registers wallets on recovery and dispatches cross-chain instructions, so it acts as
         // an agent of its registry. Only the registry writes into the storage, never a person.
         _grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0, NO_EXECUTION_DELAY);
-        _grantRole(RolesLib.forDomain(storageDomainId, RolesLib.Role.IRS_WRITER), registry, 0, NO_EXECUTION_DELAY);
+        _grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry, 0, NO_EXECUTION_DELAY);
     }
 
     function _assignToDomain(uint32 domainId, address target) private {
