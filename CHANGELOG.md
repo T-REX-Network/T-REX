@@ -5,15 +5,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **An institution can decide every satellite transfer from data it keeps offchain** (#127). The sender's
-  identity calls `askTransferValidation(from, to, requestedMin, requestedMax, spender)`, which checks the
-  caller and emits `TransferValidationAsked` without storing or reserving anything. The institution's backend
-  reads it, runs its private check and calls `requestTransferValidation` with the amount it allows. On an
-  issuance, `TransferContext.data` now carries `abi.encode(address requester)`.
-  `AuthorizedRequesterModule` answers 0 unless the requester holds the approver role
-  (`setApproverRole(uint64)`, `approverRoleOf(compliance)`, `ApproverRoleSet`), so neither the sender's
-  identity nor AGENT can request around the backend. No validation state, expiry or cleanup is added. Native
-  movements and relocations are not judged.
 - **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
   waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by
@@ -206,7 +197,7 @@ All notable changes to this project will be documented in this file.
     on the state a movement leaves behind is an `AFTER` module that reverts, on `TRANSFER` and `MINT` only: a
     settlement, a burn and an agent's movement run `afterTransfer` too, and a revert there is no veto. The issuance
     of a validation reaches `TRANSFER_CHECK` and `SPENDER` only; a settlement moves, then tells `AFTER`.
-  - `TransferContext.data`, empty but on an issuance, is room for a later compliance to pass a fact this struct does
+  - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.
   - A recipient that resolves to no identity is refused while a `TRANSFER_CHECK` is bound: a distribution rule keys

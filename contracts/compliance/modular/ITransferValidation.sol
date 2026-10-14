@@ -207,30 +207,6 @@ interface ITransferValidation {
         bytes calldata spender
     ) external returns (uint256 validationId);
 
-    /// @dev Asks for a validation without requesting it: announces the movement for the address that requests on
-    /// the sender's behalf, an institution's backend whose check lives offchain. The backend reads the event, runs
-    /// its check and calls `requestTransferValidation` with the amount it allows. Nothing is stored, reserved or
-    /// sent, so an ask nobody answers leaves nothing behind, and asking twice is two events.
-    ///
-    /// Requirements:
-    /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
-    /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
-    /// - The caller is the identity `from` is linked to; otherwise reverts with `NotAuthorizedForWallet`.
-    ///
-    /// Emits `TransferValidationAsked`.
-    /// @param from ERC-7930 interoperable address of the sender.
-    /// @param to ERC-7930 interoperable address of the recipient.
-    /// @param requestedMin Inclusive lower bound the sender proposes.
-    /// @param requestedMax Inclusive upper bound the sender proposes.
-    /// @param spender ERC-7930 address allowed to execute through `transferFrom`, or empty for `from` alone.
-    function askTransferValidation(
-        bytes calldata from,
-        bytes calldata to,
-        uint256 requestedMin,
-        uint256 requestedMax,
-        bytes calldata spender
-    ) external;
-
     /// @dev Sets how long a validation stays executable on the satellite: `expiry` is issuance time plus this.
     ///
     /// Requirements:

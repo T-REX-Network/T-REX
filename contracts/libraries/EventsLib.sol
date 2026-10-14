@@ -230,11 +230,6 @@ library EventsLib {
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event ValidationDiscarded(uint256 indexed validationId);
-    /// @notice Emitted when a sender's identity asks for a validation it does not request itself, for the address
-    ///         that requests on its behalf to read. Nothing is stored or reserved.
-    event TransferValidationAsked(
-        address indexed fromIdentity, bytes from, bytes to, bytes spender, uint256 amountMin, uint256 amountMax
-    );
     /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
     event ValidationResent(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:

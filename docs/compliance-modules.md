@@ -91,7 +91,7 @@ struct TransferContext {
     uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
-    bytes   data;           // abi.encode(requester) on an issuance, empty otherwise; room to say more later
+    bytes   data;           // empty today; room for a later compliance to say more without a selector change
 }
 ```
 
@@ -130,13 +130,12 @@ leaves it out, the way it leaves out `FORCED_TRANSFER` and `RECOVERY`. A tracker
 change of ownership, a holder count for instance, records it like any other movement. Write that choice
 in the module; never let it fall out of a `switch` with no default.
 
-`data` is empty on every movement but an issuance, where it is `abi.encode(address requester)`: who called
-`requestTransferValidation`, the sender's identity or an address the AccessManager authorised for it. The
-struct is a parameter of every module function, so it is part of their selectors: a field added once modules
-are deployed changes the selectors and breaks every one of them. A new fact goes in `data` instead. The
-compliance that fills it documents the shape, an `abi.encode`d tuple, and only ever appends to that tuple,
-so a module that decodes the prefix it knows keeps working when a later fact is added behind it. A module
-decodes `data` only when it knows which compliance filled it, and ignores it otherwise.
+`data` is empty and reserved. The struct is a parameter of every module function, so it is part of their
+selectors: a field added once modules are deployed changes the selectors and breaks every one of them. A
+new fact goes in `data` instead. The compliance that fills it documents the shape, an `abi.encode`d tuple,
+and only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when a
+later fact is added behind it. A module decodes `data` only when it knows which compliance filled it, and
+ignores it otherwise.
 
 A `SPENDER` module answers about `ctx.spender`, a wallet on this chain or on a satellite, so one
 policy covers `transferFrom` here and a validation a satellite operator will execute. The shipped
@@ -153,42 +152,6 @@ tell every movement apart, which is why it needs one function and not three.
 A recipient that resolves to no identity is refused before any rule is asked, whenever a rule is bound. A
 distribution rule keys on the identity and would read a zero one as a burn, so the tokens would land where
 no cap could reach them. Only a token whose registry has eligibility checks disabled can get that far.
-
-## A check that lives offchain
-
-Some institutions keep part of a rule in their own systems: an investor's holdings across every asset, for
-instance, which no chain sees. Such a rule cannot be a module, because `checkTransfer` is a view and cannot
-wait for an answer. The institution's backend answers it, and the approval is the request itself:
-
-1. The sender's identity calls `askTransferValidation`. It checks the caller and emits
-   `TransferValidationAsked`; nothing is stored, reserved or sent.
-2. The backend reads the event, runs its private check and calls `requestTransferValidation` with the amount
-   it allows as the maximum.
-3. The validation is issued like any other: the modules still narrow the amount, it is reserved, and its
-   expiry starts now.
-
-`AuthorizedRequesterModule` makes the backend the only way in: it answers 0 to an issuance unless the
-requester holds the approver role, a role of the compliance's AccessManager set with `setApproverRole`. The
-sender's identity is refused, and so is any other caller the AccessManager lets request, AGENT included,
-without that role. Bound with no role, it refuses every issuance. Bind `requestTransferValidation` to the
-approver role alone, so the backend holds none of AGENT's other powers.
-
-The ask checks only who asks: `to` and `spender` are taken as given, so the backend checks them before it
-answers, and reads asks from the compliance's own address only. The request it sends then runs every check of
-an issuance.
-
-Nothing waits on chain, so an ask nobody answers leaves nothing to reserve, expire or clean up. The backend
-asks; it never executes: the sending wallet, or the spender the validation names, still executes on the
-satellite.
-
-Limits, stated plainly:
-
-- **Native movements are not judged.** A native transfer has no requester and cannot wait, so a rule over an
-  investor's total holdings holds over satellite movements only.
-- **Relocations are not judged.** Moving tokens between one identity's wallets never reaches the rules at
-  issuance and changes no position, so it stays the identity's own.
-- **The approver can lock a sender's balance.** Every validation reserves its maximum until it settles or is
-  discarded, so an approver, like AGENT today, can hold a wallet's balance by requesting for it.
 
 ## Two rules a module must follow
 

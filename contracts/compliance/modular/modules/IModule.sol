@@ -89,9 +89,7 @@ interface IModule {
         /// on a native movement, the spender named on a validation. Empty when the sender executes itself,
         /// which is every direct transfer, mint and burn.
         bytes spender;
-        /// Room for what a later compliance has to say that this struct does not carry yet. Empty on every
-        /// movement but an issuance, where it is `abi.encode(address requester)`: who called
-        /// `requestTransferValidation`, the sender's identity or an address the AccessManager authorised.
+        /// Room for what a later compliance has to say that this struct does not carry yet. Empty today.
         /// This struct is a parameter of every module function, so it is part of their selectors: a field
         /// added after modules are deployed changes the selectors and breaks every one of them. A new fact
         /// goes here instead. The compliance that fills it documents the shape as an `abi.encode`d tuple and

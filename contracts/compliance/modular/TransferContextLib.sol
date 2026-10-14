@@ -36,8 +36,6 @@ library TransferContextLib {
     }
 
     /// @dev A cross-chain validation being issued: a range the satellite will execute some amount inside.
-    ///  `data` is `abi.encode(requester)`, the address that called `requestTransferValidation`: the sender's
-    ///  identity, or an address the AccessManager authorised for that selector.
     function issuance(
         address compliance,
         address fromIdentity,
@@ -46,8 +44,7 @@ library TransferContextLib {
         bytes32 toWallet,
         uint256 amountMin,
         uint256 amountMax,
-        bytes memory spender,
-        address requester
+        bytes memory spender
     ) internal pure returns (IModule.TransferContext memory ctx) {
         ctx.compliance = compliance;
         ctx.fromIdentity = fromIdentity;
@@ -59,7 +56,6 @@ library TransferContextLib {
         ctx.kind = MovementKindLib.CROSS_CHAIN;
         ctx.isIssuance = true;
         ctx.spender = spender;
-        ctx.data = abi.encode(requester);
     }
 
     /// @dev A validation that settled: the amount a satellite actually executed, between two satellite wallets
