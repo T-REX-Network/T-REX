@@ -182,6 +182,11 @@ A satellite movement:
    refuses. The mark never outlives the transaction: there is nothing to replay and nothing to clean up.
 4. From there it is the usual flow: reserved, expiry from now, executed on the satellite, settled.
 
+Every approval carries an `approvalId` the service chooses, for example the hash of the ask's transaction hash
+and log index. The module refuses an id it has seen, so a decision delivered twice, by a retry or by two
+instances of the service, approves once. An approval that reverts leaves its id unused, and
+`isApprovalIdUsed` tells a retry from a new decision.
+
 Any other request finds no mark and gets 0 from the module, the sender's identity's or an agent's included.
 The mark is the movement's two wallets, not its range, because the compliance caps the range at the wallet's
 free balance before it asks the rules.
@@ -200,9 +205,19 @@ Deployment and roles:
   upgradeable. Binding the function to that role takes it away from AGENT.
 - On the module's AccessManager, bind `approveCrossChainTransfer`, `approveTransfer` and `revokeApproval` to a validator role, granted
   to the service's addresses and nothing else.
+- Never bind `requestTransferValidation` or the validator functions to `PUBLIC_ROLE`: `hasRole(PUBLIC_ROLE, x)`
+  is true for every address, so the module would bind and anyone could approve.
 - The module is a privileged caller of the compliance, and the validator role is the real gate. Whoever holds
   it can request any satellite movement, and so lock a sender's balance through the reservation, exactly as
   AGENT can today. Keep that key as hardened as AGENT's.
+
+What the validator decides, beyond yes or no:
+
+- **The ask is not a precondition.** The validator can approve a movement nobody asked for. The ask only tells
+  it what the investor wants.
+- **The validator chooses the terms.** `to`, the range and the spender in `approveCrossChainTransfer` are its
+  own, not copied from the ask, so it can name a spender the investor never asked for. The investor, or the
+  spender the validation names, still has to execute it, so a validator can move nothing by itself.
 
 Not judged: mints, the issuer's own action; forced transfers and recoveries, which never reach a
 `TRANSFER_CHECK` module; and relocations between one identity's wallets, which change no position.

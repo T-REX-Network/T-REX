@@ -151,6 +151,7 @@ library ErrorsLib {
     error SpenderAlreadyAllowed(bytes spender);
     error SpenderNotListed(bytes spender);
     error ApprovalInProgress();
+    error ApprovalIdAlreadyUsed(bytes32 approvalId);
     error ExpiryInPast(uint64 expiry);
     error TransferNotApproved(address from, address to, uint256 amount);
 

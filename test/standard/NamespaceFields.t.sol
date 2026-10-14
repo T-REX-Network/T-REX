@@ -357,6 +357,9 @@ contract NamespaceFieldsTest is Test {
         uint256 packed = uint256(_word(_entry(_entry(byCompliance, bytes32(NUMBER)), KEY)));
         assertEq(uint64(packed), 11, "approvals.count");
         assertEq(uint64(packed >> 64), 22, "approvals.expiry");
+
+        validationStorage.usedApprovalIds[ALICE][KEY] = true;
+        assertEq(_word(_entry(_entry(_field(base, 1), _key(ALICE)), KEY)), 1, "usedApprovalIds");
     }
 
     function test_SpenderWhitelistModule() public {

@@ -30,6 +30,7 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
 
     OffchainApprovalModule internal module;
     address internal service = makeAddr("validationService");
+    uint256 internal approvalCount;
     bytes internal aliceSat;
     bytes internal bobSat;
 
@@ -160,7 +161,9 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
         vm.warp(block.timestamp + 1 hours);
 
         vm.expectEmit(address(module));
-        emit OffchainApprovalModule.CrossChainTransferApproved(address(boundCompliance), 1, aliceSat, bobSat, 0, 100);
+        emit OffchainApprovalModule.CrossChainTransferApproved(
+            address(boundCompliance), 1, bytes32(uint256(1)), aliceSat, bobSat, 0, 100
+        );
         uint256 id = _approveCrossChainTransfer(0, 100);
 
         ITransferValidation.Validation memory issued = boundCompliance.validationOf(id);
@@ -194,7 +197,9 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
 
         vm.prank(service);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ZeroValue.selector));
-        module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, 0, 100, "");
+        module.approveCrossChainTransfer(address(boundCompliance), _nextApprovalId(), aliceSat, bobSat, 0, 100, "");
+
+        assertFalse(module.isApprovalIdUsed(address(boundCompliance), bytes32(approvalCount)), "free for a retry");
 
         _grantRequestRole(address(aliceIdentity));
         vm.prank(address(aliceIdentity));
@@ -216,7 +221,9 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
         boundCompliance.addModule(address(spenderRule));
 
         vm.prank(service);
-        uint256 id = module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, 0, 100, bobSat);
+        uint256 id = module.approveCrossChainTransfer(
+            address(boundCompliance), _nextApprovalId(), aliceSat, bobSat, 0, 100, bobSat
+        );
 
         assertEq(boundCompliance.validationOf(id).amountMax, 100);
     }
@@ -224,7 +231,7 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
     function test_approveCrossChainTransfer_RevertWhen_TheCallerIsNotAValidator() public {
         vm.prank(agent);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
-        module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, 0, 100, "");
+        module.approveCrossChainTransfer(address(boundCompliance), _nextApprovalId(), aliceSat, bobSat, 0, 100, "");
     }
 
     /// @notice A validation the service approved settles on what the satellite reports, as any other.
@@ -355,19 +362,23 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
     function test_approveTransfer_RevertWhen_TheExpiryHasPassed() public {
         vm.prank(service);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ExpiryInPast.selector, uint64(block.timestamp)));
-        module.approveTransfer(address(boundCompliance), charlie, bob, 100, uint64(block.timestamp));
+        module.approveTransfer(address(boundCompliance), _nextApprovalId(), charlie, bob, 100, uint64(block.timestamp));
     }
 
     function test_approveTransfer_RevertWhen_TheAmountIsZero() public {
         vm.prank(service);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
-        module.approveTransfer(address(boundCompliance), charlie, bob, 0, uint64(block.timestamp + 1 days));
+        module.approveTransfer(
+            address(boundCompliance), _nextApprovalId(), charlie, bob, 0, uint64(block.timestamp + 1 days)
+        );
     }
 
     function test_approveTransfer_RevertWhen_TheCallerIsNotAValidator() public {
         vm.prank(charlie);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, charlie));
-        module.approveTransfer(address(boundCompliance), charlie, bob, 100, uint64(block.timestamp + 1 days));
+        module.approveTransfer(
+            address(boundCompliance), _nextApprovalId(), charlie, bob, 100, uint64(block.timestamp + 1 days)
+        );
     }
 
     /// @notice An unbind discards every approval: a rebind starts empty.
@@ -415,6 +426,53 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
         assertEq(module.approvalOf(address(boundCompliance), charlie, bob, 100).count, 1, "left for a transfer");
     }
 
+    // ==== Approval id Tests ====
+
+    /// @notice A decision delivered twice, a service retry for instance, approves one movement, not two.
+    function test_approveCrossChainTransfer_RevertWhen_TheApprovalIdWasUsed() public {
+        bytes32 approvalId = keccak256("ask tx hash, log index");
+        vm.startPrank(service);
+        module.approveCrossChainTransfer(address(boundCompliance), approvalId, aliceSat, bobSat, 0, 100, "");
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApprovalIdAlreadyUsed.selector, approvalId));
+        module.approveCrossChainTransfer(address(boundCompliance), approvalId, aliceSat, bobSat, 0, 100, "");
+        vm.stopPrank();
+
+        assertEq(boundCompliance.lastValidationId(), 1, "one validation");
+        assertTrue(module.isApprovalIdUsed(address(boundCompliance), approvalId));
+    }
+
+    /// @notice The same for a native transfer: one transfer is approved, the retry is refused.
+    function test_approveTransfer_RevertWhen_TheApprovalIdWasUsed() public {
+        bytes32 approvalId = keccak256("ask tx hash, log index");
+        uint64 expiry = uint64(block.timestamp + 1 days);
+        vm.startPrank(service);
+        module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApprovalIdAlreadyUsed.selector, approvalId));
+        module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
+        vm.stopPrank();
+
+        assertEq(module.approvalOf(address(boundCompliance), charlie, bob, 100).count, 1);
+    }
+
+    /// @notice A rebind discards the approvals but not the used ids, so a decision retried after it is refused.
+    function test_approveTransfer_RevertWhen_TheApprovalIdWasUsedBeforeARebind() public {
+        bytes32 approvalId = keccak256("ask tx hash, log index");
+        uint64 expiry = uint64(block.timestamp + 1 days);
+        vm.prank(service);
+        module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
+
+        vm.startPrank(deployer);
+        boundCompliance.removeModule(address(module));
+        boundCompliance.addModule(address(module));
+        vm.stopPrank();
+
+        vm.prank(service);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApprovalIdAlreadyUsed.selector, approvalId));
+        module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
+    }
+
     // ==== Helpers ====
 
     function _newModule() private returns (OffchainApprovalModule) {
@@ -442,12 +500,20 @@ contract OffchainApprovalModuleTest is InteropSuiteTest {
 
     function _approveCrossChainTransfer(uint256 min, uint256 max) private returns (uint256) {
         vm.prank(service);
-        return module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, min, max, "");
+        return
+            module.approveCrossChainTransfer(
+                address(boundCompliance), _nextApprovalId(), aliceSat, bobSat, min, max, ""
+            );
     }
 
     function _approveNative(address from, address to, uint256 amount, uint64 expiry) private {
         vm.prank(service);
-        module.approveTransfer(address(boundCompliance), from, to, amount, expiry);
+        module.approveTransfer(address(boundCompliance), _nextApprovalId(), from, to, amount, expiry);
+    }
+
+    /// @dev A fresh id per decision, as a service would give it.
+    function _nextApprovalId() private returns (bytes32) {
+        return bytes32(++approvalCount);
     }
 
     function _mintTo(address holder, uint256 amount) private {
