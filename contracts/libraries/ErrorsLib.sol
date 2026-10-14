@@ -150,6 +150,9 @@ library ErrorsLib {
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(bytes spender);
     error SpenderNotListed(bytes spender);
+    error ApprovalInFlight();
+    error ApprovalExpired(uint64 expiry);
+    error TransferNotApproved(address from, address to, uint256 amount);
 
     // TREXFactory Errors
     error AuthorityMismatch();
