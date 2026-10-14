@@ -157,7 +157,7 @@ no cap could reach them. Only a token whose registry has eligibility checks disa
 
 Some institutions keep part of a rule in their own systems: an investor's holdings across every asset, for
 instance, which no chain sees. `checkTransfer` is a view and cannot wait for an answer, so the answer comes
-from a service outside the chain, through `ExternalValidationModule`. The service can be an institution's
+from a service outside the chain, through `OffchainApprovalModule`. The service can be an institution's
 backend, an oracle adapter, anything holding the module's validator role. The module only learns "allowed or
 not", never what was checked. The compliance and the token are unchanged: a token that does not bind the
 module pays nothing for it.
@@ -173,10 +173,10 @@ There are two kinds of approval, because the two movements are executed by diffe
 
 A satellite movement:
 
-1. The sender's identity calls `ask` on the module. It emits `ValidationAsked` and stores nothing, so an ask
+1. The sender's identity calls `askApproval` on the module. It emits `ApprovalAsked` and stores nothing, so an ask
    nobody answers leaves nothing behind. The service dedupes asks on `(txHash, logIndex)`.
 2. The service runs its private check, and drops the ask if the movement would fail the other rules.
-3. The service calls `approveAndRequest`. In one transaction the module marks that movement, calls
+3. The service calls `approveCrossChainTransfer`. In one transaction the module marks that movement, calls
    `requestTransferValidation` itself and clears the mark. The compliance asks every rule inside that call;
    one that leaves the range empty reverts the whole transaction, so nothing is approved that the chain
    refuses. The mark never outlives the transaction: there is nothing to replay and nothing to clean up.
@@ -186,10 +186,10 @@ Any other request finds no mark and gets 0 from the module, the sender's identit
 The mark is the movement's two wallets, not its range, because the compliance caps the range at the wallet's
 free balance before it asks the rules.
 
-A native transfer: the service calls `approve` for that exact transfer (sender, recipient, amount) with an
+A native transfer: the service calls `approveTransfer` for that exact transfer (sender, recipient, amount) with an
 expiry. Approving it again adds to the count, and the newest expiry applies. `checkTransfer` passes it while
-the count is not zero and the expiry is ahead; `afterTransfer` uses one up. `revoke` withdraws one, expired or
-not. For a native transfer, `ask` with both bounds at the amount.
+the count is not zero and the expiry is ahead; `afterTransfer` uses one up. `revokeApproval` withdraws one, expired or
+not. For a native transfer, `askApproval` with both bounds at the amount.
 
 Deployment and roles:
 
@@ -198,7 +198,7 @@ Deployment and roles:
   `canComplianceBind` refuses the binding otherwise. Do not grant the module AGENT, the role that function is
   bound to by default: AGENT also mints, forces transfers and edits the registry, and the module is
   upgradeable. Binding the function to that role takes it away from AGENT.
-- On the module's AccessManager, bind `approveAndRequest`, `approve` and `revoke` to a validator role, granted
+- On the module's AccessManager, bind `approveCrossChainTransfer`, `approveTransfer` and `revokeApproval` to a validator role, granted
   to the service's addresses and nothing else.
 - The module is a privileged caller of the compliance, and the validator role is the real gate. Whoever holds
   it can request any satellite movement, and so lock a sender's balance through the reservation, exactly as

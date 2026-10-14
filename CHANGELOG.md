@@ -5,14 +5,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **`ExternalValidationModule`: a service outside the chain approves every transfer** (#127). For a satellite
-  movement the sender's identity calls `ask` (`ValidationAsked`, nothing stored), and the service calls
-  `approveAndRequest`, which marks the movement in transient storage, requests the validation itself and
+- **`OffchainApprovalModule`: a service outside the chain approves every transfer** (#127). For a satellite
+  movement the sender's identity calls `askApproval` (`ApprovalAsked`, nothing stored), and the service calls
+  `approveCrossChainTransfer`, which marks the movement in transient storage, requests the validation itself and
   clears the mark in the same transaction, so the approval can neither be replayed nor left behind; any other
   request finds no mark and is refused. For a native transfer the service stores an approval of the exact
-  transfer with a count and an expiry (`approve`, `revoke`, `approvalOf`), and `afterTransfer` uses one up.
+  transfer with a count and an expiry (`approveTransfer`, `revokeApproval`, `approvalOf`), and `afterTransfer` uses one up.
   Binds only where it holds the role bound to `requestTransferValidation`, with no delay
-  (`canComplianceBind`). Errors `ApprovalInFlight`, `ApprovalExpired`, `TransferNotApproved`. The compliance
+  (`canComplianceBind`). Errors `ApprovalInProgress`, `ExpiryInPast`, `TransferNotApproved`. The compliance
   and the token are unchanged: the `askTransferValidation` entry point and the requester in
   `TransferContext.data` first proposed in #128 were not merged.
 - **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte

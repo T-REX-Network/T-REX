@@ -21,9 +21,9 @@ import { ITransferValidation } from "contracts/compliance/modular/ITransferValid
 import { ModuleSetLib } from "contracts/compliance/modular/ModuleSetLib.sol";
 import { TransferValidationLib } from "contracts/compliance/modular/TransferValidationLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
-import { ExternalValidationModule } from "contracts/compliance/modular/modules/ExternalValidationModule.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
+import { OffchainApprovalModule } from "contracts/compliance/modular/modules/OffchainApprovalModule.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
 import { ITrustedGatewayRegistry } from "contracts/interop/ITrustedGatewayRegistry.sol";
 import { TREXMessagingLib } from "contracts/interop/TREXMessagingLib.sol";
@@ -344,14 +344,14 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_entry(_entry(_field(base, 0), _key(ALICE)), bytes32(NUMBER))), 11, "maxBalance");
     }
 
-    function test_ExternalValidationModule() public {
-        bytes32 base = Utils.erc7201("erc3643.storage.ExternalValidationModule");
-        ExternalValidationModule.ExternalValidationStorage storage validationStorage;
+    function test_OffchainApprovalModule() public {
+        bytes32 base = Utils.erc7201("erc3643.storage.OffchainApprovalModule");
+        OffchainApprovalModule.OffchainApprovalStorage storage validationStorage;
         assembly ("memory-safe") {
             validationStorage.slot := base
         }
 
-        validationStorage.approvals[ALICE][NUMBER][KEY] = ExternalValidationModule.Approval({ count: 11, expiry: 22 });
+        validationStorage.approvals[ALICE][NUMBER][KEY] = OffchainApprovalModule.Approval({ count: 11, expiry: 22 });
 
         bytes32 byCompliance = _entry(_field(base, 0), _key(ALICE));
         uint256 packed = uint256(_word(_entry(_entry(byCompliance, bytes32(NUMBER)), KEY)));

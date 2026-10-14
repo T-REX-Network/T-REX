@@ -6,10 +6,10 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
-import { ExternalValidationModule } from "contracts/compliance/modular/modules/ExternalValidationModule.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { OffchainApprovalModule } from "contracts/compliance/modular/modules/OffchainApprovalModule.sol";
 import { SpenderVerificationModule } from "contracts/compliance/modular/modules/SpenderVerificationModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
@@ -20,7 +20,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///      as it is. A satellite movement: the sender's identity asks the module, the service answers by having
 ///      the module request the validation, with the approval alive only inside that transaction. A native
 ///      transfer: the service stores an approval with a count and an expiry, and the transfer uses one up.
-contract ExternalValidationModuleTest is InteropSuiteTest {
+contract OffchainApprovalModuleTest is InteropSuiteTest {
 
     uint256 internal constant BALANCE = 2000;
     /// @dev Bound to `requestTransferValidation` alone, in place of AGENT, and granted to the module.
@@ -28,7 +28,7 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
     /// @dev Bound to the module's validator functions, and granted to the service.
     uint64 internal constant VALIDATOR_ROLE = 8888;
 
-    ExternalValidationModule internal module;
+    OffchainApprovalModule internal module;
     address internal service = makeAddr("validationService");
     bytes internal aliceSat;
     bytes internal bobSat;
@@ -45,9 +45,9 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         boundCompliance.addModule(address(module));
 
         bytes4[] memory validatorFunctions = new bytes4[](3);
-        validatorFunctions[0] = ExternalValidationModule.approveAndRequest.selector;
-        validatorFunctions[1] = ExternalValidationModule.approve.selector;
-        validatorFunctions[2] = ExternalValidationModule.revoke.selector;
+        validatorFunctions[0] = OffchainApprovalModule.approveCrossChainTransfer.selector;
+        validatorFunctions[1] = OffchainApprovalModule.approveTransfer.selector;
+        validatorFunctions[2] = OffchainApprovalModule.revokeApproval.selector;
         suiteManager.setTargetFunctionRole(address(module), validatorFunctions, VALIDATOR_ROLE);
         suiteManager.grantRole(VALIDATOR_ROLE, service, NO_EXECUTION_DELAY);
 
@@ -63,14 +63,14 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         assertEq(uint8(types[0]), uint8(IModule.ModuleType.TRANSFER_CHECK));
         assertEq(uint8(types[1]), uint8(IModule.ModuleType.AFTER));
         assertFalse(module.isPlugAndPlay());
-        assertEq(module.name(), "ExternalValidationModule");
+        assertEq(module.name(), "OffchainApprovalModule");
     }
 
     // ==== Binding Tests ====
 
     /// @notice A module that cannot request validations would only fail later, at the compliance: refuse it now.
     function test_addModule_RevertWhen_TheModuleCannotRequest() public {
-        ExternalValidationModule unprivileged = _newModule();
+        OffchainApprovalModule unprivileged = _newModule();
 
         vm.prank(deployer);
         vm.expectRevert(
@@ -81,7 +81,7 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
 
     /// @notice The module calls the compliance directly and cannot schedule, so a delayed grant is refused too.
     function test_addModule_RevertWhen_TheRequestRoleHasADelay() public {
-        ExternalValidationModule delayed = _newModule();
+        OffchainApprovalModule delayed = _newModule();
         suiteManager.grantRole(REQUEST_ROLE, address(delayed), 1 days);
 
         vm.prank(deployer);
@@ -91,77 +91,77 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         boundCompliance.addModule(address(delayed));
     }
 
-    // ==== .ask Tests ====
+    // ==== .askApproval Tests ====
 
     /// @notice The investor's one step: an event, nothing stored, reserved or issued.
-    function test_ask_Success_WhenTheSenderIdentityAsks() public {
+    function test_askApproval_Success_WhenTheSenderIdentityAsks() public {
         uint256 freeBefore = token.availableOf(aliceSat);
 
         vm.expectEmit(address(module));
-        emit ExternalValidationModule.ValidationAsked(
+        emit OffchainApprovalModule.ApprovalAsked(
             address(boundCompliance), address(aliceIdentity), aliceSat, bobSat, "", 10, 150
         );
         vm.prank(address(aliceIdentity));
-        module.ask(address(boundCompliance), aliceSat, bobSat, 10, 150, "");
+        module.askApproval(address(boundCompliance), aliceSat, bobSat, 10, 150, "");
 
         assertEq(boundCompliance.lastValidationId(), 0, "nothing issued");
         assertEq(token.availableOf(aliceSat), freeBefore, "nothing reserved");
     }
 
     /// @notice A native transfer is asked for the same way, with both bounds at the amount.
-    function test_ask_Success_WhenTheSenderIsNative() public {
+    function test_askApproval_Success_WhenTheSenderIsNative() public {
         bytes memory nativeCharlie = InteroperableAddress.formatEvmV1(block.chainid, charlie);
         bytes memory nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
 
         vm.expectEmit(address(module));
-        emit ExternalValidationModule.ValidationAsked(
+        emit OffchainApprovalModule.ApprovalAsked(
             address(boundCompliance), address(charlieIdentity), nativeCharlie, nativeBob, "", 100, 100
         );
         vm.prank(address(charlieIdentity));
-        module.ask(address(boundCompliance), nativeCharlie, nativeBob, 100, 100, "");
+        module.askApproval(address(boundCompliance), nativeCharlie, nativeBob, 100, 100, "");
     }
 
-    function test_ask_RevertWhen_TheCallerIsNotTheSenderIdentity() public {
+    function test_askApproval_RevertWhen_TheCallerIsNotTheSenderIdentity() public {
         vm.prank(service);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, service, aliceSat));
-        module.ask(address(boundCompliance), aliceSat, bobSat, 10, 150, "");
+        module.askApproval(address(boundCompliance), aliceSat, bobSat, 10, 150, "");
     }
 
-    function test_ask_RevertWhen_TheWalletIsLinkedToNoIdentity() public {
+    function test_askApproval_RevertWhen_TheWalletIsLinkedToNoIdentity() public {
         bytes memory unlinked = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("unlinkedOnPolygon"));
         vm.prank(address(aliceIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(aliceIdentity), unlinked)
         );
-        module.ask(address(boundCompliance), unlinked, bobSat, 10, 150, "");
+        module.askApproval(address(boundCompliance), unlinked, bobSat, 10, 150, "");
     }
 
-    function test_ask_RevertWhen_TheRangeIsInverted() public {
+    function test_askApproval_RevertWhen_TheRangeIsInverted() public {
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidRequestedRange.selector, 150, 10));
-        module.ask(address(boundCompliance), aliceSat, bobSat, 150, 10, "");
+        module.askApproval(address(boundCompliance), aliceSat, bobSat, 150, 10, "");
     }
 
     /// @notice A compliance that never bound the module gets no asks: they would be events nobody answers.
-    function test_ask_RevertWhen_TheComplianceDidNotBindTheModule() public {
-        ExternalValidationModule unbound = _newModule();
+    function test_askApproval_RevertWhen_TheComplianceDidNotBindTheModule() public {
+        OffchainApprovalModule unbound = _newModule();
         vm.prank(address(aliceIdentity));
         vm.expectRevert(ErrorsLib.ComplianceNotBound.selector);
-        unbound.ask(address(boundCompliance), aliceSat, bobSat, 10, 150, "");
+        unbound.askApproval(address(boundCompliance), aliceSat, bobSat, 10, 150, "");
     }
 
-    // ==== .approveAndRequest Tests ====
+    // ==== .approveCrossChainTransfer Tests ====
 
     /// @notice The whole satellite flow: ask, then the service's answer issues the validation at its amount,
     ///         reserved, with an expiry counted from the answer.
-    function test_approveAndRequest_Success_WhenTheServiceAnswersAnAsk() public {
+    function test_approveCrossChainTransfer_Success_WhenTheServiceAnswersAnAsk() public {
         vm.prank(address(aliceIdentity));
-        module.ask(address(boundCompliance), aliceSat, bobSat, 0, 150, "");
+        module.askApproval(address(boundCompliance), aliceSat, bobSat, 0, 150, "");
         vm.warp(block.timestamp + 1 hours);
 
         vm.expectEmit(address(module));
-        emit ExternalValidationModule.ValidationApproved(address(boundCompliance), 1, aliceSat, bobSat, 0, 100);
-        uint256 id = _approveAndRequest(0, 100);
+        emit OffchainApprovalModule.CrossChainTransferApproved(address(boundCompliance), 1, aliceSat, bobSat, 0, 100);
+        uint256 id = _approveCrossChainTransfer(0, 100);
 
         ITransferValidation.Validation memory issued = boundCompliance.validationOf(id);
         assertEq(issued.amountMax, 100, "the service's answer is the maximum");
@@ -172,29 +172,29 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
 
     /// @notice The compliance caps the range at the wallet's free balance before it asks the rules, so the
     ///         approval must not depend on the requested maximum.
-    function test_approveAndRequest_Success_WhenTheRequestExceedsTheFreeBalance() public {
-        uint256 id = _approveAndRequest(0, BALANCE * 2);
+    function test_approveCrossChainTransfer_Success_WhenTheRequestExceedsTheFreeBalance() public {
+        uint256 id = _approveCrossChainTransfer(0, BALANCE * 2);
 
         assertEq(boundCompliance.validationOf(id).amountMax, BALANCE, "capped at what alice holds");
     }
 
     /// @notice The service's answer is a maximum, not a grant: another rule still narrows it.
-    function test_approveAndRequest_Success_WhenAnotherRuleNarrowsTheAnswer() public {
+    function test_approveCrossChainTransfer_Success_WhenAnotherRuleNarrowsTheAnswer() public {
         _bindCap(60);
 
-        uint256 id = _approveAndRequest(0, 100);
+        uint256 id = _approveCrossChainTransfer(0, 100);
 
         assertEq(boundCompliance.validationOf(id).amountMax, 60, "the onchain cap decides");
     }
 
     /// @notice Another rule refusing reverts the whole answer: nothing is approved that the chain refuses, and
     ///         no approval is left behind for a later request to find.
-    function test_approveAndRequest_RevertWhen_AnotherRuleRefuses() public {
+    function test_approveCrossChainTransfer_RevertWhen_AnotherRuleRefuses() public {
         _bindCap(0);
 
         vm.prank(service);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ZeroValue.selector));
-        module.approveAndRequest(address(boundCompliance), aliceSat, bobSat, 0, 100, "");
+        module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, 0, 100, "");
 
         _grantRequestRole(address(aliceIdentity));
         vm.prank(address(aliceIdentity));
@@ -203,7 +203,7 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
     }
 
     /// @notice A named spender goes through to the compliance, where the `SPENDER` modules judge it as today.
-    function test_approveAndRequest_Success_WhenASpenderIsNamed() public {
+    function test_approveCrossChainTransfer_Success_WhenASpenderIsNamed() public {
         SpenderVerificationModule spenderRule = SpenderVerificationModule(
             address(
                 new ModuleProxy(
@@ -216,21 +216,21 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         boundCompliance.addModule(address(spenderRule));
 
         vm.prank(service);
-        uint256 id = module.approveAndRequest(address(boundCompliance), aliceSat, bobSat, 0, 100, bobSat);
+        uint256 id = module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, 0, 100, bobSat);
 
         assertEq(boundCompliance.validationOf(id).amountMax, 100);
     }
 
-    function test_approveAndRequest_RevertWhen_TheCallerIsNotAValidator() public {
+    function test_approveCrossChainTransfer_RevertWhen_TheCallerIsNotAValidator() public {
         vm.prank(agent);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
-        module.approveAndRequest(address(boundCompliance), aliceSat, bobSat, 0, 100, "");
+        module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, 0, 100, "");
     }
 
     /// @notice A validation the service approved settles on what the satellite reports, as any other.
     function test_handleSettlement_Success_WhenAnApprovedValidationSettles() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        uint256 id = _approveAndRequest(0, 100);
+        uint256 id = _approveCrossChainTransfer(0, 100);
 
         gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 80)));
 
@@ -320,7 +320,7 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
     }
 
     /// @notice An offchain "yes" is not valid forever. An expired approval can still be revoked.
-    function test_transfer_RevertWhen_TheApprovalExpired() public {
+    function test_transfer_RevertWhen_TheExpiryInPast() public {
         _mintTo(charlie, 200);
         uint64 expiry = uint64(block.timestamp + 1 days);
         _approveNative(charlie, bob, 100, expiry);
@@ -331,7 +331,7 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         token.transfer(bob, 100);
 
         vm.prank(service);
-        module.revoke(address(boundCompliance), charlie, bob, 100);
+        module.revokeApproval(address(boundCompliance), charlie, bob, 100);
         assertEq(module.approvalOf(address(boundCompliance), charlie, bob, 100).count, 0);
     }
 
@@ -339,35 +339,35 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         _mintTo(charlie, 200);
         _approveNative(charlie, bob, 100, uint64(block.timestamp + 1 days));
         vm.prank(service);
-        module.revoke(address(boundCompliance), charlie, bob, 100);
+        module.revokeApproval(address(boundCompliance), charlie, bob, 100);
 
         vm.prank(charlie);
         vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
         token.transfer(bob, 100);
     }
 
-    function test_revoke_RevertWhen_NothingIsApproved() public {
+    function test_revokeApproval_RevertWhen_NothingIsApproved() public {
         vm.prank(service);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TransferNotApproved.selector, charlie, bob, 100));
-        module.revoke(address(boundCompliance), charlie, bob, 100);
+        module.revokeApproval(address(boundCompliance), charlie, bob, 100);
     }
 
-    function test_approve_RevertWhen_TheExpiryHasPassed() public {
+    function test_approveTransfer_RevertWhen_TheExpiryHasPassed() public {
         vm.prank(service);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApprovalExpired.selector, uint64(block.timestamp)));
-        module.approve(address(boundCompliance), charlie, bob, 100, uint64(block.timestamp));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ExpiryInPast.selector, uint64(block.timestamp)));
+        module.approveTransfer(address(boundCompliance), charlie, bob, 100, uint64(block.timestamp));
     }
 
-    function test_approve_RevertWhen_TheAmountIsZero() public {
+    function test_approveTransfer_RevertWhen_TheAmountIsZero() public {
         vm.prank(service);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
-        module.approve(address(boundCompliance), charlie, bob, 0, uint64(block.timestamp + 1 days));
+        module.approveTransfer(address(boundCompliance), charlie, bob, 0, uint64(block.timestamp + 1 days));
     }
 
-    function test_approve_RevertWhen_TheCallerIsNotAValidator() public {
+    function test_approveTransfer_RevertWhen_TheCallerIsNotAValidator() public {
         vm.prank(charlie);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, charlie));
-        module.approve(address(boundCompliance), charlie, bob, 100, uint64(block.timestamp + 1 days));
+        module.approveTransfer(address(boundCompliance), charlie, bob, 100, uint64(block.timestamp + 1 days));
     }
 
     /// @notice An unbind discards every approval: a rebind starts empty.
@@ -417,12 +417,12 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
 
     // ==== Helpers ====
 
-    function _newModule() private returns (ExternalValidationModule) {
-        return ExternalValidationModule(
+    function _newModule() private returns (OffchainApprovalModule) {
+        return OffchainApprovalModule(
             address(
                 new ModuleProxy(
-                    address(new ExternalValidationModule()),
-                    abi.encodeCall(ExternalValidationModule.initialize, (address(suiteManager)))
+                    address(new OffchainApprovalModule()),
+                    abi.encodeCall(OffchainApprovalModule.initialize, (address(suiteManager)))
                 )
             )
         );
@@ -440,14 +440,14 @@ contract ExternalValidationModuleTest is InteropSuiteTest {
         suiteManager.grantRole(REQUEST_ROLE, account, NO_EXECUTION_DELAY);
     }
 
-    function _approveAndRequest(uint256 min, uint256 max) private returns (uint256) {
+    function _approveCrossChainTransfer(uint256 min, uint256 max) private returns (uint256) {
         vm.prank(service);
-        return module.approveAndRequest(address(boundCompliance), aliceSat, bobSat, min, max, "");
+        return module.approveCrossChainTransfer(address(boundCompliance), aliceSat, bobSat, min, max, "");
     }
 
     function _approveNative(address from, address to, uint256 amount, uint64 expiry) private {
         vm.prank(service);
-        module.approve(address(boundCompliance), from, to, amount, expiry);
+        module.approveTransfer(address(boundCompliance), from, to, amount, expiry);
     }
 
     function _mintTo(address holder, uint256 amount) private {

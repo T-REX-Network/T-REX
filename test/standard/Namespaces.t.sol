@@ -107,10 +107,10 @@ contract DomainsTest is Test {
         );
     }
 
-    function test_externalValidationModuleNamespace() public pure {
+    function test_offchainApprovalModuleNamespace() public pure {
         assertEq(
-            Utils.erc7201("erc3643.storage.ExternalValidationModule"),
-            0xa1120db406459129af0bc428bdf0309aeb35a1c3107edebc9481e947179c7700
+            Utils.erc7201("erc3643.storage.OffchainApprovalModule"),
+            0xf9e1ffd38cb3760e9c42e682f8101772fe10c627a95c4f189fc68cd264992900
         );
     }
 
