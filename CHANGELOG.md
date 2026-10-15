@@ -5,18 +5,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **`OffchainApprovalModule`: a service outside the chain approves every transfer** (#127). For a satellite
-  movement the sender's identity calls `askApproval` (`ApprovalAsked`, nothing stored), and the service calls
-  `approveCrossChainTransfer`, which marks the movement in transient storage, requests the validation itself
-  and clears the mark in the same transaction, so the approval can neither be replayed nor left behind; any
-  other request finds no mark and is refused. For a native transfer the service stores an approval of the
-  exact transfer with a count and an expiry (`approveTransfer`, `revokeApproval`, `approvalOf`), and
-  `afterTransfer` uses one up. Every approval carries the validator's `approvalId`, refused when used before
-  (`ApprovalIdAlreadyUsed`, `isApprovalIdUsed`), so a decision delivered twice approves once. Binds only where
-  it holds the role bound to `requestTransferValidation`, with no delay (`canComplianceBind`). Errors
-  `ApprovalInProgress`, `ApprovalIdAlreadyUsed`, `ExpiryInPast`, `TransferNotApproved`. The compliance and the
-  token are unchanged: the `askTransferValidation` entry point and the requester in `TransferContext.data`
-  first proposed in #128 were not merged.
+- **Cross-chain requests can wait for an approval** (#127). A new module type, `APPROVAL`, one at most per
+  compliance. While one is bound, `requestTransferValidation` narrows and reserves as before but records the
+  validation as `AwaitingApproval` (`TransferValidationAwaitingApproval`) instead of issuing it, and tells the
+  module (`IApprovalModule.approvalRequested`). `answerApproval(validationId, approvedMax)` issues it,
+  narrowed and with its deadline counted from then, or refuses it (`ValidationApprovalRefused`), releasing the
+  reservation; past the deadline anyone may refuse an unanswered request. Errors
+  `ValidationNotAwaitingApproval`, `ApprovalDeadlineNotReached`, `OneApprovalModuleOnly`.
+  `AsyncApprovalModule` is the `APPROVAL` module: approvers set per compliance answer in order on the
+  validation id, and can only approve, narrow or refuse (`approveValidation`, `refuseValidation`); approver
+  contracts are told through `IAsyncApprover.approvalAsked`, so a rule computed with FHE answers from its
+  decryption callback. Native transfers use stored approvals of an exact transfer with an expiry, under an
+  approver's `approvalId` (`approveTransfer`, `revokeApproval`, `approvalOf`, `isApprovalIdUsed`). Errors
+  `ApproversNotSet`, `NotAnApprover`, `NotTheNextApprover`, `UnknownApprovalRequest`, `ApprovalIdAlreadyUsed`,
+  `ExpiryInPast`, `TransferNotApproved`.
 - **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be
   waited out: the reservation stayed locked until `releaseAt` and a new validation had to be requested. Callable by

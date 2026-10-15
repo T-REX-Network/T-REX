@@ -62,43 +62,55 @@
 
 pragma solidity 0.8.30;
 
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
-
-import { IERC3643 } from "../../../ERC-3643/IERC3643.sol";
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import { WalletKeyLib } from "../../../libraries/WalletKeyLib.sol";
-import { ITREXRegistry } from "../../../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../../../utils/AccessManagedOwnableUpgradeable.sol";
-import { IModularCompliance } from "../IModularCompliance.sol";
 import { ITransferValidation } from "../ITransferValidation.sol";
 import { MovementKindLib } from "../MovementKindLib.sol";
 import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
+import { IApprovalModule } from "./IApprovalModule.sol";
 import { IModule } from "./IModule.sol";
 
-/// @dev Lets a service outside the chain approve every transfer of a token: an institution's backend, an
-///  oracle adapter, anything holding the validator role on this module. The module only learns "allowed or
-///  not", never what was checked.
+/// @dev Told by {AsyncApprovalModule} that a request waits for this approver's answer. Optional: an approver
+///  without code, or one that does not implement it, is simply not told and reads the module's events.
+interface IAsyncApprover {
+
+    /// @dev `validationId`, requested on `compliance`, now waits for the caller's approver. An FHE rule starts
+    ///  its computation here and answers from its decryption callback.
+    function approvalAsked(address compliance, uint256 validationId) external;
+
+}
+
+/// @dev Decides, for a token, whether a requested cross-chain movement is issued, through answers that may come
+///  later: an institution's backend, a rule computed with FHE that answers from its decryption callback, any
+///  address. The compliance keeps the request `AwaitingApproval`, reserved, while the approvers answer.
 ///
-///  A satellite movement is approved by requesting it. The sender's identity calls {askApproval}, which only emits
-///  an event; the service runs its check and calls {approveCrossChainTransfer}, in which this module marks the
-///  movement, requests the validation from the compliance itself, and clears the mark before returning. The
-///  approval never outlives that transaction, so it cannot be replayed and nothing is left to clean up. Any
-///  other request, the sender's identity's or an agent's, finds no mark and is refused.
+///  The compliance owner lists the approvers with {setApprovers}. They answer in that order, each on the request
+///  id, never on terms of their own: approve, possibly with a lower maximum, or refuse. Nobody can change the
+///  recipient or the spender, or widen the range. When the last approver approves, the module answers the
+///  compliance, which issues the validation at the lowest maximum approved; the first refusal refuses it. A
+///  request nobody finished answering is refused by anyone past its deadline, on the compliance.
 ///
-///  A native transfer cannot be requested on the investor's behalf, since the investor executes it. The
-///  service stores an approval for that exact transfer instead, with a count and an expiry; {checkTransfer}
-///  answers from it and {afterTransfer} uses one up.
-///
-///  The module requests validations, so it must hold the role the compliance's AccessManager binds to
-///  `requestTransferValidation`, with no execution delay: {canComplianceBind} refuses the binding otherwise.
+///  A native transfer cannot wait: the investor executes it in one call. An approver stores an approval of that
+///  exact transfer instead, with an expiry, under an id of its own so a decision delivered twice approves one
+///  transfer; {checkTransfer} answers from it and {afterTransfer} uses it up.
 ///
 ///  Not judged: mints, the issuer's own action; relocations between one identity's wallets, which change no
 ///  position; and every agent movement, which never reaches a `TRANSFER_CHECK` module.
-contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable {
+contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable, IApprovalModule {
+
+    /// @dev Where a request awaiting approval stands in this module.
+    struct Request {
+        /// How many approvers approved so far: the next one to answer is `approvers[approved]`.
+        uint64 approved;
+        /// The requested minimum: an approver's maximum below it refuses.
+        uint256 amountMin;
+        /// The lowest maximum approved so far, the requested maximum to start with.
+        uint256 amountMax;
+    }
 
     /// @dev How many identical native transfers are approved, and until when.
     struct Approval {
@@ -107,42 +119,30 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         uint64 expiry;
     }
 
-    /// @custom:storage-location erc7201:erc3643.storage.OffchainApprovalModule
-    struct OffchainApprovalStorage {
-        /// Native-transfer approvals per compliance, scoped by the bind nonce so an unbind discards them, keyed
-        /// by `keccak256(abi.encode(fromWallet, toWallet, amount))` with the wallet keys the compliance builds.
+    /// @custom:storage-location erc7201:erc3643.storage.AsyncApprovalModule
+    struct AsyncApprovalStorage {
+        /// The approvers per compliance, in the order they answer, scoped by the bind nonce.
+        mapping(address compliance => mapping(uint256 nonce => address[])) approvers;
+        /// The requests awaiting approval per compliance, by validation id. Deleted once answered.
+        mapping(address compliance => mapping(uint256 validationId => Request)) requests;
+        /// Native-transfer approvals per compliance, scoped by the bind nonce, keyed by
+        /// `keccak256(abi.encode(fromWallet, toWallet, amount))` with the wallet keys the compliance builds.
         mapping(address compliance => mapping(uint256 nonce => mapping(bytes32 transferKey => Approval))) approvals;
-        /// Every approval id a validator has used, per compliance. Not scoped by the bind nonce: an id stays
-        /// used across a rebind, so a decision retried after one is still refused.
+        /// Every native approval id an approver used, per compliance. Not scoped by the bind nonce, so a
+        /// decision retried after a rebind is still refused.
         mapping(address compliance => mapping(bytes32 approvalId => bool)) usedApprovalIds;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.OffchainApprovalModule")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant _OFFCHAIN_APPROVAL_STORAGE_LOCATION =
-        0xf9e1ffd38cb3760e9c42e682f8101772fe10c627a95c4f189fc68cd264992900;
+    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.AsyncApprovalModule")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant _ASYNC_APPROVAL_STORAGE_LOCATION =
+        0x8e132769c339aa4b7063edecd97a34a6fcabe204f7e6adaf81c9a125d1e53f00;
 
-    /// @dev The satellite movement this module is requesting, set for the duration of {approveCrossChainTransfer}
-    ///  only. Transient, so it can never persist past the transaction, and outside the namespace on purpose.
-    bytes32 private transient _approvalInProgress;
-
-    event ApprovalAsked(
-        address indexed compliance,
-        address indexed fromIdentity,
-        bytes from,
-        bytes to,
-        bytes spender,
-        uint256 amountMin,
-        uint256 amountMax
+    event ApproversSet(address indexed compliance, address[] approvers);
+    event ApprovalRequested(address indexed compliance, uint256 indexed validationId, address indexed approver);
+    event ValidationApproved(
+        address indexed compliance, uint256 indexed validationId, address indexed approver, uint256 amountMax
     );
-    event CrossChainTransferApproved(
-        address indexed compliance,
-        uint256 indexed validationId,
-        bytes32 indexed approvalId,
-        bytes from,
-        bytes to,
-        uint256 amountMin,
-        uint256 amountMax
-    );
+    event ValidationRefused(address indexed compliance, uint256 indexed validationId, address indexed approver);
     event TransferApproved(
         address indexed compliance,
         address indexed from,
@@ -164,7 +164,7 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
     }
 
     /// @dev Initializes the module behind its proxy.
-    /// @param accessManagerAddress authority gating the validator functions and the implementation upgrade
+    /// @param accessManagerAddress authority gating the implementation upgrade
     function initialize(address accessManagerAddress) external initializer {
         require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
 
@@ -172,69 +172,80 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         __AccessManaged_init(accessManagerAddress);
     }
 
-    /* ----- The investor ----- */
+    /* ----- The compliance owner ----- */
 
-    /// @dev Asks the service to approve a movement out of `from`. Emits `ApprovalAsked` and stores nothing,
-    ///  so an ask nobody answers leaves nothing behind and asking twice is two events. Only the identity
-    ///  `from` is linked to may ask: the event says whose movement it is, and the service trusts that. `to`
-    ///  and `spender` are taken as given; the service checks them, and the compliance checks everything again
-    ///  when the movement is requested or executed. For a native transfer, ask with both bounds at the amount.
-    /// @param compliance the compliance of the token, which must have bound this module
-    /// @param from ERC-7930 envelope of the sending wallet, native or satellite
-    /// @param to ERC-7930 envelope of the receiving wallet
-    /// @param requestedMin inclusive lower bound
-    /// @param requestedMax inclusive upper bound
-    /// @param spender ERC-7930 envelope of who executes on the sender's behalf, or empty
-    function askApproval(
-        address compliance,
-        bytes calldata from,
-        bytes calldata to,
-        uint256 requestedMin,
-        uint256 requestedMax,
-        bytes calldata spender
-    ) external onlyBoundCompliance(compliance) {
-        require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
-        address fromIdentity = address(_identityRegistry(compliance).resolveIdentity(from));
-        address caller = _msgSender();
-        require(fromIdentity == caller, ErrorsLib.NotAuthorizedForWallet(caller, from));
-
-        emit ApprovalAsked(compliance, fromIdentity, from, to, spender, requestedMin, requestedMax);
+    /// @dev Sets who answers the calling compliance's requests, in the order they answer. Requests already
+    ///  waiting continue with the new list from where they stand. Emits `ApproversSet`.
+    /// @param approvers backend keys, approver contracts, any address; at least one, none zero
+    function setApprovers(address[] calldata approvers) external onlyComplianceCall {
+        require(approvers.length != 0, ErrorsLib.ApproversNotSet());
+        for (uint256 i = 0; i < approvers.length; i++) {
+            require(approvers[i] != address(0), ErrorsLib.ZeroAddress());
+        }
+        _getAsyncApprovalStorage().approvers[msg.sender][getNonce(msg.sender)] = approvers;
+        emit ApproversSet(msg.sender, approvers);
     }
 
-    /* ----- The service ----- */
-
-    /// @dev Approves a satellite movement by requesting its validation, in one transaction: marks it, calls
-    ///  `requestTransferValidation` on the compliance, clears the mark. The compliance asks every rule inside
-    ///  that call, this one included; a rule that leaves the range empty reverts the whole transaction, so
-    ///  nothing is approved that the other rules refuse, and `approvalId` stays unused for a retry. Emits
-    ///  `CrossChainTransferApproved`.
-    /// @param approvalId the validator's own id for this decision, refused if it was used before, so a
-    ///  decision delivered twice approves once
-    /// @return validationId the validation the compliance issued
-    function approveCrossChainTransfer(
-        address compliance,
-        bytes32 approvalId,
-        bytes calldata from,
-        bytes calldata to,
-        uint256 requestedMin,
-        uint256 requestedMax,
-        bytes calldata spender
-    ) external restricted onlyBoundCompliance(compliance) returns (uint256 validationId) {
-        require(_approvalInProgress == bytes32(0), ErrorsLib.ApprovalInProgress());
-        _useApprovalId(compliance, approvalId);
-        _approvalInProgress = _movementKey(compliance, WalletKeyLib.walletId(from), WalletKeyLib.walletId(to));
-        validationId =
-            ITransferValidation(compliance).requestTransferValidation(from, to, requestedMin, requestedMax, spender);
-        _approvalInProgress = bytes32(0);
-
-        emit CrossChainTransferApproved(compliance, validationId, approvalId, from, to, requestedMin, requestedMax);
+    /// @dev The approvers of `compliance`, in the order they answer.
+    function approversOf(address compliance) public view returns (address[] memory) {
+        return _getAsyncApprovalStorage().approvers[compliance][getNonce(compliance)];
     }
 
-    /// @dev Approves one native transfer of exactly `amount` from `from` to `to`, usable until `expiry`.
-    ///  Approving the same transfer again, under another `approvalId`, adds one to its count, and the newest
-    ///  expiry applies to all of them. Emits `TransferApproved`.
-    /// @param approvalId the validator's own id for this decision, refused if it was used before, so a
-    ///  decision delivered twice approves one transfer, not two
+    /* ----- The compliance ----- */
+
+    /// @inheritdoc IApprovalModule
+    /// @dev Keeps the request and tells the first approver. Reverts with no approver set, which refuses the
+    ///  request: a request nobody could approve would only hold its reservation until the deadline.
+    function approvalRequested(uint256 validationId, IModule.TransferContext calldata ctx, uint64)
+        external
+        onlyComplianceCall
+    {
+        address[] storage approvers = _getAsyncApprovalStorage().approvers[msg.sender][getNonce(msg.sender)];
+        require(approvers.length != 0, ErrorsLib.ApproversNotSet());
+        _getAsyncApprovalStorage().requests[msg.sender][validationId] =
+            Request({ approved: 0, amountMin: ctx.amountMin, amountMax: ctx.amountMax });
+        _ask(msg.sender, validationId, approvers[0]);
+    }
+
+    /* ----- The approvers ----- */
+
+    /// @dev Approves a request awaiting approval, at most at `amountMax`. Only the approver whose turn it is
+    ///  may answer. A maximum below the requested minimum refuses. The last approval answers the compliance,
+    ///  which issues the validation at the lowest maximum approved. Emits `ValidationApproved`.
+    function approveValidation(address compliance, uint256 validationId, uint256 amountMax)
+        external
+        onlyBoundCompliance(compliance)
+    {
+        (Request storage request, address[] storage approvers) = _requestForCaller(compliance, validationId);
+        if (amountMax < request.amountMax) request.amountMax = amountMax;
+        if (request.amountMax == 0 || request.amountMax < request.amountMin) {
+            _refuse(compliance, validationId);
+            return;
+        }
+        request.approved++;
+        emit ValidationApproved(compliance, validationId, _msgSender(), request.amountMax);
+
+        if (request.approved < approvers.length) {
+            _ask(compliance, validationId, approvers[request.approved]);
+            return;
+        }
+        uint256 approvedMax = request.amountMax;
+        delete _getAsyncApprovalStorage().requests[compliance][validationId];
+        ITransferValidation(compliance).answerApproval(validationId, approvedMax);
+    }
+
+    /// @dev Refuses a request awaiting approval. Only the approver whose turn it is may answer. Emits
+    ///  `ValidationRefused`.
+    function refuseValidation(address compliance, uint256 validationId) external onlyBoundCompliance(compliance) {
+        _requestForCaller(compliance, validationId);
+        _refuse(compliance, validationId);
+    }
+
+    /// @dev Approves one native transfer of exactly `amount` from `from` to `to`, usable until `expiry`, by
+    ///  any approver of `compliance`. Approving the same transfer again, under another `approvalId`, adds one
+    ///  to its count, and the newest expiry applies to all of them. Emits `TransferApproved`.
+    /// @param approvalId the approver's own id for this decision, refused if it was used before, so a decision
+    ///  delivered twice approves one transfer, not two
     function approveTransfer(
         address compliance,
         bytes32 approvalId,
@@ -242,10 +253,14 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         address to,
         uint256 amount,
         uint64 expiry
-    ) external restricted onlyBoundCompliance(compliance) {
+    ) external onlyBoundCompliance(compliance) {
+        _requireApprover(compliance);
         require(amount != 0, ErrorsLib.ZeroValue());
         require(expiry > block.timestamp, ErrorsLib.ExpiryInPast(expiry));
-        _useApprovalId(compliance, approvalId);
+        mapping(bytes32 => bool) storage usedIds = _getAsyncApprovalStorage().usedApprovalIds[compliance];
+        require(!usedIds[approvalId], ErrorsLib.ApprovalIdAlreadyUsed(approvalId));
+        usedIds[approvalId] = true;
+
         Approval storage approval =
             _approval(compliance, WalletKeyLib.walletId(from), WalletKeyLib.walletId(to), amount);
         approval.count++;
@@ -254,14 +269,21 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         emit TransferApproved(compliance, from, to, approvalId, amount, expiry, approval.count);
     }
 
-    /// @dev Withdraws one approval of a native transfer, expired or not. Emits `ApprovalRevoked`.
-    function revokeApproval(address compliance, address from, address to, uint256 amount) external restricted {
+    /// @dev Withdraws one approval of a native transfer, expired or not, by any approver of `compliance`.
+    ///  Emits `ApprovalRevoked`.
+    function revokeApproval(address compliance, address from, address to, uint256 amount) external {
+        _requireApprover(compliance);
         Approval storage approval =
             _approval(compliance, WalletKeyLib.walletId(from), WalletKeyLib.walletId(to), amount);
         require(approval.count != 0, ErrorsLib.TransferNotApproved(from, to, amount));
         approval.count--;
 
         emit ApprovalRevoked(compliance, from, to, amount, approval.count);
+    }
+
+    /// @dev Where a request awaiting approval stands in this module; all zeros once answered.
+    function requestOf(address compliance, uint256 validationId) external view returns (Request memory) {
+        return _getAsyncApprovalStorage().requests[compliance][validationId];
     }
 
     /// @dev The approvals stored for a native transfer of exactly `amount` from `from` to `to`.
@@ -273,25 +295,18 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         return _approval(compliance, WalletKeyLib.walletId(from), WalletKeyLib.walletId(to), amount);
     }
 
-    /// @dev Whether a validator already used `approvalId` with `compliance`, so a service can tell a retry from
+    /// @dev Whether an approver already used `approvalId` with `compliance`, so a service can tell a retry from
     ///  a new decision.
     function isApprovalIdUsed(address compliance, bytes32 approvalId) external view returns (bool) {
-        return _getOffchainApprovalStorage().usedApprovalIds[compliance][approvalId];
+        return _getAsyncApprovalStorage().usedApprovalIds[compliance][approvalId];
     }
 
-    /* ----- The compliance ----- */
+    /* ----- Native transfers ----- */
 
     /// @inheritdoc IModule
-    /// @dev An issuance passes only while this module is requesting that very movement; the requested range
-    ///  is not part of the mark, since the compliance caps it at the wallet's free balance before asking. A
-    ///  native transfer passes on an unexpired approval for its exact amount. Mints and relocations pass.
+    /// @dev A native transfer between two identities passes on an unexpired approval for its exact amount. An
+    ///  issuance is not judged here: it waits for the approvers instead.
     function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
-        if (ctx.isIssuance) {
-            if (_approvalInProgress == _movementKey(ctx.compliance, ctx.fromWallet, ctx.toWallet)) {
-                return type(uint256).max;
-            }
-            return 0;
-        }
         if (!_needsStoredApproval(ctx)) return type(uint256).max;
         Approval storage approval = _approval(ctx.compliance, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         if (approval.count == 0 || approval.expiry <= block.timestamp) return 0;
@@ -300,8 +315,7 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @inheritdoc IModule
     /// @dev Uses up one approval of the native transfer that just moved. Never reverts: on a transfer a revert
-    ///  here is a veto, and {checkTransfer} already decided. A settlement has nothing to use up, since its
-    ///  mark was cleared when the validation was issued.
+    ///  here is a veto, and {checkTransfer} already decided.
     function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
         if (!_needsStoredApproval(ctx)) return;
         Approval storage approval = _approval(msg.sender, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
@@ -313,36 +327,31 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @inheritdoc IModule
     function moduleTypes() external pure returns (ModuleType[] memory types) {
-        types = new ModuleType[](2);
+        types = new ModuleType[](3);
         types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.AFTER;
+        types[2] = ModuleType.APPROVAL;
     }
 
     /// @inheritdoc IModule
-    /// @dev Binds only where this module may request validations: it must hold, with no execution delay, the
-    ///  role the compliance's AccessManager binds to `requestTransferValidation`, since it calls it directly
-    ///  and cannot schedule. Grant it a role bound to that function alone rather than AGENT, which also mints,
-    ///  forces transfers and edits the registry.
-    /// @return true when the module holds that role
-    function canComplianceBind(address _compliance) external view returns (bool) {
-        IAccessManager manager = IAccessManager(IAccessManaged(_compliance).authority());
-        uint64 roleId =
-            manager.getTargetFunctionRole(_compliance, ITransferValidation.requestTransferValidation.selector);
-        (bool isMember, uint32 executionDelay) = manager.hasRole(roleId, address(this));
-        return isMember && executionDelay == 0;
+    /// @dev Nothing to verify: the approvers are set with `addAndSetModule`.
+    /// @return always true
+    function canComplianceBind(address) external pure returns (bool) {
+        return true;
     }
 
     /// @inheritdoc IModule
-    /// @dev Not plug and play: the module needs the request role first, see {canComplianceBind}.
-    /// @return always false
+    /// @dev Binds anywhere, in any order. Bound without approvers, it refuses every cross-chain request and
+    ///  every native transfer between two identities until they are set.
+    /// @return always true
     function isPlugAndPlay() external pure returns (bool) {
-        return false;
+        return true;
     }
 
     /// @inheritdoc IModule
     /// @return _name the name of the module
     function name() external pure returns (string memory _name) {
-        return "OffchainApprovalModule";
+        return "AsyncApprovalModule";
     }
 
     /// @inheritdoc AccessManagedOwnableBase
@@ -355,27 +364,57 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         override(AbstractModuleUpgradeable, AccessManagedOwnableBase)
         returns (bool)
     {
-        return AbstractModuleUpgradeable.supportsInterface(interfaceId)
+        return interfaceId == type(IApprovalModule).interfaceId
+            || AbstractModuleUpgradeable.supportsInterface(interfaceId)
             || AccessManagedOwnableBase.supportsInterface(interfaceId);
     }
 
     /// @dev Gated through the shared authority.
     function _authorizeUpgrade(address) internal override restricted { }
 
+    /// @dev The waiting request, and the approvers of `compliance`, once checked that the caller is the
+    ///  approver whose turn it is.
+    function _requestForCaller(address compliance, uint256 validationId)
+        private
+        view
+        returns (Request storage request, address[] storage approvers)
+    {
+        AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
+        request = $.requests[compliance][validationId];
+        require(request.amountMax != 0, ErrorsLib.UnknownApprovalRequest(validationId));
+        approvers = $.approvers[compliance][getNonce(compliance)];
+        address expected = request.approved < approvers.length ? approvers[request.approved] : address(0);
+        require(_msgSender() == expected, ErrorsLib.NotTheNextApprover(_msgSender(), expected));
+    }
+
+    /// @dev Forgets the request and refuses it on the compliance, which releases its reservation.
+    function _refuse(address compliance, uint256 validationId) private {
+        delete _getAsyncApprovalStorage().requests[compliance][validationId];
+        emit ValidationRefused(compliance, validationId, _msgSender());
+        ITransferValidation(compliance).answerApproval(validationId, 0);
+    }
+
+    /// @dev Announces whose turn it is, and tells that approver when it is a contract. Telling is best
+    ///  effort: an approver that does not implement {IAsyncApprover} reads the event instead, and its failure
+    ///  never refuses the request.
+    function _ask(address compliance, uint256 validationId, address approver) private {
+        emit ApprovalRequested(compliance, validationId, approver);
+        if (approver.code.length == 0) return;
+        try IAsyncApprover(approver).approvalAsked(compliance, validationId) { } catch { }
+    }
+
+    function _requireApprover(address compliance) private view {
+        address[] storage approvers = _getAsyncApprovalStorage().approvers[compliance][getNonce(compliance)];
+        address caller = _msgSender();
+        for (uint256 i = 0; i < approvers.length; i++) {
+            if (approvers[i] == caller) return;
+        }
+        revert ErrorsLib.NotAnApprover(caller);
+    }
+
     /// @dev A native transfer between two identities: the one movement an approval is stored for.
     function _needsStoredApproval(TransferContext calldata ctx) private pure returns (bool) {
-        return ctx.kind == MovementKindLib.TRANSFER && ctx.fromIdentity != ctx.toIdentity;
-    }
-
-    /// @dev Marks `approvalId` used for `compliance`, refusing an id used before.
-    function _useApprovalId(address compliance, bytes32 approvalId) private {
-        mapping(bytes32 => bool) storage usedIds = _getOffchainApprovalStorage().usedApprovalIds[compliance];
-        require(!usedIds[approvalId], ErrorsLib.ApprovalIdAlreadyUsed(approvalId));
-        usedIds[approvalId] = true;
-    }
-
-    function _movementKey(address compliance, bytes32 fromWallet, bytes32 toWallet) private pure returns (bytes32) {
-        return keccak256(abi.encode(compliance, fromWallet, toWallet));
+        return ctx.kind == MovementKindLib.TRANSFER && !ctx.isIssuance && ctx.fromIdentity != ctx.toIdentity;
     }
 
     function _approval(address compliance, bytes32 fromWallet, bytes32 toWallet, uint256 amount)
@@ -384,17 +423,12 @@ contract OffchainApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnab
         returns (Approval storage)
     {
         bytes32 transferKey = keccak256(abi.encode(fromWallet, toWallet, amount));
-        return _getOffchainApprovalStorage().approvals[compliance][getNonce(compliance)][transferKey];
+        return _getAsyncApprovalStorage().approvals[compliance][getNonce(compliance)][transferKey];
     }
 
-    /// @dev Resolves the registry of the token bound to a compliance.
-    function _identityRegistry(address _compliance) private view returns (ITREXRegistry) {
-        return ITREXRegistry(address(IERC3643(IModularCompliance(_compliance).getTokenBound()).identityRegistry()));
-    }
-
-    function _getOffchainApprovalStorage() private pure returns (OffchainApprovalStorage storage $) {
+    function _getAsyncApprovalStorage() private pure returns (AsyncApprovalStorage storage $) {
         assembly ("memory-safe") {
-            $.slot := _OFFCHAIN_APPROVAL_STORAGE_LOCATION
+            $.slot := _ASYNC_APPROVAL_STORAGE_LOCATION
         }
     }
 

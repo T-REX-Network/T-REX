@@ -153,74 +153,57 @@ A recipient that resolves to no identity is refused before any rule is asked, wh
 distribution rule keys on the identity and would read a zero one as a burn, so the tokens would land where
 no cap could reach them. Only a token whose registry has eligibility checks disabled can get that far.
 
-## A check that lives offchain
+## A check that answers later
 
-Some institutions keep part of a rule in their own systems: an investor's holdings across every asset, for
-instance, which no chain sees. `checkTransfer` is a view and cannot wait for an answer, so the answer comes
-from a service outside the chain, through `OffchainApprovalModule`. The service can be an institution's
-backend, an oracle adapter, anything holding the module's validator role. The module only learns "allowed or
-not", never what was checked. The compliance and the token are unchanged: a token that does not bind the
-module pays nothing for it.
+Some rules cannot answer inside the request. Part of the data may live only in an institution's systems, an
+investor's holdings across every asset for instance, or the rule may be computed with FHE and only learn its
+result in a later transaction, through its decryption callback. `checkTransfer` is a view and cannot wait, so
+the compliance has a waiting state for cross-chain requests, and a module of type `APPROVAL` decides them.
 
-There are two kinds of approval, because the two movements are executed by different parties:
+While an `APPROVAL` module is bound (one at most), `requestTransferValidation` does everything it does today,
+resolving the route, narrowing the range by every rule and reserving it, but records the validation as
+`AwaitingApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
+`approvalRequested`, and the validity window from now is the deadline for its answer. The compliance then takes
+one answer, `answerApproval(validationId, approvedMax)`:
 
-| | Satellite movement (validation) | Native transfer |
-|---|---|---|
-| Who executes it | the satellite, later | the investor, in their own `transfer` |
-| Can the service trigger it? | yes, by requesting the validation | no, only the investor calls `transfer` |
-| How long the approval lives | inside one transaction | stored, with a count and an expiry |
-| Used up by | construction: cleared before the call returns | `afterTransfer`, when the transfer moves |
+1. From the module, before the deadline: an approval issues the validation at `approvedMax` when it is lower,
+   releases the difference, starts the satellite's deadline and sends the legs. No rule runs again, since every
+   rule ran and the room was reserved at the request. An answer below the requested minimum is a refusal.
+2. From anyone, past the deadline: only a refusal is taken, so a request nobody answered never keeps its
+   reservation.
 
-A satellite movement:
+A refusal releases the reservation and ends the validation `Discarded`. Unbinding the module turns requests back
+into immediate issuances; the OWNER of the compliance can do it if the approvers stop answering.
 
-1. The sender's identity calls `askApproval` on the module. It emits `ApprovalAsked` and stores nothing, so an ask
-   nobody answers leaves nothing behind. The service dedupes asks on `(txHash, logIndex)`.
-2. The service runs its private check, and drops the ask if the movement would fail the other rules.
-3. The service calls `approveCrossChainTransfer`. In one transaction the module marks that movement, calls
-   `requestTransferValidation` itself and clears the mark. The compliance asks every rule inside that call;
-   one that leaves the range empty reverts the whole transaction, so nothing is approved that the chain
-   refuses. The mark never outlives the transaction: there is nothing to replay and nothing to clean up.
-4. From there it is the usual flow: reserved, expiry from now, executed on the satellite, settled.
+Because the request reserves while it waits, two waiting requests cannot jointly break a rule that reads the
+ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
 
-Every approval carries an `approvalId` the service chooses, for example the hash of the ask's transaction hash
-and log index. The module refuses an id it has seen, so a decision delivered twice, by a retry or by two
-instances of the service, approves once. An approval that reverts leaves its id unused, and
-`isApprovalIdUsed` tells a retry from a new decision.
+`AsyncApprovalModule` is the `APPROVAL` module that ships:
 
-Any other request finds no mark and gets 0 from the module, the sender's identity's or an agent's included.
-The mark is the movement's two wallets, not its range, because the compliance caps the range at the wallet's
-free balance before it asks the rules.
+- The compliance owner lists the approvers with `setApprovers`, through `addAndSetModule` or
+  `callModuleFunction`. An approver is any address: an institution's backend key, a multisig, or a contract.
+- They answer in that order, on the validation id, with `approveValidation(compliance, id, amountMax)` or
+  `refuseValidation(compliance, id)`. They cannot change the recipient or the spender, or widen the range: the
+  lowest maximum approved is the one issued, and the first refusal refuses.
+- An approver contract is told in the same transaction, through `IAsyncApprover.approvalAsked`, when its turn
+  comes. An FHE rule starts its computation there and answers from its decryption callback, with no trusted
+  party in between. Telling is best effort: an approver that does not implement it reads `ApprovalRequested`.
+- Native transfers cannot wait, since the investor executes them in one call. Any approver can store an approval
+  of one exact transfer (sender, recipient, amount) with an expiry, under an `approvalId` of its own, so a
+  decision delivered twice approves one transfer. `checkTransfer` passes it, `afterTransfer` uses it up, and
+  `revokeApproval` withdraws one. Approving the same transfer again adds to the count, and the newest expiry
+  applies to all of its approvals.
+- The approvers are the compliance's own, so on a module shared by several issuers, one issuer's approver
+  cannot answer for another.
 
-A native transfer: the service calls `approveTransfer` for that exact transfer (sender, recipient, amount) with an
-expiry. Approving it again adds to the count, and the newest expiry applies. `checkTransfer` passes it while
-the count is not zero and the expiry is ahead; `afterTransfer` uses one up. `revokeApproval` withdraws one, expired or
-not. For a native transfer, `askApproval` with both bounds at the amount.
+Limits, stated plainly:
 
-Deployment and roles:
-
-- On the compliance's AccessManager, bind `requestTransferValidation` to a role of its own and grant it to the
-  module, with no execution delay: the module calls the compliance directly and cannot schedule.
-  `canComplianceBind` refuses the binding otherwise. Do not grant the module AGENT, the role that function is
-  bound to by default: AGENT also mints, forces transfers and edits the registry, and the module is
-  upgradeable. Binding the function to that role takes it away from AGENT.
-- On the module's AccessManager, bind `approveCrossChainTransfer`, `approveTransfer` and `revokeApproval` to a validator role, granted
-  to the service's addresses and nothing else.
-- Never bind `requestTransferValidation` or the validator functions to `PUBLIC_ROLE`: `hasRole(PUBLIC_ROLE, x)`
-  is true for every address, so the module would bind and anyone could approve.
-- The module is a privileged caller of the compliance, and the validator role is the real gate. Whoever holds
-  it can request any satellite movement, and so lock a sender's balance through the reservation, exactly as
-  AGENT can today. Keep that key as hardened as AGENT's.
-
-What the validator decides, beyond yes or no:
-
-- **The ask is not a precondition.** The validator can approve a movement nobody asked for. The ask only tells
-  it what the investor wants.
-- **The validator chooses the terms.** `to`, the range and the spender in `approveCrossChainTransfer` are its
-  own, not copied from the ask, so it can name a spender the investor never asked for. The investor, or the
-  spender the validation names, still has to execute it, so a validator can move nothing by itself.
-
-Not judged: mints, the issuer's own action; forced transfers and recoveries, which never reach a
-`TRANSFER_CHECK` module; and relocations between one identity's wallets, which change no position.
+- **The approvers gate every cross-chain movement.** If they stop answering, requests are refused at their
+  deadline, and only unbinding the module restores immediate issuance.
+- **Mints are not judged**, being the issuer's own action, though they move holdings like a transfer does. An
+  issuer whose rule covers total holdings checks it before minting.
+- **Forced transfers, recoveries and relocations** between one identity's native wallets are not judged either.
+  A cross-chain relocation still waits for the approvers, like any request.
 
 ## Two rules a module must follow
 

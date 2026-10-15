@@ -150,8 +150,12 @@ library ErrorsLib {
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(bytes spender);
     error SpenderNotListed(bytes spender);
-    error ApprovalInProgress();
     error ApprovalIdAlreadyUsed(bytes32 approvalId);
+    error OneApprovalModuleOnly();
+    error ApproversNotSet();
+    error NotAnApprover(address caller);
+    error NotTheNextApprover(address caller, address expected);
+    error UnknownApprovalRequest(uint256 validationId);
     error ExpiryInPast(uint64 expiry);
     error TransferNotApproved(address from, address to, uint256 amount);
 
@@ -245,6 +249,8 @@ library ErrorsLib {
     error SenderNotOnSatellite(bytes wallet);
     /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
     ///  it is `AwaitingMint`; `status` is the `ValidationStatus` found instead.
+    error ValidationNotAwaitingApproval(uint256 validationId, uint8 status);
+    error ApprovalDeadlineNotReached(uint256 validationId, uint64 deadline);
     error ValidationNotResendable(uint256 validationId, uint8 status);
     /// @dev The deadline for a resend has passed: `expiry` while `Pending`, since past it no satellite may execute;
     ///  `releaseAt` once the burn landed, so the resent leg cannot land after the pair was resolved.

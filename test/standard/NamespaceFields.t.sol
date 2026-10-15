@@ -21,9 +21,9 @@ import { ITransferValidation } from "contracts/compliance/modular/ITransferValid
 import { ModuleSetLib } from "contracts/compliance/modular/ModuleSetLib.sol";
 import { TransferValidationLib } from "contracts/compliance/modular/TransferValidationLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
+import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
-import { OffchainApprovalModule } from "contracts/compliance/modular/modules/OffchainApprovalModule.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
 import { ITrustedGatewayRegistry } from "contracts/interop/ITrustedGatewayRegistry.sol";
 import { TREXMessagingLib } from "contracts/interop/TREXMessagingLib.sol";
@@ -344,22 +344,25 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_entry(_entry(_field(base, 0), _key(ALICE)), bytes32(NUMBER))), 11, "maxBalance");
     }
 
-    function test_OffchainApprovalModule() public {
-        bytes32 base = Utils.erc7201("erc3643.storage.OffchainApprovalModule");
-        OffchainApprovalModule.OffchainApprovalStorage storage validationStorage;
+    function test_AsyncApprovalModule() public {
+        bytes32 base = Utils.erc7201("erc3643.storage.AsyncApprovalModule");
+        AsyncApprovalModule.AsyncApprovalStorage storage approvalStorage;
         assembly ("memory-safe") {
-            validationStorage.slot := base
+            approvalStorage.slot := base
         }
 
-        validationStorage.approvals[ALICE][NUMBER][KEY] = OffchainApprovalModule.Approval({ count: 11, expiry: 22 });
+        approvalStorage.approvers[ALICE][NUMBER].push(ALICE);
+        approvalStorage.requests[ALICE][NUMBER].approved = 11;
+        approvalStorage.approvals[ALICE][NUMBER][KEY] = AsyncApprovalModule.Approval({ count: 22, expiry: 33 });
+        approvalStorage.usedApprovalIds[ALICE][KEY] = true;
 
         bytes32 byCompliance = _entry(_field(base, 0), _key(ALICE));
-        uint256 packed = uint256(_word(_entry(_entry(byCompliance, bytes32(NUMBER)), KEY)));
-        assertEq(uint64(packed), 11, "approvals.count");
-        assertEq(uint64(packed >> 64), 22, "approvals.expiry");
-
-        validationStorage.usedApprovalIds[ALICE][KEY] = true;
-        assertEq(_word(_entry(_entry(_field(base, 1), _key(ALICE)), KEY)), 1, "usedApprovalIds");
+        assertEq(_word(_entry(byCompliance, bytes32(NUMBER))), 1, "approvers");
+        assertEq(_word(_entry(_entry(_field(base, 1), _key(ALICE)), bytes32(NUMBER))), 11, "requests");
+        uint256 packed = _word(_entry(_entry(_entry(_field(base, 2), _key(ALICE)), bytes32(NUMBER)), KEY));
+        assertEq(uint64(packed), 22, "approvals.count");
+        assertEq(uint64(packed >> 64), 33, "approvals.expiry");
+        assertEq(_word(_entry(_entry(_field(base, 3), _key(ALICE)), KEY)), 1, "usedApprovalIds");
     }
 
     function test_SpenderWhitelistModule() public {
