@@ -56,7 +56,10 @@ interface IModule {
         /// Answers {checkSpender}.
         SPENDER,
         /// Is told {afterTransfer} after the ledger moved.
-        AFTER
+        AFTER,
+        /// Decides whether a requested validation is issued, see {IApprovalModule}. While one is bound, a
+        /// cross-chain request waits for its answer instead of being issued at once. One at most per compliance.
+        APPROVAL
     }
 
     /// @dev Everything a module needs to know about a movement, resolved once by the compliance.

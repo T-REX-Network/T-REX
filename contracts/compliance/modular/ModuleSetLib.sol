@@ -168,6 +168,10 @@ library ModuleSetLib {
         for (uint256 i = 0; i < moduleTypes.length; i++) {
             IModule.ModuleType moduleType = moduleTypes[i];
             require(moduleSet.byType[moduleType].add(_module), ErrorsLib.DuplicateModuleType(uint8(moduleType)));
+            // A request waits for one answer, so a second module deciding it would race the first.
+            if (moduleType == IModule.ModuleType.APPROVAL) {
+                require(moduleSet.byType[moduleType].length() == 1, ErrorsLib.OneApprovalModuleOnly());
+            }
         }
 
         emit EventsLib.ModuleTypesRecorded(_module, moduleTypes);
