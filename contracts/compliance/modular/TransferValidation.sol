@@ -557,6 +557,12 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             uint256 validationId = validationIds[i];
             require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
             Validation storage validation = store.validations[validationId];
+            // Nothing was sent for a validation still awaiting approval, so no leg can be in flight: anyone may
+            // discard it once its deadline passed, and the reservation comes back.
+            if (validation.status == ValidationStatus.AwaitingApproval) {
+                TransferValidationLib.discardUnanswered(validationId, address(_boundToken()));
+                continue;
+            }
             require(
                 validation.status == ValidationStatus.Pending,
                 ErrorsLib.ValidationNotDiscardable(validationId, uint8(validation.status))

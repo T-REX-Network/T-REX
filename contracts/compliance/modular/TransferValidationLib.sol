@@ -172,7 +172,7 @@ library TransferValidationLib {
 
     /// @dev Answers a validation awaiting approval, see {ITransferValidation-answerApproval}. Issuing it runs
     ///  no rule again: every rule ran and the range was reserved at the request, so an approval only narrows,
-    ///  starts the satellite's deadline and sends the legs. The legs go through the token, which as the
+    ///  checks the chains are still open and sends the legs. The legs go through the token, which as the
     ///  compliance's DELEGATECALL target sees the compliance as its caller.
     /// @param token the token the compliance is bound to
     function answerApproval(uint256 validationId, uint256 approvedMax, address token) external {
@@ -183,15 +183,8 @@ library TransferValidationLib {
             validation.status == ITransferValidation.ValidationStatus.AwaitingApproval,
             ErrorsLib.ValidationNotAwaitingApproval(validationId, uint8(validation.status))
         );
-        // Until the deadline only the approval module answers; past it anyone may, and only to refuse, so a
-        // request nobody answered never keeps its reservation.
-        uint64 deadline = validation.expiry;
-        if (msg.sender == _approvalModule()) {
-            require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
-        } else {
-            require(block.timestamp >= deadline, ErrorsLib.ApprovalDeadlineNotReached(validationId, deadline));
-            approvedMax = 0;
-        }
+        require(msg.sender == _approvalModule(), ErrorsLib.NotTheApprovalModule(msg.sender));
+        require(block.timestamp < validation.expiry, ErrorsLib.ValidationExpired(validationId, validation.expiry));
 
         if (approvedMax == 0 || approvedMax < validation.amountMin) {
             _release(validation, validation.amountMax, token);
@@ -205,10 +198,11 @@ library TransferValidationLib {
             _release(validation, validation.amountMax - approvedMax, token);
             validation.amountMax = approvedMax;
         }
-        (uint64 expiry, uint64 window) =
-            _expiryAndWindow(store, token, validation.fromChainKey, validation.toChainKey, validation.twoLegs);
-        validation.expiry = expiry;
-        validation.releaseAt = expiry + window;
+        // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
+        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
+        // are checked again, since one may have been paused while the request waited.
+        _openChainWindow(store, token, validation.fromChainKey);
+        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
         validation.status = ITransferValidation.ValidationStatus.Pending;
 
         bytes memory body = _issueRecorded(
@@ -220,8 +214,8 @@ library TransferValidationLib {
                 spender: store.awaitedTerms[validationId].spender,
                 amountMin: validation.amountMin,
                 amountMax: validation.amountMax,
-                expiry: expiry,
-                reconciliationWindow: window,
+                expiry: validation.expiry,
+                reconciliationWindow: validation.releaseAt - validation.expiry,
                 token: token
             })
         );
@@ -321,16 +315,7 @@ library TransferValidationLib {
         view
         returns (uint64 expiry, uint64 window)
     {
-        return _expiryAndWindow(layout(), token, fromChainKey, toChainKey, twoLegs);
-    }
-
-    function _expiryAndWindow(
-        ValidationStorage storage store,
-        address token,
-        bytes32 fromChainKey,
-        bytes32 toChainKey,
-        bool twoLegs
-    ) private view returns (uint64 expiry, uint64 window) {
+        ValidationStorage storage store = layout();
         require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
         window = _openChainWindow(store, token, fromChainKey);
         if (twoLegs) {
@@ -378,6 +363,22 @@ library TransferValidationLib {
         assembly ("memory-safe") {
             $.slot := VALIDATION_STORAGE_LOCATION
         }
+    }
+
+    /// @dev Discards a validation still `AwaitingApproval` once its deadline passed, for anyone, see
+    ///  {ITransferValidation-discardExpiredValidations}: nothing was sent for it, so no leg can be in flight.
+    ///  The reservation comes back and the envelopes kept for the answer are deleted.
+    /// @param token the token the compliance is bound to
+    function discardUnanswered(uint256 validationId, address token) external {
+        ValidationStorage storage store = layout();
+        ITransferValidation.Validation storage validation = store.validations[validationId];
+        require(
+            block.timestamp >= validation.expiry, ErrorsLib.ValidationNotReleasable(validationId, validation.expiry)
+        );
+        _release(validation, validation.amountMax, token);
+        validation.status = ITransferValidation.ValidationStatus.Discarded;
+        delete store.awaitedTerms[validationId];
+        emit EventsLib.ValidationDiscarded(validationId);
     }
 
     /// @dev Keeps the validation forever and reserves its amount. Everything written here is the issuance half

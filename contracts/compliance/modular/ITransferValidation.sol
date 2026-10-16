@@ -119,8 +119,8 @@ interface ITransferValidation {
         /// token stops taking its chain's messages.
         Resolved,
         /// Requested while an `APPROVAL` module is bound: narrowed and reserved like an issued validation, but
-        /// not issued yet and sent nowhere. `answerApproval` issues it (`Pending`) or refuses it (`Discarded`).
-        /// Until then `expiry` is the deadline for the answer.
+        /// not issued yet and sent nowhere. `answerApproval` issues it (`Pending`) or refuses it (`Discarded`);
+        /// past `expiry`, the deadline for the answer, `discardExpiredValidations` discards it.
         AwaitingApproval
     }
 
@@ -202,7 +202,8 @@ interface ITransferValidation {
     ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
     /// reserved as `AwaitingApproval`, `TransferValidationAwaitingApproval` is emitted, the module is told, and
-    /// `answerApproval` decides. The deadline for the answer is the validity window from now.
+    /// `answerApproval` decides. The deadline for the answer is `expiry`, the validity window from now, and it
+    /// stays the satellite's deadline once the validation is issued.
     /// @param from ERC-7930 interoperable address of the sender.
     /// @param to ERC-7930 interoperable address of the recipient.
     /// @param requestedMin Inclusive lower bound the caller proposes.
@@ -217,20 +218,21 @@ interface ITransferValidation {
         bytes calldata spender
     ) external returns (uint256 validationId);
 
-    /// @dev Answers a validation `AwaitingApproval`: issues it, at most at `approvedMax`, or refuses it. The
-    /// bound `APPROVAL` module answers before the deadline. Past it, anyone may answer, and only a refusal is
-    /// taken, so a request nobody answered gives its reservation back.
+    /// @dev Answers a validation `AwaitingApproval`: issues it, at most at `approvedMax`, or refuses it. Only the
+    /// bound `APPROVAL` module answers, before the deadline. A request nobody answered is discarded with
+    /// `discardExpiredValidations` once the deadline passed.
     ///
     /// An answer below the requested minimum is a refusal: the reservation is released and the validation ends
     /// `Discarded`. Any other answer lowers the maximum to `approvedMax` when it is lower, releases the
-    /// difference, and issues the validation as `requestTransferValidation` would: `expiry` counts from now,
-    /// and one leg goes to each satellite chain involved.
+    /// difference, and sends one leg to each satellite chain involved. No rule runs again: they ran at the
+    /// request. The deadline stays the request's `expiry`, so the time spent waiting comes out of the
+    /// satellite's time to execute, and the rules are never older than the validity window when it does.
     ///
     /// Requirements:
     /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
     /// - It must be stored `AwaitingApproval`; otherwise reverts with `ValidationNotAwaitingApproval`.
-    /// - From the bound `APPROVAL` module, before the deadline; otherwise reverts with `ValidationExpired`.
-    /// - From anyone else, past the deadline; otherwise reverts with `ApprovalDeadlineNotReached`.
+    /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
+    /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
     /// - On an approval, every involved chain still open, configured and not paused, as at a request.
     ///
     /// Emits `TransferValidationIssued` and sends the legs, or emits `ValidationApprovalRefused`.
@@ -282,7 +284,9 @@ interface ITransferValidation {
     ///
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
-    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
+    /// - A validation `AwaitingApproval` may be discarded by anyone once its `expiry` passed, since nothing was
+    ///   sent for it; otherwise reverts with `ValidationNotReleasable`. The rules below do not apply to it.
+    /// - Each other id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
     ///   awaiting a leg is refused whatever the clock says, since one satellite has already executed.
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;

@@ -37,7 +37,8 @@ interface IApprovalModule {
 
     /// @dev A validation was requested and waits for this module's answer. Called by the compliance inside
     ///  `requestTransferValidation`, once the range was narrowed by every rule and reserved; reverting refuses
-    ///  the request. The module answers later, before `deadline`, with `answerApproval` on the compliance.
+    ///  the request. The module answers later, before `deadline`, with `answerApproval` on the compliance; it
+    ///  may also answer at once, from inside this call, since the validation is already `AwaitingApproval`.
     /// @param validationId the validation awaiting approval
     /// @param ctx the movement, as the rules saw it at the request, with the narrowed range
     /// @param deadline the last moment, exclusive, an answer from this module is taken

@@ -90,13 +90,21 @@ interface IAsyncApprover {
 ///
 ///  The compliance owner lists the approvers with {setApprovers}. They answer in that order, each on the request
 ///  id, never on terms of their own: approve, possibly with a lower maximum, or refuse. Nobody can change the
-///  recipient or the spender, or widen the range. When the last approver approves, the module answers the
-///  compliance, which issues the validation at the lowest maximum approved; the first refusal refuses it. A
-///  request nobody finished answering is refused by anyone past its deadline, on the compliance.
+///  recipient or the spender, or widen the range. Once the last approver approved, anyone calls {finalize}, which
+///  answers the compliance: it issues the validation at the lowest maximum approved. The first refusal refuses
+///  it at once. A request nobody finished answering is discarded by anyone past its deadline, on the compliance.
+///
+///  A relocation between one identity's own wallets changes no position, so it is approved at once, in the
+///  request's own transaction, and nobody is asked.
+///
+///  Changing the approvers stops the requests already waiting: their answers so far were given under the old
+///  list, so they can no longer progress and are discarded at their deadline.
 ///
 ///  A native transfer cannot wait: the investor executes it in one call. An approver stores an approval of that
 ///  exact transfer instead, with an expiry, under an id of its own so a decision delivered twice approves one
-///  transfer; {checkTransfer} answers from it and {afterTransfer} uses it up.
+///  transfer; {checkTransfer} answers from it and {afterTransfer} uses it up. Any one approver can approve a
+///  native transfer, so the native path is as strong as the weakest approver: a rule that can only answer
+///  later, such as one computed with FHE, never sees native transfers.
 ///
 ///  Not judged: mints, the issuer's own action; relocations between one identity's wallets, which change no
 ///  position; and every agent movement, which never reaches a `TRANSFER_CHECK` module.
@@ -106,6 +114,10 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     struct Request {
         /// How many approvers approved so far: the next one to answer is `approvers[approved]`.
         uint64 approved;
+        /// The version of the approver list the request was asked under; answers stop when it changes.
+        uint64 approversVersion;
+        /// Every approver approved: waiting for {finalize}.
+        bool fullyApproved;
         /// The requested minimum: an approver's maximum below it refuses.
         uint256 amountMin;
         /// The lowest maximum approved so far, the requested maximum to start with.
@@ -131,6 +143,9 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         /// Every native approval id an approver used, per compliance. Not scoped by the bind nonce, so a
         /// decision retried after a rebind is still refused.
         mapping(address compliance => mapping(bytes32 approvalId => bool)) usedApprovalIds;
+        /// How many times each compliance set its approvers. Not scoped by the bind nonce, so a request asked
+        /// before a rebind never matches a list set after it.
+        mapping(address compliance => uint64) approversVersion;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.AsyncApprovalModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -143,6 +158,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         address indexed compliance, uint256 indexed validationId, address indexed approver, uint256 amountMax
     );
     event ValidationRefused(address indexed compliance, uint256 indexed validationId, address indexed approver);
+    event ValidationFullyApproved(address indexed compliance, uint256 indexed validationId, uint256 amountMax);
     event TransferApproved(
         address indexed compliance,
         address indexed from,
@@ -175,14 +191,17 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /* ----- The compliance owner ----- */
 
     /// @dev Sets who answers the calling compliance's requests, in the order they answer. Requests already
-    ///  waiting continue with the new list from where they stand. Emits `ApproversSet`.
+    ///  waiting stop: they were answered so far under the old list, and are discarded at their deadline.
+    ///  Emits `ApproversSet`.
     /// @param approvers backend keys, approver contracts, any address; at least one, none zero
     function setApprovers(address[] calldata approvers) external onlyComplianceCall {
         require(approvers.length != 0, ErrorsLib.ApproversNotSet());
         for (uint256 i = 0; i < approvers.length; i++) {
             require(approvers[i] != address(0), ErrorsLib.ZeroAddress());
         }
-        _getAsyncApprovalStorage().approvers[msg.sender][getNonce(msg.sender)] = approvers;
+        AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
+        $.approvers[msg.sender][getNonce(msg.sender)] = approvers;
+        $.approversVersion[msg.sender]++;
         emit ApproversSet(msg.sender, approvers);
     }
 
@@ -194,24 +213,37 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /* ----- The compliance ----- */
 
     /// @inheritdoc IApprovalModule
-    /// @dev Keeps the request and tells the first approver. Reverts with no approver set, which refuses the
-    ///  request: a request nobody could approve would only hold its reservation until the deadline.
+    /// @dev Approves a relocation at once, since it changes no position. Otherwise keeps the request and tells
+    ///  the first approver. Reverts with no approver set, which refuses the request: a request nobody could
+    ///  approve would only hold its reservation until the deadline.
     function approvalRequested(uint256 validationId, IModule.TransferContext calldata ctx, uint64)
         external
         onlyComplianceCall
     {
-        address[] storage approvers = _getAsyncApprovalStorage().approvers[msg.sender][getNonce(msg.sender)];
+        if (ctx.fromIdentity == ctx.toIdentity) {
+            // The compliance already records it `AwaitingApproval`, so this answer issues it inside the request.
+            ITransferValidation(msg.sender).answerApproval(validationId, ctx.amountMax);
+            return;
+        }
+        AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
+        address[] storage approvers = $.approvers[msg.sender][getNonce(msg.sender)];
         require(approvers.length != 0, ErrorsLib.ApproversNotSet());
-        _getAsyncApprovalStorage().requests[msg.sender][validationId] =
-            Request({ approved: 0, amountMin: ctx.amountMin, amountMax: ctx.amountMax });
+        $.requests[msg.sender][validationId] = Request({
+            approved: 0,
+            approversVersion: $.approversVersion[msg.sender],
+            fullyApproved: false,
+            amountMin: ctx.amountMin,
+            amountMax: ctx.amountMax
+        });
         _ask(msg.sender, validationId, approvers[0]);
     }
 
     /* ----- The approvers ----- */
 
     /// @dev Approves a request awaiting approval, at most at `amountMax`. Only the approver whose turn it is
-    ///  may answer. A maximum below the requested minimum refuses. The last approval answers the compliance,
-    ///  which issues the validation at the lowest maximum approved. Emits `ValidationApproved`.
+    ///  may answer. A maximum below the requested minimum refuses. The last approval only records the request
+    ///  as fully approved, so an approver answering from a callback never pays for, nor reverts on, the
+    ///  issuance; {finalize} issues it. Emits `ValidationApproved`, and `ValidationFullyApproved` on the last.
     function approveValidation(address compliance, uint256 validationId, uint256 amountMax)
         external
         onlyBoundCompliance(compliance)
@@ -229,6 +261,16 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
             _ask(compliance, validationId, approvers[request.approved]);
             return;
         }
+        request.fullyApproved = true;
+        emit ValidationFullyApproved(compliance, validationId, request.amountMax);
+    }
+
+    /// @dev Issues a request every approver approved, at the lowest maximum approved, by answering the
+    ///  compliance. Anyone may call it. A failure, a chain paused since the request for instance, reverts and
+    ///  leaves the request fully approved, so it can be tried again before the deadline.
+    function finalize(address compliance, uint256 validationId) external {
+        Request storage request = _getAsyncApprovalStorage().requests[compliance][validationId];
+        require(request.fullyApproved, ErrorsLib.NotFullyApproved(validationId));
         uint256 approvedMax = request.amountMax;
         delete _getAsyncApprovalStorage().requests[compliance][validationId];
         ITransferValidation(compliance).answerApproval(validationId, approvedMax);
@@ -382,6 +424,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
         request = $.requests[compliance][validationId];
         require(request.amountMax != 0, ErrorsLib.UnknownApprovalRequest(validationId));
+        require(request.approversVersion == $.approversVersion[compliance], ErrorsLib.ApproversChanged(validationId));
         approvers = $.approvers[compliance][getNonce(compliance)];
         address expected = request.approved < approvers.length ? approvers[request.approved] : address(0);
         require(_msgSender() == expected, ErrorsLib.NotTheNextApprover(_msgSender(), expected));
