@@ -350,6 +350,24 @@ contract ModularCompliance is
         _applyMovement(from, to, amount, kind);
     }
 
+    /// @dev See {IModularCompliance-recalled}. The owner was settled by `syncOwner` before the credit, and the
+    ///  position did not move, so nothing is adjusted here: the movement is built and the trackers told.
+    function recalled(bytes calldata fromWallet, address to, uint256 amount) external onlyBoundToken {
+        require(to != address(0), ErrorsLib.ZeroAddress());
+        require(amount > 0, ErrorsLib.ZeroValue());
+        ITREXRegistry registry = _boundRegistry();
+        _callAfterTransfer(
+            TransferContextLib.recall(
+                address(this),
+                address(registry.resolveIdentity(fromWallet)),
+                address(registry.identity(to)),
+                WalletKeyLib.walletId(fromWallet),
+                WalletKeyLib.walletId(to),
+                amount
+            )
+        );
+    }
+
     /// @dev Moves the positions, then tells the `AFTER` modules. One function serves all three hooks: the absent
     ///  side of a mint or a burn is a zero wallet and stays a zero identity.
     ///

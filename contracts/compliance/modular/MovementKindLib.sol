@@ -35,5 +35,10 @@ library MovementKindLib {
     /// `toWallet` are both the native wallet: the position keeps its owner. Reported after the burn, like every
     /// movement, so the ledger follows a registry relink of the holder with the delegated amount counted back in.
     uint8 internal constant DELEGATION = 7;
+    /// A bridged position brought back onto a native wallet of the same identity, answered by a satellite's burn
+    /// proof: the inverse of `DELEGATION`. `fromWallet` is the satellite wallet that burned, as on a settlement,
+    /// `toWallet` the native wallet the credit landed on, and `toIdentity` the owner the registry named once the
+    /// wallet's relink, if any, was followed. Reported after the mint, like every movement.
+    uint8 internal constant RECALL = 8;
 
 }
