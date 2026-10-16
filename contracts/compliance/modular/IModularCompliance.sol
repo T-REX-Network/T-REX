@@ -207,13 +207,26 @@ interface IModularCompliance is IERC3643Compliance {
 
     /**
      *  @dev follows a registry relink of a native wallet before tokens land on it outside a movement the
-     *  compliance hears of, a recall's credit: the wallet's current balance moves from the identity it was last
+     *  compliance counts, a recall's credit: the wallet's current balance moves from the identity it was last
      *  credited to onto the one the registry names now, and nothing else. No movement is counted and no module is
-     *  called. A no-op when the owner has not changed.
+     *  called; the credit itself is reported afterwards through `recalled`. A no-op when the owner has not changed.
      *  This function can be called ONLY by the token bound to the compliance
      *  @param _wallet the native wallet about to be credited
      */
     function syncOwner(address _wallet) external;
+
+    /**
+     *  @dev function called once a recall's credit landed on a native wallet: the inverse of the `DELEGATION` the
+     *  token reports through `agentTransferred`, so a module that debited the out-leg has the in-leg to credit
+     *  no position moves, since both wallets belong to one identity, and no rule is asked: the satellite already
+     *  burned. The `AFTER` modules are told a `RECALL` whose sender is the satellite wallet, as on a settlement,
+     *  and whose recipient is the native wallet under the owner `syncOwner` settled it on
+     *  This function can be called ONLY by the token bound to the compliance
+     *  @param _fromWallet the ERC-7930 envelope of the satellite wallet that burned
+     *  @param _to the native wallet the credit landed on
+     *  @param _amount amount of tokens brought back, never zero
+     */
+    function recalled(bytes calldata _fromWallet, address _to, uint256 _amount) external;
 
     /**
      *  @dev getter for the bound modules of one type, in the order they were bound
