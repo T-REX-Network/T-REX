@@ -10,6 +10,9 @@ fs_permissions = [
     { access = "read-write", path = "./deployments" },
     # scratch manifest for test/unit/scripts/DeployUtilityChecker.t.sol
     { access = "read-write", path = "./cache" },
+    # scripts/SeedActivity.s.sol and scripts/SeedGoldToken.s.sol append the identities they
+    # create to the sibling ONCHAINID checkout's deployment log.
+    { access = "read-write", path = "../ONCHAINID/deployments" },
 ]
 
 solc_version = "0.8.30"
@@ -61,7 +64,7 @@ forge-std = "1.16.2"
 # `edcc9f3`; this moves past it, so `4935eb1` (ONCHAINID #97) belongs in the diff-pass scope the auditors
 # were given, and the freeze tag needs recutting against this pin.
 # TODO: repin to the ONCHAINID v3 release tag once it is cut, and drop this note with it.
-onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "4c6d074cec62b286804519a594c91a2136fce798" }
+onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "2180c91966bfc0bea921de758395fa753e84b14f" }
 
 [rpc_endpoints]
 ethereum = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
@@ -69,3 +72,6 @@ base = "https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
 polygon = "https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
 baseSepolia = "https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}"
 
+
+[etherscan]
+baseSepolia = { key = "${BASESCAN_API_KEY}", chain = 84532 }
