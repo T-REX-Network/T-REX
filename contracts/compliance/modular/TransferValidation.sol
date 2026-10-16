@@ -250,9 +250,17 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ) private returns (uint256 validationId) {
         bytes memory body;
         (validationId, body) = TransferValidationLib.issue(from, to, spender, draft, address(_boundToken()));
+        // Empty while it awaits approval: nothing is sent until `answerApproval` issues it.
+        if (body.length == 0) return validationId;
 
         _dispatchLeg(draft.fromChainKey, validationId, body);
         if (draft.twoLegs) _dispatchLeg(draft.toChainKey, validationId, body);
+    }
+
+    /// @inheritdoc ITransferValidation
+    /// @dev The answer, the narrowing and the legs live in {TransferValidationLib-answerApproval}.
+    function answerApproval(uint256 validationId, uint256 approvedMax) external {
+        TransferValidationLib.answerApproval(validationId, approvedMax, address(_boundToken()));
     }
 
     /// @inheritdoc ITransferValidation
@@ -549,6 +557,12 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             uint256 validationId = validationIds[i];
             require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
             Validation storage validation = store.validations[validationId];
+            // Nothing was sent for a validation still awaiting approval, so no leg can be in flight: anyone may
+            // discard it once its deadline passed, and the reservation comes back.
+            if (validation.status == ValidationStatus.AwaitingApproval) {
+                TransferValidationLib.discardUnanswered(validationId, address(_boundToken()));
+                continue;
+            }
             require(
                 validation.status == ValidationStatus.Pending,
                 ErrorsLib.ValidationNotDiscardable(validationId, uint8(validation.status))
@@ -721,13 +735,14 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     function _stillReservesIdentities(ValidationStatus status, bool relocation) internal pure returns (bool) {
         if (relocation) return false;
         return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingMint
-            || status == ValidationStatus.AwaitingBurn;
+            || status == ValidationStatus.AwaitingBurn || status == ValidationStatus.AwaitingApproval;
     }
 
     /// @dev Whether the sender wallet's pending amount is still reserved in this state. Once the burn leg has
     ///  arrived the tokens are in transit, so the wallet's cap must stop counting them.
     function _stillReservesWallet(ValidationStatus status) internal pure returns (bool) {
-        return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingBurn;
+        return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingBurn
+            || status == ValidationStatus.AwaitingApproval;
     }
 
     /// @dev Where a validation goes when a leg lands on it, and whether that leg completes the movement.

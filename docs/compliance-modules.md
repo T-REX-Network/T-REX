@@ -153,6 +153,70 @@ A recipient that resolves to no identity is refused before any rule is asked, wh
 distribution rule keys on the identity and would read a zero one as a burn, so the tokens would land where
 no cap could reach them. Only a token whose registry has eligibility checks disabled can get that far.
 
+## A check that answers later
+
+Some rules cannot answer inside the request. Part of the data may live only in an institution's systems, an
+investor's holdings across every asset for instance, or the rule may be computed with FHE and only learn its
+result in a later transaction, through its decryption callback. `checkTransfer` is a view and cannot wait, so
+the compliance has a waiting state for cross-chain requests, and a module of type `APPROVAL` decides them.
+
+While an `APPROVAL` module is bound (one at most), `requestTransferValidation` does everything it does today,
+resolving the route, narrowing the range by every rule and reserving it, but records the validation as
+`AwaitingApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
+`approvalRequested`. The request's `expiry`, the validity window from now, is both the deadline for the answer
+and, once issued, the satellite's deadline: the time spent waiting comes out of the time to execute, so the
+rules are never older than one validity window when the satellite executes.
+
+Only the module answers, with `answerApproval(validationId, approvedMax)`, before the deadline. An approval
+lowers the maximum when the answer is lower, releases the difference and sends the legs; no rule runs again,
+since every rule ran and the room was reserved at the request, but the chains are checked again, as one may
+have been paused while the request waited. An answer below the requested minimum is a refusal, which releases
+the reservation and ends the validation `Discarded`. A request nobody answered is discarded past its deadline
+with `discardExpiredValidations`, by anyone, since nothing was sent for it.
+
+Because the request reserves while it waits, two waiting requests cannot jointly break a rule that reads the
+ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
+
+Unbinding the module turns new requests back into immediate issuances; the OWNER of the compliance can do it if
+the approvers stop answering. Requests already waiting keep waiting until their deadline, then are discarded.
+
+`AsyncApprovalModule` is the `APPROVAL` module that ships:
+
+- The compliance owner lists the approvers with `setApprovers`, through `addAndSetModule` or
+  `callModuleFunction`. An approver is any address: an institution's backend key, a multisig, or a contract.
+- They answer in that order, on the validation id, with `approveValidation(compliance, id, amountMax)` or
+  `refuseValidation(compliance, id)`. They cannot change the recipient or the spender, or widen the range: the
+  lowest maximum approved is the one issued, and the first refusal refuses at once.
+- The last approval only records the request as fully approved. Anyone then calls `finalize(compliance, id)`,
+  which answers the compliance and pays for sending the legs. An approver answering from a callback therefore
+  never reverts on a paused chain, nor carries the cost of the issuance, and a failed `finalize` can be tried
+  again before the deadline.
+- An approver contract is told in the same transaction, through `IAsyncApprover.approvalAsked`, when its turn
+  comes. An FHE rule starts its computation there and answers from its decryption callback, with no trusted
+  party in between. Telling is best effort: an approver that does not implement it reads `ApprovalRequested`.
+- A relocation between one identity's own wallets changes no position, so the module approves it at once,
+  inside the request, and asks nobody.
+- Setting a new approver list stops the requests already waiting, since what was approved so far was approved
+  under the old list. They are discarded at their deadline.
+- Native transfers cannot wait, since the investor executes them in one call. Any approver can store an approval
+  of one exact transfer (sender, recipient, amount) with an expiry, under an `approvalId` of its own, so a
+  decision delivered twice approves one transfer. `checkTransfer` passes it, `afterTransfer` uses it up, and
+  `revokeApproval` withdraws one. Approving the same transfer again adds to the count, and the newest expiry
+  applies to all of its approvals.
+- The approvers are the compliance's own, so on a module shared by several issuers, one issuer's approver
+  cannot answer for another.
+
+Limits, stated plainly:
+
+- **The approvers gate every cross-chain movement.** If they stop answering, requests are discarded at their
+  deadline, and only unbinding the module restores immediate issuance.
+- **A native transfer passes on one approver's approval,** while a cross-chain request needs all of them in
+  order. With a backend and an FHE rule listed, the backend alone approves native transfers, and the FHE rule
+  never sees them: the native path is as strong as the weakest approver.
+- **Mints are not judged**, being the issuer's own action, though they move holdings like a transfer does. An
+  issuer whose rule covers total holdings checks it before minting.
+- **Forced transfers, recoveries and relocations** between one identity's native wallets are not judged either.
+
 ## Two rules a module must follow
 
 **A module never calls another module.** It talks to the compliance and to the token's identity registry,
