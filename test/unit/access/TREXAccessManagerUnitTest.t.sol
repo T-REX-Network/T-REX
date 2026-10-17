@@ -80,7 +80,7 @@ contract TREXAccessManagerUnitTest is Test {
         assertEq(fresh.domainOf(registry), 1);
         assertEq(fresh.domainOf(identityStorage), 1);
         assertEq(fresh.domainOf(compliance), 1);
-        _assertSuiteLayout(fresh, 1, 1);
+        _assertSuiteLayout(fresh, 1);
     }
 
     function test_initializeSuite_RevertWhen_CalledTwice() public {
@@ -135,7 +135,7 @@ contract TREXAccessManagerUnitTest is Test {
         assertEq(manager.domainOf(registry), fund);
         assertEq(manager.domainOf(identityStorage), fund);
         assertEq(manager.domainOf(compliance), fund);
-        _assertSuiteLayout(manager, fund, fund);
+        _assertSuiteLayout(manager, fund);
     }
 
     /// @notice A storage holds one record per wallet whichever registry wrote it, so a second domain writing
@@ -251,6 +251,33 @@ contract TREXAccessManagerUnitTest is Test {
         );
         (bool otherTokenIsAgent,) = manager.hasRole(RolesLib.forDomain(fund, RolesLib.Role.AGENT), otherToken);
         assertTrue(otherTokenIsAgent, "the second token acts as an agent of the domain");
+    }
+
+    /// @notice Two tokens of one domain share a storage: the second registry is granted `IRS_WRITER` in that
+    ///         domain, and in no other, so what writes into a storage is always a registry of its own domain.
+    function test_setupSuite_ASecondRegistryOfTheDomainWritesThroughTheDomainsIrsWriter() public {
+        uint32 fundA = manager.createDomain("Fund A");
+        uint32 fundB = manager.createDomain("Fund B");
+        address otherToken = makeAddr("otherToken");
+        address otherRegistry = makeAddr("otherRegistry");
+        manager.setupSuite(fundA, token);
+        _mockSuite(otherToken, otherRegistry, identityStorage, makeAddr("otherCompliance"));
+
+        manager.setupSuite(fundA, otherToken);
+
+        assertEq(manager.domainOf(identityStorage), fundA);
+        assertEq(manager.domainOf(otherRegistry), fundA);
+        (bool writesInA,) = manager.hasRole(RolesLib.forDomain(fundA, RolesLib.Role.IRS_WRITER), otherRegistry);
+        (bool writesInB,) = manager.hasRole(RolesLib.forDomain(fundB, RolesLib.Role.IRS_WRITER), otherRegistry);
+        assertTrue(writesInA, "the second registry writes through its own domain");
+        assertFalse(writesInB, "no grant lands in another domain");
+        _assertRow(
+            manager,
+            identityStorage,
+            IERC3643IdentityRegistryStorage.addIdentityToStorage.selector,
+            fundA,
+            RolesLib.Role.IRS_WRITER
+        );
     }
 
     /// @notice Role admins belong to the domain. A second suite set up in it does not put back the default
@@ -404,8 +431,9 @@ contract TREXAccessManagerUnitTest is Test {
     // The layout, row by row
     // ============================================================
 
-    /// @dev Every row the manager writes for a suite in `domainId` whose storage sits in `storageDomainId`.
-    function _assertSuiteLayout(TREXAccessManager target, uint32 domainId, uint32 storageDomainId) private view {
+    /// @dev Every row the manager writes for a suite in `domainId`. The storage's rows and the registry's
+    ///      `IRS_WRITER` grant sit in the same domain as the rest of the suite, never in another.
+    function _assertSuiteLayout(TREXAccessManager target, uint32 domainId) private view {
         // Token
         _assertRow(target, token, IERC3643.setName.selector, domainId, RolesLib.Role.TOKEN_MANAGER);
         _assertRow(target, token, IERC3643.setSymbol.selector, domainId, RolesLib.Role.TOKEN_MANAGER);
@@ -483,35 +511,35 @@ contract TREXAccessManagerUnitTest is Test {
             target,
             identityStorage,
             IERC3643IdentityRegistryStorage.bindIdentityRegistry.selector,
-            storageDomainId,
+            domainId,
             RolesLib.Role.IRS_BINDER
         );
         _assertRow(
             target,
             identityStorage,
             IERC3643IdentityRegistryStorage.unbindIdentityRegistry.selector,
-            storageDomainId,
+            domainId,
             RolesLib.Role.OWNER
         );
         _assertRow(
             target,
             identityStorage,
             IERC3643IdentityRegistryStorage.addIdentityToStorage.selector,
-            storageDomainId,
+            domainId,
             RolesLib.Role.IRS_WRITER
         );
         _assertRow(
             target,
             identityStorage,
             IERC3643IdentityRegistryStorage.modifyStoredIdentity.selector,
-            storageDomainId,
+            domainId,
             RolesLib.Role.IRS_WRITER
         );
         _assertRow(
             target,
             identityStorage,
             IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector,
-            storageDomainId,
+            domainId,
             RolesLib.Role.IRS_WRITER
         );
         // Compliance
@@ -578,10 +606,10 @@ contract TREXAccessManagerUnitTest is Test {
         assertEq(target.getRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.OWNER)), ADMIN_ROLE);
         assertEq(target.getRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.SUITE_ADMIN)), ADMIN_ROLE);
         assertEq(target.getRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_ADMIN)), ADMIN_ROLE);
-        assertEq(target.getRoleAdmin(RolesLib.forDomain(storageDomainId, RolesLib.Role.IRS_WRITER)), ADMIN_ROLE);
+        assertEq(target.getRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER)), ADMIN_ROLE);
         // The suite's own contracts
         (bool tokenIsAgent,) = target.hasRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token);
-        (bool registryWrites,) = target.hasRole(RolesLib.forDomain(storageDomainId, RolesLib.Role.IRS_WRITER), registry);
+        (bool registryWrites,) = target.hasRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry);
         assertTrue(tokenIsAgent, "the token acts as an agent of its registry");
         assertTrue(registryWrites, "the registry writes into the storage");
     }

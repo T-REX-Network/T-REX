@@ -164,7 +164,10 @@ contract TREXAccessManager is AccessManagerUpgradeable {
     ///      one record per wallet whichever registry wrote it, so an agent of a domain whose registry writes into
     ///      it could register and revoke the wallets of every other domain's holders. Binding a registry to a
     ///      shared storage is not done here: a fresh storage binds its first registry at init, a reused one is
-    ///      bound by a holder of `IRS_BINDER`.
+    ///      bound by a holder of `IRS_BINDER`. A registry of another domain bound that way writes nothing, as it
+    ///      holds `IRS_WRITER` in its own domain only. The isolation is between the domains' roles, not from the
+    ///      manager's admin: every domain of one manager shares its `ADMIN_ROLE`, which can grant `IRS_WRITER`
+    ///      of any domain by hand.
     /// @dev A new domain and its first suite take one transaction: the manager inherits OpenZeppelin's
     ///      `multicall`, so the admin sends `createDomain(name)` and `setupSuite(domainCount() + 1, token)`
     ///      together. The id is `domainCount() + 1` because ids are dense and only admins create domains.
