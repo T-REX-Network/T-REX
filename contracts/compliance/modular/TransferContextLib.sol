@@ -78,4 +78,24 @@ library TransferContextLib {
         ctx.kind = MovementKindLib.CROSS_CHAIN;
     }
 
+    /// @dev A recall that landed: a satellite wallet burned `amount` and a native wallet of the same identity was
+    ///  credited with it.
+    function recall(
+        address compliance,
+        address fromIdentity,
+        address toIdentity,
+        bytes32 fromWallet,
+        bytes32 toWallet,
+        uint256 amount
+    ) internal pure returns (IModule.TransferContext memory ctx) {
+        ctx.compliance = compliance;
+        ctx.fromIdentity = fromIdentity;
+        ctx.toIdentity = toIdentity;
+        ctx.fromWallet = fromWallet;
+        ctx.toWallet = toWallet;
+        ctx.amountMin = amount;
+        ctx.amountMax = amount;
+        ctx.kind = MovementKindLib.RECALL;
+    }
+
 }

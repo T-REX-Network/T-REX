@@ -609,7 +609,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc TREXMessaging
     /// @dev The recall path: the proof is judged against the instruction it answers and the bridged position
     ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
-    ///      minted to: together, the transition {_recall} describes. Same pause policy as {_handleSettlement}: a
+    ///      minted to: together, the transition {_recall} describes. The mint stays on the raw `_update`, so the
+    ///      modules do not see a plain mint they never saw leave; the compliance is told a `RECALL` instead, once
+    ///      the credit landed, the one notification of the in-leg. Same pause policy as {_handleSettlement}: a
     ///      paused token leaves the proof deliverable, a proof for a recall already settled pauses the chain's
     ///      inbound, a proof for a recall never issued pauses the token. A duplicate of a settled proof changes
     ///      nothing.
@@ -620,13 +622,15 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
         nonReentrant
     {
-        (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount) =
+        (ISettlementHandler.Verdict verdict, address nativeWallet, bytes memory burnedWallet, uint256 amount) =
             TokenDelegationLib.consumeBurnProof(chainKey, body);
         if (verdict != ISettlementHandler.Verdict.None) {
             _applyVerdict(chainKey, verdict);
             return;
         }
-        if (amount != 0) ERC20Upgradeable._update(address(0), nativeWallet, amount);
+        if (amount == 0) return;
+        ERC20Upgradeable._update(address(0), nativeWallet, amount);
+        IModularCompliance(address(_getCompliance())).recalled(burnedWallet, nativeWallet, amount);
     }
 
     /// @dev The two brakes a handler can ask for, see {ISettlementHandler-Verdict}.

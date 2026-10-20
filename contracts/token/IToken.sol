@@ -229,8 +229,9 @@ interface IToken is IERC3643 {
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId);
 
     /// @notice Orders the Lite on `wallet`'s chain to burn up to `amount` of `wallet` and prove it under the returned id.
-    ///  The proof debits the bridged position and credits `nativeWallet` by what the satellite actually burned. A
-    ///  forced movement of location, never of ownership. One recall at a time per wallet; a lost instruction is sent
+    ///  The proof debits the bridged position and credits `nativeWallet` by what the satellite actually burned, and the
+    ///  compliance is told, as a `RECALL`, the inverse of the `DELEGATION` it heard on the way out. A forced movement
+    ///  of location, never of ownership. One recall at a time per wallet; a lost instruction is sent
     ///  again with {resend}. Only the gateway and the peer the instruction went to may answer it, even after a
     ///  `setPeer`: before replacing a hostile peer, distrust its gateway or drain its open recalls.
     /// @dev Callable by the AccessManager role bound to this selector. Not pause-gated: the instruction moves nothing.
