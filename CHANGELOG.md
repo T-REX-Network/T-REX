@@ -593,6 +593,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Breaking, `RecoverySuccess` and `UpdatedTokenInformation`**: no argument is `indexed` anymore, matching
+  the ERC-3643 specification. `RecoverySuccess(address lostWallet, address newWallet, address investorOnchainID)`
+  and `UpdatedTokenInformation(string, string, uint8, string, address newOnchainID)` keep their topic hash but
+  carry every argument in the data field. Consumers filtering these events by wallet or ONCHAINID topic must
+  decode the data instead.
 - **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
   after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
   token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
