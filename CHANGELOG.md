@@ -481,6 +481,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A zero-value transfer, mint or burn goes through** (audit L-02). The token lets a zero amount pass every
+  check and notifies compliance with it, as an ERC-20 hook should, but `ERC3643Compliance.transferred`,
+  `created` and `destroyed` reverted it with `ZeroValue`, so `transfer`, `transferFrom`, `mint` and `burn` of 0
+  all failed. The three guards are removed: a zero amount reaches the modules and moves nothing.
+  `ERC3643ErrorsLib.ZeroValue` had no other use and is removed. The token does not skip compliance on 0, since a
+  zero-value transfer still emits `Transfer` and the modules should see it.
 - **A settlement to a native wallet credits the identity the registry names when it lands** (audit L-34). The
   settlement path re-resolved a native recipient's owner, but from the identity stored at issuance instead of the
   registry, so a wallet relinked in between was credited to its old identity, and when the ledger had already

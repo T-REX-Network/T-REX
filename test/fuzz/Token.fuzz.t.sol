@@ -21,7 +21,7 @@ contract TokenFuzzTest is TREXSuiteTest {
 
     /// Frozen amount can never be set above balance, and once set stays <= balance.
     function testFuzz_freezeNeverExceedsBalance(uint256 mintAmt, uint256 freezeAmt) public {
-        mintAmt = bound(mintAmt, 1, 1e30); // mint(0) reverts ZeroValue via compliance.created
+        mintAmt = bound(mintAmt, 0, 1e30);
         vm.prank(agent);
         token.mint(alice, mintAmt);
 
@@ -83,7 +83,7 @@ contract TokenFuzzTest is TREXSuiteTest {
     function testFuzz_burnAutoUnfreezes(uint256 mintAmt, uint256 freezeAmt, uint256 burnAmt) public {
         mintAmt = bound(mintAmt, 1, 1e30);
         freezeAmt = bound(freezeAmt, 0, mintAmt);
-        burnAmt = bound(burnAmt, 1, mintAmt); // burn(0) reverts ZeroValue via compliance.destroyed
+        burnAmt = bound(burnAmt, 0, mintAmt);
         vm.startPrank(agent);
         token.mint(alice, mintAmt);
         token.freezePartialTokens(alice, freezeAmt);

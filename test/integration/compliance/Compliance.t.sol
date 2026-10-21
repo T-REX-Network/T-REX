@@ -424,12 +424,11 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.transferred(alice, address(0), 10);
     }
 
-    /// @notice Should revert when amount is zero
-    function test_transferred_RevertWhen_AmountIsZero() public {
+    /// @notice Should accept a zero amount, which a token reports for a zero-value movement
+    function test_transferred_Succeeds_WhenAmountIsZero() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         vm.prank(address(testToken));
-        vm.expectRevert(ErrorsLib.ZeroValue.selector);
         compliance.transferred(alice, bob, 0);
     }
 
@@ -461,12 +460,11 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.created(address(0), 10);
     }
 
-    /// @notice Should revert when amount is zero
-    function test_created_RevertWhen_AmountIsZero() public {
+    /// @notice Should accept a zero amount, which a token reports for a zero-value movement
+    function test_created_Succeeds_WhenAmountIsZero() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         vm.prank(address(testToken));
-        vm.expectRevert(ErrorsLib.ZeroValue.selector);
         compliance.created(bob, 0);
     }
 
@@ -510,12 +508,11 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.destroyed(address(0), 10);
     }
 
-    /// @notice Should revert when amount is zero
-    function test_destroyed_RevertWhen_AmountIsZero() public {
+    /// @notice Should accept a zero amount, which a token reports for a zero-value movement
+    function test_destroyed_Succeeds_WhenAmountIsZero() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         vm.prank(address(testToken));
-        vm.expectRevert(ErrorsLib.ZeroValue.selector);
         compliance.destroyed(alice, 0);
     }
 
