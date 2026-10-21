@@ -79,8 +79,9 @@ library WalletKeyLib {
 
     /// @notice Parses a version 1 ERC-7930 envelope, requiring it to be canonical.
     /// @dev One encoding per wallet, so one ledger key per wallet. Refused: bytes beyond the parsed envelope
-    ///  (ONCHAINID M-08) and a zero-led EVM chain reference, which decodes to the same id. A lone zero byte
-    ///  is accepted: it is how OpenZeppelin formats chain id 0.
+    ///  (ONCHAINID M-08), and on EVM an address that is not 20 bytes, an empty chain reference, and a zero-led
+    ///  chain reference, each of which would key the same wallet a second time or no wallet at all. A lone zero
+    ///  byte is accepted: it is how OpenZeppelin formats chain id 0.
     /// @param envelope the interoperable address
     /// @return chainType the CAIP-350 chain type
     /// @return chainReference the chain reference bytes
@@ -94,7 +95,10 @@ library WalletKeyLib {
         (success, chainType, chainReference, addr) = InteroperableAddress.tryParseV1(envelope);
         require(
             success && HEADER_LENGTH + chainReference.length + addr.length == envelope.length
-                && (chainType != EVM_CHAIN_TYPE || chainReference.length < 2 || chainReference[0] != 0x00),
+                && (chainType != EVM_CHAIN_TYPE
+                    || (addr.length == 20
+                        && chainReference.length > 0
+                        && (chainReference.length == 1 || chainReference[0] != 0x00))),
             ErrorsLib.NonCanonicalInteroperableAddress(envelope)
         );
     }
