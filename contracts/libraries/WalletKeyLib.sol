@@ -78,9 +78,8 @@ library WalletKeyLib {
     bytes2 private constant EVM_CHAIN_TYPE = 0x0000;
 
     /// @notice Parses a version 1 ERC-7930 envelope, requiring it to be canonical.
-    /// @dev One encoding per wallet, so one ledger key per wallet. Refused: bytes beyond the parsed envelope
-    ///  (ONCHAINID M-08) and a zero-led EVM chain reference, which decodes to the same id. A lone zero byte
-    ///  is accepted: it is how OpenZeppelin formats chain id 0.
+    /// @dev One encoding per wallet, so one ledger key per wallet. Any other way of writing a wallet would give
+    ///  it a second ledger key, or name no wallet at all, so it is refused.
     /// @param envelope the interoperable address
     /// @return chainType the CAIP-350 chain type
     /// @return chainReference the chain reference bytes
@@ -92,11 +91,23 @@ library WalletKeyLib {
     {
         bool success;
         (success, chainType, chainReference, addr) = InteroperableAddress.tryParseV1(envelope);
+
+        // `tryParseV1` ignores bytes after the address, and they would be the same wallet under another key.
+        bool noTrailingBytes = HEADER_LENGTH + chainReference.length + addr.length == envelope.length;
+
         require(
-            success && HEADER_LENGTH + chainReference.length + addr.length == envelope.length
-                && (chainType != EVM_CHAIN_TYPE || chainReference.length < 2 || chainReference[0] != 0x00),
+            success && noTrailingBytes && (chainType != EVM_CHAIN_TYPE || _isCanonicalEvm(envelope)),
             ErrorsLib.NonCanonicalInteroperableAddress(envelope)
         );
+    }
+
+    /// @dev Whether an EVM envelope is written the one standard way: a 20-byte address and the shortest chain
+    ///  reference. Rebuilding it from its chain id and address must give back the same bytes. Any other spelling
+    ///  (a padded address, an empty or zero-led chain reference) names the same wallet under another key, or no
+    ///  wallet at all.
+    function _isCanonicalEvm(bytes memory envelope) private pure returns (bool) {
+        (bool success, uint256 chainId, address account) = InteroperableAddress.tryParseEvmV1(envelope);
+        return success && keccak256(envelope) == keccak256(InteroperableAddress.formatEvmV1(chainId, account));
     }
 
     /// @notice Returns the ledger key of a wallet: `keccak256` over its canonical envelope.
