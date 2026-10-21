@@ -12,6 +12,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import {
+    DelegatedCapRuleModule,
     RecordingModule,
     RuleOnlyModule,
     SpenderOnlyModule,
@@ -229,8 +230,16 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     // ==== .canSpenderCall routing Tests ====
 
     /// @notice With no spender-aware module bound, nothing objects.
-    function test_canSpenderCall_Success_WhenNoModuleDeclaresTheSpenderCheck() public view {
+    function test_canSpenderCall_Success_WhenNoModuleDeclaresTheSpenderCheck() public {
+        vm.prank(address(token));
         assertTrue(mc.canSpenderCall(charlie, alice, bob, 100));
+    }
+
+    /// @notice Only the bound token asks, since the spender it names is kept for the transfer that follows.
+    function test_canSpenderCall_RevertWhen_CallerIsNotTheToken() public {
+        vm.prank(charlie);
+        vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
+        mc.canSpenderCall(charlie, alice, bob, 100);
     }
 
     /// @notice A bound spender module decides the answer.
@@ -239,9 +248,11 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(deployer);
         mc.addModule(address(spenderCheck));
 
+        vm.prank(address(token));
         assertTrue(mc.canSpenderCall(charlie, alice, bob, 100));
 
         spenderCheck.setAllow(false);
+        vm.prank(address(token));
         assertFalse(mc.canSpenderCall(charlie, alice, bob, 100));
     }
 
@@ -255,6 +266,45 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertTrue(mc.canTransfer(alice, bob, 100));
         vm.prank(alice);
         token.transfer(bob, 100);
+    }
+
+    /// @notice The trackers are told who called `transferFrom`, and a direct transfer after it carries no
+    ///         spender: the compliance forgets it once the transfer is recorded.
+    function test_transferFrom_Success_WhenTrackersSeeTheSpender() public {
+        TrackerOnlyModule tracker = TrackerOnlyModule(_deploy(address(new TrackerOnlyModule())));
+        vm.prank(deployer);
+        mc.addModule(address(tracker));
+        vm.prank(alice);
+        token.approve(charlie, 100);
+
+        vm.prank(charlie);
+        token.transferFrom(alice, bob, 100);
+        (,,,,,,,, bytes memory spender) = tracker.lastContext();
+        assertEq(spender, InteroperableAddress.formatEvmV1(block.chainid, charlie));
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+        (,,,,,,,, spender) = tracker.lastContext();
+        assertEq(spender, "");
+    }
+
+    /// @notice A rule sees who called `transferFrom`, so it can cap delegated transfers without touching
+    ///         direct ones.
+    function test_transferFrom_RevertWhen_ARuleCapsDelegatedTransfers() public {
+        DelegatedCapRuleModule cap = DelegatedCapRuleModule(_deploy(address(new DelegatedCapRuleModule())));
+        vm.prank(deployer);
+        mc.addModule(address(cap));
+        cap.setAllowedAmount(50);
+        vm.prank(alice);
+        token.approve(charlie, 100);
+
+        vm.prank(charlie);
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        token.transferFrom(alice, bob, 100);
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+        assertEq(token.balanceOf(bob), 100);
     }
 
     // ==== .requestTransferValidation routing Tests ====

@@ -184,8 +184,10 @@ interface IModularCompliance is IERC3643Compliance {
      *  a direct transfer needs no spender check: the spender is the sender, already covered by
      *  {canTransfer}
      *  returns true when no bound module objects, including when none enforces a spender rule
+     *  only the bound token may call it, right before its `transferFrom` moves anything: `_spender` is kept
+     *  for the rest of that transfer, so the `RULE` and `TRACKER` modules see it in their context too
      */
-    function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool);
+    function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external returns (bool);
 
     /**
      *  @dev getter for the bound modules of one type, in the order they were bound
