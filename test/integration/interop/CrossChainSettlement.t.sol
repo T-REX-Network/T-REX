@@ -156,7 +156,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, aliceSat, BALANCE - 95, BALANCE)
         );
-        TokenLedgerHarness(address(token)).recall(aliceSat, alice, BALANCE);
+        TokenLedgerHarness(address(token)).ledgerRecall(aliceSat, alice, BALANCE);
     }
 
     // ==== refusal Tests ====

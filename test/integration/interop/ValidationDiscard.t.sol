@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
@@ -87,19 +85,64 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
-    /// @notice An agent, a manager or a stranger cannot discard.
-    function test_discardExpiredValidations_RevertWhen_CallerLacksTheKeeperRole() public {
-        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+    /// @notice Between the windows the keeper alone may discard: an agent, a manager or a stranger is told when
+    ///         it opens to them.
+    function test_discardExpiredValidations_RevertWhen_NonKeeperBeforeTheSecondWindow() public {
+        uint64 publicAt = uint64(issuedAt + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
+        vm.warp(publicAt);
 
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         boundCompliance.discardExpiredValidations(_ids(id));
 
         vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, deployer));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
+        boundCompliance.discardExpiredValidations(_ids(id));
+
+        vm.prank(makeAddr("stranger"));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         boundCompliance.discardExpiredValidations(_ids(id));
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
+    }
+
+    /// @notice Past the second window a stranger releases the reservation the keeper never did.
+    function test_discardExpiredValidations_Success_WhenAnyoneAfterTheSecondWindow() public {
+        vm.warp(issuedAt + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ValidationDiscarded(id);
+        vm.prank(makeAddr("stranger"));
+        boundCompliance.discardExpiredValidations(_ids(id));
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 0);
+    }
+
+    /// @notice A stranger's batch is judged id by id: one still inside the keeper's window refuses the whole call,
+    ///         and the keeper's batch of the same ids goes through.
+    function test_discardExpiredValidations_RevertWhen_NonKeeperBatchHasOneIdInsideTheKeeperWindow() public {
+        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
+        uint256 later = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 10, CAP);
+        uint64 laterPublicAt = uint64(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
+        vm.warp(laterPublicAt);
+
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = id;
+        ids[1] = later;
+        vm.prank(makeAddr("stranger"));
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, later, laterPublicAt)
+        );
+        boundCompliance.discardExpiredValidations(ids);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+
+        vm.prank(keeper);
+        boundCompliance.discardExpiredValidations(ids);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(uint8(boundCompliance.statusOf(later)), uint8(ITransferValidation.ValidationStatus.Discarded));
     }
 
     /// @notice A validation still inside its reconciliation window is refused.
