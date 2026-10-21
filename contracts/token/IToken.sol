@@ -210,7 +210,53 @@ interface IToken is IERC3643 {
         external
         returns (bytes32);
 
-    /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
-    function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external returns (bytes32);
+    /// @notice Moves `amount` of `holder`'s free balance onto `toWallet`, a satellite wallet of the same identity: the
+    ///  native balance is burned (`Transfer(holder, 0x0)`), the bridged position credited, `totalSupply` unchanged,
+    ///  and a `MINT_INSTRUCTION` carrying a fresh delegation id sent to the Lite on `toWallet`'s chain. Location
+    ///  moves, ownership does not, so no distribution rule is asked; the compliance is told, as a `DELEGATION`, so
+    ///  its ledger follows a registry relink of `holder`. A lost instruction is sent again with {resend}. The way
+    ///  back is a validation to a native wallet through the compliance, or an agent's {instructRecall}.
+    /// @dev Callable by `holder`, by the identity `holder` is linked to, or by an address the AccessManager authorises
+    ///  for this selector; otherwise reverts with `AccessManagedUnauthorized`. Reverts with `EnforcedPause`,
+    ///  `FrozenWallet`, `ZeroValue`, `WalletsNotLinked`, `UnverifiedWallet`, `NotASatelliteWallet`,
+    ///  `ERC20InsufficientBalance` and `ChainNotOpen`; nothing moves in any of these cases. Emits `Transfer`,
+    ///  `DelegatedOut` and `ProtocolMessageSent`.
+    /// @param holder the native wallet the tokens leave
+    /// @param toWallet the ERC-7930 envelope of the satellite wallet to credit
+    /// @param amount the amount to delegate
+    /// @return sendId the gateway's id for the instruction
+    function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId);
+
+    /// @notice Orders the Lite on `wallet`'s chain to burn up to `amount` of `wallet` and prove it under the returned id.
+    ///  The proof debits the bridged position and credits `nativeWallet` by what the satellite actually burned. A
+    ///  forced movement of location, never of ownership. One recall at a time per wallet; a lost instruction is sent
+    ///  again with {resend}. Only the gateway and the peer the instruction went to may answer it, even after a
+    ///  `setPeer`: before replacing a hostile peer, distrust its gateway or drain its open recalls.
+    /// @dev Callable by the AccessManager role bound to this selector. Not pause-gated: the instruction moves nothing.
+    ///  Reverts with `ZeroValue`, `ZeroAddress`, `WalletsNotLinked` (revoked wallets still resolve),
+    ///  `NotASatelliteWallet`, `RecallPending`, `InsufficientBridgedBalance` above the wallet's bridged position, and
+    ///  `ChainNotOpen`. Reservations are not subtracted: the satellite burns what it still holds and proves that.
+    ///  Emits `RecallInstructed` and `ProtocolMessageSent`.
+    /// @param wallet the ERC-7930 envelope of the satellite wallet to burn
+    /// @param amount the most the satellite may burn
+    /// @param nativeWallet the wallet on this chain to credit
+    /// @return recallId the id the burn proof must answer with
+    function instructRecall(bytes calldata wallet, uint256 amount, address nativeWallet)
+        external
+        returns (uint256 recallId);
+
+    /// @notice Sends an instruction again, byte for byte, under its original id, to the peer it first went to, through
+    ///  the chain's current route. Moves nothing on this chain; the Lite acts on each id once.
+    ///  `kind` 0: a delegation, `data` = `abi.encode(toWallet, amount, holder, peer)` as dispatched, checked against
+    ///  the commitment stored then. `kind` 1: a recall still waiting for its proof, `data` = `abi.encode(wallet)`;
+    ///  the gateway admitted to answer it becomes the current route.
+    /// @dev Callable by the AccessManager role bound to this selector, while paused too. Reverts with
+    ///  `DelegationMismatch`, `RecallNotPending`, `RecallMismatch`, `PeerChanged` when the chain's peer is no longer
+    ///  the one addressed, `UnknownResendKind`, and `ChainNotOpen`. Emits `ProtocolMessageSent` and `InstructionResent`.
+    /// @return sendId the gateway's id for the resent instruction
+    function resend(uint8 kind, uint256 id, bytes calldata data) external returns (bytes32 sendId);
+
+    /// @notice The recall instruction `recallId` while it waits for its proof; all zeros once settled or never issued.
+    function pendingRecall(uint256 recallId) external view returns (TokenLedgerLib.PendingRecall memory);
 
 }

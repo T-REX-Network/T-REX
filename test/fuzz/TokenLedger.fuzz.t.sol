@@ -70,10 +70,12 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         } else if (kind == 4) {
             try token.freezePartialTokens(actors[from], amount % (token.freeBalanceOf(actors[from]) + 1)) { } catch { }
         } else if (kind == 5) {
-            try ledger.delegateOut(actors[from], satellites[from], amount % (token.freeBalanceOf(actors[from]) + 1)) { }
+            try ledger.ledgerDelegateOut(
+                actors[from], satellites[from], amount % (token.freeBalanceOf(actors[from]) + 1)
+            ) { }
                 catch { }
         } else if (kind == 6) {
-            try ledger.recall(
+            try ledger.ledgerRecall(
                 satellites[from], actors[from], amount % (token.bridgedBalanceOf(satellites[from]) + 1)
             ) { }
                 catch { }
@@ -130,14 +132,14 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         vm.startPrank(agent);
         token.mint(alice, mintAmount);
         token.freezePartialTokens(alice, frozen);
-        ledger.delegateOut(alice, satellites[0], delegated);
+        ledger.ledgerDelegateOut(alice, satellites[0], delegated);
 
         assertEq(token.balanceOf(alice), mintAmount - delegated, "balance after delegation");
         assertEq(token.getFrozenTokens(alice), frozen, "frozen after delegation");
         assertEq(token.bridgedBalanceOf(satellites[0]), delegated, "bridged after delegation");
         assertEq(token.totalSupply(), mintAmount, "supply after delegation");
 
-        ledger.recall(satellites[0], alice, delegated);
+        ledger.ledgerRecall(satellites[0], alice, delegated);
         vm.stopPrank();
 
         assertEq(token.balanceOf(alice), mintAmount, "balance after recall");
@@ -156,7 +158,7 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
         vm.startPrank(agent);
         token.mint(alice, mintAmount);
-        ledger.delegateOut(alice, satellites[0], delegated);
+        ledger.ledgerDelegateOut(alice, satellites[0], delegated);
         ledger.bridgedTransfer(satellites[0], satellites[2], settled, 1);
         vm.stopPrank();
 
@@ -179,7 +181,7 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         token.mint(alice, mintAmount);
         token.freezePartialTokens(alice, frozen);
         // the counterparty wallet is bob's, so the settlement back crosses identities
-        ledger.delegateOut(alice, satellites[1], settled);
+        ledger.ledgerDelegateOut(alice, satellites[1], settled);
 
         assertEq(token.balanceOf(alice), mintAmount - settled, "balance after delegating out");
         assertEq(token.bridgedBalanceOf(satellites[1]), settled, "bridged after delegating out");
@@ -202,12 +204,12 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
         vm.startPrank(agent);
         token.mint(alice, 1000);
-        ledger.delegateOut(alice, satellites[0], 500);
+        ledger.ledgerDelegateOut(alice, satellites[0], 500);
 
         vm.expectRevert(expected);
-        ledger.delegateOut(alice, padded, amount % 500);
+        ledger.ledgerDelegateOut(alice, padded, amount % 500);
         vm.expectRevert(expected);
-        ledger.recall(padded, alice, amount % 500);
+        ledger.ledgerRecall(padded, alice, amount % 500);
         vm.expectRevert(expected);
         ledger.bridgedTransfer(padded, satellites[1], amount % 500, 1);
         vm.expectRevert(expected);

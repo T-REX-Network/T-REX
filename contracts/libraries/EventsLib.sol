@@ -77,10 +77,27 @@ library EventsLib {
 
     // Token Events
 
-    /// @notice Emitted on a delegation-out. Carries the full envelope so indexers need no reverse key table.
-    event DelegatedOut(address indexed holder, bytes32 indexed toKey, bytes toWallet, uint256 amount);
+    /// @notice Emitted on a delegation-out. Carries the full envelope so indexers need no reverse key table, and the
+    ///  delegation's id, which the mint instruction and any resend carry. Zero on a transition with no instruction.
+    event DelegatedOut(
+        address indexed holder, bytes32 indexed toKey, uint256 indexed delegationId, bytes toWallet, uint256 amount
+    );
     /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
     event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
+    /// @notice Emitted when an agent orders a satellite to burn up to `amount` of `wallet`; the proof that answers
+    ///  credits `nativeWallet`.
+    event RecallInstructed(
+        uint256 indexed recallId, bytes32 indexed walletKey, address indexed nativeWallet, bytes wallet, uint256 amount
+    );
+    /// @notice Emitted when a burn proof settles its recall. `amount` is what the satellite proved.
+    event RecallSettled(uint256 indexed recallId, bytes32 indexed originChainKey, uint256 amount);
+    /// @notice Emitted when the proof that already settled a recall is delivered again: nothing is applied.
+    event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
+    /// @notice Emitted when a burn proof answers a recall never issued, or differs from the proof that settled it.
+    ///  The token pauses itself until an agent unpauses it, as it does on a replayed settlement.
+    event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
+    /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
+    event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
     /// @notice Emitted when the burn leg of a cross-chain validation takes the amount out of the sender's
     ///         position and holds it in transit until the mint leg lands.
     /// A validation being issued reserved part of a satellite wallet's bridged balance.
@@ -184,9 +201,9 @@ library EventsLib {
     event ProtocolMessageReceived(
         MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 receiveId
     );
-    /// @notice Emitted by the token when an attributed burn proof reaches its recall path.
+    /// @notice Emitted by the token when an attributed burn proof reaches its recall path, before it is judged.
     event BurnProofReceived(
-        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
+        bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
 
     // ModularCompliance Interop Events

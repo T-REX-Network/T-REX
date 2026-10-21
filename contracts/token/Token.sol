@@ -77,17 +77,20 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
 import { IToken } from "./IToken.sol";
+import { TokenDelegationLib } from "./TokenDelegationLib.sol";
 import { TokenGuardsLib } from "./TokenGuardsLib.sol";
 import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 import { TokenRecoveryLib } from "./TokenRecoveryLib.sol";
@@ -187,9 +190,44 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         return _sendComplianceValidation(chainKey, validationId, body);
     }
 
-    /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
-    function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
-        return _sendMessage(chainKey, MessageTypesLib.Message.RECALL_INSTRUCTION, body);
+    /// @inheritdoc IToken
+    /// @dev The native burn happens here, the only part the library cannot reach; {TokenDelegationLib-delegateOut}
+    ///  then checks the burn stayed inside the free balance, credits the bridged position, checks the wallets, tells
+    ///  the compliance, commits and sends the instruction. One transaction, so a refusal anywhere undoes the burn,
+    ///  and the satellite is never told to mint what this chain still holds. Together these are the transition
+    ///  {_delegateOut} describes.
+    function delegateOut(address holder, bytes calldata toWallet, uint256 amount)
+        external
+        whenNotPaused
+        nonReentrant
+        returns (bytes32)
+    {
+        ITREXRegistry registry = ITREXRegistry(address(_getIdentityRegistry()));
+        if (_msgSender() != holder && _msgSender() != address(registry.identity(holder))) {
+            _checkCanCallSelector(this.delegateOut.selector);
+        }
+        require(!_isFrozen(holder), ErrorsLib.FrozenWallet(holder));
+
+        ERC20Upgradeable._update(holder, address(0), amount);
+
+        return TokenDelegationLib.delegateOut(holder, toWallet, amount);
+    }
+
+    /// @inheritdoc IToken
+    /// @dev No pause guard: an instruction moves nothing here. The proof that answers it is applied only once the
+    ///  token is unpaused, and stays deliverable until then.
+    function instructRecall(bytes calldata wallet, uint256 amount, address nativeWallet)
+        external
+        restricted
+        returns (uint256)
+    {
+        return TokenDelegationLib.instructRecall(wallet, amount, nativeWallet);
+    }
+
+    /// @inheritdoc IToken
+    /// @dev No pause guard, like {instructRecall}: a resend moves nothing.
+    function resend(uint8 kind, uint256 id, bytes calldata data) external restricted returns (bytes32) {
+        return TokenDelegationLib.resend(kind, id, data);
     }
 
     /// @inheritdoc IToken
@@ -197,7 +235,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         external
         whenNotPaused
     {
-        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireBoundCompliance();
         _settle(from, to, amount, validationId);
     }
 
@@ -206,7 +244,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         external
         whenNotPaused
     {
-        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireBoundCompliance();
         TokenLedgerLib.holdInTransit(from, amount, validationId, reserved);
     }
 
@@ -242,7 +280,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @inheritdoc IToken
     function returnHeldInTransit(bytes calldata to, uint256 validationId) external whenNotPaused {
-        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireBoundCompliance();
         TokenLedgerLib.returnHeldInTransit(to, validationId);
     }
 
@@ -261,7 +299,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  Issuance itself is allowed while the token is paused, and the reservation has to follow it, or a paused
     ///  token would issue validations with nothing held against the wallet they draw from.
     function reserveForValidation(bytes calldata wallet, uint256 amount) external {
-        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireBoundCompliance();
         TokenLedgerLib.reserve(wallet, amount);
     }
 
@@ -269,7 +307,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev No pause guard, for the reason `reserveForValidation` gives: a discard while the token is paused
     ///  must still give the wallet its room back.
     function releaseFromValidation(bytes calldata wallet, uint256 amount) external {
-        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
+        _requireBoundCompliance();
         TokenLedgerLib.release(wallet, amount);
     }
 
@@ -286,6 +324,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc IToken
     function totalInTransit() external view returns (uint256) {
         return TokenLedgerLib.layout().totalInTransit;
+    }
+
+    /// @inheritdoc IToken
+    function pendingRecall(uint256 recallId) external view returns (TokenLedgerLib.PendingRecall memory) {
+        return TokenLedgerLib.layout().recalls[recallId];
     }
 
     /* ----- Transfer Functions ----- */
@@ -343,28 +386,31 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Ledger Transitions ----- */
 
     // Pause policy for everything below: the transitions move balances without {_update} and check no pause
-    // themselves; the entry points that reach them do. Today those are `_handleSettlement`, `settleValidation`
-    // and `holdInTransit`, each of which requires the token not to be paused. A delegation-out or recall flow
-    // that lands later must do the same before calling `_delegateOut` or `_recall`, so that the pause halts
-    // every movement between wallets, native or satellite, while mints and burns stay allowed.
+    // themselves; the entry points that reach them do. Those are `_handleSettlement`, `settleValidation`,
+    // `holdInTransit`, `delegateOut` and `_handleBurnProof`, each of which requires the token not to be paused,
+    // so that the pause halts every movement between wallets, native or satellite, while mints and burns stay
+    // allowed.
 
+    /// @dev The test harness's transition; production goes through {delegateOut} and {TokenDelegationLib}.
     /// @dev Moves `amount` of `holder`'s free balance out to `toWallet`, a wallet on a satellite chain: a native
     ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
     ///  Relocation of one identity's own position, so ownership does not move: the calling flow checks pause,
     ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
     ///  the buckets and the envelope only. It is the only way a native position reaches a satellite.
-    function _delegateOut(address holder, bytes memory toWallet, uint256 amount) internal {
+    /// @param delegationId the id the mint instruction carries, zero on a transition with no instruction
+    function _delegateOut(address holder, bytes memory toWallet, uint256 amount, uint256 delegationId) internal {
         require(holder != address(0), ErrorsLib.ZeroAddress());
         bytes32 toKey = TokenLedgerLib.creditFromNative(holder, toWallet, amount, freeBalanceOf(holder));
         ERC20Upgradeable._update(holder, address(0), amount);
 
-        emit EventsLib.DelegatedOut(holder, toKey, toWallet, amount);
+        emit EventsLib.DelegatedOut(holder, toKey, delegationId, toWallet, amount);
     }
 
+    /// @dev The test harness's transition; production goes through {_handleBurnProof} and {TokenDelegationLib}.
     /// @dev Brings `amount` back from `fromWallet`, a wallet on a satellite chain, onto `holder`'s free balance:
     ///  a bridged debit and a native mint (`Transfer(0x0, holder)`). The mirror of {_delegateOut}, applied on a
-    ///  consumed burn proof; the flow checks that `holder` belongs to the burned wallet's identity, so ownership
-    ///  does not move here either. A settlement leg that crosses identities is {_settle}.
+    ///  consumed burn proof; {_handleBurnProof} checks that `holder` belongs to the burned wallet's identity and
+    ///  has the compliance follow any relink of `holder` first, so ownership does not move here either. A settlement leg that crosses identities is {_settle}.
     function _recall(bytes memory fromWallet, address holder, uint256 amount) internal {
         bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, holder, amount);
         ERC20Upgradeable._update(address(0), holder, amount);
@@ -387,6 +433,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         ERC20Upgradeable._update(address(0), recipient, amount);
 
         emit EventsLib.SettledToNative(fromKey, recipient, validationId, from, amount);
+    }
+
+    /// @dev The ledger entry points only the bound compliance may call, which classified the movement first.
+    function _requireBoundCompliance() private view {
+        require(_msgSender() == address(_getCompliance()), ErrorsLib.OnlyBoundCompliance());
     }
 
     /* ----- Utility Functions ----- */
@@ -457,26 +508,48 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         emit ComplianceAdded(complianceAddress);
     }
 
-    /// @dev Adds the T-REX recovery preconditions to the standard recovery: a wallet may not be
-    ///  recovered onto itself, there must be something to recover, and at least one of the two wallets
-    ///  must already be known to the identity registry.
+    /// @dev The standard recovery with the T-REX preconditions in front, a wallet may not be recovered onto
+    ///  itself, there must be something to recover, and at least one of the two wallets must already be known
+    ///  to the identity registry, and the move reported to the modular compliance as an agent's movement, so
+    ///  the trackers can leave it out of what they count against the investor. The steps are the base's, see
+    ///  {ERC3643Token-_recoveryAddress}; only the compliance call differs.
+    /// @dev Carries its own `nonReentrant` and `whenNotPaused` because it reimplements the base body instead
+    ///  of calling `super`, like {_forcedTransfer}.
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         internal
         override
+        whenNotPaused
+        nonReentrant
         returns (bool)
     {
-        TokenRecoveryLib.checkRecovery(
-            _getIdentityRegistry(), lostWallet, newWallet, investorOnchainId, balanceOf(lostWallet)
-        );
+        uint256 investorTokens = balanceOf(lostWallet);
+        TokenRecoveryLib.checkRecovery(_getIdentityRegistry(), lostWallet, newWallet, investorOnchainId, investorTokens);
 
-        return super._recoveryAddress(lostWallet, newWallet, investorOnchainId);
+        uint256 frozenTokens = _erc3643TokenStorage().frozenTokens[lostWallet];
+
+        // The new wallet is registered before the move and the lost wallet is deleted after the compliance
+        // call, so that during `agentTransferred` both wallets still resolve to the identities that hold and
+        // receive the tokens. A module keyed by identity can then debit and credit through the registry.
+        bool migrateIdentity = _registerRecoveredWallet(lostWallet, newWallet, investorOnchainId);
+
+        _forceUpdate(lostWallet, newWallet, investorTokens);
+        _migrateFrozenAmount(newWallet, frozenTokens);
+        _migrateAddressFrozen(lostWallet, newWallet);
+
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(lostWallet, newWallet, investorTokens, MovementKindLib.RECOVERY);
+
+        if (migrateIdentity) _getIdentityRegistry().deleteIdentity(lostWallet);
+
+        emit RecoverySuccess(lostWallet, newWallet, investorOnchainId);
+        return true;
     }
 
     /// @dev Adds the T-REX `ForcedTransfer` event to the standard forced transfer. It is emitted before
     ///  the compliance hook so that no module log can land between `Transfer` and this event.
     /// @dev Carries its own `nonReentrant` and `whenNotPaused` because it reimplements the base body
     ///  instead of calling `super`, so the base modifiers never run on this path. {_recoveryAddress} does
-    ///  call `super` and inherits both, which is why it is not marked here.
+    ///  the same.
     function _forcedTransfer(address from, address to, uint256 amount)
         internal
         override
@@ -487,7 +560,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         require(_getIdentityRegistry().isVerified(to), ErrorsLib.UnverifiedIdentity());
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
-        _getCompliance().transferred(from, to, amount);
+        // Reported as an agent's movement, so a module counting what the investor does can leave it out.
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
         return true;
     }
 
@@ -522,15 +597,24 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc TREXMessaging
-    /// @dev The recall path: credits the holder's native wallet against a satellite's burn proof.
-    ///
-    /// The path must check that the destination wallet is linked to the same identity as the burned one,
-    /// because a recall moves location and never ownership, then consume the proof through {_recall}.
-    /// The identity link and the call into the ledger arrive with the movement types; until then the
-    /// proof is attributed, checked for a destination, and announced with its fields intact, without
-    /// touching the ledger.
-    function _handleBurnProof(bytes32 chainKey, bytes memory body) internal virtual override {
-        TREXMessagingLib.announceBurnProof(chainKey, body);
+    /// @dev The recall path: the proof is judged against the instruction it answers and the bridged position
+    ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
+    ///      minted to: together, the transition {_recall} describes. Same pause and halt policy as
+    ///      {_handleSettlement}: a paused token leaves the proof deliverable, and a proof the token cannot account
+    ///      for pauses it. A duplicate of a settled proof changes nothing.
+    function _handleBurnProof(bytes32 chainKey, bytes memory body)
+        internal
+        virtual
+        override
+        whenNotPaused
+        nonReentrant
+    {
+        (bool halt, address nativeWallet, uint256 amount) = TokenDelegationLib.consumeBurnProof(chainKey, body);
+        if (halt) {
+            _pause();
+            return;
+        }
+        if (amount != 0) ERC20Upgradeable._update(address(0), nativeWallet, amount);
     }
 
     /// @inheritdoc ERC3643Token
