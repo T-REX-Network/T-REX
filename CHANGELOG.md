@@ -481,6 +481,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **An owner granted with a delay can bind and unbind a compliance's token** (audit L-13). `bindToken` and
+  `unbindToken` were authorized through one synthetic selector, `RolesLib.BIND_UNBIND_TOKEN`, asked for immediate
+  permission only. An owner granted with an execution delay could not schedule either call: the AccessManager
+  schedules by the real selector, which had no row and fell back to `ADMIN_ROLE`. The compliance table of
+  `AccessManagerSetupLib` now maps `bindToken` and `unbindToken` to `OWNER` like every other owner function, and
+  the compliance checks them the way `restricted` does, consuming a scheduled operation. A caller without the role
+  now reverts with `AccessManagedUnauthorized` instead of `OnlyOwnerOrTokenCanCall`. Removed:
+  `RolesLib.BIND_UNBIND_TOKEN` and the error `OnlyOwnerOrTokenCanCall`. The token's own bind and unbind paths are
+  unchanged. A suite set up before this change needs the two rows added to its manager.
 - **`UtilityChecker` predictions follow the registry and the compliance** (audit L-32). `getVerifiedDetails` let
   the last trusted issuer holding a claim for a topic overwrite the row, so a valid claim from a first issuer was
   reported as failing when a later issuer's claim did not validate, while `isVerified` accepts the first valid
