@@ -135,7 +135,7 @@ library AccessManagerSetupLib {
     }
 
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](18);
+        table = new SelectorRole[](17);
         table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.Role.TOKEN_MANAGER);
         table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.Role.TOKEN_MANAGER);
         table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.Role.IDENTITY_MANAGER);
@@ -143,17 +143,16 @@ library AccessManagerSetupLib {
         table[4] = SelectorRole(IERC3643.setCompliance.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[5] = SelectorRole(Token.setRoute.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[6] = SelectorRole(Token.setPeer.selector, RolesLib.Role.IDENTITY_MANAGER);
-        table[7] = SelectorRole(Token.dispatchMintInstruction.selector, RolesLib.Role.AGENT);
-        table[8] = SelectorRole(Token.dispatchRecallInstruction.selector, RolesLib.Role.AGENT);
-        table[9] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
-        table[10] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
-        table[11] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[12] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[13] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
-        table[14] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
-        table[15] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
-        table[16] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
-        table[17] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[7] = SelectorRole(Token.dispatchRecallInstruction.selector, RolesLib.Role.AGENT);
+        table[8] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
+        table[9] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
+        table[10] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[11] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[12] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[13] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
+        table[14] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[15] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[16] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {

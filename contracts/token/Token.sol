@@ -215,14 +215,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         return _sendComplianceValidation(chainKey, validationId, body);
     }
 
-    /// @dev Sends a delegation-out mint instruction to this token's peer on `chainKey`.
-    ///
-    /// One-way by design: delegation-out is atomic and final here, so no reconciliation is expected and
-    /// none is tracked. Reverts when the chain was never opened.
-    function dispatchMintInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
-        return _sendMessage(chainKey, MessageTypesLib.Message.MINT_INSTRUCTION, body);
-    }
-
     /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
     function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external restricted returns (bytes32) {
         return _sendMessage(chainKey, MessageTypesLib.Message.RECALL_INSTRUCTION, body);

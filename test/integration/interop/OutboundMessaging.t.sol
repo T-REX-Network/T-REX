@@ -26,7 +26,6 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     uint256 validationId = 1;
     bytes validationBody = abi.encode(uint256(1), "validation");
-    bytes mintBody = abi.encode(uint256(2), "mint");
     bytes recallBody = abi.encode(uint256(3), "recall");
 
     function setUp() public override {
@@ -78,7 +77,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _dispatch(validationId, satellite);
 
         vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
+        token.dispatchRecallInstruction(satellite, recallBody);
 
         assertEq(gateway.queueLength(), 2);
     }
@@ -132,38 +131,6 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(token.pinnedRouteFor(validationId, optimism), address(optimismGateway));
         assertEq(gateway.queueLength(), 1);
         assertEq(optimismGateway.queueLength(), 1);
-    }
-
-    /* ----- Mint instruction: fire and forget ----- */
-
-    function testAgentDispatchesAMintInstructionAndItIsAnnounced() public {
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.MINT_INSTRUCTION, satellite, gateway.receiveIdFor(0));
-
-        vm.prank(agent);
-        bytes32 sendId = token.dispatchMintInstruction(satellite, mintBody);
-
-        assertEq(gateway.queueLength(), 1);
-        assertEq(sendId, gateway.receiveIdFor(0));
-
-        (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
-        assertEq(messageType, uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
-        assertEq(body, mintBody);
-    }
-
-    /// @dev Nothing is reconciled, so nothing is pinned: the token keeps no record of a mint instruction.
-    function testAMintInstructionLeavesNoRecordBehind() public {
-        vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
-
-        // Neither dropping nor never relaying the message changes anything on the token's side.
-        gateway.drop(0);
-
-        vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
-
-        assertEq(gateway.queueLength(), 2);
-        assertEq(token.pinnedRouteFor(0, satellite), address(0));
     }
 
     /* ----- Recall instruction: an order out, a proof back ----- */
@@ -227,10 +194,6 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
         vm.prank(alice);
-        token.dispatchMintInstruction(satellite, mintBody);
-
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
-        vm.prank(alice);
         token.dispatchRecallInstruction(satellite, recallBody);
 
         assertEq(gateway.queueLength(), 0);
@@ -240,7 +203,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
     ///      the compliance's to author, and no role reaches past that.
     function testAgentCannotDispatchAValidationEvenThoughItDispatchesInstructions() public {
         vm.prank(agent);
-        token.dispatchMintInstruction(satellite, mintBody);
+        token.dispatchRecallInstruction(satellite, recallBody);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, agent));
         vm.prank(agent);
