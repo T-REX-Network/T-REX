@@ -64,6 +64,7 @@
 pragma solidity 0.8.30;
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 
 /// @title IToken
 /// @notice The T-REX token surface beyond ERC-3643: the ledger views the standard does not define.
@@ -72,6 +73,53 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 ///  all three. Inside the bridged bucket, an amount a satellite burned for a cross-chain validation whose mint
 ///  leg has not landed is held in transit against that validation: no wallet holds it, its sender still owns it.
 interface IToken is IERC3643 {
+
+    event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
+    event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
+    event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
+    event HeldInTransit(bytes32 indexed fromKey, uint256 indexed validationId, bytes fromWallet, uint256 amount);
+    event BridgedTransfer(
+        bytes32 indexed fromKey,
+        bytes32 indexed toKey,
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        uint256 amount
+    );
+
+    event DelegatedOut(
+        address indexed holder, bytes32 indexed toKey, uint256 indexed delegationId, bytes toWallet, uint256 amount
+    );
+    event RecallInstructed(
+        uint256 indexed recallId, bytes32 indexed walletKey, address indexed nativeWallet, bytes wallet, uint256 amount
+    );
+    event RecallSettled(uint256 indexed recallId, bytes32 indexed originChainKey, uint256 amount);
+    event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
+    event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
+    event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
+
+    error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
+    error WalletsNotLinked(address nativeWallet, bytes wallet);
+    error RecallMismatch(uint256 recallId);
+    error RecallAmountExceeded(uint256 recallId, uint256 instructed, uint256 proven);
+    error RecallPending(bytes32 walletKey, uint256 recallId);
+    error RecallNotPending(uint256 recallId);
+    error DelegationMismatch(uint256 delegationId);
+    error PeerChanged(bytes32 chainKey);
+    error UnknownResendKind(uint8 kind);
+    error UnverifiedWallet(bytes wallet);
+    error NonCanonicalInteroperableAddress(bytes envelope);
+    error NotASatelliteWallet(bytes wallet);
+    error NothingInTransit(uint256 validationId);
+    error TransitAlreadyHeld(uint256 validationId);
+    error TransitAmountMismatch(uint256 validationId, uint256 held, uint256 amount);
+    error NoTokenToRecover();
+    error RecoveryNotPossible();
+    error SameWalletRecovery();
+    error TokenCirculating();
+    error InvalidIdentityRegistry();
+    error InvalidCompliance();
+    error ComplianceAlreadyBoundToToken();
 
     /// @notice Returns the part of a wallet's balance that is movable on this chain: `balanceOf` minus frozen.
     /// @param wallet the wallet to read
@@ -144,5 +192,25 @@ interface IToken is IERC3643 {
 
     /// @dev Gives back `amount` of what was reserved against `wallet`. Callable by the bound compliance alone.
     function releaseFromValidation(bytes calldata wallet, uint256 amount) external;
+
+    /// @dev Initializes a token behind its beacon proxy. Called once, by the factory.
+    function init(
+        string calldata tokenName,
+        string calldata tokenSymbol,
+        uint8 tokenDecimals,
+        address identityRegistryAddress,
+        address complianceAddress,
+        address trustedGatewayRegistryAddress,
+        address onchainIdAddress,
+        address accessManagerAddress
+    ) external;
+
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
+    function dispatchComplianceValidation(bytes32 chainKey, uint256 validationId, bytes calldata body)
+        external
+        returns (bytes32);
+
+    /// @dev Sends a forced-recall instruction to this token's peer on `chainKey`.
+    function dispatchRecallInstruction(bytes32 chainKey, bytes calldata body) external returns (bytes32);
 
 }

@@ -63,7 +63,6 @@
 pragma solidity 0.8.30;
 
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
-import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -77,11 +76,11 @@ import { RolesLib } from "../../libraries/RolesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
-import { Token } from "../../token/Token.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
+import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
@@ -105,21 +104,6 @@ contract ModularCompliance is
 {
 
     using EnumerableSet for EnumerableSet.AddressSet;
-
-    /// @custom:storage-location erc7201:erc3643.storage.TREXCompliance
-    /// @dev One list of every bound module, plus one list per type. A module sits in `modules` and in the
-    ///  list of each type it named, so every dispatch is a loop over exactly the modules that answer it.
-    ///  Keying the lists by the type rather than naming one field each means a type added later needs a new
-    ///  enum member and its dispatch, and nothing else here.
-    struct ModuleSet {
-        /// Every bound module, at most 25. What `getModules` returns.
-        EnumerableSet.AddressSet modules;
-        /// The modules of each type, in the order they were bound.
-        mapping(IModule.ModuleType moduleType => EnumerableSet.AddressSet) byType;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXCompliance")) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant STORAGE_LOCATION = 0xbd2da5c5fcdced9ef28c358fe4e316978613e6ee5dda1f35de5eca5813787500;
 
     constructor() {
         _disableInitializers();
@@ -184,10 +168,7 @@ contract ModularCompliance is
      *  module's own state.
      */
     function resyncModuleTypes(address _module) external restricted {
-        ModuleSet storage moduleSet = _moduleSet();
-        require(moduleSet.modules.contains(_module), ErrorsLib.ModuleNotBound());
-        _removeFromItsTypeLists(moduleSet, _module);
-        _addToItsTypeLists(moduleSet, _module);
+        ModuleSetLib.resyncModuleTypes(_module);
     }
 
     /// @inheritdoc ISettlementHandler
@@ -452,7 +433,7 @@ contract ModularCompliance is
     /// @inheritdoc TransferValidation
     /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
     function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
-        Token(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
+        IToken(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
     }
 
     /// @inheritdoc TransferValidation
@@ -469,11 +450,6 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    function _reserveOnToken(bytes memory wallet, uint256 amount) internal override {
-        _boundToken().reserveForValidation(wallet, amount);
-    }
-
-    /// @inheritdoc TransferValidation
     function _releaseOnToken(bytes memory wallet, uint256 amount) internal override {
         _boundToken().releaseFromValidation(wallet, amount);
     }
@@ -485,70 +461,19 @@ contract ModularCompliance is
 
     /* ----- Module lifecycle ----- */
 
-    /// @dev Binds a module: zero check, duplicate check, cap of 25, plug-and-play / canComplianceBind
-    ///  requirement, then it is sorted into the list of every type it names. No caller check — wrappers
-    ///  enforce it. Everything is validated before any state is written, so `canComplianceBind` sees the
-    ///  module as not yet bound.
+    /// @dev Binds a module. No caller check: wrappers enforce it. See {ModuleSetLib-addModule}.
     function _addModule(address _module) internal {
-        require(_module != address(0), ErrorsLib.ZeroAddress());
-        ModuleSet storage moduleSet = _moduleSet();
-        require(moduleSet.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
-        require(!moduleSet.modules.contains(_module), ErrorsLib.ModuleAlreadyBound());
-        IModule module = IModule(_module);
-        require(
-            module.isPlugAndPlay() || module.canComplianceBind(address(this)),
-            ErrorsLib.ComplianceNotSuitableForBindingToModule(_module)
-        );
-
-        moduleSet.modules.add(_module);
-        _addToItsTypeLists(moduleSet, _module);
-
-        module.bindCompliance(address(this));
-
-        emit EventsLib.ModuleAdded(_module);
+        ModuleSetLib.addModule(_module);
     }
 
     /// @dev Takes a module out of every list it sits in, without calling into it.
     function _removeModule(address _module) internal {
-        require(_module != address(0), ErrorsLib.ZeroAddress());
-        ModuleSet storage moduleSet = _moduleSet();
-        require(moduleSet.modules.remove(_module), ErrorsLib.ModuleNotBound());
-        _removeFromItsTypeLists(moduleSet, _module);
+        ModuleSetLib.removeModule(_module);
     }
 
-    /// @dev Adds the module to the list of every type it names. A module that names nothing would never be
-    ///  called, and one that names a type twice has a declaration its author did not mean; both are refused.
-    function _addToItsTypeLists(ModuleSet storage moduleSet, address _module) private {
-        IModule.ModuleType[] memory moduleTypes = IModule(_module).moduleTypes();
-        require(moduleTypes.length != 0, ErrorsLib.ModuleHasNoType());
-
-        for (uint256 i = 0; i < moduleTypes.length; i++) {
-            IModule.ModuleType moduleType = moduleTypes[i];
-            require(moduleSet.byType[moduleType].add(_module), ErrorsLib.DuplicateModuleType(uint8(moduleType)));
-        }
-
-        emit EventsLib.ModuleTypesRecorded(_module, moduleTypes);
-    }
-
-    /// @dev Removes the module from the list of every type, whichever ones it was in. It walks all the types
-    ///  rather than asking the module what it names now, so a module whose declaration changed since it was
-    ///  bound still leaves the lists it really sits in.
-    function _removeFromItsTypeLists(ModuleSet storage moduleSet, address _module) private {
-        for (uint256 i = 0; i <= uint256(type(IModule.ModuleType).max); i++) {
-            moduleSet.byType[IModule.ModuleType(i)].remove(_module);
-        }
-    }
-
-    /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
-    ///  Reverts when `_module` is not bound or when the underlying call fails. No caller check — wrappers enforce it.
+    /// @dev Forwards `callData` to a bound `_module`. No caller check: wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
-        require(_moduleSet().modules.contains(_module), ErrorsLib.ModuleNotBound());
-
-        if (!LowLevelCall.callNoReturn(_module, callData)) {
-            LowLevelCall.bubbleRevert();
-        }
-
-        emit EventsLib.ModuleInteraction(_module, callData);
+        ModuleSetLib.callModuleFunction(callData, _module);
     }
 
     function _isOwner(address caller) internal view returns (bool) {
@@ -557,10 +482,8 @@ contract ModularCompliance is
         return isOwner;
     }
 
-    function _moduleSet() private pure returns (ModuleSet storage moduleSet) {
-        assembly ("memory-safe") {
-            moduleSet.slot := STORAGE_LOCATION
-        }
+    function _moduleSet() private pure returns (ModuleSetLib.ModuleSet storage) {
+        return ModuleSetLib.layout();
     }
 
 }
