@@ -603,6 +603,30 @@ All notable changes to this project will be documented in this file.
   inbound messages are matched to the peer byte for byte, so such a peer refused every message from the real Lite.
   An EVM peer whose account is not 20 bytes now reverts with
   `InvalidPeer`; non-EVM peers are unchanged.
+- **An EVM wallet is accepted only as a 20-byte address on a named chain** (`WalletKeyLib.parse`). An EVM
+  envelope with a left-padded address, an empty chain reference or no address was accepted. A padded address names
+  the same wallet yet hashes to a second ledger key, and a native wallet written that way was read as a satellite.
+  Such envelopes now revert with `NonCanonicalInteroperableAddress`; non-EVM envelopes are unchanged.
+- **The issuance rules see the spender a validation names.** `requestTransferValidation` asked the `TRANSFER_CHECK`
+  modules with an empty spender, while the spender allowlist check got the named one, so a rule could not see who
+  would execute the validation. The named spender is now in the rule context. `ModularCompliance` shrinks by 9 bytes.
+- **The implementation authority requires code at its access manager.** The `TREXImplementationAuthority`
+  constructor rejected only the zero address, so a codeless address could become the authority every publish and
+  upgrade asks, and such an address refuses every restricted call. The constructor now reverts with
+  `AccessManagerNotAContract`, as the factory and `setAuthority` already do; the zero address reverts the same way.
+- **A predicted suite address cannot be the access manager administrator.** `deployTREXSuite` refused the zero
+  address, the factory and the predicted access manager as `accessManagerAdmin`, but accepted the predicted token,
+  identity registry, identity storage and compliance. None of them ever acts as the administrator, so such a suite
+  had none. All of them now revert with `InvalidAccessManagerAdmin`.
+- **Documented: delisting a spender leaves issued validations to expire.** `SpenderWhitelistModule.disallowSpender`
+  takes effect on the next `transferFrom` and the next validation. A validation already issued to that spender is on
+  the satellite and may execute until its expiry; the validity window bounds that exposure.
+- **Documented: only gateways paid out of band carry token traffic.** A token calls `sendMessage` with no value and
+  no attributes, so a gateway that must be paid with the call cannot carry its messages
+  (`ITrustedGatewayRegistry`, `docs/satellite-lite.md`).
+- **Documented: a settlement tells the tracker modules no spender.** Neither the validation record nor the
+  satellite's leg keeps who executed it, so `TransferContext.spender` is empty on a settlement's `afterTransfer`;
+  that spender was already judged at issuance (`IModule`, `TransferContextLib`).
 - **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
   after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
   token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
