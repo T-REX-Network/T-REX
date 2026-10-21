@@ -59,7 +59,7 @@ library TransferContextLib {
     }
 
     /// @dev A validation that settled: the amount a satellite actually executed, between two satellite wallets
-    ///  or landing on a native one.
+    ///  or landing on a native one. No spender: the validation does not keep it, see {IModule-TransferContext}.
     function settlement(
         address compliance,
         address fromIdentity,

@@ -87,7 +87,9 @@ interface IModule {
         bool isIssuance;
         /// ERC-7930 envelope of who executes the movement on the sender's behalf: the caller of `transferFrom`
         /// on a native movement, the spender named on a validation. Empty when the sender executes itself,
-        /// which is every direct transfer, mint and burn.
+        /// which is every direct transfer, mint and burn. Empty too on a settlement told to `afterTransfer`:
+        /// neither the validation record nor the satellite's leg keeps who executed it, and that spender was
+        /// already judged at issuance.
         bytes spender;
         /// Room for what a later compliance has to say that this struct does not carry yet. Empty today.
         /// This struct is a parameter of every module function, so it is part of their selectors: a field
