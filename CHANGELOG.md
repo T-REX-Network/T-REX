@@ -481,6 +481,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A settlement to a native wallet credits the identity the registry names when it lands** (audit L-34). The
+  settlement path re-resolved a native recipient's owner, but from the identity stored at issuance instead of the
+  registry, so a wallet relinked in between was credited to its old identity, and when the ledger had already
+  followed the relink, the wallet's balance was moved back to the old identity. The owner is now resolved through
+  the registry's native lookup, as every native movement does; a wallet the registry no longer names keeps the
+  identity it was issued to.
 - **An owner granted with a delay can bind and unbind a compliance's token** (audit L-13). `bindToken` and
   `unbindToken` were authorized through one synthetic selector, `RolesLib.BIND_UNBIND_TOKEN`, asked for immediate
   permission only. An owner granted with an execution delay could not schedule either call: the AccessManager

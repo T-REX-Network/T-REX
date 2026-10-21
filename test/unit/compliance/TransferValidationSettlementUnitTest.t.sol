@@ -69,6 +69,8 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
         _bind(fromSat, aliceIdentity);
         _bind(nativeBob, bobIdentity);
+        // A settlement to a native wallet resolves its owner again through the registry's native lookup.
+        vm.mockCall(registry, abi.encodeWithSignature("identity(address)", bob), abi.encode(bobIdentity));
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
 
