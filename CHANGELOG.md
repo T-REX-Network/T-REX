@@ -598,6 +598,11 @@ All notable changes to this project will be documented in this file.
   and `UpdatedTokenInformation(string, string, uint8, string, address newOnchainID)` keep their topic hash but
   carry every argument in the data field. Consumers filtering these events by wallet or ONCHAINID topic must
   decode the data instead.
+- **An EVM peer must be a 20-byte account** (`setPeer`). The peer check accepted any non-empty account, so a
+  left-padded or truncated EVM address was stored as the Lite. A gateway reports an EVM sender as its 20 bytes and
+  inbound messages are matched to the peer byte for byte, so such a peer refused every message from the real Lite.
+  An EVM peer whose account is not 20 bytes now reverts with
+  `InvalidPeer`; non-EVM peers are unchanged.
 - **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
   after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
   token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
