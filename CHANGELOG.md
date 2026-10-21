@@ -481,6 +481,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
+  pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
+  peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed
+  unreconciled. The peer is now pinned with the gateway, a pinned settlement is checked against it, and a
+  re-dispatch to a different peer reverts with `ValidationAlreadyRouted`. Burn proofs and settlements for ids this
+  token never dispatched still follow the current peer.
 - **A zero-value transfer, mint or burn goes through** (audit L-02). The token lets a zero amount pass every
   check and notifies compliance with it, as an ERC-20 hook should, but `ERC3643Compliance.transferred`,
   `created` and `destroyed` reverted it with `ZeroValue`, so `transfer`, `transferFrom`, `mint` and `burn` of 0

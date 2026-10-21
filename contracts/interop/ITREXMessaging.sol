@@ -119,6 +119,9 @@ interface ITREXMessaging {
     ///   trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
     ///
+    /// A validation already sent keeps settling from the peer it was sent to; only what is sent after the
+    /// change goes to, and is accepted from, the new peer.
+    ///
     /// Emits `ChainRegistered` on first sight of the prefix, then `PeerSet`.
     /// @param chainKey The chain the peer is on.
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
