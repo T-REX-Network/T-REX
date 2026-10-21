@@ -205,6 +205,33 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertFalse(results[0].pass); // Should be false because isClaimValid threw an error
     }
 
+    /// @notice A topic passes on its first valid claim, as in isVerified: a later trusted issuer whose claim fails
+    ///         does not overwrite the row.
+    function test_getVerifiedDetails_KeepsTheValidClaim_WhenALaterIssuerFails() public {
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
+        uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
+        uint256 topic = topics[0];
+        vm.prank(deployer);
+        trustedIssuersRegistry.addTrustedIssuer(address(trickyClaimIssuer), topics);
+
+        Structs.ClaimData memory trickyData = Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, ""),
+            payload: "0x00"
+        });
+        vm.prank(alice);
+        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", trickyData, "");
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
+            utilityChecker.getVerifiedDetails(address(token), alice);
+
+        assertEq(results.length, 1);
+        assertEq(address(results[0].issuer), address(claimIssuer));
+        assertTrue(results[0].pass);
+        assertTrue(identityRegistry.isVerified(alice));
+    }
+
     /// @notice Should resolve the per-identity-type topics, mirroring isVerified. The default set is
     ///         the KYC topic every investor needs; corporates must additionally pass KYB.
     function test_getVerifiedDetails_UsesTypeTopics_WhenOverrideSetForIdentityType() public {

@@ -147,4 +147,36 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertEq(keccak256(bytes(results[0].moduleName)), keccak256(bytes("TestModule")));
     }
 
+    /// @notice A sender that resolves to no identity is refused by the compliance while a rule is bound, and the
+    ///         preview agrees instead of reporting what the rule alone would allow.
+    function test_getTransferDetails_ReportsNoPass_WhenTheSenderHasNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), stranger, bob, 100);
+
+        assertEq(results.length, 1);
+        assertEq(results[0].allowedAmount, 0);
+        assertFalse(results[0].pass);
+        assertFalse(compliance.canTransfer(stranger, bob, 100), "and the compliance agrees");
+    }
+
+    /// @notice The same for a recipient that resolves to no identity.
+    function test_getTransferDetails_ReportsNoPass_WhenTheRecipientHasNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), alice, stranger, 100);
+
+        assertEq(results.length, 1);
+        assertFalse(results[0].pass);
+        assertFalse(compliance.canTransfer(alice, stranger, 100), "and the compliance agrees");
+    }
+
 }
