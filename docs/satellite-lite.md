@@ -137,8 +137,10 @@ distrusted gateway is refused even when pinned, or drains the open recalls befor
 - **Sticky satellite bindings.** A satellite wallet's identity binding in the ONCHAINID IdentityFactory does not move
   to another identity while the wallet holds a position. The bridged ledger keeps no owner record for satellite
   wallets and relies on this.
-- **Gateway fees.** The token forwards no value to the gateway, so only gateway adapters that require no value from
-  the sender are supported in this release.
+- **Gateway fees.** The token calls `sendMessage` with no value and an empty attributes array, and has no payable
+  entry point, so only gateway adapters that take their fee out of band (post-paid, or funded by a relayer) are
+  supported in this release. A gateway that must be paid with the call cannot carry the token's traffic and is not
+  to be vetted in `TrustedGatewayRegistry`.
 - **Permanent loss of a trusted gateway or peer** with instructions or validations outstanding needs a separately
   reviewed migration procedure; it is not covered here.
 - **A native wallet unlinked after a recall was instructed:** the proof reverts `WalletsNotLinked` and stays
