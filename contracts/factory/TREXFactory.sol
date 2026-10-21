@@ -194,8 +194,14 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         if (tokenDetails.accessManager == address(0)) {
             address admin = tokenDetails.accessManagerAdmin;
             require(admin != address(0), ErrorsLib.ZeroAddress());
-            require(admin != address(this), ErrorsLib.InvalidAccessManagerAdmin());
-            require(admin != _predictAddress(salt, ACCESS_MANAGER), ErrorsLib.InvalidAccessManagerAdmin());
+            // The factory and the suite's own contracts never act as the manager's administrator, so naming one
+            // of them would leave the suite with none.
+            require(
+                admin != address(this) && admin != _predictAddress(salt, ACCESS_MANAGER)
+                    && admin != _predictAddress(salt, TOKEN) && admin != _predictAddress(salt, REGISTRY)
+                    && admin != _predictAddress(salt, IRS) && admin != _predictAddress(salt, MC),
+                ErrorsLib.InvalidAccessManagerAdmin()
+            );
         } else {
             require(
                 tokenDetails.accessManager.code.length != 0,
