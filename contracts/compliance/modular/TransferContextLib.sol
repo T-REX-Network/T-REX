@@ -53,14 +53,15 @@ library TransferContextLib {
     }
 
     /// @dev A validation that settled: the amount a satellite actually executed, between two satellite wallets
-    ///  or landing on a native one.
+    ///  or landing on a native one, executed by the spender the validation names.
     function settlement(
         address compliance,
         address fromIdentity,
         address toIdentity,
         bytes32 fromWallet,
         bytes32 toWallet,
-        uint256 amount
+        uint256 amount,
+        bytes memory spender
     ) internal pure returns (IModule.TransferContext memory ctx) {
         ctx.compliance = compliance;
         ctx.fromIdentity = fromIdentity;
@@ -69,6 +70,7 @@ library TransferContextLib {
         ctx.toWallet = toWallet;
         ctx.amountMin = amount;
         ctx.amountMax = amount;
+        ctx.spender = spender;
     }
 
 }

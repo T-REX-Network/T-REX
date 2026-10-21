@@ -421,7 +421,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             toIdentity,
             WalletKeyLib.walletId(from),
             WalletKeyLib.walletId(to),
-            amount
+            amount,
+            validation.spender
         );
     }
 
