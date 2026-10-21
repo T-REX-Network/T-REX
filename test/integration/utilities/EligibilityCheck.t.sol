@@ -73,6 +73,20 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertFalse(results[0].pass);
     }
 
+    /// @notice A wallet with no identity gets one unmatched row per required topic instead of a revert
+    function test_getVerifiedDetails_ReturnsFalse_WhenTheWalletHasNoIdentity() public {
+        address stranger = makeAddr("stranger");
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results, IIdentityFactory.AccountStatus walletStatus) =
+            utilityChecker.getVerifiedDetails(address(token), stranger);
+
+        assertEq(results.length, 1);
+        assertEq(address(results[0].issuer), address(0));
+        assertFalse(results[0].pass);
+        assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.None));
+        assertFalse(identityRegistry.isVerified(stranger));
+    }
+
     /// @notice Should return empty result when the identity is registered without topics
     function test_getVerifiedDetails_ReturnsEmpty_WhenNoClaimTopics() public {
         // Register charlie

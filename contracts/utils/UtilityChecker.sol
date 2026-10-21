@@ -132,6 +132,9 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
         _details = new EligibilityCheckDetails[](topicsCount);
+        // A wallet with no identity holds no claim, and asking the zero address for one would revert: every
+        // required topic is reported as not found, as `isVerified` refuses the wallet.
+        if (address(identity) == address(0)) return (_details, _walletStatus);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
             uint256 topic = requiredClaimTopics[claimTopic];
             address[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
