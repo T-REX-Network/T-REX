@@ -481,6 +481,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Closing a chain stops the settlements already on their way** (audit L-10). A settlement for a validation
+  already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
+  set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
+  pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
 - **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
   pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
   peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed

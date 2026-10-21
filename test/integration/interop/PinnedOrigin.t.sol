@@ -11,7 +11,7 @@ import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol"
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
 /// @dev A validation leg is pinned to the gateway and the peer it was sent to. A peer change does not strand
-///      it.
+///      it, and closing the chain stops it like every other message from that chain.
 ///      The validations are dispatched by the token alone, never issued by the compliance, so a leg that
 ///      passes the transport reaches `handleSettlement`, which is what these tests read.
 contract PinnedOriginTest is InteropSuiteTest {
@@ -103,6 +103,28 @@ contract PinnedOriginTest is InteropSuiteTest {
 
         _expectHandled();
         gateway.relay(fromCurrent);
+    }
+
+    /* ----- Closing the chain ----- */
+
+    function testAClosedChainRefusesAPinnedSettlement() public {
+        uint256 index = _settlementFrom(address(token), inFlight);
+        _openEvmChain(token, POLYGON, address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
+        gateway.relay(index);
+    }
+
+    function testReopeningTheChainLetsThePinnedSettlementLand() public {
+        uint256 index = _settlementFrom(address(token), inFlight);
+        _openEvmChain(token, POLYGON, address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
+        gateway.relay(index);
+
+        _openEvmChain(token, POLYGON, address(gateway));
+        _expectHandled();
+        gateway.relay(index);
     }
 
 }

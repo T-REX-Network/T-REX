@@ -285,8 +285,7 @@ library TREXMessagingLib {
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _requireExpectedOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeSettlement(body).validationId);
         } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
-            _requireCurrentPeer(chainKey, sender);
-            _requireCurrentRoute(s, gateway, chainKey);
+            _requireCurrentOrigin(s, gateway, chainKey, sender);
         } else {
             revert ErrorsLib.MessageTypeNotInbound(messageType);
         }
@@ -372,7 +371,8 @@ library TREXMessagingLib {
     }
 
     /// @dev The pinned peer and gateway when this token dispatched `validationId` toward `chainKey`, else
-    ///  the current ones. An id this token never dispatched
+    ///  the current ones. A closed chain is refused first, pinned or not: closing it stops every settlement
+    ///  from it, and reopening the route lets them be delivered again. An id this token never dispatched
     ///  there is not refused here: whether it was never issued, or issued from the reference side, is the
     ///  settlement handler's question.
     function _requireExpectedOrigin(
@@ -382,21 +382,23 @@ library TREXMessagingLib {
         bytes calldata sender,
         uint256 validationId
     ) private view {
+        require(s.routes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+
         address pinned = s.pinnedRoutes[validationId][chainKey];
         if (pinned == address(0)) {
-            _requireCurrentPeer(chainKey, sender);
-            _requireCurrentRoute(s, gateway, chainKey);
+            _requireCurrentOrigin(s, gateway, chainKey, sender);
             return;
         }
         require(keccak256(sender) == s.pinnedPeers[validationId][chainKey], ErrorsLib.SenderNotPeer(chainKey, sender));
         require(pinned == gateway, ErrorsLib.GatewayNotPinned(gateway, validationId, chainKey));
     }
 
-    function _requireCurrentPeer(bytes32 chainKey, bytes calldata sender) private view {
+    /// @dev The chain's current peer and gateway, for a message no validation leg is pinned to.
+    function _requireCurrentOrigin(MessagingStorage storage s, address gateway, bytes32 chainKey, bytes calldata sender)
+        private
+        view
+    {
         require(keccak256(sender) == keccak256(peerFor(chainKey)), ErrorsLib.SenderNotPeer(chainKey, sender));
-    }
-
-    function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {
         require(s.routes[chainKey] == gateway, ErrorsLib.GatewayNotRouted(gateway, chainKey));
     }
 
