@@ -112,8 +112,14 @@ contract TREXImplementationAuthorityUnitTest is Test {
     }
 
     function test_constructor_RevertWhen_AccessManagerIsZero() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, address(0)));
         new TREXImplementationAuthority(address(0), v0, _v0Impls());
+    }
+
+    function test_constructor_RevertWhen_AccessManagerHasNoCode() public {
+        address eoa = makeAddr("NotAManager");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, eoa));
+        new TREXImplementationAuthority(eoa, v0, _v0Impls());
     }
 
     function test_constructor_RevertWhen_TokenImplementationIsZero() public {
