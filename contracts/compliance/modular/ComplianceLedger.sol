@@ -125,6 +125,7 @@ abstract contract ComplianceLedger is IComplianceLedger {
         ComplianceLedgerLib.Ledger storage ledger = _ledger();
         ledger.pendingOut[fromIdentity] -= amountMax;
         ledger.pendingIn[toIdentity] -= amountMax;
+        ledger.pendingTotal -= amountMax;
     }
 
     /// @dev See {ComplianceLedgerLib-isRelocation}.

@@ -290,12 +290,18 @@ contract ModularCompliance is
     ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
     ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
     ///  same; this covers the owner calling here directly.
+    ///
+    ///  A previous token can also leave validations open, whose pending amounts would count against the new
+    ///  token's holders. Those are settled or discarded before another token is bound. Positions need no such
+    ///  check: they always add up to the bound token's supply, which is zero here. An `ownerOf` entry the previous
+    ///  token left needs none either: the wallet holds none of the new token, so following it moves nothing.
     function _authorizeTokenBinding(address token) internal view override {
         require(
             (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
+        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.

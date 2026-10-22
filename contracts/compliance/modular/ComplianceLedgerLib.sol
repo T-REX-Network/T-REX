@@ -80,6 +80,9 @@ library ComplianceLedgerLib {
         int256 __deprecatedGap;
         /// The identity each native wallet was last credited to, so a change of owner is noticed and followed.
         mapping(address wallet => address identity) ownerOf;
+        /// What all open validations promise, the sum of every `pendingOut` and of every `pendingIn`. Zero is
+        /// what lets the compliance be bound to another token without carrying a previous token's promises.
+        uint256 pendingTotal;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ComplianceLedger")) - 1)) & ~bytes32(uint256(0xff));
@@ -98,6 +101,7 @@ library ComplianceLedgerLib {
         Ledger storage ledger = layout();
         ledger.pendingOut[fromIdentity] += amountMax;
         ledger.pendingIn[toIdentity] += amountMax;
+        ledger.pendingTotal += amountMax;
         return true;
     }
 

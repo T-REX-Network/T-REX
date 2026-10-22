@@ -579,6 +579,17 @@ All notable changes to this project will be documented in this file.
     refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
     resolve to nobody after the registry's storage is swapped.
 
+- **A compliance is bound to another token only once the previous token's validations are over** (#152).
+  `_authorizeTokenBinding` checked only that the incoming token had no supply, so a token with no supply could
+  leave its compliance with validations still open, and their `pendingIn` and `pendingOut` amounts counted
+  against the next token's holders, in `MaxBalancePerIdentityModule` for one. The ledger now keeps
+  `pendingTotal`, what every open validation promises, and a bind reverts with `ValidationsPending` until it is
+  zero: settle or discard the validations first. Positions need no check, since they always add up to the bound
+  token's supply, and an `ownerOf` entry left behind moves nothing when the wallet is first credited.
+  `pendingTotal` is appended after `ownerOf` in `erc3643.storage.ComplianceLedger`, so a deployed proxy keeps
+  its layout. Upgrade a deployed compliance only when no validation is open: one issued before the upgrade is
+  not in `pendingTotal`, and releasing it would underflow and revert.
+
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same
