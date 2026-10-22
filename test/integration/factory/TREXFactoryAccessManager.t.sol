@@ -119,7 +119,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
     function test_deployTREXSuite_Success_SuppliedIdentityKeysAreUntouched() public {
         address wallet = makeAddr("issuerWallet");
-        address supplied = address(_deployIdentity(wallet, "supplied-oid"));
+        address supplied = _bindTokenIdentity("supplied-oid", wallet);
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.ONCHAINID = supplied;
 
@@ -135,7 +135,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
     function test_deployTREXSuiteIsolated_Success_SuppliedIdentityKeysAreUntouched() public {
         address wallet = makeAddr("issuerWallet");
-        address supplied = address(_deployIdentity(wallet, "supplied-oid-isolated"));
+        address supplied = _bindTokenIdentity("supplied-oid-isolated", wallet);
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.ONCHAINID = supplied;
 

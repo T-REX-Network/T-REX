@@ -12,6 +12,7 @@ import { ReputationRegistry } from "@onchain-id/solidity/contracts/reputation/Re
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -244,6 +245,24 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      interoperable address, so the wallet is wrapped in an EVM envelope for this chain.
     function _identityOf(address wallet) internal view returns (address) {
         return idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, wallet));
+    }
+
+    // Re-derives the factory's CREATE3 address prediction for a given (salt, contractType), mirroring
+    // TREXFactory._saltBytes / _predictAddress. Lets tests assert that deployed == predicted.
+    function _predictSuiteAddress(string memory salt, string memory contractType) internal view returns (address) {
+        bytes32 saltBytes = bytes20(address(trexFactory)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
+        return Create3.computeAddress(saltBytes, address(trexFactory));
+    }
+
+    /// @dev Binds the token address the suite `salt` will deploy to a new ASSET identity managed by
+    ///      `managementKey`, which is what a deployer does before passing `ONCHAINID` to the factory.
+    ///      Creating an ASSET identity for another account needs the ASSET role, so the test contract takes it.
+    function _bindTokenIdentity(string memory salt, address managementKey) internal returns (address) {
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+        _grantTokenOidMinterRole(address(this));
+        Structs.KeyParam[] memory keys = new Structs.KeyParam[](1);
+        keys[0] = _ecdsaKey(managementKey, KeyPurposes.MANAGEMENT);
+        return idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys);
     }
 
     function _ecdsaKey(address addr, uint256 purpose) internal pure returns (Structs.KeyParam memory) {

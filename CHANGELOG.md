@@ -602,6 +602,15 @@ All notable changes to this project will be documented in this file.
   The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
   `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
   `OWNER` from them.
+- **A supplied token ONCHAINID must already be bound to the token address** (OZ L-24, #161). With
+  `TokenDetails.ONCHAINID` set, `_deployToken` accepted an IdentityFactory slot that bound nothing to the
+  predicted token address and never bound it either, so any holder of the ASSET role could later bind the live
+  token to an identity of its own, and the token and the IdentityFactory would name different identities.
+  The factory now refuses a supplied identity unless the IdentityFactory already resolves the predicted
+  token address to it: an unbound slot, or one bound to it but revoked, reverts with `TokenIdentityNotBound`, and
+  a slot bound to another identity, revoked or not, with `TokenIdentityAlreadyBound`. A deployer that supplies the identity creates it first with
+  `IdentityFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)`, holding the role the
+  ASSET policy names, and passes the returned address. Leaving `ONCHAINID` at zero is unchanged.
 
 ### Removed
 

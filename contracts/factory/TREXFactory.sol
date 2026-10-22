@@ -440,9 +440,12 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /// Resolves the OID (caller-supplied or minted via `IIdentityFactory.createIdentityFor` against the
-    /// Token's predicted CREATE3 address) and deploys the Token proxy. A caller-supplied OID is checked
-    /// against the IdentityFactory's binding for that same predicted address, so the suite cannot deploy
-    /// onto an address the factory already resolves to a different identity.
+    /// Token's predicted CREATE3 address) and deploys the Token proxy. A caller-supplied OID must already
+    /// be the IdentityFactory's active binding for that same predicted address: the suite never deploys onto
+    /// an address the factory resolves to a different identity, or to none (unbound or revoked). The deployer binds it first by
+    /// calling `createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)` on the IdentityFactory
+    /// with the role the ASSET policy names, and passes the returned identity as `ONCHAINID`.
+    /// `predictedToken` is `Create3.computeAddress(bytes20(factory) | keccak256(salt ++ "Token") >> 168, factory)`.
     ///
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
     /// against its own authority, so this factory must hold that role there for the auto-mint path
@@ -469,12 +472,17 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             // The token address is predictable, so anyone allowed to create ASSET identities can
             // bind it to their own identity before this deploy runs. The binding is permanent, and
             // the token would then answer to one identity while the IdentityFactory answers another.
+            // An unbound slot is refused too: this factory never binds a supplied identity, so the
+            // slot would stay open for anyone to take once the token is live.
             // Revoked slots are dead but still occupied, so ask for those too, not just active ones.
-            (address boundIdentity,) = IIdentityFactory(_idFactory)
+            (address boundIdentity, IIdentityFactory.AccountStatus bindingStatus) = IIdentityFactory(_idFactory)
                 .getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, predictedToken));
+            require(boundIdentity != address(0), ErrorsLib.TokenIdentityNotBound(predictedToken, oid));
+            require(boundIdentity == oid, ErrorsLib.TokenIdentityAlreadyBound(predictedToken, boundIdentity));
+            // A revoked binding no longer resolves, so the IdentityFactory would answer no identity for the token.
             require(
-                boundIdentity == address(0) || boundIdentity == oid,
-                ErrorsLib.TokenIdentityAlreadyBound(predictedToken, boundIdentity)
+                bindingStatus == IIdentityFactory.AccountStatus.Active,
+                ErrorsLib.TokenIdentityNotBound(predictedToken, oid)
             );
         }
         return

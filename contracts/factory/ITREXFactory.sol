@@ -77,6 +77,8 @@ interface ITREXFactory {
         // binds the new identity registry to it, the issuer does
         address irs;
         // ONCHAINID of the token
+        // set it to ZERO address to have the factory create it in the IdentityFactory
+        // if an address is provided, the IdentityFactory must already bind the predicted token address to it
         address ONCHAINID;
         // modules to bind to the compliance, indexes are corresponding to the settings callData indexes
         // if a module doesn't require settings, it can be added at the end of the array, at index > settings.length

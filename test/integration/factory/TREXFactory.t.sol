@@ -10,6 +10,7 @@ import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessMana
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
@@ -60,13 +61,6 @@ contract TREXFactoryTest is TREXSuiteTest {
         uint256[][] memory emptyClaims;
 
         return ITREXFactory.ClaimDetails({ claimTopics: emptyTopics, issuers: emptyIssuers, issuerClaims: emptyClaims });
-    }
-
-    // Re-derives the factory's CREATE3 address prediction for a given (salt, contractType), mirroring
-    // TREXFactory._saltBytes / _predictAddress. Lets tests assert that deployed == predicted.
-    function _predictSuiteAddress(string memory salt, string memory contractType) internal view returns (address) {
-        bytes32 saltBytes = bytes20(address(trexFactory)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
-        return Create3.computeAddress(saltBytes, address(trexFactory));
     }
 
     // ============ Existing Basic Tests ============
@@ -606,9 +600,7 @@ contract TREXFactoryTest is TREXSuiteTest {
     /// @notice When the caller supplies an ONCHAINID, Token.onchainID must equal that exact address (and the
     ///         factory must NOT have created a new identity via IdentityFactory)
     function test_deployTREXSuite_Token_UsesProvidedONCHAINID() public {
-        // Spawn a stand-in OID address. We don't deploy a real Identity contract because Token.init only
-        // stores `onchainId` as an address — it does not call into it during init.
-        address suppliedOID = makeAddr("SuppliedOID");
+        address suppliedOID = _bindTokenIdentity("token-provided-oid-salt", deployer);
 
         ITREXFactory.TokenDetails memory tokenDetails = ITREXFactory.TokenDetails({
             name: "Token name",
@@ -629,9 +621,24 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(deployedToken.onchainID(), suppliedOID, "Token.onchainID must equal the supplied ONCHAINID");
         assertEq(
             _identityOf(address(deployedToken)),
-            address(0),
-            "IdentityFactory must not have minted a new identity when ONCHAINID was supplied"
+            suppliedOID,
+            "IdentityFactory must resolve the token to the supplied ONCHAINID, not to a newly minted one"
         );
+    }
+
+    /// @notice The factory never binds a supplied ONCHAINID. If it accepted one the IdentityFactory does not
+    ///         bind to the token address yet, that address would stay open after deployment, and any holder
+    ///         of the ASSET role could bind the live token to an identity of its own.
+    function test_deployTREXSuite_RevertWhen_SuppliedONCHAINIDIsNotBoundToTheToken() public {
+        string memory salt = "unbound-token-salt";
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+        address suppliedOID = makeAddr("SuppliedOID");
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = suppliedOID;
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, predictedToken, suppliedOID));
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
     }
 
     /// @notice The auto-mint path is gated on the factory holding ASSET_DEPLOYER at the IdentityFactory's
@@ -658,12 +665,32 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite("no-oid-minter-salt", tokenDetails, _createEmptyClaimDetails());
     }
 
+    /// @notice A revoked binding no longer resolves: the IdentityFactory would answer no identity for the live
+    ///         token, so a supplied ONCHAINID bound to the token and then revoked is refused.
+    function test_deployTREXSuite_RevertWhen_SuppliedONCHAINIDBindingIsRevoked() public {
+        string memory salt = "revoked-token-salt";
+        address predictedToken = _predictSuiteAddress(salt, "Token");
+        bytes memory tokenAccount = InteroperableAddress.formatEvmV1(block.chainid, predictedToken);
+
+        // ASSET identities cannot revoke their account, so a revocable INDIVIDUAL identity stands in.
+        address suppliedOID = address(_deployIdentity(predictedToken, "revoked-token-identity"));
+        vm.prank(suppliedOID);
+        idFactory.revokeAccount(tokenAccount);
+        assertEq(idFactory.getIdentity(tokenAccount), address(0), "the revoked binding must not resolve");
+
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = suppliedOID;
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, predictedToken, suppliedOID));
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
+    }
+
     /// @notice The ASSET_DEPLOYER gate covers minting only. With the role revoked, a caller-supplied
     ///         ONCHAINID must still deploy, since that path never calls `createIdentityFor`.
     function test_deployTREXSuite_Succeeds_WithoutTokenOidMinter_WhenONCHAINIDSupplied() public {
         accessManager.revokeRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), address(trexFactory));
 
-        address suppliedOID = makeAddr("SuppliedOID");
+        address suppliedOID = _bindTokenIdentity("no-oid-minter-supplied-salt", deployer);
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
         tokenDetails.ONCHAINID = suppliedOID;
 
