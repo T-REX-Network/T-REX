@@ -399,15 +399,20 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  function because the settlement path holds enough live values without it, and the legacy pipeline runs
     ///  out of stack there under `forge coverage`.
     ///
-    ///  A native recipient may have changed owner since issuance, so it is resolved again here. The token has
-    ///  not been credited yet at this point, which is why nothing is adjusted for this very movement.
+    ///  A native recipient may have changed owner since issuance, so it is resolved again here, through the
+    ///  registry; a wallet the registry no longer names keeps the identity it was issued to. The token has not
+    ///  been credited yet at this point, which is why nothing is adjusted for this very movement.
     function _settledMovement(Validation storage validation, bytes memory from, bytes memory to, uint256 amount)
         private
         returns (IModule.TransferContext memory)
     {
         address toIdentity = validation.toIdentity;
         (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
-        if (toNative) toIdentity = _currentOwner(toWallet, toIdentity, 0);
+        if (toNative) {
+            address resolved = address(_boundRegistry().identity(toWallet));
+            if (resolved == address(0)) resolved = toIdentity;
+            toIdentity = _currentOwner(toWallet, resolved, 0);
+        }
 
         return TransferContextLib.settlement(
             address(this),

@@ -67,8 +67,6 @@ import { ErrorsLib } from "./ErrorsLib.sol";
 
 library RolesLib {
 
-    bytes4 constant BIND_UNBIND_TOKEN = bytes4(0x6f7cc304);
-
     // ---- Suite roles. A role id is a domain id in the upper 32 bits and a role number below ----
 
     enum Role {

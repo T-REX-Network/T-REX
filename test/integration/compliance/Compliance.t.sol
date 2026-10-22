@@ -17,6 +17,7 @@ import {
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
@@ -107,7 +108,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should revert when calling as another account than the owner
     function test_bindToken_RevertWhen_CalledByNonOwner() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         compliance.bindToken(address(token));
     }
 
@@ -127,7 +128,7 @@ contract ComplianceTest is TREXSuiteTest {
 
         // Try to bind again as another account
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         newCompliance.bindToken(address(token));
     }
 
@@ -160,6 +161,31 @@ contract ComplianceTest is TREXSuiteTest {
         assertTrue(newCompliance.isTokenBound(address(testToken)));
     }
 
+    /// @notice An owner granted with an execution delay schedules `bindToken` and `unbindToken` like any other
+    ///         owner function: both selectors have their own row on OWNER.
+    function test_bindAndUnbindToken_Success_WhenScheduledByDelayedOwner() public {
+        Token testToken = _deployToken("salt2", "Dino Token", "DINO");
+        address delayedOwner = makeAddr("delayedOwner");
+        accessManager.grantRole(_role(RolesLib.Role.OWNER), delayedOwner, 1 days);
+        bytes memory bindCall = abi.encodeCall(IERC3643Compliance.bindToken, (address(testToken)));
+        bytes memory unbindCall = abi.encodeCall(IERC3643Compliance.unbindToken, (address(testToken)));
+
+        uint256 start = block.timestamp;
+        vm.prank(delayedOwner);
+        accessManager.schedule(address(complianceBeta), bindCall, 0);
+        vm.warp(start + 1 days);
+        vm.prank(delayedOwner);
+        complianceBeta.bindToken(address(testToken));
+        assertTrue(complianceBeta.isTokenBound(address(testToken)));
+
+        vm.prank(delayedOwner);
+        accessManager.schedule(address(complianceBeta), unbindCall, 0);
+        vm.warp(start + 2 days);
+        vm.prank(delayedOwner);
+        complianceBeta.unbindToken(address(testToken));
+        assertFalse(complianceBeta.isTokenBound(address(testToken)));
+    }
+
     /// @notice Should revert when token address is zero
     function test_bindToken_RevertWhen_TokenAddressIsZero() public {
         ModularCompliance newCompliance = _deployModularComplianceWithProxy(address(trexImplementationAuthority));
@@ -176,7 +202,7 @@ contract ComplianceTest is TREXSuiteTest {
     /// @notice Should revert when calling as another account
     function test_unbindToken_RevertWhen_CalledByNonOwner() public {
         vm.prank(another);
-        vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
         compliance.unbindToken(address(token));
     }
 
@@ -398,12 +424,11 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.transferred(alice, address(0), 10);
     }
 
-    /// @notice Should revert when amount is zero
-    function test_transferred_RevertWhen_AmountIsZero() public {
+    /// @notice Should accept a zero amount, which a token reports for a zero-value movement
+    function test_transferred_Succeeds_WhenAmountIsZero() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         vm.prank(address(testToken));
-        vm.expectRevert(ErrorsLib.ZeroValue.selector);
         compliance.transferred(alice, bob, 0);
     }
 
@@ -435,12 +460,11 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.created(address(0), 10);
     }
 
-    /// @notice Should revert when amount is zero
-    function test_created_RevertWhen_AmountIsZero() public {
+    /// @notice Should accept a zero amount, which a token reports for a zero-value movement
+    function test_created_Succeeds_WhenAmountIsZero() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         vm.prank(address(testToken));
-        vm.expectRevert(ErrorsLib.ZeroValue.selector);
         compliance.created(bob, 0);
     }
 
@@ -484,12 +508,11 @@ contract ComplianceTest is TREXSuiteTest {
         compliance.destroyed(address(0), 10);
     }
 
-    /// @notice Should revert when amount is zero
-    function test_destroyed_RevertWhen_AmountIsZero() public {
+    /// @notice Should accept a zero amount, which a token reports for a zero-value movement
+    function test_destroyed_Succeeds_WhenAmountIsZero() public {
         Token testToken = _setupComplianceBoundToWallet();
 
         vm.prank(address(testToken));
-        vm.expectRevert(ErrorsLib.ZeroValue.selector);
         compliance.destroyed(alice, 0);
     }
 

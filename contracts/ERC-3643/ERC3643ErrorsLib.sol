@@ -71,7 +71,6 @@ library ERC3643ErrorsLib {
 
     // Common
     error ZeroAddress();
-    error ZeroValue();
 
     // Batch
     /// @dev A batch call whose arrays differ in length. Unchecked, a short first array would silently

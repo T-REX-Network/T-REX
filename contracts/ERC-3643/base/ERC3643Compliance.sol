@@ -105,21 +105,18 @@ abstract contract ERC3643Compliance is IERC3643Compliance {
     /// @inheritdoc IERC3643Compliance
     function transferred(address _from, address _to, uint256 _amount) external virtual onlyBoundToken {
         require(_from != address(0) && _to != address(0), ERC3643ErrorsLib.ZeroAddress());
-        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _transferred(_from, _to, _amount);
     }
 
     /// @inheritdoc IERC3643Compliance
     function created(address _to, uint256 _amount) external virtual onlyBoundToken {
         require(_to != address(0), ERC3643ErrorsLib.ZeroAddress());
-        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _created(_to, _amount);
     }
 
     /// @inheritdoc IERC3643Compliance
     function destroyed(address _from, uint256 _amount) external virtual onlyBoundToken {
         require(_from != address(0), ERC3643ErrorsLib.ZeroAddress());
-        require(_amount > 0, ERC3643ErrorsLib.ZeroValue());
         _destroyed(_from, _amount);
     }
 

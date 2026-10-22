@@ -114,7 +114,9 @@ interface IUtilityChecker {
         view
         returns (bool _freezeStatus, bool _eligibilityStatus, bool _complianceStatus);
 
-    /// @dev Check trade validity and return the status of each module for this transfer.
+    /// @dev Check trade validity and return the status of each module for this transfer. A sender or a recipient
+    ///      that resolves to no identity is refused by the compliance before any rule is asked, so every row then
+    ///      allows zero.
     /// @param _token The address of the token contract.
     /// @param _from Address of the sender.
     /// @param _to Address of the receiver.

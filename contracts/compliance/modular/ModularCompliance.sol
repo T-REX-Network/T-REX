@@ -72,7 +72,6 @@ import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
-import { RolesLib } from "../../libraries/RolesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
@@ -285,23 +284,23 @@ contract ModularCompliance is
     }
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
-    ///  claim a fresh compliance during setup), and the owner may always bind or unbind.
+    ///  claim a fresh compliance during setup), and anyone else needs the role the AccessManager binds to
+    ///  `bindToken`, checked the way `restricted` checks it, so an owner granted with a delay schedules the call.
     ///
     ///  Neither door admits a token that already has supply. The ledger keeps every position from the
     ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
     ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
     ///  same; this covers the owner calling here directly.
-    function _authorizeTokenBinding(address token) internal view override {
-        require(
-            (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
-            ErrorsLib.OnlyOwnerOrTokenCanCall()
-        );
+    function _authorizeTokenBinding(address token) internal override {
+        bool tokenClaimsFreshCompliance = _getTokenBound() == address(0) && msg.sender == token;
+        if (!tokenClaimsFreshCompliance) _checkCanCall(_msgSender(), _msgData());
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
     }
 
-    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
-    function _authorizeTokenUnbinding(address token) internal view override {
-        require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+    /// @dev Unbinding does not allow the "first bind" path: only the token itself, or the role bound to
+    ///  `unbindToken`.
+    function _authorizeTokenUnbinding(address token) internal override {
+        if (msg.sender != token) _checkCanCall(_msgSender(), _msgData());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -474,12 +473,6 @@ contract ModularCompliance is
     /// @dev Forwards `callData` to a bound `_module`. No caller check: wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         ModuleSetLib.callModuleFunction(callData, _module);
-    }
-
-    function _isOwner(address caller) internal view returns (bool) {
-        (bool isOwner,) =
-            AuthorityUtils.canCallWithDelay(authority(), caller, address(this), RolesLib.BIND_UNBIND_TOKEN);
-        return isOwner;
     }
 
     function _moduleSet() private pure returns (ModuleSetLib.ModuleSet storage) {

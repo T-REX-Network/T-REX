@@ -73,6 +73,20 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertFalse(results[0].pass);
     }
 
+    /// @notice A wallet with no identity gets one unmatched row per required topic instead of a revert
+    function test_getVerifiedDetails_ReturnsFalse_WhenTheWalletHasNoIdentity() public {
+        address stranger = makeAddr("stranger");
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results, IIdentityFactory.AccountStatus walletStatus) =
+            utilityChecker.getVerifiedDetails(address(token), stranger);
+
+        assertEq(results.length, 1);
+        assertEq(address(results[0].issuer), address(0));
+        assertFalse(results[0].pass);
+        assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.None));
+        assertFalse(identityRegistry.isVerified(stranger));
+    }
+
     /// @notice Should return empty result when the identity is registered without topics
     function test_getVerifiedDetails_ReturnsEmpty_WhenNoClaimTopics() public {
         // Register charlie
@@ -189,6 +203,33 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertEq(address(results[0].issuer), address(trickyClaimIssuer));
         assertEq(results[0].topic, topic);
         assertFalse(results[0].pass); // Should be false because isClaimValid threw an error
+    }
+
+    /// @notice A topic passes on its first valid claim, as in isVerified: a later trusted issuer whose claim fails
+    ///         does not overwrite the row.
+    function test_getVerifiedDetails_KeepsTheValidClaim_WhenALaterIssuerFails() public {
+        ClaimIssuerTrick trickyClaimIssuer = new ClaimIssuerTrick(address(validatorModule));
+        uint256[] memory topics = claimTopicsRegistry.getClaimTopics();
+        uint256 topic = topics[0];
+        vm.prank(deployer);
+        trustedIssuersRegistry.addTrustedIssuer(address(trickyClaimIssuer), topics);
+
+        Structs.ClaimData memory trickyData = Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, ""),
+            payload: "0x00"
+        });
+        vm.prank(alice);
+        aliceIdentity.addClaim(topic, 1, address(trickyClaimIssuer), "0x00", trickyData, "");
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
+            utilityChecker.getVerifiedDetails(address(token), alice);
+
+        assertEq(results.length, 1);
+        assertEq(address(results[0].issuer), address(claimIssuer));
+        assertTrue(results[0].pass);
+        assertTrue(identityRegistry.isVerified(alice));
     }
 
     /// @notice Should resolve the per-identity-type topics, mirroring isVerified. The default set is

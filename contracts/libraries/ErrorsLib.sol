@@ -122,7 +122,6 @@ library ErrorsLib {
     /// @dev A module names the same type twice.
     error DuplicateModuleType(uint8 moduleType);
     error ModuleNotBound();
-    error OnlyOwnerOrTokenCanCall();
     error TokenNotBound();
 
     // Module Errors

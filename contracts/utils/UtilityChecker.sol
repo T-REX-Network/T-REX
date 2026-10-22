@@ -132,6 +132,9 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
         _details = new EligibilityCheckDetails[](topicsCount);
+        // A wallet with no identity holds no claim, and asking the zero address for one would revert: every
+        // required topic is reported as not found, as `isVerified` refuses the wallet.
+        if (address(identity) == address(0)) return (_details, _walletStatus);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
             uint256 topic = requiredClaimTopics[claimTopic];
             address[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
@@ -142,6 +145,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
                     _details[claimTopic] =
                         EligibilityCheckDetails({ issuer: IClaimIssuer(trustedIssuers[i]), topic: topic, pass: pass });
                 }
+                // `isVerified` accepts a topic on its first valid claim, so a later issuer must not overwrite it.
+                if (pass) break;
             }
         }
     }
@@ -231,9 +236,15 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         // others would report a pass they never gave.
         address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
         IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
+        // A zero wallet is the missing side of a mint or a burn, not a wallet without an identity.
+        bool senderHasNoIdentity = _from != address(0) && ctx.fromIdentity == address(0);
+        bool recipientHasNoIdentity = _to != address(0) && ctx.toIdentity == address(0);
+        // The compliance refuses either case before asking any rule, so every rule is reported as allowing nothing.
+        bool refusedBeforeTheRules = senderHasNoIdentity || recipientHasNoIdentity;
+
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
-            uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
+            uint256 allowed = refusedBeforeTheRules ? 0 : IModule(rules[i]).allowedAmount(ctx);
             _details[i] = ComplianceCheckDetails({
                 moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed
             });

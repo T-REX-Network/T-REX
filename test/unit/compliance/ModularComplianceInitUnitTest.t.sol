@@ -139,7 +139,7 @@ contract ModularComplianceInitUnitTest is Test {
         address otherToken = makeAddr("OtherToken");
 
         vm.prank(otherToken);
-        vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, otherToken));
         mc.bindToken(otherToken);
     }
 
