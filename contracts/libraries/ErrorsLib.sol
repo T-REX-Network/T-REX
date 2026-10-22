@@ -166,9 +166,8 @@ library ErrorsLib {
 
     // AccessManagerSetupLib Errors
     error NotAssigned(address target);
-    error PendingDelayChange(address account, uint64 role);
-    error PendingRoleGrant(address account, uint64 role);
-    error RoleNotHeld(address account, uint64 role);
+    /// @dev `target` already belongs to `domainId`, so it cannot be set up in another domain.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();

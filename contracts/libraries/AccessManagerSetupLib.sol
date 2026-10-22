@@ -100,17 +100,6 @@ library AccessManagerSetupLib {
         RolesLib.Role admin;
     }
 
-    struct RoleAssignment {
-        address account;
-        RolesLib.Role role;
-        uint32 domainId;
-    }
-
-    struct RoleRevocation {
-        address account;
-        RolesLib.Role role;
-    }
-
     uint64 internal constant ADMIN_ROLE = 0;
 
     function setupTokenRoles(IAccessManager accessManager, address token, uint32 domainId) internal {
@@ -220,79 +209,40 @@ library AccessManagerSetupLib {
         table[12] = RoleAdmin(RolesLib.Role.COMPLIANCE_MANAGER, RolesLib.Role.SUITE_ADMIN);
     }
 
+    /// @notice Commissions the suite of `token` into the domain the manager assigned it to. The identity
+    ///         storage joins that same domain: a fresh storage is assigned to it, a storage already in it
+    ///         keeps its rows, and a storage already assigned to another domain is refused.
+    /// @dev The storage holds one record per wallet, whichever registry wrote it. If a registry of domain B
+    ///      wrote into the storage of domain A, an agent of B could register wallets under, and revoke the
+    ///      wallets of, A's holders through B's registry (OZ H-01). So a storage belongs to one domain, and
+    ///      every registry bound to it holds `IRS_WRITER` in that domain. Tokens of one domain still share a
+    ///      storage. The isolation is between the domains' roles, not from the manager's admin: every domain
+    ///      of one manager shares its `ADMIN_ROLE`, which can grant `IRS_WRITER` of any domain by hand.
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
         uint32 domainId = accessManager.domainOf(token);
         require(domainId != 0, ErrorsLib.NotAssigned(token));
         address registry = _registryOf(token);
         address identityRegistryStorage = _storageOf(registry);
+
         uint32 storageDomainId = accessManager.domainOf(identityRegistryStorage);
         if (storageDomainId == 0) {
             accessManager.assign(domainId, identityRegistryStorage);
-            storageDomainId = domainId;
+        } else {
+            require(storageDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(identityRegistryStorage, storageDomainId));
         }
-        _commission(accessManager, token, registry, identityRegistryStorage, domainId, storageDomainId);
+
+        _commission(accessManager, token, registry, identityRegistryStorage, domainId);
     }
 
-    function commissionSuite(IAccessManager accessManager, address token, uint32 domainId, uint32 storageDomainId)
-        internal
-    {
+    /// @notice The pure form of {commissionSuite}, for any `IAccessManager`: the caller names the domain, and
+    ///         the suite's four contracts, the storage included, are all set up in it.
+    /// @dev A plain `IAccessManager` keeps no record of domains, so this form cannot refuse a storage that
+    ///      another domain already uses: it maps the storage's rows to `domainId` as asked. The caller, who
+    ///      holds `ADMIN_ROLE`, must not point a suite at a storage of another domain; the manager form
+    ///      above refuses it for them.
+    function commissionSuite(IAccessManager accessManager, address token, uint32 domainId) internal {
         address registry = _registryOf(token);
-        _commission(accessManager, token, registry, _storageOf(registry), domainId, storageDomainId);
-    }
-
-    function moveSuitesToDomains(
-        TREXAccessManager accessManager,
-        address[] memory tokens,
-        uint32 fromDomainId,
-        uint32[] memory toDomainIds,
-        RoleAssignment[] memory assignments,
-        RoleRevocation[] memory revocations
-    ) internal {
-        require(tokens.length == toDomainIds.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < tokens.length; i++) {
-            accessManager.assign(toDomainIds[i], tokens[i]);
-        }
-        migrateSuitesToDomains(
-            IAccessManager(accessManager), tokens, fromDomainId, toDomainIds, assignments, revocations
-        );
-    }
-
-    function migrateSuitesToDomains(
-        IAccessManager accessManager,
-        address[] memory tokens,
-        uint32 fromDomainId,
-        uint32[] memory toDomainIds,
-        RoleAssignment[] memory assignments,
-        RoleRevocation[] memory revocations
-    ) internal {
-        require(tokens.length == toDomainIds.length, ErrorsLib.ArrayLengthMismatch());
-        for (uint256 i = 0; i < assignments.length; i++) {
-            _grantFrom(
-                accessManager, fromDomainId, assignments[i].role, assignments[i].domainId, assignments[i].account
-            );
-        }
-        for (uint256 i = 0; i < tokens.length; i++) {
-            _grantFrom(accessManager, fromDomainId, RolesLib.Role.AGENT, toDomainIds[i], tokens[i]);
-        }
-        for (uint256 i = 0; i < tokens.length; i++) {
-            setupTokenRoles(accessManager, tokens[i], toDomainIds[i]);
-            setupTREXRegistryRoles(accessManager, _registryOf(tokens[i]), toDomainIds[i]);
-            setupModularComplianceRoles(accessManager, _complianceOf(tokens[i]), toDomainIds[i]);
-            setupRoleAdmins(accessManager, toDomainIds[i]);
-        }
-        for (uint256 i = 0; i < tokens.length; i++) {
-            accessManager.revokeRole(RolesLib.forDomain(fromDomainId, RolesLib.Role.AGENT), tokens[i]);
-        }
-        for (uint256 i = 0; i < revocations.length; i++) {
-            if (!_isAdministrative(revocations[i].role)) {
-                accessManager.revokeRole(RolesLib.forDomain(fromDomainId, revocations[i].role), revocations[i].account);
-            }
-        }
-        for (uint256 i = 0; i < revocations.length; i++) {
-            if (_isAdministrative(revocations[i].role)) {
-                accessManager.revokeRole(RolesLib.forDomain(fromDomainId, revocations[i].role), revocations[i].account);
-            }
-        }
+        _commission(accessManager, token, registry, _storageOf(registry), domainId);
     }
 
     function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
@@ -365,16 +315,17 @@ library AccessManagerSetupLib {
         }
     }
 
+    /// @dev The token acts as an agent of its registry (recovery, cross-chain instructions), and only the
+    ///      registry writes into the storage, never a person. Both grants land in the suite's own domain.
     function _commission(
         IAccessManager accessManager,
         address token,
         address registry,
         address identityRegistryStorage,
-        uint32 domainId,
-        uint32 storageDomainId
+        uint32 domainId
     ) private {
         accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0);
-        accessManager.grantRole(RolesLib.forDomain(storageDomainId, RolesLib.Role.IRS_WRITER), registry, 0);
+        accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry, 0);
 
         setupTokenRoles(accessManager, token, domainId);
         setupTREXRegistryRoles(accessManager, registry, domainId);
@@ -383,35 +334,7 @@ library AccessManagerSetupLib {
         if (!IIdentityRegistryStorage(identityRegistryStorage).isIdentityRegistryBound(registry)) {
             IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
         }
-        setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, storageDomainId);
-        if (storageDomainId != domainId) {
-            setupRoleAdmins(accessManager, storageDomainId);
-        }
-    }
-
-    function _grantFrom(
-        IAccessManager accessManager,
-        uint32 fromDomainId,
-        RolesLib.Role role,
-        uint32 toDomainId,
-        address account
-    ) private {
-        uint64 sourceRole = RolesLib.forDomain(fromDomainId, role);
-        (uint48 since, uint32 executionDelay,, uint48 effect) = accessManager.getAccess(sourceRole, account);
-        require(since != 0, ErrorsLib.RoleNotHeld(account, sourceRole));
-        require(since <= block.timestamp, ErrorsLib.PendingRoleGrant(account, sourceRole));
-        require(effect <= block.timestamp, ErrorsLib.PendingDelayChange(account, sourceRole));
-        accessManager.grantRole(RolesLib.forDomain(toDomainId, role), account, executionDelay);
-    }
-
-    function _isAdministrative(RolesLib.Role role) private pure returns (bool) {
-        RoleAdmin[] memory table = roleAdminTable();
-        for (uint256 i = 0; i < table.length; i++) {
-            if (table[i].admin == role) {
-                return true;
-            }
-        }
-        return false;
+        setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, domainId);
     }
 
     /// @dev Walks `table` as runs of consecutive same-role entries and maps each run with one
