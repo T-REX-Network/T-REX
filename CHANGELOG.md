@@ -79,11 +79,14 @@ All notable changes to this project will be documented in this file.
     reset every role mapping the admin changed since, and a run into another domain would move the suite
     while its storage and the token's old `AGENT` grant stay behind. A contract's rows are written the first
     time it joins a domain and never again, so a registry, storage or compliance shared by a second token
-    keeps every row its admin changed. A registry or compliance already in another domain is refused with
-    the same error (remapping it would lock the first token out of its own registry); the storage keeps its
-    first domain as before. Who hands out which role is set once, in `createDomain`, so a second suite in a
-    domain no longer puts the default appointers back. The old library reset rows and appointers on every
-    run.
+    keeps every row its admin changed. A registry, storage or compliance already in another domain is
+    refused with the same error (remapping it would lock the first token out of its own registry). The
+    storage used to keep its first domain and let the second domain's registry write into it (OZ H-01): one
+    record per wallet serves every registry bound to a storage, so an agent of one domain could register
+    wallets under, and revoke the wallets of, another domain's holders. The `IRS_WRITER` grant now always
+    lands in the suite's own domain, and tokens of one domain still share a storage. Who hands out which
+    role is set once, in `createDomain`, so a second suite in a domain no longer puts the default
+    appointers back. The old library reset rows and appointers on every run.
   - **Breaking, deployment order:** the factory initializes a fresh suite manager with `initializeSuite`,
     which only the new `TREXAccessManager` implementation has. Publish it in the same implementation
     authority version as this factory (`publishAndUpgrade`, one transaction for all five implementations);
@@ -257,10 +260,13 @@ All notable changes to this project will be documented in this file.
   - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
     gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
     domain administrator can hand it out, so this holds by construction. Agents edit investor
-    records through a registry, never directly, and a storage shared across domains gives the other
-    domain's agents nothing.
+    records through a registry, never directly, and a storage is never shared across domains: one record
+    per wallet serves every registry bound to it, so whoever writes it can admit and revoke any of its holders.
     Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's domain: whoever owns the
-    storage's domain owns its bindings.
+    storage's domain owns its bindings. A registry of another domain bound by hand writes nothing, as it
+    holds `IRS_WRITER` in its own domain only. The isolation is between the domains' roles, not from the
+    manager's admin: every domain of one manager shares its `ADMIN_ROLE`, which can grant `IRS_WRITER` of
+    any domain by hand.
   - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns
     the next id, `assign(domainId, target)` records the domain of a token or a storage,
     `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers use
@@ -279,21 +285,14 @@ All notable changes to this project will be documented in this file.
     `migrateSuitesToDomains`: remap the suites, grant the new domains' roles, revoke the old domain's
     `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `setupSuite` after a bare reassignment
     remaps but leaves the old grant in place.
-  - Two tiers. `AccessManagerSetupLib.setupSuite(manager, token)` reads `domainOf(token)` and
-    needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
-    the token's domain on first use and keeps a storage already assigned where it is, so a storage
-    reused across domains keeps one owner and every registry bound to it writes with that
-    domain's `IRS_WRITER`. `setupSuite(manager, token, domainId, storageDomainId)` is
-    the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
-    already shared with another domain is passed with the domain it lives in and is not
-    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Suite setup is
-    idempotent for a caller that also holds `AGENT_ADMIN` in the domain: re-running re-applies the
-    standard tables, and the token's `AGENT` grant is gated by that role once the role-admin table is
-    in place. Suite setup needs `ADMIN_ROLE`: it maps
-    selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
-    governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
-    for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
-    domain.
+  - Suite setup is `TREXAccessManager.setupSuite(domainId, token)`, once per token: it reads the registry,
+    storage and compliance from the token and writes the four contracts into one domain, the storage
+    included. A storage, registry or compliance already in another domain is refused (`SuiteAlreadySetUp`),
+    so every registry bound to a storage writes with the storage's own `IRS_WRITER`. The platform
+    `AccessManagerSetupLib` functions take the role ids they map to and are pure. Suite setup needs
+    `ADMIN_ROLE`: it maps selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a
+    storage is a governance act. Binding a second registry to a mapped storage needs `IRS_BINDER` in the
+    storage's domain.
   - The library keeps no state of its own and validates no preconditions: no markers, no
     "already configured" checks, no migration preflight. Which suites were configured alike is the
     operator's record.
