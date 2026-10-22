@@ -172,12 +172,14 @@ All notable changes to this project will be documented in this file.
     leaves the old grant in place.
   - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
-    the token's domain on first use, keeps a storage already in that domain where it is, and refuses
-    a storage already assigned to another domain (`SuiteAlreadySetUp(storage, domainId)`), so every
-    registry bound to a storage writes with the storage's own `IRS_WRITER`. Tokens of one domain
-    still share a storage. `commissionSuite(manager, token, domainId)` is the pure form and works on
-    any `IAccessManager`: the caller names the domain, and the four suite contracts, the storage
-    included, are set up in it. Every other suite `setup*` function takes a `domainId` and is pure.
+    the token's domain on first use and keeps a storage already in that domain where it is.
+    `commissionSuite(manager, token, domainId)` is the pure form and works on any `IAccessManager`:
+    the caller names the domain, and the four suite contracts, the storage included, are set up in it.
+    Both forms refuse a storage of another domain (`StorageInAnotherDomain(storage, storageDomainId)`):
+    the domain a storage is in is read from its own selector rows, the ones that decide who may write
+    it, so neither the manager's domain record nor the caller's `domainId` can move a storage, and
+    every registry bound to a storage writes with the storage's own `IRS_WRITER`. Tokens of one domain
+    still share a storage. Every other suite `setup*` function takes a `domainId` and is pure.
     Commissioning is idempotent: re-running re-applies the standard tables. Commissioning needs
     `ADMIN_ROLE`: it maps selectors and grants `IRS_WRITER` to the registry, and attaching a registry
     to a storage is a governance act. A second suite into a domain already administered also needs
@@ -185,7 +187,7 @@ All notable changes to this project will be documented in this file.
     in the storage's domain.
   - The library keeps no state of its own and validates no preconditions beyond the storage's
     domain: no markers, no "already configured" checks. Which suites were configured alike is the
-    operator's record. Moving a suite between domains is a script if the need appears.
+    operator's record.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
@@ -480,10 +482,12 @@ All notable changes to this project will be documented in this file.
   registry wrote it, so an agent of the second domain could, through their own registry, register a
   wallet under any holder of the first domain's token, rebind a holder's wallet and move its balance
   with `identityTransfer`, or revoke it: the isolation the domains promised did not hold.
-  `commissionSuite(manager, token)` now refuses a storage already assigned to another domain
-  (`SuiteAlreadySetUp(storage, domainId)`), assigns a fresh one to the suite's own domain, and grants
-  `IRS_WRITER` in that domain only; the pure form drops its `storageDomainId` parameter and sets the
-  storage up in the suite's domain too. Tokens of one domain still share a storage. The migration
+  Both forms of `commissionSuite` now refuse a storage of another domain
+  (`StorageInAnotherDomain(storage, storageDomainId)`): the check reads the storage's own
+  `addIdentityToStorage` row, the one that decides who may write it, so a bare `assign` of the storage
+  or a call of the pure form with another domain cannot move a live storage either. A fresh storage is
+  mapped to the suite's own domain, and `IRS_WRITER` is granted in that domain only; the pure form
+  drops its `storageDomainId` parameter. Tokens of one domain still share a storage. The migration
   helpers `moveSuitesToDomains` and `migrateSuitesToDomains` are removed: they moved a suite without
   its storage, which left the same shared storage behind, and they never ran outside tests. With them
   go `RoleAssignment`, `RoleRevocation` and the errors `RoleNotHeld`, `PendingRoleGrant`,
