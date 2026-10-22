@@ -73,6 +73,14 @@ import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
 
+/// @dev Gas given to each trusted issuer's `isClaimValid`. Without a cap an issuer that burns its gas leaves the
+///  loop 1/64 of what remained, too little to ask the next issuer or topic. The heaviest honest check measured
+///  is an ONCHAINID issuer whose claim signer is a WebAuthn (P-256) key verified in Solidity, on a chain without
+///  the P-256 precompile: 314,207 gas, cold, for a claim with a 2,048-byte payload (an ECDSA signer needs
+///  39,999). The cap leaves room above that for longer client data and gas repricing, and one issuer that burns
+///  it on all 15 topics a registry allows costs 7.5M gas, under half a 16,777,216-gas transaction.
+uint256 constant IS_CLAIM_VALID_GAS = 500_000;
+
 /// @title ERC3643IdentityRegistry
 /// @dev The ERC-3643 Identity Registry surface and nothing else, over its own ERC-7201 namespace.
 /// Collaborators are reached through `_identityStorage`, `_issuersRegistry` and `_topicsRegistry`, so a
@@ -245,7 +253,8 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     ///  An identity answers `getClaim`, so the issuer it returns is untrusted input: only a claim from
     ///  `trustedIssuer` hashes to `claimId`. Validity is therefore asked of the configured issuer, never
     ///  of the address the identity supplied. The call is made with a bounded low-level staticcall so a
-    ///  hostile or broken issuer cannot halt verification by reverting or returning oversized data.
+    ///  hostile or broken issuer cannot halt verification by reverting, burning its gas or returning
+    ///  oversized data.
     function _isVerified(address userAddress) internal view virtual returns (bool) {
         IIdentity userIdentity = _activeIdentityOf(userAddress);
         if (address(userIdentity) == address(0)) return false;
@@ -274,9 +283,24 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
             // Only an answer of exactly one word equal to true counts. An issuer that reverts, answers nothing or
             // answers something else is skipped like an invalid claim, so one broken issuer never halts transfers.
-            (bool success, bytes32 answer,) = LowLevelCall.staticcallReturn64Bytes(
-                trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data))
-            );
+            bytes memory isClaimValidCall =
+                abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data));
+            bool success;
+            bytes32 answer;
+            // `LowLevelCall.staticcallReturn64Bytes` with the gas capped, which the library cannot do: it forwards all
+            // gas. An issuer that runs out of its cap fails the call, so it reads as an invalid claim. Only the first
+            // word is copied back, so an oversized answer costs nothing here.
+            assembly ("memory-safe") {
+                success := staticcall(
+                    IS_CLAIM_VALID_GAS,
+                    trustedIssuer,
+                    add(isClaimValidCall, 0x20),
+                    mload(isClaimValidCall),
+                    0x00,
+                    0x20
+                )
+                answer := mload(0x00)
+            }
             if (success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1))) return true;
         }
         return false;

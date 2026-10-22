@@ -63,6 +63,23 @@ contract NonBooleanClaimIssuer {
 
 }
 
+/// @dev A claim issuer that calls every claim valid until it starts burning all the gas it is given, as a trusted
+///  issuer that turns hostile after its claims were added.
+contract GasBurningClaimIssuer {
+
+    bool public burnsGas;
+
+    function startBurningGas() external {
+        burnsGas = true;
+    }
+
+    function isClaimValid(IIdentity, uint256, bytes calldata, Structs.ClaimData calldata) external view returns (bool) {
+        while (burnsGas) { }
+        return true;
+    }
+
+}
+
 /// @dev A claim issuer that calls every claim valid.
 contract AlwaysValidClaimIssuer {
 
@@ -133,6 +150,37 @@ contract SilentClaimIssuerTest is TREXSuiteTest {
         (UtilityChecker.EligibilityCheckDetails[] memory details,) =
             utilityChecker.getVerifiedDetails(address(token), david);
         assertEq(address(details[0].issuer), validIssuer, "the UtilityChecker reports the issuer that passed");
+        assertTrue(details[0].pass, "the UtilityChecker agrees");
+    }
+
+    /// @notice An issuer that burns its gas gets a capped share, so the registry still has the gas to ask the next
+    ///  trusted issuer. Uncapped, it took 63/64 of the gas and left too little for the next issuer, here the suite's
+    ///  ONCHAINID claim issuer checking a real signed claim. The gas limit is one a wallet could set for a transfer.
+    function test_isVerified_SkipsAGasBurningIssuerAndCountsTheNextOne() public {
+        Token token = _deployTokenWithClaimTopic("gas-burner", "GAS", "GAS");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        GasBurningClaimIssuer gasBurningIssuer = new GasBurningClaimIssuer();
+        // The registry asks issuers in the order they were trusted, so the burner goes ahead of the valid issuer.
+        vm.prank(deployer);
+        registry.removeTrustedIssuer(address(claimIssuer));
+        _trust(registry, address(gasBurningIssuer));
+        _trust(registry, address(claimIssuer));
+        _registerIdentities(token);
+        _addClaim(aliceIdentity, CLAIM_TOPIC_1, "kyc", claimIssuerSigner.key, address(claimIssuer), alice);
+        Structs.ClaimData memory data = Structs.ClaimData({
+            issuedAt: block.timestamp,
+            validUntil: 0,
+            metadataHash: validatorModule.getMetadataHash(1, "uri"),
+            payload: ""
+        });
+        vm.prank(alice);
+        aliceIdentity.addClaim(CLAIM_TOPIC_1, 1, address(gasBurningIssuer), hex"00", data, "uri");
+        gasBurningIssuer.startBurningGas();
+
+        assertTrue(registry.isVerified{ gas: 1_000_000 }(alice), "the valid issuer's claim counts");
+        (UtilityChecker.EligibilityCheckDetails[] memory details,) =
+            utilityChecker.getVerifiedDetails{ gas: 1_000_000 }(address(token), alice);
+        assertEq(address(details[0].issuer), address(claimIssuer), "the UtilityChecker reports the issuer that passed");
         assertTrue(details[0].pass, "the UtilityChecker agrees");
     }
 

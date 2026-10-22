@@ -76,6 +76,7 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { IS_CLAIM_VALID_GAS } from "../ERC-3643/base/ERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
@@ -190,18 +191,33 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (bool topicMatch, bool pass)
     {
-        /// forge-lint: disable-next-line(asm-keccak256)
-        bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
-        (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
-            identity.getClaim(claimId);
+        (
+            uint256 foundClaimTopic,,
+            address issuer,
+            bytes memory sig,
+            Structs.ClaimData memory data,
+            /// forge-lint: disable-next-line(asm-keccak256)
+        ) = identity.getClaim(keccak256(abi.encode(trustedIssuer, topic)));
         // Same rule as the registry's `isVerified`: only a claim from the trusted issuer itself counts, and only
         // that issuer is asked about it.
         if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
-        (bool success, bytes32 answer,) = LowLevelCall.staticcallReturn64Bytes(
-            trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data))
-        );
+        bytes memory isClaimValidCall = abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data));
+        bool success;
+        bytes32 answer;
+        // The registry's capped call, so an issuer that needs more gas than the registry gives fails here too.
+        assembly ("memory-safe") {
+            success := staticcall(
+                IS_CLAIM_VALID_GAS,
+                trustedIssuer,
+                add(isClaimValidCall, 0x20),
+                mload(isClaimValidCall),
+                0x00,
+                0x20
+            )
+            answer := mload(0x00)
+        }
         pass = success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1));
     }
 

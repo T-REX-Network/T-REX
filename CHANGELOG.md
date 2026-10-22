@@ -481,6 +481,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A trusted issuer that burns its gas no longer blocks verification** (audit L-12). `isVerified` gave each
+  trusted issuer's `isClaimValid` all remaining gas, so an issuer that burned it left 1/64 for the rest of the
+  loop and a holder with a valid claim from another issuer could not be verified. Each call now gets at most
+  `IS_CLAIM_VALID_GAS` (500,000), and a call that runs out reads as an invalid claim. The heaviest honest check
+  measured, an ONCHAINID issuer with a WebAuthn signer verified without the P-256 precompile, needs 314,207.
+  `UtilityChecker.getVerifiedDetails` uses the same cap, so the two still agree.
 - **A trusted issuer that answers nothing no longer validates a claim.** `isVerified` read the issuer's
   `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
   anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
