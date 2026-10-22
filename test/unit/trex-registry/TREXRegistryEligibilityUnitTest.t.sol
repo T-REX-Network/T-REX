@@ -18,14 +18,20 @@ contract TREXRegistryEligibilityUnitTest is TREXRegistryBaseUnitTest {
         registry.disableEligibilityChecks();
     }
 
-    function test_disableEligibilityChecks_Success_IsVerifiedAlwaysTrue() public {
+    /// @notice The kill switch skips the claims, not the identity: a wallet with an identity passes without the
+    ///         claim a topic requires, and an address with no identity is still refused.
+    function test_disableEligibilityChecks_Success_SkipsTheClaimsButNotTheIdentity() public {
+        vm.prank(deployer);
+        registry.addClaimTopic(CLAIM_TOPIC_1);
+        assertFalse(registry.isVerified(charlie), "charlie holds no claim for the topic");
+
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false, address(registry));
         emit EventsLib.EligibilityChecksDisabled();
         registry.disableEligibilityChecks();
 
-        // Even an unregistered address must be considered verified.
-        assertTrue(registry.isVerified(charlie));
+        assertTrue(registry.isVerified(charlie), "the claim is skipped");
+        assertFalse(registry.isVerified(another), "an address with no identity is still refused");
     }
 
     function test_disableEligibilityChecks_RevertWhen_AlreadyDisabled() public {
@@ -52,18 +58,20 @@ contract TREXRegistryEligibilityUnitTest is TREXRegistryBaseUnitTest {
     }
 
     function test_enableEligibilityChecks_Success() public {
-        vm.prank(deployer);
+        vm.startPrank(deployer);
+        registry.addClaimTopic(CLAIM_TOPIC_1);
         registry.disableEligibilityChecks();
+        vm.stopPrank();
 
-        assertTrue(registry.isVerified(another));
+        assertTrue(registry.isVerified(charlie));
 
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false, address(registry));
         emit EventsLib.EligibilityChecksEnabled();
         registry.enableEligibilityChecks();
 
-        // No registered identity = unverified
-        assertFalse(registry.isVerified(another));
+        // The claim is required again.
+        assertFalse(registry.isVerified(charlie));
     }
 
     // ============ isVerified() ============

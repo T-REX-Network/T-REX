@@ -126,12 +126,19 @@ contract TREXRegistryWalletViewsUnitTest is TREXRegistryBaseUnitTest {
         assertFalse(registry.isWalletVerified(satelliteWallet));
     }
 
-    /// @notice Disabled checks admit any wallet, bound or not, before any lookup.
+    /// @notice Disabled checks skip the claims but still need an active identity, on either path.
     function test_isWalletVerified_Success_WhenChecksAreDisabled() public {
         vm.prank(deployer);
         registry.disableEligibilityChecks();
 
-        assertTrue(registry.isWalletVerified(satelliteWallet));
+        assertFalse(registry.isWalletVerified(satelliteWallet), "an unbound satellite wallet is refused");
+        assertFalse(
+            registry.isWalletVerified(InteroperableAddress.formatEvmV1(block.chainid, another)),
+            "an unbound native wallet is refused"
+        );
+
+        _mockActive(address(charlieIdentity));
+        assertTrue(registry.isWalletVerified(satelliteWallet), "a bound satellite wallet passes without claims");
         assertTrue(registry.isWalletVerified(InteroperableAddress.formatEvmV1(block.chainid, charlie)));
     }
 
