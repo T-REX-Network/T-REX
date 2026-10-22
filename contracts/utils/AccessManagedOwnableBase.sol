@@ -82,14 +82,14 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
     }
 
     /// @inheritdoc IERC173
-    /// @dev Rotates this contract's authority only. Replacing a suite's AccessManager is not a supported
-    ///      operation: the manager is a beacon proxy upgraded in place, and the token identity's MANAGEMENT
-    ///      key stays with the manager that deployed the suite.
-    function transferOwnership(address newAuthority) external {
-        address oldAuthority = authority();
-        setAuthority(newAuthority);
-
-        emit OwnershipTransferred(oldAuthority, newAuthority);
+    /// @dev Always reverts. The owner is the AccessManager, and a change of manager must wait for the target's
+    ///      admin delay, which the manager applies only to its own `updateAuthority`. This function is a
+    ///      call on the target itself, mapped to no role, so the manager would run it with no delay.
+    /// @dev Replacing a suite's AccessManager is not a supported operation either way: the manager is a beacon
+    ///      proxy upgraded in place, and the token identity's MANAGEMENT key stays with the manager that
+    ///      deployed the suite.
+    function transferOwnership(address) external pure {
+        revert ErrorsLib.UseUpdateAuthority();
     }
 
     /// @inheritdoc IERC173
