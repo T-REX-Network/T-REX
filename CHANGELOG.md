@@ -518,6 +518,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A stuck pair whose burn leg moved nothing resolves** (OZ N-10, #170): a validation issued with a zero minimum
+  may burn 0, which holds nothing in transit, and `resolveStuckValidation` then reverted `NothingInTransit`, leaving
+  the validation and both identities' pending amounts in place for good. Resolution now skips the hold return when
+  the executed amount is 0. Issuance still accepts a zero minimum.
+- **A zero receive id is not recorded** (OZ L-19, #158): ERC-7786 lets a gateway pass `bytes32(0)`, and recording
+  `(gateway, 0)` refused every later message from that gateway with `MessageAlreadyReceived`. A zero id now skips
+  the transport record. Every inbound type keeps its own replay protection: a settlement or a leg delivered again
+  finds its validation already past that leg and halts the token (`ReplayedSettlement`); the proof that settled a
+  recall delivered again changes nothing (`BurnProofDuplicate`), and any other proof for it halts the token
+  (`ReplayedBurnProof`). Nonzero ids are recorded and refused on repeat as before.
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where

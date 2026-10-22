@@ -108,7 +108,7 @@ library TREXMessagingLib {
         /// This token's Lite on each chain, ERC-7930. Empty falls back to the token's own address.
         mapping(bytes32 chainKey => bytes peer) peers;
 
-        /// Transport-level replay guard. The pinned receiver base keeps no record of its own.
+        /// Transport-level replay guard, for nonzero receive ids. The pinned receiver base keeps no record of its own.
         mapping(address gateway => mapping(bytes32 receiveId => bool)) received;
 
         /// The prefix each known chain key was derived from, recorded on first sight.
@@ -275,8 +275,13 @@ library TREXMessagingLib {
 
         (messageType, body) = MessageTypesLib.decode(payload);
 
-        require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
-        s.received[gateway][receiveId] = true;
+        // A zero id is a gateway naming no delivery, which ERC-7786 allows; recording it would refuse every later
+        // message from that gateway. Its deliveries are still deduplicated by what they carry: a settlement by
+        // its validation's status, a burn proof by its recall and the hash of the proof that settled it.
+        if (receiveId != bytes32(0)) {
+            require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
+            s.received[gateway][receiveId] = true;
+        }
 
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _requireCurrentPeer(chainKey, sender);
