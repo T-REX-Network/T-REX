@@ -69,14 +69,13 @@ import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { LowLevelCall } from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
-import { IS_CLAIM_VALID_GAS } from "../ERC-3643/base/ERC3643IdentityRegistry.sol";
+import { issuerConfirmsClaim } from "../ERC-3643/base/ERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
@@ -204,21 +203,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         topicMatch = true;
 
         bytes memory isClaimValidCall = abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data));
-        bool success;
-        bytes32 answer;
-        // The registry's capped call, so an issuer that needs more gas than the registry gives fails here too.
-        assembly ("memory-safe") {
-            success := staticcall(
-                IS_CLAIM_VALID_GAS,
-                trustedIssuer,
-                add(isClaimValidCall, 0x20),
-                mload(isClaimValidCall),
-                0x00,
-                0x20
-            )
-            answer := mload(0x00)
-        }
-        pass = success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1));
+        // The registry's own question, so the checker and `isVerified` always agree on an issuer's answer.
+        pass = issuerConfirmsClaim(trustedIssuer, isClaimValidCall);
     }
 
     /// @inheritdoc IUtilityChecker

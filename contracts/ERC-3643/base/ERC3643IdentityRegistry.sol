@@ -81,6 +81,29 @@ import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistr
 ///  it on all 15 topics a registry allows costs 7.5M gas, under half a 16,777,216-gas transaction.
 uint256 constant IS_CLAIM_VALID_GAS = 500_000;
 
+/// @dev Asks `trustedIssuer` the encoded `isClaimValid` call with at most `IS_CLAIM_VALID_GAS`, and counts only an
+///  answer of exactly one word equal to true. An issuer that reverts, runs out of its gas, answers nothing or
+///  answers something else reads as an invalid claim, so one broken issuer never halts verification.
+///  Assembly because only it can both cap the gas and copy back just the first word of the answer: a Solidity
+///  call returning `bytes memory` copies the whole answer, so an issuer could make the caller pay for megabytes
+///  of memory, and a typed call in a `try` reverts outside the `catch` when the answer does not decode.
+function issuerConfirmsClaim(address trustedIssuer, bytes memory isClaimValidCall) view returns (bool) {
+    bool success;
+    bytes32 answer;
+    assembly ("memory-safe") {
+        success := staticcall(
+            IS_CLAIM_VALID_GAS,
+            trustedIssuer,
+            add(isClaimValidCall, 0x20),
+            mload(isClaimValidCall),
+            0x00,
+            0x20
+        )
+        answer := mload(0x00)
+    }
+    return success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1));
+}
+
 /// @title ERC3643IdentityRegistry
 /// @dev The ERC-3643 Identity Registry surface and nothing else, over its own ERC-7201 namespace.
 /// Collaborators are reached through `_identityStorage`, `_issuersRegistry` and `_topicsRegistry`, so a
@@ -287,27 +310,9 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
             if (foundClaimTopic != claimTopic || issuer != trustedIssuer) continue;
 
-            // Only an answer of exactly one word equal to true counts. An issuer that reverts, answers nothing or
-            // answers something else is skipped like an invalid claim, so one broken issuer never halts transfers.
             bytes memory isClaimValidCall =
                 abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data));
-            bool success;
-            bytes32 answer;
-            // `LowLevelCall.staticcallReturn64Bytes` with the gas capped, which the library cannot do: it forwards all
-            // gas. An issuer that runs out of its cap fails the call, so it reads as an invalid claim. Only the first
-            // word is copied back, so an oversized answer costs nothing here.
-            assembly ("memory-safe") {
-                success := staticcall(
-                    IS_CLAIM_VALID_GAS,
-                    trustedIssuer,
-                    add(isClaimValidCall, 0x20),
-                    mload(isClaimValidCall),
-                    0x00,
-                    0x20
-                )
-                answer := mload(0x00)
-            }
-            if (success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1))) return true;
+            if (issuerConfirmsClaim(trustedIssuer, isClaimValidCall)) return true;
         }
         return false;
     }
