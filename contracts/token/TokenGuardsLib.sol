@@ -70,6 +70,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
+import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 
 /**
  * @title TokenGuardsLib
@@ -79,14 +80,20 @@ import { ErrorsLib } from "../libraries/ErrorsLib.sol";
  */
 library TokenGuardsLib {
 
-    /// @dev A token with supply keeps its registry, and the new one must advertise the standard interface.
-    ///  Reverts `TokenCirculating`, then `InvalidIdentityRegistry`.
+    /// @dev A token with supply keeps its registry, and the new one must advertise the standard interface and
+    ///  the T-REX one. Reverts `TokenCirculating`, then `InvalidIdentityRegistry`.
     /// @param current the registry the token has now, zero during initialization
     /// @param supply the token's total supply, native and bridged
     function checkIdentityRegistry(address current, address identityRegistryAddress, uint256 supply) external view {
         require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
+
+        // The token's recovery and delegation, and the spender check on every `transferFrom`, call T-REX
+        // methods outside the standard interface, which would revert on a registry missing them.
+        bytes4[] memory calledInterfaces = new bytes4[](2);
+        calledInterfaces[0] = type(IERC3643IdentityRegistry).interfaceId;
+        calledInterfaces[1] = type(ITREXRegistry).interfaceId;
         require(
-            ERC165Checker.supportsInterface(identityRegistryAddress, type(IERC3643IdentityRegistry).interfaceId),
+            ERC165Checker.supportsAllInterfaces(identityRegistryAddress, calledInterfaces),
             ErrorsLib.InvalidIdentityRegistry()
         );
     }

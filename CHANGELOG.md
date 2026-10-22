@@ -642,6 +642,10 @@ All notable changes to this project will be documented in this file.
   `IModularCompliance` and `ISettlementHandler` through ERC-165, besides `IERC3643Compliance`, or the call reverts
   with `InvalidCompliance`. A base ERC-3643 compliance was accepted, then every `transferFrom` and settlement
   delivery reverted, and once tokens were minted the compliance could not be replaced.
+- **`setIdentityRegistry` requires `ITREXRegistry`** (N-06): the new registry must advertise `ITREXRegistry` through
+  ERC-165, besides `IERC3643IdentityRegistry`, or the call reverts with `InvalidIdentityRegistry`. The
+  `SpenderVerificationModule` calls `isWalletVerified` on every `transferFrom`, and the token's recovery and
+  delegation call other T-REX registry methods; a standard-only registry made those revert.
 
 ### Removed
 
