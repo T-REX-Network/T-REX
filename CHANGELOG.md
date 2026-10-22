@@ -638,6 +638,10 @@ All notable changes to this project will be documented in this file.
 - **A compliance keeps a bound token that has supply** (L-31): `unbindToken`, and a `bindToken` that would replace
   the bound token, revert with `TokenCirculating` while the bound token has supply. Detaching it made every mint,
   burn, transfer, recovery and settlement revert, and no path could bind it back.
+- **`setCompliance` requires every interface the token calls** (L-22): the new compliance must advertise
+  `IModularCompliance` and `ISettlementHandler` through ERC-165, besides `IERC3643Compliance`, or the call reverts
+  with `InvalidCompliance`. A base ERC-3643 compliance was accepted, then every `transferFrom` and settlement
+  delivery reverted, and once tokens were minted the compliance could not be replaced.
 
 ### Removed
 

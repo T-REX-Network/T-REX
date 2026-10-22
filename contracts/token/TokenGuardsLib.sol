@@ -68,6 +68,7 @@ import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC16
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 
 /**
@@ -90,19 +91,23 @@ library TokenGuardsLib {
         );
     }
 
-    /// @dev A token with supply keeps its compliance; the new one must advertise the standard interface and
-    ///  be bound to no token; the current one, if any, is unbound. The token then writes the pointer and
-    ///  binds. Reverts `TokenCirculating`, then `InvalidCompliance`, then `ComplianceAlreadyBoundToToken`.
+    /// @dev A token with supply keeps its compliance; the new one must advertise every interface the token
+    ///  calls on it and be bound to no token; the current one, if any, is unbound. The token then writes the
+    ///  pointer and binds. Reverts `TokenCirculating`, then `InvalidCompliance`, then
+    ///  `ComplianceAlreadyBoundToToken`.
     /// @param current the compliance the token has now, zero during initialization
     /// @param supply the token's total supply, native and bridged
     function prepareCompliance(address current, address complianceAddress, uint256 supply) external {
         require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
 
-        // Checked before getTokenBound() so a wrong contract gives a named error.
-        require(
-            ERC165Checker.supportsInterface(complianceAddress, type(IERC3643Compliance).interfaceId),
-            ErrorsLib.InvalidCompliance()
-        );
+        // Checked before getTokenBound() so a wrong contract gives a named error. A compliance missing one of
+        // these is accepted, then every `transferFrom` (`canSpenderCall`), agent movement or settlement
+        // delivery reverts, and once tokens are minted the compliance can no longer be replaced.
+        bytes4[] memory calledInterfaces = new bytes4[](3);
+        calledInterfaces[0] = type(IERC3643Compliance).interfaceId;
+        calledInterfaces[1] = type(IModularCompliance).interfaceId;
+        calledInterfaces[2] = type(ISettlementHandler).interfaceId;
+        require(ERC165Checker.supportsAllInterfaces(complianceAddress, calledInterfaces), ErrorsLib.InvalidCompliance());
 
         address boundToken = IModularCompliance(complianceAddress).getTokenBound();
         require(boundToken == address(0), ErrorsLib.ComplianceAlreadyBoundToToken());
