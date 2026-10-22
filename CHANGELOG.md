@@ -198,7 +198,8 @@ All notable changes to this project will be documented in this file.
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
   so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
   Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
-  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  ERC-173 `transferOwnership` shim reverts (`UseUpdateAuthority`), and `updateAuthority` does not move
+  the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
     suite salt, creates a domain named after the token, assigns the token and its storage to it,
     commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
@@ -487,6 +488,13 @@ All notable changes to this project will be documented in this file.
   owner. Creation emitted nothing either. The event now comes from `_setAuthority`, which the constructor or
   initializer, `updateAuthority` and `transferOwnership` all pass through, and `transferOwnership` no longer
   emits it a second time. Every contract on the AccessManagedOwnable layer grows by 1 byte.
+- **`transferOwnership` always reverts** (#166, L-33). The ERC-173 shim called `setAuthority` on the
+  contract itself and was mapped to no role, so it fell to `ADMIN_ROLE` with none of the target admin delay
+  the AccessManager applies to `updateAuthority`. An admin with no execution delay could replace a
+  contract's authority at once through the manager's `execute`, leaving no window to notice or cancel it.
+  `transferOwnership` now reverts with `UseUpdateAuthority` for every caller; the authority changes only
+  through `AccessManager.updateAuthority`. `owner()` is unchanged. **Breaking** for any integration that
+  wrote ownership through ERC-173.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

@@ -79,6 +79,9 @@ library ErrorsLib {
     error ArraySizeLimited(uint256 maxSize);
     error ArrayLengthMismatch();
     error InvalidImplementationAuthority();
+    /// @dev The ERC-173 `transferOwnership` is refused: the owner is the AccessManager, and it changes only through
+    ///      `AccessManager.updateAuthority`, which applies the target's admin delay.
+    error UseUpdateAuthority();
 
     // Token Errors
     error AmountAboveFrozenTokens(uint256 amount, uint256 maxAmount);
