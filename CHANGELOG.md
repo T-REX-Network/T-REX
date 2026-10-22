@@ -611,6 +611,14 @@ All notable changes to this project will be documented in this file.
   a slot bound to another identity, revoked or not, with `TokenIdentityAlreadyBound`. A deployer that supplies the identity creates it first with
   `IdentityFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)`, holding the role the
   ASSET policy names, and passes the returned address. Leaving `ONCHAINID` at zero is unchanged.
+- **INDIVIDUAL and CORPORATE identity creation stays off the public role** (OZ L-05, #150). The token address
+  of a suite is predictable from the salt, and `createIdentityFor` binds an INDIVIDUAL or CORPORATE identity
+  to any account that is its only MANAGEMENT key without a signature from it. With those types open to
+  `PUBLIC_ROLE`, anyone could bind a predicted token address first and make that salt unusable on the chain.
+  `TREXFactory` now documents that every type that is not single-binding must stay off `PUBLIC_ROLE` for
+  `createIdentityFor` on the IdentityFactory it uses; self-deploy may stay open. The reference policy in the
+  test fixture gates INDIVIDUAL, CORPORATE and CLAIM_ISSUER behind a named platform role. No contract logic
+  changes; proof of account control for third-party bindings belongs to ONCHAINID.
 
 ### Removed
 

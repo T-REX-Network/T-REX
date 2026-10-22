@@ -88,6 +88,15 @@ import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
+/// @title TREXFactory
+/// @notice Deploys T-REX suites at CREATE3 addresses anyone can compute from the salt before the suite exists.
+/// @dev Deployment requirement on the IdentityFactory this factory uses: INDIVIDUAL and CORPORATE identity
+///      creation for another account (`createIdentityFor`) must never be open to the IdentityFactory
+///      authority's `PUBLIC_ROLE`, and neither may any other type that is not single-binding. Such a type binds
+///      its new identity to any account set as its only MANAGEMENT key, without a signature from that account,
+///      so anyone could bind a predicted token address first. The binding is permanent: the auto-created token
+///      identity and a supplied ONCHAINID both revert on the occupied address, and that salt is lost on the
+///      chain. Self-deploy (`createIdentity`) binds the caller only and may stay open.
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory

@@ -727,6 +727,33 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
     }
 
+    /// @notice An INDIVIDUAL or CORPORATE identity binds any account set as its only MANAGEMENT key. With
+    ///         creation for others open to anyone, a stranger could bind the predicted token address first
+    ///         and the suite could never deploy on that salt, so the reference policy keeps them off the
+    ///         public role.
+    function test_registerIdentityTypePolicies_StrangerCannotBindThePredictedTokenAddress() public {
+        address predictedToken = _predictSuiteAddress("squat-by-stranger-salt", "Token");
+        address stranger = makeAddr("Stranger");
+        Structs.KeyParam[] memory tokenKeys = new Structs.KeyParam[](1);
+        tokenKeys[0] = _ecdsaKey(predictedToken, KeyPurposes.MANAGEMENT);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.NotAuthorizedForIdentityType.selector, stranger, IdentityTypes.INDIVIDUAL, _identityIssuerRole()
+            )
+        );
+        idFactory.createIdentityFor(predictedToken, IdentityTypes.INDIVIDUAL, "squat-individual", tokenKeys);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.NotAuthorizedForIdentityType.selector, stranger, IdentityTypes.CORPORATE, _identityIssuerRole()
+            )
+        );
+        idFactory.createIdentityFor(predictedToken, IdentityTypes.CORPORATE, "squat-corporate", tokenKeys);
+    }
+
     /// @notice Pre-creating the token identity and passing it in is the normal flow, so a binding that
     ///         already resolves to the supplied ONCHAINID must deploy rather than trip the guard.
     function test_deployTREXSuite_Succeeds_WhenPredictedTokenBoundToSuppliedONCHAINID() public {

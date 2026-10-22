@@ -131,6 +131,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         // Registered after the module singletons exist: the per-type module bundles reference them.
         _registerIdentityTypePolicies(idFactory);
+        accessManager.grantRole(_identityIssuerRole(), deployer, NO_EXECUTION_DELAY);
 
         // The factory's beacon owner is the suite AccessManager, so initializeBeacon is restricted;
         // the test contract is the AM admin and drives it.
@@ -167,29 +168,37 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     /// @dev Registers the identity types the suite mints; the factory rejects unregistered types from
-    ///      both deploy paths. INDIVIDUAL, CORPORATE and CLAIM_ISSUER are open (PUBLIC_ROLE,
-    ///      self-deployable) for test convenience. ASSET is gated behind ASSET_DEPLOYER with self-deploy off, mirroring
-    ///      production: only a registered token factory mints token OIDs, and a token cannot sign for
-    ///      itself.
+    ///      both deploy paths. INDIVIDUAL, CORPORATE and CLAIM_ISSUER are self-deployable, but creating one for
+    ///      another account takes {_identityIssuerRole}, never `PUBLIC_ROLE`: such an identity binds any
+    ///      account set as its only MANAGEMENT key, so an open type would let anyone bind a predicted token
+    ///      address before the suite deploys. ASSET is gated behind ASSET_DEPLOYER with self-deploy off,
+    ///      mirroring production: only a registered token factory mints token OIDs, and a token cannot sign
+    ///      for itself.
     /// @dev Called as the test contract, which is the AccessManager admin (see AccessManagerHelper);
     ///      `setIdentityTypePolicy` is restricted and its selector defaults to ADMIN_ROLE.
     function _registerIdentityTypePolicies(IdentityFactory factory) internal {
-        uint64 publicRole = accessManager.PUBLIC_ROLE();
+        uint64 identityIssuerRole = _identityIssuerRole();
         // Modules are registered per type on the factory; deploy callers pass none.
         Structs.ModuleInstall[] memory standardModules =
             IdentityModulesHelper.legacyQueueModules(address(keyApprovalModule), address(validatorModule));
 
-        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, publicRole, true, false);
+        factory.setIdentityTypePolicy(IdentityTypes.INDIVIDUAL, identityIssuerRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.INDIVIDUAL, standardModules);
-        factory.setIdentityTypePolicy(IdentityTypes.CORPORATE, publicRole, true, false);
+        factory.setIdentityTypePolicy(IdentityTypes.CORPORATE, identityIssuerRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CORPORATE, standardModules);
-        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, publicRole, true, false);
+        factory.setIdentityTypePolicy(IdentityTypes.CLAIM_ISSUER, identityIssuerRole, true, false);
         factory.setIdentityTypeModules(IdentityTypes.CLAIM_ISSUER, standardModules);
         // ASSET is single-binding as in production: a token OID binds to exactly one token.
         factory.setIdentityTypePolicy(
             IdentityTypes.ASSET, RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), false, true
         );
         factory.setIdentityTypeModules(IdentityTypes.ASSET, standardModules);
+    }
+
+    /// @dev The role that creates INDIVIDUAL, CORPORATE and CLAIM_ISSUER identities for other accounts; the
+    ///      deployer holds it, as an onboarding desk would.
+    function _identityIssuerRole() internal pure returns (uint64) {
+        return RolesLib.platform(bytes32("IDENTITY_ISSUER"));
     }
 
     /// @dev A claim issuer is an Identity of type CLAIM_ISSUER holding a CLAIM_SIGNER key. The
