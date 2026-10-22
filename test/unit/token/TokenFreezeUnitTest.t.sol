@@ -52,6 +52,19 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
         token.freezePartialTokens(user, excessiveAmount);
     }
 
+    /// @notice An amount whose sum with the frozen part overflows still reports the missing balance, not a panic.
+    function testTokenFreezePartialTokensRevertsWhenAmountOverflowsTheFrozenPart() public {
+        vm.prank(agent);
+        token.freezePartialTokens(user, freezeAmount);
+        uint256 hugeAmount = type(uint256).max;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, mintAmount, hugeAmount)
+        );
+        vm.prank(agent);
+        token.freezePartialTokens(user, hugeAmount);
+    }
+
     function testTokenFreezePartialTokensNominal() public {
         vm.expectEmit(true, true, true, true);
         emit IERC3643.TokensFrozen(user, freezeAmount);

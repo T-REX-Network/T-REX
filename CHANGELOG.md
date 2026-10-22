@@ -481,6 +481,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Over-freezing a partly frozen wallet reports the missing balance** (audit N-09). `freezePartialTokens` added
+  the amount to the frozen part under checked math, so a large enough amount reverted with `Panic(0x11)` instead
+  of `ERC20InsufficientBalance`. It now compares the amount with the balance minus the frozen part, which cannot
+  underflow because the frozen part never exceeds the balance.
 - **A trusted issuer that burns its gas no longer blocks verification** (audit L-12). `isVerified` gave each
   trusted issuer's `isClaimValid` all remaining gas, so an issuer that burned it left 1/64 for the rest of the
   loop and a holder with a valid claim from another issuer could not be verified. Each call now gets at most
