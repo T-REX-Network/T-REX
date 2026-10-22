@@ -269,6 +269,12 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     }
 
     /// @dev Whether `userIdentity` holds a valid claim for `claimTopic` from any issuer trusted for it.
+    ///
+    ///  Each claim is read whole through `getClaim`, the only claim getter ONCHAINID exposes, so the identity loads
+    ///  the signature, payload and uri (up to 2,048 bytes each) before the issuer can say the claim has expired. No
+    ///  change here can skip that load: an expired claim of that size costs about 450,000 gas inside `getClaim`
+    ///  alone, so about 30 of them from issuers trusted ahead of the valid one exceed a 16,777,216-gas transaction
+    ///  and transfers to the holder revert. The holder recovers by removing the stale claims.
     function _hasValidClaimForTopic(IIdentity userIdentity, uint256 claimTopic) internal view virtual returns (bool) {
         address[] memory trustedIssuersForTopic = _trustedIssuersForTopic(claimTopic);
         if (trustedIssuersForTopic.length == 0) return false;
