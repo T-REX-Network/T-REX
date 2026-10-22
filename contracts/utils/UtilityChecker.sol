@@ -75,6 +75,7 @@ import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
+import { issuerConfirmsClaim } from "../ERC-3643/base/ERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
@@ -189,18 +190,21 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (bool topicMatch, bool pass)
     {
-        /// forge-lint: disable-next-line(asm-keccak256)
-        bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
-        (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
-            identity.getClaim(claimId);
-        if (foundClaimTopic != topic) return (false, false);
+        (
+            uint256 foundClaimTopic,,
+            address issuer,
+            bytes memory sig,
+            Structs.ClaimData memory data,
+            /// forge-lint: disable-next-line(asm-keccak256)
+        ) = identity.getClaim(keccak256(abi.encode(trustedIssuer, topic)));
+        // Same rule as the registry's `isVerified`: only a claim from the trusted issuer itself counts, and only
+        // that issuer is asked about it.
+        if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
-        try IClaimIssuer(issuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
-            pass = validity;
-        } catch {
-            pass = false;
-        }
+        bytes memory isClaimValidCall = abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data));
+        // The registry's own question, so the checker and `isVerified` always agree on an issuer's answer.
+        pass = issuerConfirmsClaim(trustedIssuer, isClaimValidCall);
     }
 
     /// @inheritdoc IUtilityChecker

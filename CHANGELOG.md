@@ -481,6 +481,28 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Over-freezing a partly frozen wallet reports the missing balance** (audit N-09). `freezePartialTokens` added
+  the amount to the frozen part under checked math, so a large enough amount reverted with `Panic(0x11)` instead
+  of `ERC20InsufficientBalance`. It now compares the amount with the balance minus the frozen part, which cannot
+  underflow because the frozen part never exceeds the balance.
+- **A trusted issuer that burns its gas no longer blocks verification** (audit L-12). `isVerified` gave each
+  trusted issuer's `isClaimValid` all remaining gas, so an issuer that burned it left 1/64 for the rest of the
+  loop and a holder with a valid claim from another issuer could not be verified. Each call now gets at most
+  `IS_CLAIM_VALID_GAS` (500,000), and a call that runs out reads as an invalid claim. The heaviest honest check
+  measured, an ONCHAINID issuer with a WebAuthn signer verified without the P-256 precompile, needs 314,207.
+  `UtilityChecker.getVerifiedDetails` uses the same cap, so the two still agree.
+- **A trusted issuer that answers nothing no longer validates a claim.** `isVerified` read the issuer's
+  `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
+  anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
+  memory read as `true`: with such an issuer trusted, an identity reporting a claim from it passed `isVerified`.
+  The registry now counts an answer only when it is exactly one word equal to `true`. An issuer that reverts,
+  answers nothing or answers something else is skipped like an invalid claim, never a revert, so one broken
+  issuer cannot halt transfers and another trusted issuer for the same topic can still verify the holder.
+  `addTrustedIssuer` also refuses an issuer without code (`TrustedIssuerHasNoCode`), as an early signal for a
+  wrong address; the check runs at trust time only, so an issuer must be deployed before a suite that trusts
+  it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
+  `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
+  claim that names another issuer as the registry already did, so the two report the same result.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same
