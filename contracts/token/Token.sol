@@ -466,8 +466,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @dev Adds the T-REX recovery preconditions to the standard recovery: a wallet may not be
-    ///  recovered onto itself, there must be something to recover, and at least one of the two wallets
-    ///  must already be known to the identity registry.
+    ///  recovered onto itself, there must be something to recover, at least one of the two wallets
+    ///  must already be known to the identity registry, and each known wallet must belong to
+    ///  `investorOnchainId`.
     function _recoveryAddress(address lostWallet, address newWallet, address investorOnchainId)
         internal
         override

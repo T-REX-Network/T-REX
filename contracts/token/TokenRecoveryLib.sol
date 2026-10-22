@@ -81,8 +81,13 @@ import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 library TokenRecoveryLib {
 
     /// @dev The T-REX recovery preconditions: a wallet may not be recovered onto itself, there must be
-    ///  something to recover, at least one of the two wallets must already be known to the registry, and a
-    ///  known new wallet must already belong to `investorOnchainId`. Reverts in that order.
+    ///  something to recover, at least one of the two wallets must already be known to the registry, and each
+    ///  known wallet must belong to `investorOnchainId`. Reverts in that order.
+    /// @dev Recovery moves one investor's tokens between that investor's wallets. Without the lost-wallet check
+    ///  an agent could name another identity: the tokens would land in a wallet registered to it, skipping the
+    ///  verification a forced transfer requires and reported to the compliance as a recovery, and the registry
+    ///  would map the new wallet through the token's own AGENT grant. To move an investor to a new identity,
+    ///  rebind the lost wallet with `updateIdentity` first, then recover.
     /// @param lostBalance the lost wallet's current balance, read by the token
     function checkRecovery(
         IERC3643IdentityRegistry registry,
@@ -96,6 +101,10 @@ library TokenRecoveryLib {
 
         require(registry.contains(lostWallet) || registry.contains(newWallet), ErrorsLib.RecoveryNotPossible());
         require(
+            !registry.contains(lostWallet) || registry.identity(lostWallet) == IIdentity(investorOnchainId),
+            ErrorsLib.RecoveryNotPossible()
+        );
+        require(
             !registry.contains(newWallet) || registry.identity(newWallet) == IIdentity(investorOnchainId),
             ErrorsLib.RecoveryNotPossible()
         );
@@ -105,6 +114,9 @@ library TokenRecoveryLib {
     ///  already binds keeps following that binding rather than a local copy. Only local entries can be
     ///  deleted, so the lost wallet is reported for deletion only when it is locally registered. Country is
     ///  passed as 0 rather than read from the lost wallet, because T-REX stores none.
+    /// @dev The new wallet must then pass `isVerified`, as the recipient of a forced transfer must: a wallet
+    ///  revoked in ONCHAINID keeps its binding, and could otherwise receive the balance and move it out. The
+    ///  check runs after the registration so that a fresh wallet is judged on the identity's claims.
     /// @return lostWalletLocal whether the token must delete the lost wallet once compliance has been told
     function registerRecoveredWallet(
         IERC3643IdentityRegistry registry,
@@ -115,6 +127,7 @@ library TokenRecoveryLib {
         if (!registry.contains(newWallet)) {
             registry.registerIdentity(newWallet, IIdentity(investorOnchainId), 0);
         }
+        require(registry.isVerified(newWallet), ErrorsLib.UnverifiedIdentity());
         return ITREXRegistry(address(registry)).isLocallyRegistered(lostWallet);
     }
 
