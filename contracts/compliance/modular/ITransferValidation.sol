@@ -86,9 +86,11 @@ interface ITransferValidation {
     /// the keeper gave up, and what is still reserved are all read off this one value.
     ///
     /// What is reserved is derived rather than stored, so the two can never disagree:
-    /// - the identities' pending amounts are outstanding in `Pending`, `AwaitingMint` and `AwaitingBurn`, and
+    /// - the identities' pending amounts are outstanding in `Pending`, `AwaitingMint`, `AwaitingBurn` and
+    ///   `AwaitingApproval`, and
     ///   never on a relocation, where nothing was reserved for them in the first place;
-    /// - the sender wallet's pending amount is outstanding in `Pending` and `AwaitingBurn` alone, because a burn
+    /// - the sender wallet's pending amount is outstanding in `Pending`, `AwaitingBurn` and `AwaitingApproval`
+    ///   alone, because a burn
     ///   leg has already taken the tokens out of that wallet and into transit.
     enum ValidationStatus {
         /// Issued, amounts reserved, waiting for the settlement notification(s).
@@ -115,7 +117,11 @@ interface ITransferValidation {
         /// The keeper gave up on a pair whose other leg never arrived: whatever was held in transit went back to
         /// the wallet it was burned from, and the reservation was released. A leg arriving now is a replay: the
         /// token stops taking its chain's messages.
-        Resolved
+        Resolved,
+        /// Requested while an `APPROVAL` module is bound: narrowed and reserved like an issued validation, but
+        /// not issued yet and sent nowhere. `answerApproval` issues it (`Pending`) or refuses it (`Discarded`);
+        /// past `expiry`, the deadline for the answer, `discardExpiredValidations` discards it.
+        AwaitingApproval
     }
 
     /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
@@ -193,6 +199,11 @@ interface ITransferValidation {
     /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
     /// Emits `TransferValidationIssued`, then the token's `ValidationRoutePinned` and `ProtocolMessageSent` per leg.
+    ///
+    /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
+    /// reserved as `AwaitingApproval`, `TransferValidationAwaitingApproval` is emitted, the module is told, and
+    /// `answerApproval` decides. The deadline for the answer is `expiry`, the validity window from now, and it
+    /// stays the satellite's deadline once the validation is issued.
     /// @param from ERC-7930 interoperable address of the sender.
     /// @param to ERC-7930 interoperable address of the recipient.
     /// @param requestedMin Inclusive lower bound the caller proposes.
@@ -206,6 +217,28 @@ interface ITransferValidation {
         uint256 requestedMax,
         bytes calldata spender
     ) external returns (uint256 validationId);
+
+    /// @dev Answers a validation `AwaitingApproval`: issues it, at most at `approvedMax`, or refuses it. Only the
+    /// bound `APPROVAL` module answers, before the deadline. A request nobody answered is discarded with
+    /// `discardExpiredValidations` once the deadline passed.
+    ///
+    /// An answer below the requested minimum is a refusal: the reservation is released and the validation ends
+    /// `Discarded`. Any other answer lowers the maximum to `approvedMax` when it is lower, releases the
+    /// difference, and sends one leg to each satellite chain involved. No rule runs again: they ran at the
+    /// request. The deadline stays the request's `expiry`, so the time spent waiting comes out of the
+    /// satellite's time to execute, and the rules are never older than the validity window when it does.
+    ///
+    /// Requirements:
+    /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
+    /// - It must be stored `AwaitingApproval`; otherwise reverts with `ValidationNotAwaitingApproval`.
+    /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
+    /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
+    /// - On an approval, every involved chain still open, configured and not paused, as at a request.
+    ///
+    /// Emits `TransferValidationIssued` and sends the legs, or emits `ValidationApprovalRefused`.
+    /// @param validationId The validation awaiting approval.
+    /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
+    function answerApproval(uint256 validationId, uint256 approvedMax) external;
 
     /// @dev Sets how long a validation stays executable on the satellite: `expiry` is issuance time plus this.
     ///
@@ -251,7 +284,9 @@ interface ITransferValidation {
     ///
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
-    /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
+    /// - A validation `AwaitingApproval` may be discarded by anyone once its `expiry` passed, since nothing was
+    ///   sent for it; otherwise reverts with `ValidationNotReleasable`. The rules below do not apply to it.
+    /// - Each other id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
     ///   awaiting a leg is refused whatever the clock says, since one satellite has already executed.
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;

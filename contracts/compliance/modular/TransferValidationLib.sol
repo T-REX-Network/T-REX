@@ -62,6 +62,8 @@
 
 pragma solidity 0.8.30;
 
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+
 import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
@@ -70,6 +72,10 @@ import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
+import { ModuleSetLib } from "./ModuleSetLib.sol";
+import { TransferContextLib } from "./TransferContextLib.sol";
+import { IApprovalModule } from "./modules/IApprovalModule.sol";
+import { IModule } from "./modules/IModule.sol";
 
 /**
  * @title TransferValidationLib
@@ -84,6 +90,8 @@ import { ITransferValidation } from "./ITransferValidation.sol";
  */
 library TransferValidationLib {
 
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     /// @custom:storage-location erc7201:erc3643.storage.TransferValidation
     struct ValidationStorage {
         /// Added to the issuance timestamp to compute `expiry`. Zero blocks issuance.
@@ -97,6 +105,15 @@ library TransferValidationLib {
         uint256 lastValidationId;
         /// Every issued validation, kept forever.
         mapping(uint256 validationId => ITransferValidation.Validation validation) validations;
+        /// The two envelopes the record does not keep, for a validation `AwaitingApproval` alone: what it is
+        /// issued with once approved. Deleted by the answer.
+        mapping(uint256 validationId => AwaitedTerms terms) awaitedTerms;
+    }
+
+    /// @dev The recipient's and the spender's envelopes of a validation awaiting approval.
+    struct AwaitedTerms {
+        bytes to;
+        bytes spender;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1)) & ~bytes32(uint256(0xff));
@@ -117,35 +134,95 @@ library TransferValidationLib {
         uint64 reconciliationWindow;
     }
 
-    /// @dev Turns a settled draft into an issued validation: take the next id, build the object the satellite
-    ///  will execute against, keep its terms, reserve the amount, then announce it.
+    /// @dev Turns a settled draft into a validation: take the next id, keep its terms and reserve the amount.
+    ///  With no `APPROVAL` module bound, issue it at once: build the object the satellite will execute against
+    ///  and announce it. With one bound, keep it `AwaitingApproval` instead, until {answerApproval}.
     /// @param token the token the compliance is bound to
-    /// @return validationId the id issued
-    /// @return body the encoded validation, for the compliance to send, one leg per satellite chain involved
+    /// @return validationId the id taken
+    /// @return body the encoded validation, for the compliance to send, one leg per satellite chain involved;
+    ///  empty while it awaits approval, since nothing is sent yet
     function issue(bytes calldata from, bytes calldata to, bytes calldata spender, Draft memory draft, address token)
         external
         returns (uint256 validationId, bytes memory body)
     {
         validationId = ++layout().lastValidationId;
+        _record(validationId, from, to, draft, token);
 
-        MessageTypesLib.ComplianceValidation memory issued = MessageTypesLib.ComplianceValidation({
-            validationId: validationId,
-            from: from,
-            to: to,
-            spender: spender,
-            amountMin: draft.amountMin,
-            amountMax: draft.amountMax,
-            expiry: draft.expiry,
-            reconciliationWindow: draft.reconciliationWindow,
-            token: token
-        });
-        _record(validationId, issued, from, to, draft, token);
+        address approvalModule = _approvalModule();
+        if (approvalModule != address(0)) {
+            _awaitApproval(validationId, from, to, spender, draft, approvalModule);
+            return (validationId, "");
+        }
 
-        emit EventsLib.TransferValidationIssued(
-            validationId, from, to, spender, draft.amountMin, draft.amountMax, draft.expiry, draft.reconciliationWindow
+        body = _issueRecorded(
+            validationId,
+            MessageTypesLib.ComplianceValidation({
+                validationId: validationId,
+                from: from,
+                to: to,
+                spender: spender,
+                amountMin: draft.amountMin,
+                amountMax: draft.amountMax,
+                expiry: draft.expiry,
+                reconciliationWindow: draft.reconciliationWindow,
+                token: token
+            })
         );
+    }
 
-        body = abi.encode(issued);
+    /// @dev Answers a validation awaiting approval, see {ITransferValidation-answerApproval}. Issuing it runs
+    ///  no rule again: every rule ran and the range was reserved at the request, so an approval only narrows,
+    ///  checks the chains are still open and sends the legs. The legs go through the token, which as the
+    ///  compliance's DELEGATECALL target sees the compliance as its caller.
+    /// @param token the token the compliance is bound to
+    function answerApproval(uint256 validationId, uint256 approvedMax, address token) external {
+        ValidationStorage storage store = layout();
+        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        ITransferValidation.Validation storage validation = store.validations[validationId];
+        require(
+            validation.status == ITransferValidation.ValidationStatus.AwaitingApproval,
+            ErrorsLib.ValidationNotAwaitingApproval(validationId, uint8(validation.status))
+        );
+        require(msg.sender == _approvalModule(), ErrorsLib.NotTheApprovalModule(msg.sender));
+        require(block.timestamp < validation.expiry, ErrorsLib.ValidationExpired(validationId, validation.expiry));
+
+        if (approvedMax == 0 || approvedMax < validation.amountMin) {
+            _release(validation, validation.amountMax, token);
+            validation.status = ITransferValidation.ValidationStatus.Discarded;
+            delete store.awaitedTerms[validationId];
+            emit EventsLib.ValidationApprovalRefused(validationId);
+            return;
+        }
+
+        if (approvedMax < validation.amountMax) {
+            _release(validation, validation.amountMax - approvedMax, token);
+            validation.amountMax = approvedMax;
+        }
+        // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
+        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
+        // are checked again, since one may have been paused while the request waited.
+        _openChainWindow(store, token, validation.fromChainKey);
+        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
+        validation.status = ITransferValidation.ValidationStatus.Pending;
+
+        bytes memory body = _issueRecorded(
+            validationId,
+            MessageTypesLib.ComplianceValidation({
+                validationId: validationId,
+                from: validation.fromWallet,
+                to: store.awaitedTerms[validationId].to,
+                spender: store.awaitedTerms[validationId].spender,
+                amountMin: validation.amountMin,
+                amountMax: validation.amountMax,
+                expiry: validation.expiry,
+                reconciliationWindow: validation.releaseAt - validation.expiry,
+                token: token
+            })
+        );
+        delete store.awaitedTerms[validationId];
+
+        IToken(token).dispatchComplianceValidation(validation.fromChainKey, validationId, body);
+        if (validation.twoLegs) IToken(token).dispatchComplianceValidation(validation.toChainKey, validationId, body);
     }
 
     /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the record does not
@@ -288,19 +365,28 @@ library TransferValidationLib {
         }
     }
 
+    /// @dev Discards a validation still `AwaitingApproval` once its deadline passed, for anyone, see
+    ///  {ITransferValidation-discardExpiredValidations}: nothing was sent for it, so no leg can be in flight.
+    ///  The reservation comes back and the envelopes kept for the answer are deleted.
+    /// @param token the token the compliance is bound to
+    function discardUnanswered(uint256 validationId, address token) external {
+        ValidationStorage storage store = layout();
+        ITransferValidation.Validation storage validation = store.validations[validationId];
+        require(
+            block.timestamp >= validation.expiry, ErrorsLib.ValidationNotReleasable(validationId, validation.expiry)
+        );
+        _release(validation, validation.amountMax, token);
+        validation.status = ITransferValidation.ValidationStatus.Discarded;
+        delete store.awaitedTerms[validationId];
+        emit EventsLib.ValidationDiscarded(validationId);
+    }
+
     /// @dev Keeps the validation forever and reserves its amount. Everything written here is the issuance half
-    ///  of {ITransferValidation-Validation}; the lifecycle half stays at its zero value until a settlement or a
-    ///  discard moves it.
-    function _record(
-        uint256 validationId,
-        MessageTypesLib.ComplianceValidation memory issued,
-        bytes calldata from,
-        bytes calldata to,
-        Draft memory draft,
-        address token
-    ) private {
+    ///  of the lifecycle; the hash is written once the validation is issued, see {_issueRecorded}.
+    function _record(uint256 validationId, bytes calldata from, bytes calldata to, Draft memory draft, address token)
+        private
+    {
         ITransferValidation.Validation storage stored = layout().validations[validationId];
-        stored.hash = MessageTypesLib.hashValidation(issued);
         stored.amountMin = draft.amountMin;
         stored.amountMax = draft.amountMax;
         stored.expiry = draft.expiry;
@@ -316,6 +402,76 @@ library TransferValidationLib {
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
         stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
         IToken(token).reserveForValidation(from, draft.amountMax);
+    }
+
+    /// @dev Writes the hash of what the satellite will execute against, announces it, and encodes it.
+    function _issueRecorded(uint256 validationId, MessageTypesLib.ComplianceValidation memory issued)
+        private
+        returns (bytes memory body)
+    {
+        layout().validations[validationId].hash = MessageTypesLib.hashValidation(issued);
+
+        emit EventsLib.TransferValidationIssued(
+            validationId,
+            issued.from,
+            issued.to,
+            issued.spender,
+            issued.amountMin,
+            issued.amountMax,
+            issued.expiry,
+            issued.reconciliationWindow
+        );
+
+        body = abi.encode(issued);
+    }
+
+    /// @dev Keeps a recorded validation waiting for the approval module, with the two envelopes the record does
+    ///  not keep otherwise, and tells the module. The validity window from now is the deadline for the answer.
+    function _awaitApproval(
+        uint256 validationId,
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender,
+        Draft memory draft,
+        address approvalModule
+    ) private {
+        ITransferValidation.Validation storage stored = layout().validations[validationId];
+        stored.status = ITransferValidation.ValidationStatus.AwaitingApproval;
+        layout().awaitedTerms[validationId] = AwaitedTerms({ to: to, spender: spender });
+
+        emit EventsLib.TransferValidationAwaitingApproval(
+            validationId, from, to, spender, draft.amountMin, draft.amountMax, draft.expiry
+        );
+
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            spender
+        );
+        IApprovalModule(approvalModule).approvalRequested(validationId, ctx, draft.expiry);
+    }
+
+    /// @dev Gives back `amount` of what a validation reserved, against the identities unless it is a
+    ///  relocation, and against the sending wallet on the token.
+    function _release(ITransferValidation.Validation storage validation, uint256 amount, address token) private {
+        if (!validation.relocation) {
+            ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
+            ledger.pendingOut[validation.fromIdentity] -= amount;
+            ledger.pendingIn[validation.toIdentity] -= amount;
+        }
+        IToken(token).releaseFromValidation(validation.fromWallet, amount);
+    }
+
+    /// @dev The bound `APPROVAL` module, or zero when none is: the compliance binds one at most.
+    function _approvalModule() private view returns (address) {
+        EnumerableSet.AddressSet storage approvalModules = ModuleSetLib.layout().byType[IModule.ModuleType.APPROVAL];
+        if (approvalModules.length() == 0) return address(0);
+        return approvalModules.at(0);
     }
 
 }
