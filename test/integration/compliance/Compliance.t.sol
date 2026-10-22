@@ -202,6 +202,18 @@ contract ComplianceTest is TREXSuiteTest {
         assertEq(unboundCompliance.positionOf(address(aliceIdentity)), 0);
     }
 
+    /// @notice The owner cannot bind a fresh token over a bound token that has supply, which would leave every
+    ///  hook of the circulating token reverting.
+    function test_bindToken_RevertWhen_DisplacingACirculatingToken() public {
+        Token freshToken = _deployToken("salt2", "Dino Token", "DINO");
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.TokenCirculating.selector);
+        compliance.bindToken(address(freshToken));
+
+        assertEq(compliance.getTokenBound(), address(token));
+    }
+
     /// @notice Should revert when token address is zero
     function test_bindToken_RevertWhen_TokenAddressIsZero() public {
         ModularCompliance newCompliance = _deployModularComplianceWithProxy(address(trexImplementationAuthority));
@@ -220,6 +232,15 @@ contract ComplianceTest is TREXSuiteTest {
         vm.prank(another);
         vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
         compliance.unbindToken(address(token));
+    }
+
+    /// @notice The owner cannot detach a token that has supply: nothing could bind it back.
+    function test_unbindToken_RevertWhen_TokenIsCirculating() public {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.TokenCirculating.selector);
+        compliance.unbindToken(address(token));
+
+        assertEq(compliance.getTokenBound(), address(token));
     }
 
     /// @notice Should revert when token is zero address

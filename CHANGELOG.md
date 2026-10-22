@@ -635,6 +635,9 @@ All notable changes to this project will be documented in this file.
 - **A token claims an unbound compliance only if the compliance's AccessManager governs it** (L-35): the token path
   of `bindToken` also requires that the compliance's manager gives the token's `setCompliance` a role. Before, any
   contract with no supply could bind itself and write positions through a registry it chose.
+- **A compliance keeps a bound token that has supply** (L-31): `unbindToken`, and a `bindToken` that would replace
+  the bound token, revert with `TokenCirculating` while the bound token has supply. Detaching it made every mint,
+  burn, transfer, recovery and settlement revert, and no path could bind it back.
 
 ### Removed
 

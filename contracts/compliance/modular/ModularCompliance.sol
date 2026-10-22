@@ -302,8 +302,12 @@ contract ModularCompliance is
     ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
     ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
     ///  same; this covers the owner calling here directly.
+    ///
+    ///  Nor does a bind displace a bound token that has supply: its every hook would revert from then on, and
+    ///  no path binds a circulating token back, so its holders would be frozen until an upgrade.
     function _authorizeTokenBinding(address token) internal view override {
-        bool tokenClaimsUnboundCompliance = _getTokenBound() == address(0) && msg.sender == token;
+        address boundToken = _getTokenBound();
+        bool tokenClaimsUnboundCompliance = boundToken == address(0) && msg.sender == token;
         // A target the manager never configured answers the admin role, 0, for every selector.
         bool tokenGovernedByThisManager =
             IAccessManager(authority()).getTargetFunctionRole(token, IERC3643.setCompliance.selector) != 0;
@@ -312,11 +316,15 @@ contract ModularCompliance is
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
+        require(!_hasSupply(boundToken), ErrorsLib.TokenCirculating());
     }
 
-    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
+    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner. A bound token
+    ///  with supply stays bound, for the reason a bind may not displace it.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+        address boundToken = _getTokenBound();
+        require(!_hasSupply(boundToken), ErrorsLib.TokenCirculating());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -505,6 +513,12 @@ contract ModularCompliance is
     /// @dev Forwards `callData` to a bound `_module`. No caller check: wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         ModuleSetLib.callModuleFunction(callData, _module);
+    }
+
+    /// @dev An address with no code has no supply. A compliance is bound to the token's predicted address before
+    ///  the token is deployed, and a spare compliance is prepared by binding a placeholder then unbinding it.
+    function _hasSupply(address token) private view returns (bool) {
+        return token.code.length != 0 && IToken(token).totalSupply() != 0;
     }
 
     function _isOwner(address caller) internal view returns (bool) {
