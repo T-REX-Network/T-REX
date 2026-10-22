@@ -344,12 +344,16 @@ contract ModularCompliance is
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
     ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
+    ///
+    ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
+    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same.
     function _applyMovement(address from, address to, uint256 value) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
-        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), int256(value));
-        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
+        int256 adjustment = from == to ? int256(0) : int256(value);
+        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), adjustment);
+        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -adjustment);
 
         IModule.TransferContext memory ctx =
             TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, "");
