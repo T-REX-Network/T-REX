@@ -166,9 +166,8 @@ library ErrorsLib {
 
     // AccessManagerSetupLib Errors
     error NotAssigned(address target);
-    error PendingDelayChange(address account, uint64 role);
-    error PendingRoleGrant(address account, uint64 role);
-    error RoleNotHeld(address account, uint64 role);
+    /// @dev `identityRegistryStorage` belongs to `storageDomainId`, so a suite of another domain cannot use it.
+    error StorageInAnotherDomain(address identityRegistryStorage, uint32 storageDomainId);
 
     // RolesLib Errors
     error InvalidDomain();
