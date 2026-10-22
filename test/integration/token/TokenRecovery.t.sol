@@ -14,6 +14,7 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
+import { Token } from "contracts/token/Token.sol";
 
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -366,6 +367,40 @@ contract TokenRecoveryTest is TREXSuiteTest {
         token.recoveryAddress(bob, freshWallet, address(aliceIdentity));
 
         assertEq(address(identityRegistry.identity(freshWallet)), address(0), "no wallet was mapped");
+    }
+
+    /// @notice A wallet revoked in ONCHAINID keeps its binding to the investor's identity but is no longer
+    ///  verified. Recovery refuses it as a forced transfer would, so the balance cannot land on a wallet whose
+    ///  key the investor gave up and be moved out from there.
+    function test_recoveryAddress_RevertWhen_NewWalletIsRevoked() public {
+        Account memory revokedWallet = makeAccount("revokedWallet");
+        bytes memory account = _linkSatelliteWallet(bobIdentity, block.chainid, revokedWallet);
+        _revokeWallet(bobIdentity, account);
+        assertEq(address(identityRegistry.identity(revokedWallet.addr)), address(bobIdentity), "binding stays");
+        assertFalse(identityRegistry.isVerified(revokedWallet.addr), "but the wallet is not verified");
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
+        token.recoveryAddress(bob, revokedWallet.addr, address(bobIdentity));
+
+        assertEq(token.balanceOf(bob), 500, "the balance stays on the lost wallet");
+    }
+
+    /// @notice A fresh wallet registered by the recovery is judged on the identity's claims: an investor whose
+    ///  identity no longer holds the required claims cannot be recovered onto it, as a forced transfer to it
+    ///  would be refused too.
+    function test_recoveryAddress_RevertWhen_IdentityLacksRequiredClaims() public {
+        Token claimed = _deployTokenWithClaimedHolders("claimed", "Claimed", "CLM");
+        vm.startPrank(agent);
+        claimed.unpause();
+        claimed.mint(bob, 100);
+        vm.stopPrank();
+        _removeClaim(bobIdentity, CLAIM_TOPIC_1, bob);
+        address freshWallet = makeAddr("freshWallet");
+
+        vm.prank(agent);
+        vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
+        claimed.recoveryAddress(bob, freshWallet, address(bobIdentity));
     }
 
     /// @notice The lost wallet's local binding shadows a global one. The debit must land on the local identity
