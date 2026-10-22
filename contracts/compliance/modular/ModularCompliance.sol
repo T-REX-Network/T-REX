@@ -362,12 +362,19 @@ contract ModularCompliance is
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
     ///  minus what just arrived. A wallet whose owner changed since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
+    ///
+    ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
+    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
+    ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
+    ///  the full adjustment.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
-        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), int256(value));
-        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
+        bool balanceUnchanged = from == to && kind != MovementKindLib.DELEGATION;
+        int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
+        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), adjustment);
+        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -adjustment);
 
         IModule.TransferContext memory ctx =
             TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");

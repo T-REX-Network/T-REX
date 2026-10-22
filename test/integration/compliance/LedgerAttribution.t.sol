@@ -278,6 +278,27 @@ contract LedgerAttributionTest is TREXSuiteTest {
         _assertPositionsPlusGapRecountTheSupply();
     }
 
+    /// @notice A self-transfer as the first movement after a relink moves the wallet's balance, not the balance
+    ///         plus the amount: the wallet's balance did not change, so nothing is added back on either side.
+    function test_transfer_Success_FollowsTheRelink_WhenTheFirstMovementIsASelfTransfer() public {
+        IComplianceLedger ledger = IComplianceLedger(address(compliance));
+        _resolveAliceTo(charlieIdentity);
+        // The factory still links alice to her first identity, so the swapped answer is not verified; the token
+        // asks for the recipient's eligibility before the hook this test is about.
+        vm.mockCall(address(registry), abi.encodeCall(registry.isVerified, (alice)), abi.encode(true));
+
+        vm.prank(alice);
+        vm.expectEmit(address(compliance));
+        emit EventsLib.WalletOwnerChanged(alice, address(aliceIdentity), address(charlieIdentity), BALANCE);
+        token.transfer(alice, 100);
+
+        assertEq(token.balanceOf(alice), BALANCE);
+        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
+        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE, "the new owner gets the balance only");
+        assertEq(ledger.positionGap(), 0);
+        _assertPositionsPlusGapRecountTheSupply();
+    }
+
     /// @notice The pool can also hand tokens to an identity: the other direction of the same repair.
     function test_fixPosition_Success_FromThePoolToAnIdentity() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
