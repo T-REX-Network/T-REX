@@ -9,6 +9,7 @@ import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol"
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -105,6 +106,15 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);
         trexFactory.deployTREXSuiteIsolated("self-admin", _details(address(0), address(trexFactory)), _noClaims());
+    }
+
+    /// @dev None of the five contracts the factory is about to deploy at these addresses can administer the manager.
+    function test_deployTREXSuite_RevertWhen_AccessManagerAdminIsAPredictedSuiteAddress() public {
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "AccessManager"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "Token"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "REGISTRY"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "IRS"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "MC"));
     }
 
     function test_deployTREXSuite_RevertWhen_FreshManagerReusesAStorage() public {
@@ -335,6 +345,18 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
             }
         }
         assertNotEq(beacons.tokenBeacon, address(0));
+    }
+
+    function _expectAdminRefused(address admin) private {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);
+        trexFactory.deployTREXSuite("predicted-admin", _details(address(0), admin), _noClaims());
+    }
+
+    /// @dev Mirrors TREXFactory._saltBytes and _predictAddress.
+    function _predictSuiteAddress(string memory salt, string memory contractType) private view returns (address) {
+        bytes32 saltBytes = bytes20(address(trexFactory)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
+        return Create3.computeAddress(saltBytes, address(trexFactory));
     }
 
     function _details(address manager, address admin) private pure returns (ITREXFactory.TokenDetails memory) {

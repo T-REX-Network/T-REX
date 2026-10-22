@@ -92,6 +92,25 @@ contract RuleOnlyModule is RecordingModule {
 
 }
 
+/// @dev A rule that caps only delegated movements: what moves through `transferFrom` or a named spender.
+contract DelegatedCapRuleModule is RecordingModule {
+
+    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+        if (ctx.spender.length == 0) return type(uint256).max;
+        return _allowed;
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.RULE;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "DelegatedCapRuleModule";
+    }
+
+}
+
 /// @dev A spender policy and nothing else.
 contract SpenderOnlyModule is RecordingModule {
 

@@ -131,7 +131,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _resolveRoute(draft, from, to, spender);
         _requireCallerOwnsTheWallet(draft, from);
         _setExpiryAndRelease(draft);
-        _narrowAmountRange(draft, from, to);
+        _narrowAmountRange(draft, from, to, spender);
         _requireSpenderAllowed(draft, to, spender);
 
         validationId = _issueValidation(from, to, spender, draft);
@@ -182,17 +182,19 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
     ///  then to the smallest amount the rules allow.
-    function _narrowAmountRange(TransferValidationLib.Draft memory draft, bytes calldata from, bytes calldata to)
-        private
-        view
-    {
+    function _narrowAmountRange(
+        TransferValidationLib.Draft memory draft,
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender
+    ) private view {
         ITREXRegistry registry = _boundRegistry();
         require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
         draft.toIdentity = address(registry.resolveIdentity(to));
         draft.fromKey = WalletKeyLib.canonicalKey(from);
 
         _capAtWhatTheWalletCanSend(draft, from);
-        _capAtWhatTheRulesAllow(draft, to);
+        _capAtWhatTheRulesAllow(draft, to, spender);
         require(draft.amountMax != 0, ErrorsLib.ZeroValue());
     }
 
@@ -206,7 +208,11 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Caps the range at the smallest amount the rules allow. Skipped when both wallets belong to one
     ///  identity, since relocating your own tokens changes no position and no distribution rule applies.
-    function _capAtWhatTheRulesAllow(TransferValidationLib.Draft memory draft, bytes calldata to) private view {
+    function _capAtWhatTheRulesAllow(
+        TransferValidationLib.Draft memory draft,
+        bytes calldata to,
+        bytes calldata spender
+    ) private view {
         if (_isRelocation(draft.fromIdentity, draft.toIdentity)) return;
         IModule.TransferContext memory ctx = TransferContextLib.issuance(
             address(this),
@@ -216,7 +222,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             WalletKeyLib.walletId(to),
             draft.amountMin,
             draft.amountMax,
-            ""
+            spender
         );
         uint256 allowed = _minAllowedAmount(ctx);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
@@ -415,7 +421,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             toIdentity,
             WalletKeyLib.walletId(from),
             WalletKeyLib.walletId(to),
-            amount
+            amount,
+            validation.spender
         );
     }
 

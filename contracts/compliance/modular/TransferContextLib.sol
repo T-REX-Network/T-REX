@@ -6,8 +6,7 @@ import { IModule } from "./modules/IModule.sol";
 
 /// @title TransferContextLib
 /// @dev The three shapes a movement takes before a module sees it. One constructor per kind, each filled
-///  completely where it is built: a rule is asked the same struct whatever produced the movement, and no
-///  caller patches a field afterwards.
+///  completely where it is built: a rule is asked the same struct whatever produced the movement.
 library TransferContextLib {
 
     /// @dev A native movement: a transfer, a mint (zero `from`) or a burn (zero `to`), for `amount` exactly.
@@ -53,14 +52,15 @@ library TransferContextLib {
     }
 
     /// @dev A validation that settled: the amount a satellite actually executed, between two satellite wallets
-    ///  or landing on a native one.
+    ///  or landing on a native one, executed by the spender the validation names.
     function settlement(
         address compliance,
         address fromIdentity,
         address toIdentity,
         bytes32 fromWallet,
         bytes32 toWallet,
-        uint256 amount
+        uint256 amount,
+        bytes memory spender
     ) internal pure returns (IModule.TransferContext memory ctx) {
         ctx.compliance = compliance;
         ctx.fromIdentity = fromIdentity;
@@ -69,6 +69,7 @@ library TransferContextLib {
         ctx.toWallet = toWallet;
         ctx.amountMin = amount;
         ctx.amountMax = amount;
+        ctx.spender = spender;
     }
 
 }

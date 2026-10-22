@@ -177,6 +177,7 @@ library TransferValidationLib {
         stored.twoLegs = draft.twoLegs;
         stored.fromIdentity = draft.fromIdentity;
         stored.toIdentity = draft.toIdentity;
+        stored.spender = issued.spender;
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
         stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
         IToken(token).reserveForValidation(from, draft.amountMax);
