@@ -632,6 +632,20 @@ All notable changes to this project will be documented in this file.
   `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
   through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
+- **A token claims an unbound compliance only if the compliance's AccessManager governs it** (L-35): the token path
+  of `bindToken` also requires that the compliance's manager gives the token's `setCompliance` a role. Before, any
+  contract with no supply could bind itself and write positions through a registry it chose.
+- **A compliance keeps a bound token that has supply** (L-31): `unbindToken`, and a `bindToken` that would replace
+  the bound token, revert with `TokenCirculating` while the bound token has supply. Detaching it made every mint,
+  burn, transfer, recovery and settlement revert, and no path could bind it back.
+- **`setCompliance` requires every interface the token calls** (L-22): the new compliance must advertise
+  `IModularCompliance` and `ISettlementHandler` through ERC-165, besides `IERC3643Compliance`, or the call reverts
+  with `InvalidCompliance`. A base ERC-3643 compliance was accepted, then every `transferFrom` and settlement
+  delivery reverted, and once tokens were minted the compliance could not be replaced.
+- **`setIdentityRegistry` requires `ITREXRegistry`** (N-06): the new registry must advertise `ITREXRegistry` through
+  ERC-165, besides `IERC3643IdentityRegistry`, or the call reverts with `InvalidIdentityRegistry`. The
+  `SpenderVerificationModule` calls `isWalletVerified` on every `transferFrom`, and the token's recovery and
+  delegation call other T-REX registry methods; a standard-only registry made those revert.
 
 ### Removed
 
