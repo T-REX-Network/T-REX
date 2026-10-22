@@ -40,8 +40,13 @@ jobs:
         run: "! grep -rn 'msg\\.data' contracts/"
         id: msg-data
 
+      # Fails if any contract under contracts/ exceeds EIP-170 (runtime) or EIP-3860 (initcode).
+      - name: Run build
+        run: forge build --sizes contracts
+        id: build
+
       - name: Run tests
-        run: forge test --gas-report
+        run: forge test
         id: test
 
       - name: Run coverage

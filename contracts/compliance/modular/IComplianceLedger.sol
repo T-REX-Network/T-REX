@@ -48,6 +48,11 @@ pragma solidity 0.8.30;
 /// `sum(positions) + positionGap == totalSupply` holds regardless, and the owner moves it with `fixPosition`.
 interface IComplianceLedger {
 
+    event PositionFixed(address indexed from, address indexed to, uint256 amount);
+
+    error InsufficientPosition(address identity, uint256 held, uint256 amount);
+    error FromAndToAreTheSame();
+
     /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
     ///  wallets included. Moving tokens between two wallets of one identity does not change it.
     /// @param identity the ONCHAINID to look up

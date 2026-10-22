@@ -67,6 +67,17 @@ import { IModule } from "./modules/IModule.sol";
 
 interface IModularCompliance is IERC3643Compliance {
 
+    event ModuleInteraction(address indexed target, bytes data);
+    event ModuleAdded(address indexed module);
+    event ModuleTypesRecorded(address indexed module, IModule.ModuleType[] moduleTypes);
+
+    error ComplianceNotSuitableForBindingToModule(address module);
+    error MaxModulesReached(uint256 maxValue);
+    error ModuleAlreadyBound();
+    error ModuleHasNoType();
+    error DuplicateModuleType(uint8 moduleType);
+    error ModuleNotBound();
+
     /// functions
     /**
      *  @dev adds a module to the list of compliance modules
