@@ -112,6 +112,7 @@ library AccessManagerSetupLib {
     }
 
     uint64 internal constant ADMIN_ROLE = 0;
+    uint64 internal constant PUBLIC_ROLE = RolesLib.PUBLIC_ROLE;
 
     function setupTokenRoles(IAccessManager accessManager, address token, uint32 domainId) internal {
         _apply(accessManager, token, tokenTable(), domainId);
@@ -295,14 +296,65 @@ library AccessManagerSetupLib {
         }
     }
 
-    function setupTREXFactoryRoles(IAccessManager accessManager, address trexFactory) internal {
-        bytes4[] memory functions = new bytes4[](5);
-        functions[0] = ITREXFactory.setImplementationAuthority.selector;
-        functions[1] = ITREXFactory.setIdFactory.selector;
-        functions[2] = ITREXFactory.setTrustedGatewayRegistry.selector;
-        functions[3] = ITREXFactory.deployTREXSuite.selector;
-        functions[4] = ITREXFactory.deployTREXSuiteIsolated.selector;
-        accessManager.setTargetFunctionRole(trexFactory, functions, RolesLib.platform(RolesLib.PlatformRole.OWNER));
+    /// @notice Maps the factory's five functions to the roles that own their subjects. `suiteDeployerRole` uses the
+    ///         factory: it deploys suites. Each setter decides something for every later suite, so it goes to the
+    ///         role that already owns that subject: `versionManagerRole` repoints the implementation authority,
+    ///         which decides the code new suites run; `interopManagerRole` repoints the trusted gateway registry,
+    ///         which decides the bridges new tokens trust; `platformOwnerRole` repoints the identity factory, which
+    ///         creates new tokens' identities. No role exists only to configure the factory, so nobody can go
+    ///         around the version manager or the interop manager by repointing the factory. The ids are data, not
+    ///         constants: a {RolesLib.PlatformRole}, a name through {RolesLib.platform(bytes32)} or a raw id.
+    /// @dev Refuses the shapes that would let a suite deployer change what later suites get: the suite deployer
+    ///      role as any of the three setter roles, `ADMIN_ROLE` as the suite deployer role (an admin can grant
+    ///      itself any role), and the public role for any of the four. `ADMIN_ROLE` as a setter role is fine,
+    ///      since admins can do everything anyway.
+    /// @dev This is a check on the ids, not a separation guarantee: the role hierarchy the manager keeps
+    ///      (`getRoleAdmin`) can later make the suite deployer role the admin of a setter role, and nothing here
+    ///      can prevent that.
+    function setupTREXFactoryRoles(
+        IAccessManager accessManager,
+        address trexFactory,
+        uint64 suiteDeployerRole,
+        uint64 versionManagerRole,
+        uint64 interopManagerRole,
+        uint64 platformOwnerRole
+    ) internal {
+        require(
+            suiteDeployerRole != versionManagerRole && suiteDeployerRole != interopManagerRole
+                && suiteDeployerRole != platformOwnerRole,
+            ErrorsLib.SuiteDeployerCannotConfigureFactory()
+        );
+        require(suiteDeployerRole != ADMIN_ROLE, ErrorsLib.SuiteDeployerCannotConfigureFactory());
+        _requireNotPublicRole(suiteDeployerRole);
+        _requireNotPublicRole(versionManagerRole);
+        _requireNotPublicRole(interopManagerRole);
+        _requireNotPublicRole(platformOwnerRole);
+
+        // Building suites.
+        bytes4[] memory deployFunctions = new bytes4[](2);
+        deployFunctions[0] = ITREXFactory.deployTREXSuite.selector;
+        deployFunctions[1] = ITREXFactory.deployTREXSuiteIsolated.selector;
+        accessManager.setTargetFunctionRole(trexFactory, deployFunctions, suiteDeployerRole);
+
+        // Which code new suites run.
+        bytes4[] memory versionFunctions = new bytes4[](1);
+        versionFunctions[0] = ITREXFactory.setImplementationAuthority.selector;
+        accessManager.setTargetFunctionRole(trexFactory, versionFunctions, versionManagerRole);
+
+        // Which bridges new tokens trust.
+        bytes4[] memory interopFunctions = new bytes4[](1);
+        interopFunctions[0] = ITREXFactory.setTrustedGatewayRegistry.selector;
+        accessManager.setTargetFunctionRole(trexFactory, interopFunctions, interopManagerRole);
+
+        // Who creates new tokens' identities.
+        bytes4[] memory identityFunctions = new bytes4[](1);
+        identityFunctions[0] = ITREXFactory.setIdFactory.selector;
+        accessManager.setTargetFunctionRole(trexFactory, identityFunctions, platformOwnerRole);
+    }
+
+    /// @dev Every platform function configures something all suites depend on; none may be open to anyone.
+    function _requireNotPublicRole(uint64 role) private pure {
+        require(role != PUBLIC_ROLE, ErrorsLib.PlatformRoleCannotBePublic());
     }
 
     function setupTrustedGatewayRegistryRoles(IAccessManager accessManager, address trustedGatewayRegistry) internal {

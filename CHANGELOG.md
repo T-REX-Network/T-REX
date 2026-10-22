@@ -583,6 +583,42 @@ All notable changes to this project will be documented in this file.
   `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
   through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
+- **Suite deployment is no longer gated by the role that configures the factory** (#100).
+  `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
+  to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
+  could also repoint the factory's implementation authority, identity factory or trusted gateway
+  registry, which every later suite is wired to. The function now takes four role ids chosen by
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and for each setter
+  the role that already owns its subject. `setImplementationAuthority` goes to the version manager role,
+  which decides the code new suites run; `setTrustedGatewayRegistry` to the interop manager role, which
+  decides the bridges new tokens trust; `setIdFactory` to the platform owner role. No role exists only to
+  configure the factory, so nobody can go around the version manager or the interop manager by repointing
+  it. The function refuses the suite deployer role as any setter role, and the manager's `ADMIN_ROLE` as the
+  suite deployer role (`SuiteDeployerCannotConfigureFactory`), and the public role for any of the four
+  (`PlatformRoleCannotBePublic`). A platform picks any id of its manager, including a named platform role
+  through the new `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles
+  do. The `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
+  platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
+  The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
+  `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
+  `OWNER` from them.
+- **A supplied token ONCHAINID must already be bound to the token address** (OZ L-24, #161). With
+  `TokenDetails.ONCHAINID` set, `_deployToken` accepted an IdentityFactory slot that bound nothing to the
+  predicted token address and never bound it either, so any holder of the ASSET role could later bind the live
+  token to an identity of its own, and the token and the IdentityFactory would name different identities.
+  The factory now refuses a supplied identity unless the IdentityFactory already resolves the predicted
+  token address to it: an unbound slot, or one bound to it but revoked, reverts with `TokenIdentityNotBound`, and
+  a slot bound to another identity, revoked or not, with `TokenIdentityAlreadyBound`. A deployer that supplies the identity creates it first with
+  `IdentityFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)`, holding the role the
+  ASSET policy names, and passes the returned address. Leaving `ONCHAINID` at zero is unchanged.
+- **INDIVIDUAL and CORPORATE identity creation stays off the public role** (OZ L-05, #150). The token address
+  of a suite is predictable from the salt, and `createIdentityFor` binds an INDIVIDUAL or CORPORATE identity
+  to any account that is its only MANAGEMENT key without a signature from it. With those types open to
+  `PUBLIC_ROLE`, anyone could bind a predicted token address first and make that salt unusable on the chain.
+  `TREXFactory` now documents that every type that is not single-binding must stay off `PUBLIC_ROLE` for
+  `createIdentityFor` on the IdentityFactory it uses; self-deploy may stay open. The reference policy in the
+  test fixture gates INDIVIDUAL, CORPORATE and CLAIM_ISSUER behind a named platform role. No contract logic
+  changes; proof of account control for third-party bindings belongs to ONCHAINID.
 
 ### Removed
 
