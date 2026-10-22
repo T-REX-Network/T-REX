@@ -211,24 +211,32 @@ library AccessManagerSetupLib {
 
     /// @notice Commissions the suite of `token` into the domain the manager assigned it to. The identity
     ///         storage joins that same domain: a fresh storage is assigned to it, a storage already in it
-    ///         keeps its rows, and a storage already assigned to another domain is refused.
+    ///         keeps its rows, and a storage of another domain is refused.
     /// @dev The storage holds one record per wallet, whichever registry wrote it. If a registry of domain B
     ///      wrote into the storage of domain A, an agent of B could register wallets under, and revoke the
-    ///      wallets of, A's holders through B's registry (OZ H-01). So a storage belongs to one domain, and
-    ///      every registry bound to it holds `IRS_WRITER` in that domain. Tokens of one domain still share a
+    ///      wallets of, A's holders through B's registry. So a storage belongs to one domain, and every
+    ///      registry bound to it holds `IRS_WRITER` in that domain. Tokens of one domain still share a
     ///      storage. The isolation is between the domains' roles, not from the manager's admin: every domain
     ///      of one manager shares its `ADMIN_ROLE`, which can grant `IRS_WRITER` of any domain by hand.
+    /// @dev Two things say which domain a storage is in, and both are checked. The manager's domain record
+    ///      (`domainOf`) is checked here, so a storage recorded in another domain is refused even before its
+    ///      rows are mapped. The storage's own selector rows, which actually decide who may write it, are
+    ///      checked in {_commission}, so a storage mapped to another domain is refused whichever form of
+    ///      `commissionSuite` is called and whatever the record says.
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
         uint32 domainId = accessManager.domainOf(token);
         require(domainId != 0, ErrorsLib.NotAssigned(token));
         address registry = _registryOf(token);
         address identityRegistryStorage = _storageOf(registry);
 
-        uint32 storageDomainId = accessManager.domainOf(identityRegistryStorage);
-        if (storageDomainId == 0) {
+        uint32 recordedDomainId = accessManager.domainOf(identityRegistryStorage);
+        if (recordedDomainId == 0) {
             accessManager.assign(domainId, identityRegistryStorage);
         } else {
-            require(storageDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(identityRegistryStorage, storageDomainId));
+            require(
+                recordedDomainId == domainId,
+                ErrorsLib.StorageInAnotherDomain(identityRegistryStorage, recordedDomainId)
+            );
         }
 
         _commission(accessManager, token, registry, identityRegistryStorage, domainId);
@@ -236,10 +244,9 @@ library AccessManagerSetupLib {
 
     /// @notice The pure form of {commissionSuite}, for any `IAccessManager`: the caller names the domain, and
     ///         the suite's four contracts, the storage included, are all set up in it.
-    /// @dev A plain `IAccessManager` keeps no record of domains, so this form cannot refuse a storage that
-    ///      another domain already uses: it maps the storage's rows to `domainId` as asked. The caller, who
-    ///      holds `ADMIN_ROLE`, must not point a suite at a storage of another domain; the manager form
-    ///      above refuses it for them.
+    /// @dev A plain `IAccessManager` keeps no record of domains, so this form reads the domain a storage is
+    ///      in from the storage's own selector rows, see {_commission}: a storage whose rows belong to another
+    ///      domain is refused, a fresh one is mapped to `domainId`.
     function commissionSuite(IAccessManager accessManager, address token, uint32 domainId) internal {
         address registry = _registryOf(token);
         _commission(accessManager, token, registry, _storageOf(registry), domainId);
@@ -317,6 +324,7 @@ library AccessManagerSetupLib {
 
     /// @dev The token acts as an agent of its registry (recovery, cross-chain instructions), and only the
     ///      registry writes into the storage, never a person. Both grants land in the suite's own domain.
+    ///      The storage is checked first, so a refused suite leaves nothing behind.
     function _commission(
         IAccessManager accessManager,
         address token,
@@ -324,6 +332,8 @@ library AccessManagerSetupLib {
         address identityRegistryStorage,
         uint32 domainId
     ) private {
+        _requireStorageFreshOrInDomain(accessManager, identityRegistryStorage, domainId);
+
         accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0);
         accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry, 0);
 
@@ -335,6 +345,24 @@ library AccessManagerSetupLib {
             IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
         }
         setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, domainId);
+    }
+
+    /// @dev Refuses a storage whose rows belong to another domain. The row of `addIdentityToStorage` is the
+    ///      one that decides who may write the storage, so it is the one read: a fresh storage still has it
+    ///      at `ADMIN_ROLE` (no row was ever set), a commissioned storage has it at the `IRS_WRITER` role of
+    ///      its domain, and the domain is the upper half of that role id.
+    function _requireStorageFreshOrInDomain(
+        IAccessManager accessManager,
+        address identityRegistryStorage,
+        uint32 domainId
+    ) private view {
+        uint64 writerRole = accessManager.getTargetFunctionRole(
+            identityRegistryStorage, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
+        );
+        if (writerRole == ADMIN_ROLE) return;
+
+        (uint32 storageDomainId,,) = RolesLib.decode(writerRole);
+        require(storageDomainId == domainId, ErrorsLib.StorageInAnotherDomain(identityRegistryStorage, storageDomainId));
     }
 
     /// @dev Walks `table` as runs of consecutive same-role entries and maps each run with one

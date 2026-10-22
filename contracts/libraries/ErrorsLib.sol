@@ -166,8 +166,8 @@ library ErrorsLib {
 
     // AccessManagerSetupLib Errors
     error NotAssigned(address target);
-    /// @dev `target` already belongs to `domainId`, so it cannot be set up in another domain.
-    error SuiteAlreadySetUp(address target, uint32 domainId);
+    /// @dev `identityRegistryStorage` belongs to `storageDomainId`, so a suite of another domain cannot use it.
+    error StorageInAnotherDomain(address identityRegistryStorage, uint32 storageDomainId);
 
     // RolesLib Errors
     error InvalidDomain();
