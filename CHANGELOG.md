@@ -495,6 +495,16 @@ All notable changes to this project will be documented in this file.
   `transferOwnership` now reverts with `UseUpdateAuthority` for every caller; the authority changes only
   through `AccessManager.updateAuthority`. `owner()` is unchanged. **Breaking** for any integration that
   wrote ownership through ERC-173.
+- **Every token batch function has a role row of its own** (#149, L-04). A batch without a row is
+  authorized through its single-item function's role, and `_checkCanCallSelector` detects "no row" as a zero
+  `getTargetFunctionRole`. `ADMIN_ROLE` is also zero, so mapping a batch to `ADMIN_ROLE` changed nothing:
+  `AGENT_MINTER` holders could still call `batchMint`. `AccessManagerSetupLib.tokenTable` now maps
+  `batchMint`, `batchBurn`, `batchFreezePartialTokens`, `batchUnfreezePartialTokens`, `batchSetAddressFrozen`
+  and `batchForcedTransfer` to the role of their single-item function, as `batchRegisterIdentity` already was
+  on the registry, so a batch takes the full check, scheduled operations included. The AccessManager still
+  cannot tell an unset selector from one set to `ADMIN_ROLE`, so `_checkCanCallSelector` now states that a
+  batch can be restricted only through a nonzero role. Existing suites get the rows by calling
+  `setTargetFunctionRole` for the six selectors.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

@@ -227,6 +227,30 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         _assertTableMapped(address(tokenA.compliance()), AccessManagerSetupLib.complianceTable(), DOMAIN_A);
     }
 
+    /// @notice After suite setup, every batch has a row of its own on the role of its single-item function, so
+    ///         it takes the full check, scheduled operations included, rather than the immediate-only fallback.
+    function test_explicitDomain_EveryBatchHasTheRoleOfItsSingleItemFunction() public {
+        _commission(tokenA, DOMAIN_A);
+        address token = address(tokenA);
+        _assertBatchRole(token, IERC3643.batchMint.selector, IERC3643.mint.selector);
+        _assertBatchRole(token, IERC3643.batchBurn.selector, IERC3643.burn.selector);
+        _assertBatchRole(token, IERC3643.batchFreezePartialTokens.selector, IERC3643.freezePartialTokens.selector);
+        _assertBatchRole(token, IERC3643.batchUnfreezePartialTokens.selector, IERC3643.unfreezePartialTokens.selector);
+        _assertBatchRole(token, IERC3643.batchSetAddressFrozen.selector, IERC3643.setAddressFrozen.selector);
+        _assertBatchRole(token, IERC3643.batchForcedTransfer.selector, IERC3643.forcedTransfer.selector);
+        _assertBatchRole(
+            address(tokenA.identityRegistry()),
+            IERC3643IdentityRegistry.batchRegisterIdentity.selector,
+            IERC3643IdentityRegistry.registerIdentity.selector
+        );
+    }
+
+    function _assertBatchRole(address target, bytes4 batchSelector, bytes4 singleItemSelector) private view {
+        uint64 singleItemRole = accessManager.getTargetFunctionRole(target, singleItemSelector);
+        assertNotEq(singleItemRole, accessManager.ADMIN_ROLE(), "single-item function is mapped");
+        assertEq(accessManager.getTargetFunctionRole(target, batchSelector), singleItemRole);
+    }
+
     function _assertTableMapped(address target, AccessManagerSetupLib.SelectorRole[] memory table, uint32 domainId)
         private
         view
