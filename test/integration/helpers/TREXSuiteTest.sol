@@ -98,6 +98,8 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         _grantOwnerRole(deployer);
         _grantOwnerRole(address(this));
+        _grantPlatformRoles(deployer);
+        _grantPlatformRoles(address(this));
         _grantManagerRoles(deployer);
         _grantAllAgentRoles(agent);
 
@@ -290,6 +292,7 @@ contract TREXSuiteTest is AccessManagerHelper {
 
         _authorizeIAGovernance(address(ia));
         _grantOwnerRole(deployer);
+        _grantPlatformRoles(deployer);
         _grantVersionManagerRole(deployer);
 
         return ia;

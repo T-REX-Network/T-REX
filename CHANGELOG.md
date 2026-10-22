@@ -583,6 +583,25 @@ All notable changes to this project will be documented in this file.
   `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
   through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
+- **Suite deployment is no longer gated by the role that configures the factory** (#100).
+  `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
+  to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
+  could also repoint the factory's implementation authority, identity factory or trusted gateway
+  registry, which every later suite is wired to. The function now takes four role ids chosen by
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and for each setter
+  the role that already owns its subject. `setImplementationAuthority` goes to the version manager role,
+  which decides the code new suites run; `setTrustedGatewayRegistry` to the interop manager role, which
+  decides the bridges new tokens trust; `setIdFactory` to the platform owner role. No role exists only to
+  configure the factory, so nobody can go around the version manager or the interop manager by repointing
+  it. The function refuses the suite deployer role as any setter role, and the manager's `ADMIN_ROLE` as the
+  suite deployer role (`SuiteDeployerCannotConfigureFactory`), and the public role for any of the four
+  (`PlatformRoleCannotBePublic`). A platform picks any id of its manager, including a named platform role
+  through the new `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles
+  do. The `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
+  platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
+  The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
+  `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
+  `OWNER` from them.
 
 ### Removed
 
