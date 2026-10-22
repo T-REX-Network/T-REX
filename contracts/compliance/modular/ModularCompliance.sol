@@ -63,9 +63,11 @@
 pragma solidity 0.8.30;
 
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Compliance } from "../../ERC-3643/base/ERC3643Compliance.sol";
 import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
@@ -291,13 +293,22 @@ contract ModularCompliance is
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
     ///  claim a fresh compliance during setup), and the owner may always bind or unbind.
     ///
+    ///  A token claiming the compliance must be one this compliance's AccessManager governs: it has given the
+    ///  token's `setCompliance` a role. The caller writes its own `compliance()` and `authority()`, so neither
+    ///  proves anything; only the manager's admin can configure a target, so any contract with no supply could
+    ///  otherwise bind itself and write positions for any identity through a registry it chose.
+    ///
     ///  Neither door admits a token that already has supply. The ledger keeps every position from the
     ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
     ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
     ///  same; this covers the owner calling here directly.
     function _authorizeTokenBinding(address token) internal view override {
+        bool tokenClaimsUnboundCompliance = _getTokenBound() == address(0) && msg.sender == token;
+        // A target the manager never configured answers the admin role, 0, for every selector.
+        bool tokenGovernedByThisManager =
+            IAccessManager(authority()).getTargetFunctionRole(token, IERC3643.setCompliance.selector) != 0;
         require(
-            (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
+            (tokenClaimsUnboundCompliance && tokenGovernedByThisManager) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());

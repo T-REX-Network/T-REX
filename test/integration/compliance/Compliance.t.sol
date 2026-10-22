@@ -26,6 +26,35 @@ import { TestModule } from "../mocks/TestModule.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
+/// @dev A contract with no supply that claims a compliance for itself and reports its own registry, so it
+///  decides which identity every wallet it names resolves to.
+contract ComplianceClaimer {
+
+    address public immutable creditedIdentity;
+
+    constructor(address identity_) {
+        creditedIdentity = identity_;
+    }
+
+    function claimAndCredit(IERC3643Compliance compliance, address wallet, uint256 amount) external {
+        compliance.bindToken(address(this));
+        compliance.created(wallet, amount);
+    }
+
+    function totalSupply() external pure returns (uint256) {
+        return 0;
+    }
+
+    function identityRegistry() external view returns (address) {
+        return address(this);
+    }
+
+    function identity(address) external view returns (address) {
+        return creditedIdentity;
+    }
+
+}
+
 contract ComplianceTest is TREXSuiteTest {
 
     ModularCompliance public compliance;
@@ -158,6 +187,19 @@ contract ComplianceTest is TREXSuiteTest {
         testToken.setCompliance(address(newCompliance));
 
         assertTrue(newCompliance.isTokenBound(address(testToken)));
+    }
+
+    /// @notice A contract the compliance's AccessManager does not govern cannot claim an unbound compliance
+    ///  and write a position for an identity of its choice.
+    function test_bindToken_RevertWhen_UngovernedContractClaimsUnboundCompliance() public {
+        ModularCompliance unboundCompliance = _deployModularComplianceWithProxy(address(trexImplementationAuthority));
+        ComplianceClaimer claimer = new ComplianceClaimer(address(aliceIdentity));
+
+        vm.expectRevert(ErrorsLib.OnlyOwnerOrTokenCanCall.selector);
+        claimer.claimAndCredit(unboundCompliance, alice, 1e24);
+
+        assertEq(unboundCompliance.getTokenBound(), address(0));
+        assertEq(unboundCompliance.positionOf(address(aliceIdentity)), 0);
     }
 
     /// @notice Should revert when token address is zero

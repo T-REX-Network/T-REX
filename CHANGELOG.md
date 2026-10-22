@@ -632,6 +632,9 @@ All notable changes to this project will be documented in this file.
   `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
   through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
+- **A token claims an unbound compliance only if the compliance's AccessManager governs it** (L-35): the token path
+  of `bindToken` also requires that the compliance's manager gives the token's `setCompliance` a role. Before, any
+  contract with no supply could bind itself and write positions through a registry it chose.
 
 ### Removed
 
