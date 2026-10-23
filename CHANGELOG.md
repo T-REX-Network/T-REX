@@ -528,6 +528,14 @@ All notable changes to this project will be documented in this file.
   revoked bindings included, and refuses in `registerIdentity` a binding that contradicts that factory
   (`WalletBoundToAnotherIdentity`). The bound set is enumeration only again: binding and unbinding no longer
   change any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the set.
+- **A registry keeps its identity storage for life** (L-30 #164). `setIdentityRegistryStorage` let the owner
+  point a registry at a storage that does not hold its local bindings, so every wallet bound only in the old
+  one lost its identity while its tokens circulated. `TREXRegistry.setIdentityRegistryStorage` now always
+  reverts with `Deprecated`, like `setClaimTopicsRegistry` and `setTrustedIssuersRegistry`; the storage is
+  set at `init` only. To change storage, point the token at a new registry, which the token allows only while
+  nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
+  `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
+  moved a registry to another storage.
 - **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
   The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
   register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.

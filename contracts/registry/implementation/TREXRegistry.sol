@@ -65,13 +65,11 @@ pragma solidity 0.8.30;
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
-import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { IERC3643ClaimTopicsRegistry } from "../../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
 import { IERC3643IdentityRegistry } from "../../ERC-3643/IERC3643IdentityRegistry.sol";
-import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { ERC3643ClaimTopicsRegistry } from "../../ERC-3643/base/ERC3643ClaimTopicsRegistry.sol";
 import { ERC3643IdentityRegistry } from "../../ERC-3643/base/ERC3643IdentityRegistry.sol";
@@ -172,6 +170,18 @@ contract TREXRegistry is
     // ============================================================
     // IdentityRegistry
     // ============================================================
+
+    /// @inheritdoc IERC3643IdentityRegistry
+    /// @dev Always reverts: the storage is fixed at `init`. Another storage would not hold this one's local
+    ///  bindings, so wallets bound only there would lose their identity while their tokens circulate. To change
+    ///  storage, point the token at a new registry, which the token allows only while nothing circulates.
+    function setIdentityRegistryStorage(address)
+        external
+        pure
+        override(ERC3643IdentityRegistry, IERC3643IdentityRegistry)
+    {
+        revert ErrorsLib.Deprecated();
+    }
 
     /// @inheritdoc IERC3643IdentityRegistry
     /// @dev DEPRECATED: this registry is its own ClaimTopicsRegistry; always reverts. Reverted the same
@@ -443,30 +453,10 @@ contract TREXRegistry is
         _checkCanCallSelector(selector);
     }
 
-    /// @dev T-REX authorization for `setIdentityRegistryStorage`. A storage that cannot answer identity
-    ///  reads halts the token, which calls `isVerified` on every transfer, so the target is checked for
-    ///  interface support and for a shared authority. `onlySharedAuthority` is a misconfiguration guard
-    ///  only: `authority()` is spoofable.
-    ///  The new storage must already list this registry in its bound set. The registry cannot bind
-    ///  itself: bind/unbind are roles on the IRS, which is shared, so holding them here would let one
-    ///  suite mutate every other suite's resolution set. Binding stays with the IRS admin; this only
-    ///  makes a forgotten pre-bind revert now instead of silently breaking `_globalIdentity` later.
-    ///  Unbinding the old storage stays the IRS admin's job for the same reason.
-    ///  Membership is asked for directly rather than enumerated: `isIdentityRegistryBound` reads one
-    ///  slot instead of copying the whole bound set. It is a T-REX addition, not plain ERC-3643, so it
-    ///  is reached through `IIdentityRegistryStorage`; the ERC-165 check above covers only the standard
-    ///  surface, and a storage that answers the standard but lacks this getter reverts here.
-    function _authorizeRegistryUpdate(address newRegistry) internal override {
+    /// @dev No setter reaches this: the storage, claim topics and trusted issuers setters all revert. It keeps
+    ///  the role check for any future internal caller.
+    function _authorizeRegistryUpdate(address) internal override {
         _checkCanCall(_msgSender(), _msgData());
-        _checkSharedAuthority(newRegistry);
-        require(
-            ERC165Checker.supportsInterface(newRegistry, type(IERC3643IdentityRegistryStorage).interfaceId),
-            ErrorsLib.InvalidIdentityRegistryStorage()
-        );
-        require(
-            IIdentityRegistryStorage(newRegistry).isIdentityRegistryBound(address(this)),
-            ErrorsLib.RegistryNotBoundToStorage()
-        );
     }
 
     /// @dev T-REX authorization for the trusted-issuer functions.
