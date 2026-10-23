@@ -58,11 +58,6 @@ contract IdentityRegistryStorageStoredIdentityUnitTest is Test {
         vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
         vm.mockCall(otherRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(otherIdFactory));
         vm.mockCall(
-            idFactory,
-            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(otherWallet))),
-            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
-        );
-        vm.mockCall(
             otherIdFactory,
             abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(otherWallet))),
             abi.encode(otherIdentity, IIdentityFactory.AccountStatus.Active)
@@ -73,32 +68,20 @@ contract IdentityRegistryStorageStoredIdentityUnitTest is Test {
         assertEq(address(irs.storedIdentity(wallet)), address(0));
     }
 
-    function test_storedIdentity_FallsBackThroughBoundRegistryFactory() public {
+    /// @dev The storage answers its own bindings only, whatever the factories of its bound registries know.
+    function test_storedIdentity_ReturnsZero_WhenOnlyABoundRegistryFactoryKnowsTheWallet() public {
         irs.bindIdentityRegistry(registry);
+        irs.bindIdentityRegistry(otherRegistry);
 
-        assertEq(address(irs.storedIdentity(wallet)), globalIdentity);
+        assertEq(address(irs.storedIdentity(wallet)), address(0));
+        assertEq(address(irs.storedIdentity(otherWallet)), address(0));
     }
 
-    /// @dev The factory can link a wallet after the storage bound it locally; the local binding still answers.
-    function test_storedIdentity_PrefersLocalBinding() public {
+    function test_storedIdentity_ReturnsTheLocalBinding() public {
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
         irs.bindIdentityRegistry(registry);
 
         assertEq(address(irs.storedIdentity(wallet)), localIdentity);
-    }
-
-    function test_storedIdentity_ScansEveryBoundRegistryFactory() public {
-        irs.bindIdentityRegistry(registry);
-        irs.bindIdentityRegistry(otherRegistry);
-
-        assertEq(address(irs.storedIdentity(wallet)), globalIdentity);
-        assertEq(address(irs.storedIdentity(otherWallet)), otherIdentity);
-    }
-
-    function test_storedIdentity_ReturnsZero_WhenNoBoundRegistryFactoryKnowsTheWallet() public {
-        irs.bindIdentityRegistry(registry);
-
-        assertEq(address(irs.storedIdentity(otherWallet)), address(0));
     }
 
     function _account(address _wallet) private view returns (bytes memory) {

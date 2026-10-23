@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -322,6 +323,14 @@ contract LedgerAttributionTest is TREXSuiteTest {
             address(registry.identityStorage()),
             abi.encodeCall(registry.identityStorage().storedIdentity, (alice)),
             abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(registry.identityFactory()),
+            abi.encodeCall(
+                registry.identityFactory().getIdentityIncludingRevoked,
+                (InteroperableAddress.formatEvmV1(block.chainid, alice))
+            ),
+            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
         );
         assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
     }

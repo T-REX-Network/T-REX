@@ -120,10 +120,11 @@ contract TREXRegistry is
     uint256 private constant MAX_CLAIM_TOPICS = 15;
     uint256 private constant MAX_TRUSTED_ISSUERS = 50;
 
-    /// @dev ONCHAINID IdentityFactory used by `isVerified` to read an identity's type. The factory
-    ///  records the type once at minting and never updates it, so it is a safer source than asking
-    ///  the identity contract itself. Baked into the implementation so it cannot be repointed at
-    ///  runtime; changing it takes a new implementation published through the beacon.
+    /// @dev ONCHAINID IdentityFactory that resolves every wallet the storage does not bind, and that
+    ///  `isVerified` reads an identity's type and a wallet's revocation from. The factory records the type
+    ///  once at minting and never updates it, so it is a safer source than asking the identity contract.
+    ///  Baked into the implementation so it cannot be repointed at runtime; changing it takes a new
+    ///  implementation published through the beacon.
     IIdentityFactory private immutable _IDENTITY_FACTORY;
 
     /// @param identityFactoryAddress the ONCHAINID IdentityFactory whose type record backs the
@@ -348,23 +349,51 @@ contract TREXRegistry is
         return true;
     }
 
+    /// @dev The storage's local binding if it has one, otherwise this registry's IdentityFactory. Only this
+    ///  registry's own factory is asked, never the factory of another registry sharing the storage, so a wallet
+    ///  resolves only to an identity this registry can judge, and binding or unbinding other registries
+    ///  changes nothing here.
+    ///
+    ///  A revoked binding still answers: this is the attribution read behind `identity` and `contains`, and a
+    ///  wallet that holds tokens must keep its owner after the investor revokes it, so the compliance can still
+    ///  debit the right position on a burn, a recovery or a forced transfer. Whether the wallet may still act
+    ///  is the admission read, `_activeIdentityOf`.
+    function _identityOf(address userAddress) internal view override returns (IIdentity) {
+        IIdentity localIdentity = _identityStorage().storedIdentity(userAddress);
+        if (address(localIdentity) != address(0)) return localIdentity;
+
+        (address factoryIdentity,) = _factoryIdentityOf(userAddress);
+        return IIdentity(factoryIdentity);
+    }
+
     /// @dev The identity a wallet may act through, or zero. A wallet may not act when the storage or the
     ///  IdentityFactory revoked it, or when the factory links it to another identity than the storage does.
     ///  In that last case the wallet's own signature disagrees with the agent's binding, so neither is trusted.
-    ///
-    ///  `_identityOf` is left as is. Attribution and admission are separate questions: `contains`, `identity`
-    ///  and recovery keep naming who owns the wallet's tokens, while this read decides who may act.
+    ///  Attribution and admission are separate questions: `contains`, `identity` and recovery keep naming who
+    ///  owns the wallet's tokens, while this read decides who may act.
     function _activeIdentityOf(address userAddress) internal view override returns (IIdentity) {
-        IIdentity userIdentity = _identityOf(userAddress);
-        if (address(userIdentity) == address(0)) return userIdentity;
         if (_localAccountStatus(userAddress) == IIdentityFactory.AccountStatus.Revoked) return IIdentity(address(0));
 
-        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
-        (address globalIdentity, IIdentityFactory.AccountStatus status) =
-            _IDENTITY_FACTORY.getIdentityIncludingRevoked(account);
-        if (status == IIdentityFactory.AccountStatus.Revoked) return IIdentity(address(0));
-        if (globalIdentity != address(0) && globalIdentity != address(userIdentity)) return IIdentity(address(0));
-        return userIdentity;
+        (address factoryIdentity, IIdentityFactory.AccountStatus factoryStatus) = _factoryIdentityOf(userAddress);
+        if (factoryStatus == IIdentityFactory.AccountStatus.Revoked) return IIdentity(address(0));
+
+        IIdentity localIdentity = _identityStorage().storedIdentity(userAddress);
+        if (address(localIdentity) == address(0)) return IIdentity(factoryIdentity);
+        if (factoryIdentity != address(0) && factoryIdentity != address(localIdentity)) return IIdentity(address(0));
+        return localIdentity;
+    }
+
+    /// @dev A local binding may not contradict this registry's IdentityFactory: binding the same identity as the
+    ///  factory is allowed, another one is not. Every registration enters here, the token's recovery included.
+    ///  Checked after the storage write, so a revoked or already stored wallet still fails with the storage's error.
+    function _registerIdentity(address userAddress, IIdentity userIdentity, uint16 country) internal override {
+        super._registerIdentity(userAddress, userIdentity, country);
+
+        (address factoryIdentity,) = _factoryIdentityOf(userAddress);
+        require(
+            factoryIdentity == address(0) || factoryIdentity == address(userIdentity),
+            ErrorsLib.WalletBoundToAnotherIdentity(userAddress, factoryIdentity)
+        );
     }
 
     /// @dev Deleting revokes the wallet in the storage. It stays in the registry, so `IdentityRevoked` is emitted
@@ -372,6 +401,18 @@ contract TREXRegistry is
     function _deleteIdentity(address userAddress) internal override {
         _identityStorage().removeIdentityFromStorage(userAddress);
         emit EventsLib.IdentityRevoked(userAddress, _identityOf(userAddress));
+    }
+
+    /// @dev The wallet's binding in this registry's IdentityFactory, revoked or not. The factory keys wallets by
+    ///  ERC-7930 interoperable address, built with `formatEvmV1(block.chainid, wallet)`, so it resolves EVM
+    ///  wallets on this chain only; bind any other wallet locally.
+    function _factoryIdentityOf(address userAddress)
+        private
+        view
+        returns (address factoryIdentity, IIdentityFactory.AccountStatus factoryStatus)
+    {
+        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
+        return _IDENTITY_FACTORY.getIdentityIncludingRevoked(account);
     }
 
     /// @dev The status of the wallet in this registry's storage, ignoring the IdentityFactory.
