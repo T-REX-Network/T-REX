@@ -167,11 +167,10 @@ contract LedgerAttributionTest is TREXSuiteTest {
         token.setIdentityRegistry(address(registry));
     }
 
-    /* ----- What the registry displaces is counted, and the owner puts it back ----- */
+    /* ----- Every token keeps an owner ----- */
 
-    /// @notice A burn from a wallet that attributes to nobody leaves the positions over the supply by that
-    ///         amount. It is not floored away: the gap goes negative by it, and the owner moves the
-    ///         stale position off the identity that no longer holds it.
+    /// @notice A burn from a wallet the registry no longer attributes debits the owner the ledger recorded at
+    ///         the mint, so the positions still recount the supply.
     function test_burn_Success_DebitsTheRememberedOwner_WhenTheWalletIsUnlinkedEverywhere() public {
         _unlinkAliceEverywhere();
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
@@ -181,36 +180,27 @@ contract LedgerAttributionTest is TREXSuiteTest {
         token.burn(alice, BALANCE);
 
         assertEq(ledger.positionOf(address(aliceIdentity)), 0, "debited from the remembered owner");
-        assertEq(ledger.positionGap(), 0, "nothing to repair");
-        _assertPositionsPlusGapRecountTheSupply();
+        _assertPositionsRecountTheSupply();
     }
 
-    /// @notice What no lookup can resolve is the one thing left for the owner: a wallet the ledger never
-    ///         credited and the registry does not know. Only a registry with eligibility checks disabled lets
-    ///         tokens land there. The amount is counted in the gap, and `fixPosition` hands it to its owner.
-    function test_fixPosition_Success_WhenTokensLandedOnAWalletKnownToNobody() public {
-        IComplianceLedger ledger = IComplianceLedger(address(compliance));
+    /// @notice Disabling the eligibility checks skips the claims, not the identity: a wallet known to nobody
+    ///         still cannot receive tokens, so no token ever lands where the ledger has no owner to count it under.
+    function test_mint_RevertWhen_TheRecipientHasNoIdentity_EvenWithChecksDisabled() public {
         address stranger = makeAddr("stranger");
         vm.prank(deployer);
         registry.disableEligibilityChecks();
 
         vm.prank(agent);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.PositionUnresolved(bytes32(uint256(uint160(stranger))), 50);
+        vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
         token.mint(stranger, 50);
 
-        assertEq(ledger.ownerOf(stranger), address(0), "nobody to remember");
-        assertEq(ledger.positionGap(), 50, "counted, not lost");
-        _assertPositionsPlusGapRecountTheSupply();
+        vm.prank(alice);
+        vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
+        token.transfer(stranger, 50);
 
-        vm.prank(deployer);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.PositionFixed(address(0), address(charlieIdentity), 50);
-        compliance.fixPosition(address(0), address(charlieIdentity), 50);
-
-        assertEq(ledger.positionGap(), 0);
-        assertEq(ledger.positionOf(address(charlieIdentity)), 50);
-        _assertPositionsPlusGapRecountTheSupply();
+        vm.prank(agent);
+        vm.expectRevert(ERC3643ErrorsLib.UnverifiedIdentity.selector);
+        token.forcedTransfer(alice, stranger, 50);
     }
 
     /// @notice Bindings are sticky, so an agent cannot relink a wallet that holds tokens: the registration is
@@ -258,8 +248,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(ledger.ownerOf(alice), address(charlieIdentity), "the ledger followed");
         assertEq(ledger.positionOf(address(aliceIdentity)), 0);
         assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 100, "the burn debited the new identity");
-        assertEq(ledger.positionGap(), 0);
-        _assertPositionsPlusGapRecountTheSupply();
+        _assertPositionsRecountTheSupply();
     }
 
     /// @notice A recovery after a storage swap stays within one identity: the lost wallet's balance follows to
@@ -274,43 +263,27 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(token.balanceOf(another), BALANCE);
         assertEq(ledger.positionOf(address(aliceIdentity)), 0);
         assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE, "one identity before and after");
-        assertEq(ledger.positionGap(), 0);
-        _assertPositionsPlusGapRecountTheSupply();
+        _assertPositionsRecountTheSupply();
     }
 
-    /// @notice The pool can also hand tokens to an identity: the other direction of the same repair.
-    function test_fixPosition_Success_FromThePoolToAnIdentity() public {
+    /// @notice A self-transfer as the first movement after a relink moves the wallet's balance, not the balance
+    ///         plus the amount: the wallet's balance did not change, so nothing is added back on either side.
+    function test_transfer_Success_FollowsTheRelink_WhenTheFirstMovementIsASelfTransfer() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        vm.startPrank(deployer);
-        compliance.fixPosition(address(aliceIdentity), address(0), 100);
-        compliance.fixPosition(address(0), address(bobIdentity), 100);
-        vm.stopPrank();
+        _resolveAliceTo(charlieIdentity);
+        // The factory still links alice to her first identity, so the swapped answer is not verified; the token
+        // asks for the recipient's eligibility before the hook this test is about.
+        vm.mockCall(address(registry), abi.encodeCall(registry.isVerified, (alice)), abi.encode(true));
 
-        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE - 100);
-        assertEq(ledger.positionOf(address(bobIdentity)), BALANCE + 100);
-        assertEq(ledger.positionGap(), 0);
-    }
+        vm.prank(alice);
+        vm.expectEmit(address(compliance));
+        emit EventsLib.WalletOwnerChanged(alice, address(aliceIdentity), address(charlieIdentity), BALANCE);
+        token.transfer(alice, 100);
 
-    function test_fixPosition_RevertWhen_TheIdentityHoldsLess() public {
-        vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.InsufficientPosition.selector, address(aliceIdentity), BALANCE, BALANCE + 1
-            )
-        );
-        compliance.fixPosition(address(aliceIdentity), address(0), BALANCE + 1);
-    }
-
-    function test_fixPosition_RevertWhen_BothSidesAreTheSame() public {
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.FromAndToAreTheSame.selector);
-        compliance.fixPosition(address(0), address(0), 1);
-    }
-
-    function test_fixPosition_RevertWhen_NotTheOwner() public {
-        vm.prank(another);
-        vm.expectRevert();
-        compliance.fixPosition(address(aliceIdentity), address(0), 1);
+        assertEq(token.balanceOf(alice), BALANCE);
+        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
+        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE, "the new owner gets the balance only");
+        _assertPositionsRecountTheSupply();
     }
 
     /* ----- Helpers ----- */
@@ -336,13 +309,11 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(address(registry.identity(alice)), address(identity));
     }
 
-    function _assertPositionsPlusGapRecountTheSupply() private view {
+    function _assertPositionsRecountTheSupply() private view {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        int256 sum = int256(
-            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
-                + ledger.positionOf(address(charlieIdentity))
-        );
-        assertEq(sum + ledger.positionGap(), int256(token.totalSupply()), "positions + gap != supply");
+        uint256 sum = ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
+            + ledger.positionOf(address(charlieIdentity));
+        assertEq(sum, token.totalSupply(), "positions != supply");
     }
 
     function _bindLockup(address lockedIdentity) private returns (LockedSenderModule lockup) {

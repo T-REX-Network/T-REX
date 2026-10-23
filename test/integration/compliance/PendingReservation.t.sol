@@ -3,9 +3,12 @@ pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { Token } from "contracts/token/Token.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { CappedRecipientModule, RecordingModule, RuleOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
@@ -189,6 +192,58 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(_position(), 60, "the settlement landed on bob's identity, not on nobody");
         assertEq(latecomer.transferActionCalls(), 1, "the latecomer was told");
         assertEq(_max(_issue(10, CAP)), 40, "and it now narrows against the real position");
+    }
+
+    // ==== rebinding Tests ====
+
+    /// @notice A token with no supply can leave its compliance while a validation it issued is still open. The
+    ///         next token bound there would have that pending amount counted against its own holders' caps, so
+    ///         the bind is refused until the validation settles or is discarded.
+    function test_bindToken_RevertWhen_APreviousTokenLeftAValidationPending() public {
+        _issue(10, 60);
+        _moveTokenToAFreshCompliance();
+        Token nextToken = _deployToken("next", "Next Token", "NXT");
+        assertEq(_pendingIn(), 60, "the old token's promise is still counted");
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
+        boundCompliance.bindToken(address(nextToken));
+    }
+
+    /// @notice Once the previous token's validations are over, nothing it promised is left and the compliance
+    ///         can serve another token.
+    function test_bindToken_Success_WhenThePreviousTokensValidationsWereDiscarded() public {
+        _discard(_issue(10, 60));
+        _moveTokenToAFreshCompliance();
+        Token nextToken = _deployToken("next", "Next Token", "NXT");
+
+        vm.prank(deployer);
+        boundCompliance.bindToken(address(nextToken));
+
+        assertEq(boundCompliance.getTokenBound(), address(nextToken));
+        assertEq(_pendingIn(), 0);
+    }
+
+    /// @dev Recalls alice's satellite tokens and burns them, since the token leaves its compliance only at zero
+    ///  supply, then leaves. A recall is bounded by the bridged position, not by what validations reserve, and
+    ///  the satellite proves it burned the whole position.
+    function _moveTokenToAFreshCompliance() private {
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        vm.startPrank(agent);
+        token.unpause();
+        uint256 recallId = token.instructRecall(aliceSat, BALANCE, alice);
+        vm.stopPrank();
+        gateway.relay(
+            _liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, BALANCE)))
+        );
+        vm.prank(agent);
+        token.burn(alice, BALANCE);
+        assertEq(token.totalSupply(), 0, "no supply left");
+
+        ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+        vm.prank(deployer);
+        token.setCompliance(address(fresh));
+        assertEq(boundCompliance.getTokenBound(), address(0), "the old compliance is free");
     }
 
     function _issue(uint256 requestedMin, uint256 requestedMax) private returns (uint256) {

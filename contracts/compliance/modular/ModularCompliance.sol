@@ -265,11 +265,6 @@ contract ModularCompliance is
         _resolveStuckValidation(validationId);
     }
 
-    /// @inheritdoc IComplianceLedger
-    function fixPosition(address from, address to, uint256 amount) external restricted {
-        _fixPosition(from, to, amount);
-    }
-
     /// @inheritdoc ITransferValidation
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
@@ -295,12 +290,18 @@ contract ModularCompliance is
     ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
     ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
     ///  same; this covers the owner calling here directly.
+    ///
+    ///  A previous token can also leave validations open, whose pending amounts would count against the new
+    ///  token's holders. Those are settled or discarded before another token is bound. Positions need no such
+    ///  check: they always add up to the bound token's supply, which is zero here. An `ownerOf` entry the previous
+    ///  token left needs none either: the wallet holds none of the new token, so following it moves nothing.
     function _authorizeTokenBinding(address token) internal view override {
         require(
             (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
+        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
@@ -313,16 +314,14 @@ contract ModularCompliance is
     /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
-    ///  A wallet that resolves to no identity is refused outright while a rule is bound, on either side. Every
-    ///  rule about distribution keys on the identity: a zero recipient would read as the absent side of a burn
-    ///  and answer "no limit", letting tokens land where no cap can ever reach them; a zero sender would read as
-    ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
-    ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
+    ///  A sender that resolves to no identity is refused outright while a rule is bound: it would read as a mint
+    ///  and escape every rule about leaving. A holding wallet resolves to nobody only after the owner swaps the
+    ///  registry's storage or unbinds a registry from it. The recipient needs no such guard, since the token asks
+    ///  `isVerified` first, and that requires an active identity even with the eligibility checks disabled.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        if (to != address(0) && ctx.toIdentity == address(0)) return false;
         return value <= _minAllowedAmount(ctx);
     }
 
@@ -362,12 +361,19 @@ contract ModularCompliance is
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
     ///  minus what just arrived. A wallet whose owner changed since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
+    ///
+    ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
+    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
+    ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
+    ///  the full adjustment.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
-        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), int256(value));
-        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
+        bool balanceUnchanged = from == to && kind != MovementKindLib.DELEGATION;
+        int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
+        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), adjustment);
+        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -adjustment);
 
         IModule.TransferContext memory ctx =
             TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");
