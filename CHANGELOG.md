@@ -518,6 +518,24 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Each registry resolves wallets through its own IdentityFactory** (L-08 #153, L-15 #156, L-16 #157,
+  L-26 #162). The storage resolved a wallet it did not bind by asking the IdentityFactory of every bound
+  registry in turn, in an order an unbind could change, while each registry judged revocation and identity
+  type in its own factory. A registry could resolve a wallet to another factory's identity and admit it, and
+  unbinding a registry changed who wallets were in the others or left its own wallets with no identity.
+  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only, and the storage reads
+  no IdentityFactory. `TREXRegistry` resolves a wallet the storage does not bind through its own factory,
+  revoked bindings included, and refuses in `registerIdentity` a binding that contradicts that factory
+  (`WalletBoundToAnotherIdentity`). The bound set is enumeration only again: binding and unbinding no longer
+  change any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the set.
+- **A registry keeps its identity storage for life** (L-30 #164). `setIdentityRegistryStorage` let the owner
+  point a registry at a storage that does not hold its local bindings, so every wallet bound only in the old
+  one lost its identity while its tokens circulated. `TREXRegistry.setIdentityRegistryStorage` now always
+  reverts with `Deprecated`, like `setClaimTopicsRegistry` and `setTrustedIssuersRegistry`; the storage is
+  set at `init` only. To change storage, point the token at a new registry, which the token allows only while
+  nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
+  `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
+  moved a registry to another storage.
 - **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
   The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
   register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
@@ -529,9 +547,10 @@ All notable changes to this project will be documented in this file.
     registered again. Revoking twice reverts with `WalletNotActive`. The storage and the registry emit
     `IdentityRevoked` instead of the standard `IdentityUnstored` and `IdentityRemoved`, which mean the
     wallet left the registry. See docs/erc3643-oz-swap.md for integrators.
-  - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
-    factory links the wallet, actively or revoked, to a different identity, and with
-    `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
+  - `registerIdentity` reverts with `WalletBoundToAnotherIdentity` when the registry's factory links the
+    wallet, actively or revoked, to a different identity, and with `WalletAlreadyRevoked` for a revoked
+    wallet. Registering the identity the factory names still works. The storage's `addIdentityToStorage`
+    checks the revocation only, since it reads no factory.
   - The storage records the status in a new namespace, `erc3643.storage.TREXIdentityRegistryStorage`.
     Bindings stored before the upgrade read as `Active`.
   - Removed: `IIdentityRegistryStorage.isLocallyRegistered`, replaced by `localAccountStatus`, which returns

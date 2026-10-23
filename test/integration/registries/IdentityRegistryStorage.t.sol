@@ -495,20 +495,20 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(identityRegistryStorage.linkedIdentityRegistryCount(), 3);
     }
 
-    // ============ storedIdentity() fallback / storedInvestorCountry() deprecated ============
+    // ============ storedIdentity() local only / storedInvestorCountry() deprecated ============
 
-    /// @notice storedIdentity returns the local identity when present (no fallback to global)
+    /// @notice storedIdentity returns the local identity when present
     function test_storedIdentity_UsesLocal_WhenPresent() public view {
         assertEq(address(identityRegistryStorage.storedIdentity(bob)), address(bobIdentity));
     }
 
-    /// @notice storedIdentity falls back to the global identity registry when no local identity is stored
-    function test_storedIdentity_FallsBackToGlobal_WhenLocalMissing() public {
-        // `another` is a fresh wallet that has never been added to the local IRS.
-        // Create its identity directly in the global IdentityFactory and check the fallback.
+    /// @notice The storage answers its own bindings only. A wallet the IdentityFactory alone knows resolves in the
+    ///         registry, which asks its own factory.
+    function test_storedIdentity_ReturnsZero_WhenOnlyTheFactoryKnowsTheWallet() public {
         address globalIdentity = address(_deployIdentity(another, "another"));
 
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), globalIdentity);
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
+        assertEq(address(token.identityRegistry().identity(another)), globalIdentity);
     }
 
     /// @notice storedIdentity returns address(0) when the wallet is unknown to both local and global
@@ -523,31 +523,21 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(identityRegistryStorage.storedInvestorCountry(another), 0);
     }
 
-    /// @notice With no registry bound there is no factory to fall back to: a global-only wallet
-    ///         resolves to the zero identity
-    function test_storedIdentity_ReturnsZero_WhenNoRegistryBound() public {
-        address globalIdentity = address(_deployIdentity(another, "another"));
-        vm.prank(deployer);
-        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
-
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(0));
-        assertNotEq(globalIdentity, address(0));
-    }
-
     // ============ sticky bindings against the IdentityFactory ============
 
-    /// @notice A wallet the factory links to one identity cannot be bound locally to another.
-    function test_addIdentityToStorage_RevertWhen_FactoryLinksWalletToAnotherIdentity() public {
-        IIdentity globalIdentity = _deployIdentity(another, "another");
+    /// @notice The storage does not read any IdentityFactory: the rule that a local binding may not contradict the
+    ///         factory belongs to the registry, which owns the factory. A deployed suite grants the storage's
+    ///         writer role to its registry only; an account granted that role by hand writes past the rule.
+    function test_addIdentityToStorage_Succeeds_WhenFactoryLinksWalletToAnotherIdentity() public {
+        _deployIdentity(another, "another");
 
         vm.prank(agent);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, another, address(globalIdentity))
-        );
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+
+        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(charlieIdentity));
     }
 
-    /// @notice The refusal reaches the agent path an issuer actually uses: registering through the registry.
+    /// @notice A wallet the factory links to one identity cannot be registered locally to another.
     function test_registerIdentity_RevertWhen_FactoryLinksWalletToAnotherIdentity() public {
         address globalOnly = makeAddr("globalOnly");
         IIdentity globalIdentity = _deployIdentity(globalOnly, "globalOnly");
@@ -560,18 +550,19 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         registry.registerIdentity(globalOnly, charlieIdentity, 0);
     }
 
-    /// @notice A wallet the factory revoked stays bound to its identity, so it cannot be bound to another.
-    function test_addIdentityToStorage_RevertWhen_FactoryRevokedWalletOfAnotherIdentity() public {
+    /// @notice A wallet the factory revoked stays bound to its identity, so it cannot be registered to another.
+    function test_registerIdentity_RevertWhen_FactoryRevokedWalletOfAnotherIdentity() public {
         IIdentity globalIdentity = _deployIdentity(another, "another");
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
         vm.prank(address(globalIdentity));
         idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, another));
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(globalIdentity));
+        assertEq(address(registry.identity(another)), address(globalIdentity));
 
         vm.prank(agent);
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, another, address(globalIdentity))
         );
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
+        registry.registerIdentity(another, charlieIdentity, 0);
     }
 
     /// @notice A local copy of the factory's own link is allowed.
@@ -588,18 +579,6 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertEq(
             uint8(identityRegistryStorage.localAccountStatus(another)), uint8(IIdentityFactory.AccountStatus.Active)
         );
-    }
-
-    /// @notice With no registry bound there is no factory to consult: the local binding is accepted.
-    function test_addIdentityToStorage_Succeeds_WhenNoRegistryBound() public {
-        _deployIdentity(another, "another");
-        vm.prank(deployer);
-        identityRegistryStorage.unbindIdentityRegistry(address(token.identityRegistry()));
-
-        vm.prank(agent);
-        identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(charlieIdentity));
     }
 
     /// @notice Updating through the registry is refused like the storage write it relays.

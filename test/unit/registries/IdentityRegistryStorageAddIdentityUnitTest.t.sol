@@ -13,23 +13,18 @@ import {
 
 contract IdentityRegistryStorageAddIdentityUnitTest is IdentityRegistryStorageBaseUnitTest {
 
-    function test_addIdentityToStorage_RevertsWhen_FactoryLinksWalletToAnotherIdentity() public {
-        irs.bindIdentityRegistry(registry);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, wallet, globalIdentity));
-        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
-
-        assertEq(uint8(irs.localAccountStatus(wallet)), uint8(IIdentityFactory.AccountStatus.None));
-    }
-
-    function test_addIdentityToStorage_RevertsWhen_SecondBoundRegistryLinksWalletToAnotherIdentity() public {
+    /// @dev The storage reads no IdentityFactory; the registry refuses a binding that contradicts its own factory.
+    function test_addIdentityToStorage_DoesNotAskTheBoundRegistriesFactories() public {
         irs.bindIdentityRegistry(registry);
         irs.bindIdentityRegistry(otherRegistry);
+        vm.expectCall(idFactory, abi.encodeWithSelector(IIdentityFactory.getIdentityIncludingRevoked.selector), 0);
+        vm.expectCall(otherIdFactory, abi.encodeWithSelector(IIdentityFactory.getIdentityIncludingRevoked.selector), 0);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, otherWallet, otherIdentity)
-        );
+        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
         irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
+
+        assertEq(address(irs.storedIdentity(wallet)), localIdentity);
+        assertEq(address(irs.storedIdentity(otherWallet)), localIdentity);
     }
 
     function test_addIdentityToStorage_EmitsOnlyIdentityStored_WhenNoRegistryBound() public {

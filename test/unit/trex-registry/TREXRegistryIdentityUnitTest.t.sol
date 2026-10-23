@@ -150,94 +150,29 @@ contract TREXRegistryIdentityUnitTest is TREXRegistryBaseUnitTest {
         assertEq(registry.investorCountry(second), 0);
     }
 
-    // ============ setIdentityRegistryStorage() ============
+    // ============ setIdentityRegistryStorage() — fixed at init ============
 
-    function test_setIdentityRegistryStorage_RevertWhen_NotOwner() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        registry.setIdentityRegistryStorage(address(0));
-    }
-
-    function test_setIdentityRegistryStorage_Success_EmitsEvent() public {
+    /// @notice Even a storage that shares the suite authority and already binds this registry is refused: the
+    ///         storage is fixed for the registry's life, so no local binding can be left behind.
+    function test_setIdentityRegistryStorage_RevertWhen_Deprecated_AsOwner() public {
         IdentityRegistryStorage replacement = _deployIdentityRegistryStorage(address(registry));
-
-        vm.prank(deployer);
-        vm.expectEmit(true, false, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityStorageSet(address(replacement));
-        registry.setIdentityRegistryStorage(address(replacement));
-
-        assertEq(address(registry.identityStorage()), address(replacement));
-    }
-
-    /// @notice Behavior: the zero address is refused. `onlySharedAuthority` reports it as
-    ///         `AuthorityMismatch`, since it checks both clauses in one require.
-    function test_setIdentityRegistryStorage_RevertWhen_ZeroAddress() public {
         address before = address(registry.identityStorage());
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.AuthorityMismatch.selector);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
+        registry.setIdentityRegistryStorage(address(replacement));
+
+        assertEq(address(registry.identityStorage()), before);
+    }
+
+    function test_setIdentityRegistryStorage_RevertWhen_Deprecated_AsOther() public {
+        // Deprecation takes precedence — even non-owners get Deprecated, never the access-managed error.
+        vm.prank(another);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.setIdentityRegistryStorage(address(0));
-
-        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
     }
 
-    /// @notice Behavior: an account with no code is refused, so a mistyped address cannot brick the registry.
-    function test_setIdentityRegistryStorage_RevertWhen_NotAContract() public {
-        address before = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectRevert();
-        registry.setIdentityRegistryStorage(makeAddr("notAContract"));
-
-        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
-    }
-
-    /// @notice Behavior: a contract that is not an IRS is refused, so it fails here and not at the
-    ///         next transfer.
-    function test_setIdentityRegistryStorage_RevertWhen_WrongInterface() public {
-        address before = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.InvalidIdentityRegistryStorage.selector);
-        registry.setIdentityRegistryStorage(address(registry));
-
-        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
-    }
-
-    /// @notice Behavior: a storage that does not list this registry as bound is refused, so the
-    ///         registry cannot end up pointing at a storage whose `_globalIdentity` skips it.
-    function test_setIdentityRegistryStorage_RevertWhen_NotBoundToStorage() public {
-        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage(address(0));
-        address before = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
-        registry.setIdentityRegistryStorage(address(replacement));
-
-        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
-    }
-
-    /// @notice Behavior: binding the registry on the storage after the failed swap makes it succeed,
-    ///         so the check is on the bound set and not on the storage itself.
-    function test_setIdentityRegistryStorage_Success_AfterBinding() public {
-        IdentityRegistryStorage replacement = _deployIdentityRegistryStorage(address(0));
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.RegistryNotBoundToStorage.selector);
-        registry.setIdentityRegistryStorage(address(replacement));
-
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(replacement), DOMAIN);
-        vm.prank(deployer);
-        replacement.bindIdentityRegistry(address(registry));
-
-        vm.prank(deployer);
-        registry.setIdentityRegistryStorage(address(replacement));
-
-        assertEq(address(registry.identityStorage()), address(replacement));
-    }
-
-    /// @dev Shares the suite AccessManager so the new IRS passes `onlySharedAuthority`.
-    ///      `initialIR` is bound at init, which is what the pre-bind check reads.
+    /// @dev A storage on the suite AccessManager that binds `initialIR` at init.
     function _deployIdentityRegistryStorage(address initialIR) private returns (IdentityRegistryStorage) {
         return IdentityRegistryStorage(
             address(
