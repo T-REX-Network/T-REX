@@ -325,7 +325,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /**
      * @dev Deploys a contract using CREATE3
      * @param salt Base salt for deployment
-     * @param contractType Contract type identifier (e.g., "IR", IRS)
+     * @param contractType Contract type identifier (e.g., "IR", "IRS")
      * @param bytecode Full creation bytecode including constructor parameters
      */
     function _deploy(string memory salt, string memory contractType, bytes memory bytecode) internal returns (address) {
@@ -340,15 +340,15 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
      *      CREATE3, which lets the factory pre-compute one suite contract's address while feeding it into another
      *      contract's constructor (e.g. pre-binding the IR address into the IRS proxy).
      */
+    function _predictAddress(string memory salt, string memory contractType) internal view returns (address) {
+        return Create3.computeAddress(_saltBytes(salt, contractType), address(this));
+    }
+
     /// @dev Whether `account` is this factory or one of the contracts the suite for `salt` will be deployed at.
     function _isFactoryOrSuiteContract(string memory salt, address account) private view returns (bool) {
         return account == address(this) || account == _predictAddress(salt, ACCESS_MANAGER)
             || account == _predictAddress(salt, TOKEN) || account == _predictAddress(salt, REGISTRY)
             || account == _predictAddress(salt, IRS) || account == _predictAddress(salt, MC);
-    }
-
-    function _predictAddress(string memory salt, string memory contractType) internal view returns (address) {
-        return Create3.computeAddress(_saltBytes(salt, contractType), address(this));
     }
 
     /**

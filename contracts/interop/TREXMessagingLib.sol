@@ -193,11 +193,10 @@ library TREXMessagingLib {
             (bytes2 chainType, bytes calldata chainReference, bytes calldata account) =
                 InteroperableAddress.parseV1Calldata(peer);
 
-            require(
-                account.length > 0 && peer.length == ERC7930_V1_FIXED_LENGTH + chainReference.length + account.length
-                    && (chainType != MessageTypesLib.EVM_CHAIN_TYPE || account.length == 20),
-                ErrorsLib.InvalidPeer(peer)
-            );
+            bool hasAccount = account.length > 0;
+            bool noTrailingBytes = peer.length == ERC7930_V1_FIXED_LENGTH + chainReference.length + account.length;
+            bool isEvmSizedOrNotEvm = chainType != MessageTypesLib.EVM_CHAIN_TYPE || account.length == 20;
+            require(hasAccount && noTrailingBytes && isEvmSizedOrNotEvm, ErrorsLib.InvalidPeer(peer));
 
             bytes32 peerChainKey = _registerChain(s, chainType, chainReference);
             require(peerChainKey == chainKey, ErrorsLib.PeerChainMismatch(chainKey, peerChainKey));
