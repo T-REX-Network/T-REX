@@ -179,4 +179,21 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertFalse(compliance.canTransfer(alice, stranger, 100), "and the compliance agrees");
     }
 
+    /// @notice A zero amount is refused too: the compliance refuses a wallet with no identity before any rule, so
+    ///         the preview cannot pass it on `0 <= 0`.
+    function test_getTransferDetails_ReportsNoPass_WhenAZeroAmountGoesToAWalletWithNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), alice, stranger, 0);
+
+        assertEq(results.length, 1);
+        assertEq(results[0].allowedAmount, 0);
+        assertFalse(results[0].pass);
+        assertFalse(compliance.canTransfer(alice, stranger, 0), "and the compliance agrees");
+    }
+
 }
