@@ -170,8 +170,9 @@ library ErrorsLib {
     error NotAssigned(address target);
     error SuiteDeployerCannotConfigureFactory();
     error PlatformRoleCannotBePublic();
-    /// @dev `identityRegistryStorage` belongs to `storageDomainId`, so a suite of another domain cannot use it.
-    error StorageInAnotherDomain(address identityRegistryStorage, uint32 storageDomainId);
+    /// @dev `target`, a storage, a registry or a compliance, is already set up in `domainId`, so a suite of
+    ///      another domain cannot use it.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();

@@ -19,6 +19,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -296,36 +297,66 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         AccessManagerSetupLib.commissionSuite(IAccessManager(address(domainManager)), token, domainId);
     }
 
-    /// @dev Two suites in two domains, each commissioned with its own storage, and then Y's registry bound to
-    ///      X's storage by hand, the one way left to put a registry of another domain on a storage: X's
-    ///      `IRS_BINDER` binds it, and Y's `OWNER` points the registry at it. Alice holds 100 of X.
-    function _twoDomainsOneStorageBoundByHand()
-        private
-        returns (Token tokenX, Token tokenY, IdentityRegistryStorage irs, uint32 fundY)
-    {
-        tokenX = _deployBare("seize-x", address(0), address(domainManager));
-        tokenY = _deployBare("seize-y", address(0), address(domainManager));
-        irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenY));
+    /// @dev The setup of the audit's scenario: two tokens of two domains, and Y deployed on X's storage.
+    struct TwoDomainsOneStorage {
+        Token tokenX;
+        Token tokenY;
+        IdentityRegistryStorage irs;
+        uint32 fundX;
+        uint32 fundY;
+    }
 
-        _grantAllAgentRoles(domainManager, agentA, fundX);
+    /// @dev Token X is commissioned into fund X and alice holds 100 of it. Token Y is deployed on X's storage
+    ///      and assigned to fund Y, but not commissioned: that is the step the tests then try.
+    function _twoDomainsOneStorage() private returns (TwoDomainsOneStorage memory s) {
+        s.tokenX = _deployBare("seize-x", address(0), address(domainManager));
+        s.irs = IdentityRegistryStorage(address(s.tokenX.identityRegistry().identityStorage()));
+        s.tokenY = _deployBare("seize-y", address(s.irs), address(domainManager));
+        s.fundX = domainManager.createDomain("Fund X");
+        s.fundY = domainManager.createDomain("Fund Y");
+        domainManager.assign(s.fundX, address(s.tokenX));
+        domainManager.assign(s.fundY, address(s.tokenY));
+        AccessManagerSetupLib.commissionSuite(domainManager, address(s.tokenX));
+
+        _grantAllAgentRoles(domainManager, agentA, s.fundX);
         vm.startPrank(agentA);
-        tokenX.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
-        tokenX.unpause();
-        tokenX.mint(alice, 100);
+        s.tokenX.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
+        s.tokenX.unpause();
+        s.tokenX.mint(alice, 100);
         vm.stopPrank();
+    }
 
-        IERC3643IdentityRegistry registryY = tokenY.identityRegistry();
-        _grantStorageBinder(domainManager, fundX);
-        irs.bindIdentityRegistry(address(registryY));
-        domainManager.grantRole(RolesLib.forDomain(fundY, RolesLib.Role.OWNER), address(this), 0);
-        registryY.setIdentityRegistryStorage(address(irs));
-        assertEq(address(registryY.identityStorage()), address(irs));
+    /// @dev Sets Y's suite up in fund Y by hand, table by table, which is what `commissionSuite` would do if it
+    ///      did not refuse X's storage. Then X's `IRS_BINDER` binds Y's registry to X's storage. This is the
+    ///      one way left to put a registry of another domain on a storage, and it takes the admin plus X's
+    ///      binder to do it.
+    function _setUpYByHandOnXsStorage(TwoDomainsOneStorage memory s) private {
+        address registryY = address(s.tokenY.identityRegistry());
+        // The two grants come first, as in `commissionSuite`: once the role admins are set, `AGENT` is handed
+        // out by `AGENT_ADMIN`, which the admin does not hold.
+        domainManager.grantRole(RolesLib.forDomain(s.fundY, RolesLib.Role.AGENT), address(s.tokenY), 0);
+        domainManager.grantRole(RolesLib.forDomain(s.fundY, RolesLib.Role.IRS_WRITER), registryY, 0);
+        AccessManagerSetupLib.setupTokenRoles(domainManager, address(s.tokenY), s.fundY);
+        AccessManagerSetupLib.setupTREXRegistryRoles(domainManager, registryY, s.fundY);
+        AccessManagerSetupLib.setupModularComplianceRoles(domainManager, address(s.tokenY.compliance()), s.fundY);
+        AccessManagerSetupLib.setupRoleAdmins(domainManager, s.fundY);
+
+        _grantStorageBinder(domainManager, s.fundX);
+        s.irs.bindIdentityRegistry(registryY);
+        assertTrue(s.irs.isIdentityRegistryBound(registryY));
+        assertEq(address(s.tokenY.identityRegistry().identityStorage()), address(s.irs));
+    }
+
+    /// @dev A storage that no suite uses yet: its rows are all at `ADMIN_ROLE`, so the admin binds and writes it.
+    function _deployFreshStorage() private returns (IdentityRegistryStorage) {
+        return IdentityRegistryStorage(
+            address(
+                new ERC1967Proxy(
+                    address(identityRegistryStorageImplementation),
+                    abi.encodeCall(IdentityRegistryStorage.init, (address(domainManager), address(0)))
+                )
+            )
+        );
     }
 
     function test_registry_ShareClassesOfOneFundShareOneTeam() public {
@@ -369,7 +400,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
         _grantStorageBinder(domainManager, fundX);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.StorageInAnotherDomain.selector, address(irs), fundX));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
         this.commissionExternally(address(tokenY));
 
         // Nothing of Y's suite was set up, and Y's registry cannot write into X's storage.
@@ -387,7 +418,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
 
     /// @notice The pure form reads the domain from the storage's own rows, so calling it on the manager with
     ///         another domain is refused the same way: the storage's rows stay in X, and X's registry keeps
-    ///         writing.
+    ///         writing. The caller holds X's `IRS_BINDER`, so the domain check is the only thing refusing.
     function test_registry_RevertWhen_PureFormPointsAStorageAtAnotherDomain() public {
         Token tokenX = _deployBare("pure-x", address(0), address(domainManager));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
@@ -396,8 +427,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         uint32 fundY = domainManager.createDomain("Fund Y");
         domainManager.assign(fundX, address(tokenX));
         AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
+        _grantStorageBinder(domainManager, fundX);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.StorageInAnotherDomain.selector, address(irs), fundX));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
         this.commissionPureFormExternally(address(tokenY), fundY);
 
         assertEq(
@@ -424,21 +456,149 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
 
         domainManager.assign(fundY, address(irs));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.StorageInAnotherDomain.selector, address(irs), fundX));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
         this.commissionExternally(address(tokenY));
 
         assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
         assertFalse(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
     }
 
+    /// @notice The manager form also reads its own record of the storage's domain. A storage recorded in Y
+    ///         by a bare `assign`, with no row mapped yet, is refused for X's token: the record and the rows
+    ///         must agree, and while the rows are empty the record is all there is.
+    function test_registry_RevertWhen_StorageIsRecordedInAnotherDomainBeforeItsRowsAreMapped() public {
+        Token tokenX = _deployBare("record-x", address(0), address(domainManager));
+        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
+        uint32 fundX = domainManager.createDomain("Fund X");
+        uint32 fundY = domainManager.createDomain("Fund Y");
+        domainManager.assign(fundX, address(tokenX));
+        domainManager.assign(fundY, address(irs));
+        assertEq(
+            domainManager.getTargetFunctionRole(
+                address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
+            ),
+            0,
+            "the storage's rows are still empty"
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundY));
+        this.commissionExternally(address(tokenX));
+
+        assertEq(domainManager.getTargetFunctionRole(address(tokenX), IERC3643.mint.selector), 0);
+    }
+
+    /// @notice A registry belongs to one domain too, so two domains cannot share one. X's registry moves to
+    ///         a fresh storage, which the storage check has nothing to say about, and Y's token adopts X's
+    ///         registry. Commissioning Y is refused on the registry's own rows: X's agents keep their
+    ///         registry and Y's agents never get it.
+    function test_registry_RevertWhen_TheRegistryIsSetUpInAnotherDomain() public {
+        Token tokenX = _deployBare("one-reg-x", address(0), address(domainManager));
+        Token tokenY = _deployBare("one-reg-y", address(0), address(domainManager));
+        uint32 fundX = domainManager.createDomain("Fund X");
+        uint32 fundY = domainManager.createDomain("Fund Y");
+        domainManager.assign(fundX, address(tokenX));
+        domainManager.assign(fundY, address(tokenY));
+        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
+        ITREXRegistry registryX = ITREXRegistry(address(tokenX.identityRegistry()));
+
+        // X's OWNER points X's registry at a never commissioned storage, then Y's token adopts X's registry.
+        IdentityRegistryStorage freshStorage = _deployFreshStorage();
+        freshStorage.bindIdentityRegistry(address(registryX));
+        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.OWNER), address(this), 0);
+        registryX.setIdentityRegistryStorage(address(freshStorage));
+        tokenY.setIdentityRegistry(address(registryX));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(registryX), fundX));
+        this.commissionExternally(address(tokenY));
+
+        // The registry's rows still belong to X, and nothing of Y's suite was set up.
+        assertEq(
+            domainManager.getTargetFunctionRole(address(registryX), IERC3643IdentityRegistry.registerIdentity.selector),
+            RolesLib.forDomain(fundX, RolesLib.Role.AGENT)
+        );
+        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
+
+        // Commissioning X again maps the fresh storage into X; it needs X's `AGENT_ADMIN` for the token's
+        // `AGENT` grant, which `_grantAllAgentRoles` gives this contract. X's agents write, Y's are refused.
+        _grantAllAgentRoles(domainManager, agentA, fundX);
+        _grantAllAgentRoles(domainManager, agentB, fundY);
+        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
+        vm.prank(agentA);
+        registryX.registerIdentity(alice, aliceIdentity, 0);
+        vm.prank(agentB);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agentB));
+        registryX.registerIdentity(bob, bobIdentity, 0);
+        assertEq(address(registryX.identity(alice)), address(aliceIdentity));
+    }
+
+    /// @notice A compliance belongs to one domain too. X's OWNER unbinds X's compliance (X has no supply),
+    ///         Y's token adopts it, and commissioning Y is refused on the compliance's own rows.
+    function test_registry_RevertWhen_TheComplianceIsSetUpInAnotherDomain() public {
+        Token tokenX = _deployBare("one-mc-x", address(0), address(domainManager));
+        Token tokenY = _deployBare("one-mc-y", address(0), address(domainManager));
+        uint32 fundX = domainManager.createDomain("Fund X");
+        uint32 fundY = domainManager.createDomain("Fund Y");
+        domainManager.assign(fundX, address(tokenX));
+        domainManager.assign(fundY, address(tokenY));
+        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
+        IModularCompliance complianceX = IModularCompliance(address(tokenX.compliance()));
+
+        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.OWNER), address(this), 0);
+        complianceX.unbindToken(address(tokenX));
+        tokenY.setCompliance(address(complianceX));
+        assertEq(complianceX.getTokenBound(), address(tokenY));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(complianceX), fundX));
+        this.commissionExternally(address(tokenY));
+
+        // The compliance's rows still belong to X, and nothing of Y's suite was set up.
+        assertEq(
+            domainManager.getTargetFunctionRole(address(complianceX), IModularCompliance.addModule.selector),
+            RolesLib.forDomain(fundX, RolesLib.Role.OWNER)
+        );
+        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
+    }
+
+    /// @notice Two tokens of one domain may share one registry: its rows are already in that domain, so the
+    ///         second commission is let through and the domain's agents reach both tokens through it.
+    function test_registry_TokensOfOneDomainShareOneRegistry() public {
+        Token tokenX = _deployBare("share-reg-x", address(0), address(domainManager));
+        Token tokenY = _deployBare("share-reg-y", address(0), address(domainManager));
+        uint32 fund = domainManager.createDomain("Fund");
+        domainManager.assign(fund, address(tokenX));
+        domainManager.assign(fund, address(tokenY));
+        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
+        IERC3643IdentityRegistry registryX = tokenX.identityRegistry();
+
+        tokenY.setIdentityRegistry(address(registryX));
+        domainManager.grantRole(RolesLib.forDomain(fund, RolesLib.Role.AGENT_ADMIN), address(this), 0);
+        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenY));
+
+        assertEq(
+            domainManager.getTargetFunctionRole(address(registryX), IERC3643IdentityRegistry.registerIdentity.selector),
+            RolesLib.forDomain(fund, RolesLib.Role.AGENT)
+        );
+        _grantAllAgentRoles(domainManager, agentA, fund);
+        vm.startPrank(agentA);
+        registryX.registerIdentity(alice, aliceIdentity, 0);
+        tokenX.unpause();
+        tokenY.unpause();
+        tokenX.mint(alice, 1);
+        tokenY.mint(alice, 2);
+        vm.stopPrank();
+        assertEq(tokenX.balanceOf(alice), 1);
+        assertEq(tokenY.balanceOf(alice), 2);
+    }
+
     /// @notice A registry of another domain bound to the storage by hand writes nothing: it holds `IRS_WRITER`
     ///         in its own domain, and the storage's rows ask for the storage's domain.
     function test_registry_RegistryOfAnotherDomainBoundByHandWritesNothing() public {
-        (Token tokenX, Token tokenY, IdentityRegistryStorage irs, uint32 fundY) = _twoDomainsOneStorageBoundByHand();
-        IERC3643IdentityRegistry registryY = tokenY.identityRegistry();
+        TwoDomainsOneStorage memory s = _twoDomainsOneStorage();
+        _setUpYByHandOnXsStorage(s);
+        IERC3643IdentityRegistry registryY = s.tokenY.identityRegistry();
         bytes memory registryYRefused =
             abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(registryY));
-        _grantAllAgentRoles(domainManager, agentB, fundY);
+        _grantAllAgentRoles(domainManager, agentB, s.fundY);
 
         vm.startPrank(agentB);
         vm.expectRevert(registryYRefused);
@@ -449,39 +609,51 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         registryY.deleteIdentity(alice);
         vm.stopPrank();
 
-        assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
-        assertFalse(irs.isLocallyRegistered(charlie), "nothing was written for charlie");
-        assertEq(address(tokenX.identityRegistry().identity(alice)), address(aliceIdentity));
+        ITREXRegistry registryX = ITREXRegistry(address(s.tokenX.identityRegistry()));
+        assertEq(address(s.irs.storedIdentity(alice)), address(aliceIdentity));
+        assertFalse(registryX.isLocallyRegistered(charlie), "nothing was written for charlie");
+        assertEq(address(registryX.identity(alice)), address(aliceIdentity));
     }
 
-    /// @notice The audit's scenario, step by step: an agent of Y tries to register a wallet of theirs under a
-    ///         holder of X, then to rebind that holder's wallet to an identity they control, then to move the
-    ///         balance with `identityTransfer`. Every step fails and the holder keeps everything.
+    /// @notice The audit's scenario, step by step. An agent of Y wants X's storage, where alice, a holder of
+    ///         X, is recorded. Step 1 is the way the audit found: commission Y's suite onto X's storage, which
+    ///         is now refused. Steps 2 to 4 are what is left once Y's registry is put on that storage by hand:
+    ///         register a wallet of theirs under alice's identity, rebind alice to an identity they control,
+    ///         move her balance with `identityTransfer`. Every step fails and alice keeps her 100.
     function test_registry_AgentOfAnotherDomainCannotSeizeAHolder() public {
-        (Token tokenX, Token tokenY, IdentityRegistryStorage irs, uint32 fundY) = _twoDomainsOneStorageBoundByHand();
-        IERC3643IdentityRegistry registryY = tokenY.identityRegistry();
+        TwoDomainsOneStorage memory s = _twoDomainsOneStorage();
+        _grantStorageBinder(domainManager, s.fundX);
+
+        // 1. Commission Y onto X's storage. Refused: X's storage stays X's, Y's registry gets no writer role.
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(s.irs), s.fundX));
+        this.commissionExternally(address(s.tokenY));
+        assertFalse(s.irs.isIdentityRegistryBound(address(s.tokenY.identityRegistry())));
+        _assertWritesOnlyInDomain(address(s.tokenX.identityRegistry()), s.fundX);
+
+        _setUpYByHandOnXsStorage(s);
+        IERC3643IdentityRegistry registryY = s.tokenY.identityRegistry();
         bytes memory registryYRefused =
             abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(registryY));
-        _grantAllAgentRoles(domainManager, agentB, fundY);
+        _grantAllAgentRoles(domainManager, agentB, s.fundY);
 
-        // 1. Register a recipient the agent controls under alice's identity, so it passes X's checks.
+        // 2. Register a recipient the agent controls under alice's identity, so it passes X's checks.
         vm.prank(agentB);
         vm.expectRevert(registryYRefused);
         registryY.registerIdentity(charlie, aliceIdentity, 0);
 
-        // 2. Rebind alice's wallet to an identity the agent controls.
+        // 3. Rebind alice's wallet to an identity the agent controls.
         vm.prank(agentB);
         vm.expectRevert(registryYRefused);
         registryY.updateIdentity(alice, charlieIdentity);
 
-        // 3. Move alice's balance from that identity. Alice's wallet still answers to her own identity.
+        // 4. Move alice's balance from that identity. Alice's wallet still answers to her own identity.
         vm.prank(address(charlieIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotLinkedIdentity.selector, alice, address(charlieIdentity)));
-        tokenX.identityTransfer(alice, charlie, 100);
+        s.tokenX.identityTransfer(alice, charlie, 100);
 
-        assertEq(tokenX.balanceOf(alice), 100);
-        assertEq(tokenX.balanceOf(charlie), 0);
-        assertEq(address(irs.storedIdentity(alice)), address(aliceIdentity));
+        assertEq(s.tokenX.balanceOf(alice), 100);
+        assertEq(s.tokenX.balanceOf(charlie), 0);
+        assertEq(address(s.irs.storedIdentity(alice)), address(aliceIdentity));
     }
 
     /// @notice Two tokens of one domain, each with its own registry, still share one storage: both registries

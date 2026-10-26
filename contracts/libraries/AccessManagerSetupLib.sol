@@ -159,6 +159,7 @@ library AccessManagerSetupLib {
         table[7] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.Role.OWNER);
         table[8] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
         table[9] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        // {_requireFreshOrInDomain} reads this row to tell which domain a registry is in.
         table[10] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.Role.AGENT);
         table[11] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.Role.AGENT);
         table[12] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.Role.AGENT);
@@ -169,6 +170,7 @@ library AccessManagerSetupLib {
         table = new SelectorRole[](5);
         table[0] = SelectorRole(IdentityRegistryStorage.bindIdentityRegistry.selector, RolesLib.Role.IRS_BINDER);
         table[1] = SelectorRole(IdentityRegistryStorage.unbindIdentityRegistry.selector, RolesLib.Role.OWNER);
+        // {_requireFreshOrInDomain} reads this row to tell which domain a storage is in.
         table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.Role.IRS_WRITER);
         table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.IRS_WRITER);
         table[4] =
@@ -180,6 +182,7 @@ library AccessManagerSetupLib {
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.forceRemoveModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
+        // {_requireFreshOrInDomain} reads this row to tell which domain a compliance is in.
         table[3] = SelectorRole(ModularCompliance.addModule.selector, RolesLib.Role.OWNER);
         table[4] = SelectorRole(ModularCompliance.callModuleFunction.selector, RolesLib.Role.OWNER);
         table[5] = SelectorRole(RolesLib.BIND_UNBIND_TOKEN, RolesLib.Role.OWNER);
@@ -212,18 +215,26 @@ library AccessManagerSetupLib {
 
     /// @notice Commissions the suite of `token` into the domain the manager assigned it to. The identity
     ///         storage joins that same domain: a fresh storage is assigned to it, a storage already in it
-    ///         keeps its rows, and a storage of another domain is refused.
-    /// @dev The storage holds one record per wallet, whichever registry wrote it. If a registry of domain B
-    ///      wrote into the storage of domain A, an agent of B could register wallets under, and revoke the
-    ///      wallets of, A's holders through B's registry. So a storage belongs to one domain, and every
-    ///      registry bound to it holds `IRS_WRITER` in that domain. Tokens of one domain still share a
-    ///      storage. The isolation is between the domains' roles, not from the manager's admin: every domain
-    ///      of one manager shares its `ADMIN_ROLE`, which can grant `IRS_WRITER` of any domain by hand.
+    ///         keeps its rows, and a storage of another domain is refused. The same rule holds for the
+    ///         registry and the compliance: a fresh one joins the domain, one already set up in another
+    ///         domain is refused.
+    /// @dev Why a storage belongs to one domain: it holds one record per wallet, whichever registry wrote
+    ///      it. If a registry of domain B wrote into the storage of domain A, an agent of B could register
+    ///      wallets under, and revoke the wallets of, A's holders through B's registry. So every registry
+    ///      bound to a storage holds `IRS_WRITER` in the storage's domain. Tokens of one domain still share
+    ///      a storage. The isolation is between the domains' roles, not from the manager's admin: every
+    ///      domain of one manager shares its `ADMIN_ROLE`, which can grant `IRS_WRITER` of any domain by hand.
+    /// @dev Why a registry and a compliance belong to one domain: commissioning maps their functions to the
+    ///      roles of the token's domain. Two tokens of one domain may share a registry (share classes of one
+    ///      fund, say) and the rows just get written again with the same roles. A second token of another
+    ///      domain would move the registry's rows to its own domain and lock the first domain's agents out
+    ///      of their own registry, so it is refused.
     /// @dev Two things say which domain a storage is in, and both are checked. The manager's domain record
     ///      (`domainOf`) is checked here, so a storage recorded in another domain is refused even before its
     ///      rows are mapped. The storage's own selector rows, which actually decide who may write it, are
-    ///      checked in {_commission}, so a storage mapped to another domain is refused whichever form of
-    ///      `commissionSuite` is called and whatever the record says.
+    ///      checked in {_commission} together with the registry's and the compliance's rows, so a contract
+    ///      mapped to another domain is refused whichever form of `commissionSuite` is called and whatever
+    ///      the record says.
     function commissionSuite(TREXAccessManager accessManager, address token) internal {
         uint32 domainId = accessManager.domainOf(token);
         require(domainId != 0, ErrorsLib.NotAssigned(token));
@@ -235,8 +246,7 @@ library AccessManagerSetupLib {
             accessManager.assign(domainId, identityRegistryStorage);
         } else {
             require(
-                recordedDomainId == domainId,
-                ErrorsLib.StorageInAnotherDomain(identityRegistryStorage, recordedDomainId)
+                recordedDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(identityRegistryStorage, recordedDomainId)
             );
         }
 
@@ -245,9 +255,9 @@ library AccessManagerSetupLib {
 
     /// @notice The pure form of {commissionSuite}, for any `IAccessManager`: the caller names the domain, and
     ///         the suite's four contracts, the storage included, are all set up in it.
-    /// @dev A plain `IAccessManager` keeps no record of domains, so this form reads the domain a storage is
-    ///      in from the storage's own selector rows, see {_commission}: a storage whose rows belong to another
-    ///      domain is refused, a fresh one is mapped to `domainId`.
+    /// @dev A plain `IAccessManager` keeps no record of domains, so this form reads the domain a contract is
+    ///      in from the contract's own selector rows, see {_commission}: a storage, a registry or a
+    ///      compliance whose rows belong to another domain is refused, a fresh one is mapped to `domainId`.
     function commissionSuite(IAccessManager accessManager, address token, uint32 domainId) internal {
         address registry = _registryOf(token);
         _commission(accessManager, token, registry, _storageOf(registry), domainId);
@@ -374,9 +384,10 @@ library AccessManagerSetupLib {
         }
     }
 
-    /// @dev The token acts as an agent of its registry (recovery, cross-chain instructions), and only the
-    ///      registry writes into the storage, never a person. Both grants land in the suite's own domain.
-    ///      The storage is checked first, so a refused suite leaves nothing behind.
+    /// @dev The three contracts a second token can share, the storage, the registry and the compliance, are
+    ///      checked first, so a refused suite leaves nothing behind. Then the token is made an agent of its
+    ///      registry (recovery, cross-chain instructions), and the registry a writer of the storage, since
+    ///      only a registry writes into a storage, never a person. Both grants land in the suite's own domain.
     function _commission(
         IAccessManager accessManager,
         address token,
@@ -384,14 +395,22 @@ library AccessManagerSetupLib {
         address identityRegistryStorage,
         uint32 domainId
     ) private {
-        _requireStorageFreshOrInDomain(accessManager, identityRegistryStorage, domainId);
+        address compliance = _complianceOf(token);
+        _requireFreshOrInDomain(
+            accessManager,
+            identityRegistryStorage,
+            IERC3643IdentityRegistryStorage.addIdentityToStorage.selector,
+            domainId
+        );
+        _requireFreshOrInDomain(accessManager, registry, IERC3643IdentityRegistry.registerIdentity.selector, domainId);
+        _requireFreshOrInDomain(accessManager, compliance, ModularCompliance.addModule.selector, domainId);
 
         accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0);
         accessManager.grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry, 0);
 
         setupTokenRoles(accessManager, token, domainId);
         setupTREXRegistryRoles(accessManager, registry, domainId);
-        setupModularComplianceRoles(accessManager, _complianceOf(token), domainId);
+        setupModularComplianceRoles(accessManager, compliance, domainId);
         setupRoleAdmins(accessManager, domainId);
         if (!IIdentityRegistryStorage(identityRegistryStorage).isIdentityRegistryBound(registry)) {
             IERC3643IdentityRegistryStorage(identityRegistryStorage).bindIdentityRegistry(registry);
@@ -399,22 +418,25 @@ library AccessManagerSetupLib {
         setupIdentityRegistryStorageRoles(accessManager, identityRegistryStorage, domainId);
     }
 
-    /// @dev Refuses a storage whose rows belong to another domain. The row of `addIdentityToStorage` is the
-    ///      one that decides who may write the storage, so it is the one read: a fresh storage still has it
-    ///      at `ADMIN_ROLE` (no row was ever set), a commissioned storage has it at the `IRS_WRITER` role of
-    ///      its domain, and the domain is the upper half of that role id.
-    function _requireStorageFreshOrInDomain(
-        IAccessManager accessManager,
-        address identityRegistryStorage,
-        uint32 domainId
-    ) private view {
-        uint64 writerRole = accessManager.getTargetFunctionRole(
-            identityRegistryStorage, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
-        );
-        if (writerRole == ADMIN_ROLE) return;
+    /// @dev Refuses a suite contract whose rows belong to another domain. One row of `target` is read, the
+    ///      row of `selector`, chosen as the function that decides who controls the contract: who may write a
+    ///      storage (`addIdentityToStorage`), who may admit investors through a registry (`registerIdentity`),
+    ///      who may change the rules of a compliance (`addModule`). Three cases:
+    ///      1. The row is `ADMIN_ROLE`: no row was ever set, the contract is fresh and is let through. It will
+    ///         be mapped to `domainId` by the caller.
+    ///      2. The row is a role of `domainId`: the contract is already in this domain, let through. Its rows
+    ///         are written again with the same roles.
+    ///      3. The row is a role of another domain: refused with `SuiteAlreadySetUp(target, thatDomain)`.
+    ///      The domain a role belongs to is the upper half of its id, see {RolesLib.forDomain}.
+    function _requireFreshOrInDomain(IAccessManager accessManager, address target, bytes4 selector, uint32 domainId)
+        private
+        view
+    {
+        uint64 role = accessManager.getTargetFunctionRole(target, selector);
+        if (role == ADMIN_ROLE) return;
 
-        (uint32 storageDomainId,,) = RolesLib.decode(writerRole);
-        require(storageDomainId == domainId, ErrorsLib.StorageInAnotherDomain(identityRegistryStorage, storageDomainId));
+        (uint32 targetDomainId,,) = RolesLib.decode(role);
+        require(targetDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(target, targetDomainId));
     }
 
     /// @dev Walks `table` as runs of consecutive same-role entries and maps each run with one

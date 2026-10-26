@@ -175,19 +175,20 @@ All notable changes to this project will be documented in this file.
     the token's domain on first use and keeps a storage already in that domain where it is.
     `commissionSuite(manager, token, domainId)` is the pure form and works on any `IAccessManager`:
     the caller names the domain, and the four suite contracts, the storage included, are set up in it.
-    Both forms refuse a storage of another domain (`StorageInAnotherDomain(storage, storageDomainId)`):
-    the domain a storage is in is read from its own selector rows, the ones that decide who may write
-    it, so neither the manager's domain record nor the caller's `domainId` can move a storage, and
-    every registry bound to a storage writes with the storage's own `IRS_WRITER`. Tokens of one domain
-    still share a storage. Every other suite `setup*` function takes a `domainId` and is pure.
-    Commissioning is idempotent: re-running re-applies the standard tables. Commissioning needs
-    `ADMIN_ROLE`: it maps selectors and grants `IRS_WRITER` to the registry, and attaching a registry
-    to a storage is a governance act. A second suite into a domain already administered also needs
-    `AGENT_ADMIN` there for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER`
-    in the storage's domain.
-  - The library keeps no state of its own and validates no preconditions beyond the storage's
-    domain: no markers, no "already configured" checks. Which suites were configured alike is the
-    operator's record.
+    Both forms refuse a storage, a registry or a compliance already set up in another domain
+    (`SuiteAlreadySetUp(target, domainId)`): the domain a contract is in is read from one of its own
+    selector rows, the one that decides who controls it (`addIdentityToStorage`, `registerIdentity`,
+    `addModule`), so neither the manager's domain record nor the caller's `domainId` can move a
+    contract another domain's token relies on, and every registry bound to a storage writes with the
+    storage's own `IRS_WRITER`. Tokens of one domain still share a storage, and a registry. Every other
+    suite `setup*` function takes a `domainId` and is pure. Commissioning is idempotent: re-running
+    re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps selectors and grants
+    `IRS_WRITER` to the registry, and attaching a registry to a storage is a governance act. A second
+    suite into a domain already administered also needs `AGENT_ADMIN` there for the token's `AGENT`
+    grant; binding to a mapped storage needs `IRS_BINDER` in the storage's domain.
+  - The library keeps no state of its own and validates no preconditions beyond the domain of the
+    three contracts a token can share: no markers, no "already configured" checks. Which suites were
+    configured alike is the operator's record.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
@@ -483,15 +484,25 @@ All notable changes to this project will be documented in this file.
   wallet under any holder of the first domain's token, rebind a holder's wallet and move its balance
   with `identityTransfer`, or revoke it: the isolation the domains promised did not hold.
   Both forms of `commissionSuite` now refuse a storage of another domain
-  (`StorageInAnotherDomain(storage, storageDomainId)`): the check reads the storage's own
-  `addIdentityToStorage` row, the one that decides who may write it, so a bare `assign` of the storage
-  or a call of the pure form with another domain cannot move a live storage either. A fresh storage is
-  mapped to the suite's own domain, and `IRS_WRITER` is granted in that domain only; the pure form
-  drops its `storageDomainId` parameter. Tokens of one domain still share a storage. The migration
-  helpers `moveSuitesToDomains` and `migrateSuitesToDomains` are removed: they moved a suite without
-  its storage, which left the same shared storage behind, and they never ran outside tests. With them
-  go `RoleAssignment`, `RoleRevocation` and the errors `RoleNotHeld`, `PendingRoleGrant`,
+  (`SuiteAlreadySetUp(storage, domainId)`): the check reads the storage's own `addIdentityToStorage`
+  row, the one that decides who may write it, so a bare `assign` of the storage or a call of the pure
+  form with another domain cannot move a live storage either. A fresh storage is mapped to the suite's
+  own domain, and `IRS_WRITER` is granted in that domain only; the pure form drops its
+  `storageDomainId` parameter. Tokens of one domain still share a storage. The migration helpers
+  `moveSuitesToDomains` and `migrateSuitesToDomains` are removed: they moved a suite without its
+  storage, which left the same shared storage behind, and they never ran outside tests. With them go
+  `RoleAssignment`, `RoleRevocation` and the errors `RoleNotHeld`, `PendingRoleGrant`,
   `PendingDelayChange`. Moving a suite between domains is a script if the need appears.
+- **A shared registry or compliance stays in its first domain** (OZ L-28). Commissioning mapped the
+  registry's and the compliance's functions to the token's domain every time, so a second token that
+  shared a registry, commissioned into another domain, moved that registry to the second domain: the
+  first domain's agents lost their own registry, and the second domain's agents could edit the
+  identities every token on it relies on. The same check now covers the three contracts a token can
+  share: `commissionSuite` reads one row of the storage, the registry and the compliance, the row that
+  decides who controls it (`addIdentityToStorage`, `registerIdentity`, `addModule`), lets a fresh
+  contract or one already in the token's domain through, and refuses one set up in another domain with
+  `SuiteAlreadySetUp(target, domainId)`, the error `develop-diff` raises for the same case. Two tokens
+  of one domain still share a registry.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same
