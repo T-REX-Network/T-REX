@@ -88,6 +88,9 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
     /// @dev Replacing a suite's AccessManager is not a supported operation either way: the manager is a beacon
     ///      proxy upgraded in place, and the token identity's MANAGEMENT key stays with the manager that
     ///      deployed the suite.
+    /// @dev Ownership cannot be renounced, despite the ERC-173 wording above: OpenZeppelin refuses an authority
+    ///      without code, so `updateAuthority` to `address(0)` reverts with `AccessManagedInvalidAuthority`.
+    ///      A contract always has a manager to answer to.
     function transferOwnership(address) external pure {
         revert ErrorsLib.UseUpdateAuthority();
     }
