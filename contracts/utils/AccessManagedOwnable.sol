@@ -76,11 +76,6 @@ abstract contract AccessManagedOwnable is AccessManaged, AccessManagedOwnableBas
         return super.authority();
     }
 
-    /// @inheritdoc AccessManagedOwnableBase
-    function setAuthority(address newAuthority) public virtual override(AccessManaged, AccessManagedOwnableBase) {
-        super.setAuthority(newAuthority);
-    }
-
     /// @dev Every owner change passes here: the constructor and the manager's `updateAuthority`. ERC-173 requires
     ///      `OwnershipTransferred` on each, including creation, where the previous owner is the zero address.
     function _setAuthority(address newAuthority) internal virtual override {

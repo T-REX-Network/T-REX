@@ -71,7 +71,7 @@ import { IERC173 } from "../vendor/IERC173.sol";
 
 /// @dev Shared IERC173 ownership surface layered on top of an AccessManager-backed authority.
 ///      Concrete contracts mix this with either `AccessManaged` or `AccessManagedUpgradeable`,
-///      which supply `authority()` and the public `setAuthority`.
+///      which supply `authority()`.
 abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
     /// @dev Misconfiguration guard, NOT a trust boundary: `other.authority()` is spoofable, so always
@@ -111,8 +111,5 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
     /// @dev Supplied by the concrete AccessManaged base (upgradeable or not).
     function authority() public view virtual returns (address);
-
-    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not); its caller/code checks still apply.
-    function setAuthority(address newAuthority) public virtual;
 
 }
