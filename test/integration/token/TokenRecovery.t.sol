@@ -313,8 +313,6 @@ contract TokenRecoveryTest is TREXSuiteTest {
         assertEq(address(identityRegistry.identity(another)), address(bobIdentity));
     }
 
-    /// @notice Recovering onto a wallet that already belongs to another identity is a real change of ownership:
-    ///         the lost identity is emptied and the new one carries the balance.
     /// @notice Moving an investor to another identity is two explicit steps: an agent rebinds the lost wallet with
     ///  `updateIdentity`, then the recovery agent recovers within that identity. The position follows.
     function test_recoveryAddress_Success_PositionFollowsAnExplicitRebind() public {
