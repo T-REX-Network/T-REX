@@ -283,43 +283,34 @@ contract ModularCompliance is
             || interfaceId == type(IComplianceLedger).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
-    ///  claim a fresh compliance during setup), and the owner may always bind or unbind.
-    ///
-    ///  Neither door admits a token that already has supply. The ledger keeps every position from the
-    ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
-    ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
-    ///  same; this covers the owner calling here directly.
-    ///
-    ///  A previous token can also leave validations open, whose pending amounts would count against the new
-    ///  token's holders. The token cannot leave while one is open (see `_authorizeTokenUnbinding`), and the
-    ///  owner cannot bind another token over it either. Positions need no such check: they always add up to the
-    ///  bound token's supply, which is zero here. An `ownerOf` entry the previous token left needs none either:
-    ///  the wallet holds none of the new token, so following it moves nothing.
+    /// @dev An unbound compliance accepts a bind from the token itself, so a token can claim a fresh compliance
+    ///  during setup; the owner may always bind. The ledger keeps every position from the token's first mint and
+    ///  nothing seeds it, so the new token must have no supply, and the token it replaces must be able to leave.
     function _authorizeTokenBinding(address token) internal view override {
-        require(
-            (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
-            ErrorsLib.OnlyOwnerOrTokenCanCall()
-        );
-        if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
-        _requireReleasable();
+        bool tokenClaimsFreshCompliance = _getTokenBound() == address(0) && msg.sender == token;
+        require(tokenClaimsFreshCompliance || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+        require(!_hasSupply(token), ErrorsLib.TokenCirculating());
+        _requireBoundTokenCanLeave();
     }
 
-    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
+    /// @dev Only the token itself or the owner may unbind, and only once the token can leave.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
-        _requireReleasable();
+        _requireBoundTokenCanLeave();
     }
 
-    /// @dev The bound token may leave, through an unbind or a bind of another token, only once it has no supply and
-    ///  no validation is open. The ledger's positions belong to the bound token's holders, so a token still in
-    ///  circulation would hand them to the next token. Settling or discarding a validation releases its reservation
-    ///  on the bound token, and once the token has left that call reverts, so the validation could never close.
-    ///  No token is bound, or none with code, before the first bind.
-    function _requireReleasable() private view {
-        address boundToken = _getTokenBound();
-        require(boundToken.code.length == 0 || IToken(boundToken).totalSupply() == 0, ErrorsLib.TokenCirculating());
+    /// @dev The ledger's positions belong to the bound token's holders, so the token may leave only once it has
+    ///  no supply. An open validation keeps it too: closing one releases its reservation on the bound token.
+    function _requireBoundTokenCanLeave() private view {
+        require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
         require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
+    }
+
+    /// @dev A token with no code has no supply. That covers no token at all, and a token still being deployed: the
+    ///  factory binds the compliance to the token's predicted address before the token exists.
+    function _hasSupply(address token) private view returns (bool) {
+        if (token.code.length == 0) return false;
+        return IToken(token).totalSupply() != 0;
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
