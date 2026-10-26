@@ -200,9 +200,11 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
         (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
             identity.getClaim(claimId);
+        bool isTheTopic = foundClaimTopic == topic;
         // The identity answers `getClaim`, so the issuer it returns is untrusted: like `isVerified`, only a claim
         // naming the trusted issuer itself counts.
-        if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
+        bool namesTheTrustedIssuer = issuer == trustedIssuer;
+        if (!isTheTopic || !namesTheTrustedIssuer) return (false, false);
         topicMatch = true;
 
         try IClaimIssuer(issuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
@@ -250,10 +252,11 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
             uint256 allowed = refusedBeforeTheRules ? 0 : IModule(rules[i]).allowedAmount(ctx);
+            bool withinAllowance = _value <= allowed;
             _details[i] = ComplianceCheckDetails({
                 moduleName: IModule(rules[i]).name(),
                 allowedAmount: allowed,
-                pass: !refusedBeforeTheRules && _value <= allowed
+                pass: !refusedBeforeTheRules && withinAllowance
             });
         }
     }
