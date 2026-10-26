@@ -292,9 +292,10 @@ contract ModularCompliance is
     ///  same; this covers the owner calling here directly.
     ///
     ///  A previous token can also leave validations open, whose pending amounts would count against the new
-    ///  token's holders. Those are settled or discarded before another token is bound. Positions need no such
-    ///  check: they always add up to the bound token's supply, which is zero here. An `ownerOf` entry the previous
-    ///  token left needs none either: the wallet holds none of the new token, so following it moves nothing.
+    ///  token's holders. The token cannot leave while one is open (see `_authorizeTokenUnbinding`), and the
+    ///  owner cannot bind another token over it either. Positions need no such check: they always add up to the
+    ///  bound token's supply, which is zero here. An `ownerOf` entry the previous token left needs none either:
+    ///  the wallet holds none of the new token, so following it moves nothing.
     function _authorizeTokenBinding(address token) internal view override {
         require(
             (_getTokenBound() == address(0) && msg.sender == token) || _isOwner(msg.sender),
@@ -305,8 +306,13 @@ contract ModularCompliance is
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
+    ///
+    ///  The token stays while a validation is open. Settling or discarding one releases its reservation on the
+    ///  bound token, and once the token has left that call reverts, so the validation could never close and
+    ///  every later bind would be refused.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */

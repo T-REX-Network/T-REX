@@ -196,14 +196,27 @@ contract PendingReservationTest is InteropSuiteTest {
 
     // ==== rebinding Tests ====
 
-    /// @notice A token with no supply can leave its compliance while a validation it issued is still open. The
-    ///         next token bound there would have that pending amount counted against its own holders' caps, so
-    ///         the bind is refused until the validation settles or is discarded.
-    function test_bindToken_RevertWhen_APreviousTokenLeftAValidationPending() public {
+    /// @notice A token with no supply cannot leave its compliance while a validation it issued is still open.
+    ///         Once it left, discarding that validation would call a token that is no longer bound and revert,
+    ///         so the pending amount would stay forever and refuse every later bind.
+    function test_setCompliance_RevertWhen_AValidationIsPending() public {
         _issue(10, 60);
-        _moveTokenToAFreshCompliance();
+        _recallAndBurnTheWholeSupply();
+        ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
+        token.setCompliance(address(fresh));
+
+        assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
+        assertEq(_pendingIn(), 60, "and its validation can still be settled or discarded");
+    }
+
+    /// @notice The owner cannot bind another token over one whose validation is still open: the next token's
+    ///         holders would see that pending amount, and the validation would release on the wrong token.
+    function test_bindToken_RevertWhen_TheOwnerBindsAnotherTokenOverAPendingValidation() public {
+        _issue(10, 60);
         Token nextToken = _deployToken("next", "Next Token", "NXT");
-        assertEq(_pendingIn(), 60, "the old token's promise is still counted");
 
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.ValidationsPending.selector);
@@ -225,9 +238,9 @@ contract PendingReservationTest is InteropSuiteTest {
     }
 
     /// @dev Recalls alice's satellite tokens and burns them, since the token leaves its compliance only at zero
-    ///  supply, then leaves. A recall is bounded by the bridged position, not by what validations reserve, and
-    ///  the satellite proves it burned the whole position.
-    function _moveTokenToAFreshCompliance() private {
+    ///  supply. A recall is bounded by the bridged position, not by what validations reserve, and the satellite
+    ///  proves it burned the whole position.
+    function _recallAndBurnTheWholeSupply() private {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
         vm.startPrank(agent);
         token.unpause();
@@ -239,7 +252,10 @@ contract PendingReservationTest is InteropSuiteTest {
         vm.prank(agent);
         token.burn(alice, BALANCE);
         assertEq(token.totalSupply(), 0, "no supply left");
+    }
 
+    function _moveTokenToAFreshCompliance() private {
+        _recallAndBurnTheWholeSupply();
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         vm.prank(deployer);
         token.setCompliance(address(fresh));
