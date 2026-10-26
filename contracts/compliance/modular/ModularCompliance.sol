@@ -320,11 +320,11 @@ contract ModularCompliance is
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner. A bound token
-    ///  with supply stays bound, for the reason a bind may not displace it.
+    ///  with supply stays bound, even for the owner: nothing could bind it back, so a detach would only
+    ///  freeze its holders. A compliance that must change under a circulating token is upgraded instead.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
-        address boundToken = _getTokenBound();
-        require(!_hasSupply(boundToken), ErrorsLib.TokenCirculating());
+        require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
