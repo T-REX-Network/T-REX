@@ -71,10 +71,12 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.sol";
+import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
 /// @title IdentityRegistryStorage
-/// @notice Local wallet-to-identity bindings shared by the registries bound to it. It holds only its own
-///  bindings: a wallet it does not bind resolves, in each registry, through that registry's own IdentityFactory.
+/// @notice Local wallet-to-identity bindings shared by the registries bound to it, which all resolve through one
+///  IdentityFactory. It holds only its own bindings: a wallet it does not bind resolves, in each registry, through
+///  that registry's IdentityFactory.
 /// @dev {ERC3643IdentityRegistryStorage} plus AccessManager authorization, the `onlySharedAuthority` guard on
 ///  binding, sticky bindings, revocation and ERC-165.
 contract IdentityRegistryStorage is
@@ -124,12 +126,26 @@ contract IdentityRegistryStorage is
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
     /// @dev `onlySharedAuthority` is a misconfiguration guard only: `authority()` is spoofable.
+    ///  Every registry bound here must resolve through the same IdentityFactory. A registry checks a new local
+    ///  binding against its own factory only, so on a storage shared across factories one registry's agent could
+    ///  bind a wallet that another registry's factory links to another identity, and change who owns that
+    ///  wallet's tokens in the other registry. Comparing with one bound registry is enough, since every bound
+    ///  registry passed the same check.
     function bindIdentityRegistry(address identityRegistry)
         external
         override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
         restricted
         onlySharedAuthority(identityRegistry)
     {
+        address[] memory firstBoundRegistry = _linkedIdentityRegistries(0, 1);
+        if (firstBoundRegistry.length > 0) {
+            IIdentityFactory boundFactory = ITREXRegistry(firstBoundRegistry[0]).identityFactory();
+            IIdentityFactory newFactory = ITREXRegistry(identityRegistry).identityFactory();
+            require(
+                newFactory == boundFactory,
+                ErrorsLib.IdentityFactoryMismatch(address(boundFactory), address(newFactory))
+            );
+        }
         _bindIdentityRegistry(identityRegistry);
     }
 

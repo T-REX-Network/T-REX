@@ -71,7 +71,6 @@ contract IdentityRegistryStorageStoredIdentityUnitTest is Test {
     /// @dev The storage answers its own bindings only, whatever the factories of its bound registries know.
     function test_storedIdentity_ReturnsZero_WhenOnlyABoundRegistryFactoryKnowsTheWallet() public {
         irs.bindIdentityRegistry(registry);
-        irs.bindIdentityRegistry(otherRegistry);
 
         assertEq(address(irs.storedIdentity(wallet)), address(0));
         assertEq(address(irs.storedIdentity(otherWallet)), address(0));

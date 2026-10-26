@@ -177,6 +177,8 @@ library ErrorsLib {
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
+    /// @dev The registry resolves through another IdentityFactory than the registries already bound to the storage.
+    error IdentityFactoryMismatch(address expected, address actual);
     // Same names as the ONCHAINID IdentityFactory errors, but keyed by address.
     /// @dev The wallet is bound to another identity.
     error WalletBoundToAnotherIdentity(address wallet, address boundIdentity);

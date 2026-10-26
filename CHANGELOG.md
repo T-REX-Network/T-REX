@@ -526,8 +526,11 @@ All notable changes to this project will be documented in this file.
   `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only, and the storage reads
   no IdentityFactory. `TREXRegistry` resolves a wallet the storage does not bind through its own factory,
   revoked bindings included, and refuses in `registerIdentity` a binding that contradicts that factory
-  (`WalletBoundToAnotherIdentity`). The bound set is enumeration only again: binding and unbinding no longer
-  change any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the set.
+  (`WalletBoundToAnotherIdentity`). `IdentityRegistryStorage.bindIdentityRegistry` refuses a registry whose
+  IdentityFactory differs from the one of the registries already bound (`IdentityFactoryMismatch`), so that
+  check covers every registry sharing the storage: otherwise one registry's agent could bind a wallet another
+  registry's factory links elsewhere, and move that wallet's tokens to another owner there. Unbinding no
+  longer changes any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the set.
 - **A registry keeps its identity storage for life** (L-30 #164). `setIdentityRegistryStorage` let the owner
   point a registry at a storage that does not hold its local bindings, so every wallet bound only in the old
   one lost its identity while its tokens circulated. `TREXRegistry.setIdentityRegistryStorage` now always

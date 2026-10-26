@@ -221,6 +221,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
             vm.mockCall(
                 registryAddress, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
             );
+            _mockSuiteIdentityFactory(registryAddress);
             vm.prank(deployer);
             identityRegistryStorage.bindIdentityRegistry(registryAddress);
         }
@@ -229,6 +230,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // authority so it reaches the count check rather than reverting on onlySharedAuthority first.
         address extraRegistry = vm.addr(2000);
         vm.mockCall(extraRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        _mockSuiteIdentityFactory(extraRegistry);
         uint256 maxBound = identityRegistryStorage.MAX_BOUND_REGISTRIES();
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.MaxIRByIRSReached.selector, maxBound));
@@ -257,6 +259,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         vm.mockCall(
             address(charlieIdentity), abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
         );
+        _mockSuiteIdentityFactory(address(charlieIdentity));
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(address(charlieIdentity));
 
@@ -302,6 +305,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // bindIdentityRegistry is gated by onlySharedAuthority: the bound address must report the
         // storage's AccessManager as its authority.
         vm.mockCall(secondIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        _mockSuiteIdentityFactory(secondIR);
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(secondIR);
 
@@ -329,6 +333,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         // the onlySharedAuthority guard.
         address extraIR = makeAddr("extraIR");
         vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        _mockSuiteIdentityFactory(extraIR);
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
 
@@ -349,6 +354,8 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         assertFalse(identityRegistryStorage.isIdentityRegistryBound(extraIR));
 
         vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+
+        _mockSuiteIdentityFactory(extraIR);
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
         assertTrue(identityRegistryStorage.isIdentityRegistryBound(extraIR));
@@ -374,6 +381,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         address extraIR = makeAddr("extraIR");
         vm.mockCall(extraIR, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        _mockSuiteIdentityFactory(extraIR);
         vm.prank(deployer);
         identityRegistryStorage.bindIdentityRegistry(extraIR);
 
@@ -402,6 +410,13 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     // ============ linkedIdentityRegistries(start, end) pagination Tests ============
 
+    /// @dev Makes `registryAddress` report the suite registry's IdentityFactory, since every registry bound to one
+    ///  storage must resolve through the same factory.
+    function _mockSuiteIdentityFactory(address registryAddress) internal {
+        address suiteFactory = address(TREXRegistry(address(token.identityRegistry())).identityFactory());
+        vm.mockCall(registryAddress, abi.encodeCall(TREXRegistry.identityFactory, ()), abi.encode(suiteFactory));
+    }
+
     /// @dev Binds `count` extra registries and returns them, sharing the storage authority so each
     ///  passes the onlySharedAuthority guard.
     function _bindExtraRegistries(uint256 count) internal returns (address[] memory extras) {
@@ -409,6 +424,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
         for (uint256 i = 0; i < count; i++) {
             address extra = makeAddr(string.concat("pagedIR", vm.toString(i)));
             vm.mockCall(extra, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+            _mockSuiteIdentityFactory(extra);
             vm.prank(deployer);
             identityRegistryStorage.bindIdentityRegistry(extra);
             extras[i] = extra;

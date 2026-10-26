@@ -16,7 +16,6 @@ contract IdentityRegistryStorageAddIdentityUnitTest is IdentityRegistryStorageBa
     /// @dev The storage reads no IdentityFactory; the registry refuses a binding that contradicts its own factory.
     function test_addIdentityToStorage_DoesNotAskTheBoundRegistriesFactories() public {
         irs.bindIdentityRegistry(registry);
-        irs.bindIdentityRegistry(otherRegistry);
         vm.expectCall(idFactory, abi.encodeWithSelector(IIdentityFactory.getIdentityIncludingRevoked.selector), 0);
         vm.expectCall(otherIdFactory, abi.encodeWithSelector(IIdentityFactory.getIdentityIncludingRevoked.selector), 0);
 

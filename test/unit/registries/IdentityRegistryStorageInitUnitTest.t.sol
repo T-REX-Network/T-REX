@@ -9,6 +9,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
@@ -62,6 +63,10 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir2 must report the storage's
         // AccessManager as its authority.
         vm.mockCall(ir2, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        // Every registry bound to one storage must resolve through the same IdentityFactory.
+        address identityFactory = makeAddr("identityFactory");
+        vm.mockCall(ir1, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(identityFactory));
+        vm.mockCall(ir2, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(identityFactory));
         storageContract.bindIdentityRegistry(ir2);
 
         address[] memory linked = storageContract.linkedIdentityRegistries();
