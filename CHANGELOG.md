@@ -521,7 +521,8 @@ All notable changes to this project will be documented in this file.
 - **`UtilityChecker.getVerifiedDetails` answers for a wallet with no identity** (audit L-09). It asked the zero
   identity for its claims, and a call to an address with no code reverts, so the diagnostic for the one wallet
   most likely to need it failed outright. A wallet with no identity now gets one unmatched row per required topic
-  (`issuer` zero, `pass` false) and its wallet status, as `isVerified` refuses it.
+  (the `topic` filled, `issuer` zero, `pass` false) and its wallet status, as `isVerified` refuses it. A topic no
+  trusted issuer matches is reported the same way, so every row names the topic it stands for.
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

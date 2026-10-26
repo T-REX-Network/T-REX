@@ -69,7 +69,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         assertEq(results.length, 1);
         assertEq(address(results[0].issuer), address(0));
-        assertEq(results[0].topic, 0);
+        assertEq(results[0].topic, claimTopicsRegistry.getClaimTopics()[0]);
         assertFalse(results[0].pass);
     }
 
@@ -82,6 +82,7 @@ contract EligibilityCheckTest is TREXSuiteTest {
 
         assertEq(results.length, 1);
         assertEq(address(results[0].issuer), address(0));
+        assertEq(results[0].topic, claimTopicsRegistry.getClaimTopics()[0]);
         assertFalse(results[0].pass);
         assertEq(uint8(walletStatus), uint8(IIdentityFactory.AccountStatus.None));
         assertFalse(identityRegistry.isVerified(stranger));
