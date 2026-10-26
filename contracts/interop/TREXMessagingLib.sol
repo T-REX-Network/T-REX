@@ -285,7 +285,8 @@ library TREXMessagingLib {
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _requireExpectedOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeSettlement(body).validationId);
         } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
-            _requireCurrentOrigin(s, gateway, chainKey, sender);
+            _requireCurrentPeer(chainKey, sender);
+            _requireCurrentRoute(s, gateway, chainKey);
         } else {
             revert ErrorsLib.MessageTypeNotInbound(messageType);
         }
@@ -386,19 +387,19 @@ library TREXMessagingLib {
 
         address pinned = s.pinnedRoutes[validationId][chainKey];
         if (pinned == address(0)) {
-            _requireCurrentOrigin(s, gateway, chainKey, sender);
+            _requireCurrentPeer(chainKey, sender);
+            _requireCurrentRoute(s, gateway, chainKey);
             return;
         }
         require(keccak256(sender) == s.pinnedPeers[validationId][chainKey], ErrorsLib.SenderNotPeer(chainKey, sender));
         require(pinned == gateway, ErrorsLib.GatewayNotPinned(gateway, validationId, chainKey));
     }
 
-    /// @dev The chain's current peer and gateway, for a message no validation leg is pinned to.
-    function _requireCurrentOrigin(MessagingStorage storage s, address gateway, bytes32 chainKey, bytes calldata sender)
-        private
-        view
-    {
+    function _requireCurrentPeer(bytes32 chainKey, bytes calldata sender) private view {
         require(keccak256(sender) == keccak256(peerFor(chainKey)), ErrorsLib.SenderNotPeer(chainKey, sender));
+    }
+
+    function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {
         require(s.routes[chainKey] == gateway, ErrorsLib.GatewayNotRouted(gateway, chainKey));
     }
 
