@@ -12,7 +12,9 @@ All notable changes to this project will be documented in this file.
   stays the satellite's deadline once issued, so the rules are never older than one validity window when it
   executes. `answerApproval(validationId, approvedMax)`, from the module alone, issues it, narrowed when
   lower, or refuses it (`ValidationApprovalRefused`); `discardExpiredValidations` discards an unanswered one
-  past its deadline, for anyone. Errors `ValidationNotAwaitingApproval`, `NotTheApprovalModule`,
+  past its deadline, for anyone, and `statusOf` reads it `Expired` from then on. A settlement for a validation
+  never sent (waiting, refused or unanswered) halts the token, as one for an id never taken does. Errors
+  `ValidationNotAwaitingApproval`, `NotTheApprovalModule`,
   `OneApprovalModuleOnly`. `AsyncApprovalModule` is the `APPROVAL` module: approvers set per compliance answer
   in order on the validation id and can only approve, narrow or refuse (`approveValidation`,
   `refuseValidation`); the last approval marks the request fully approved and anyone issues it with
@@ -21,7 +23,7 @@ All notable changes to this project will be documented in this file.
   Relocations are approved at once; a new approver list stops the requests already waiting. Native transfers
   use stored approvals of an exact transfer with an expiry, under an approver's `approvalId`
   (`approveTransfer`, `revokeApproval`, `approvalOf`, `isApprovalIdUsed`). Errors `ApproversNotSet`,
-  `ApproversChanged`, `NotAnApprover`, `NotTheNextApprover`, `NotFullyApproved`, `UnknownApprovalRequest`,
+  `ApproversChanged`, `NotAnApprover`, `NotTheNextApprover`, `NotFullyApproved`, `AlreadyFullyApproved`, `UnknownApprovalRequest`,
   `ApprovalIdAlreadyUsed`, `ExpiryInPast`, `TransferNotApproved`.
 - **`resendValidation(validationId, chainKey, to, spender)`** sends the leg of an issued validation again, byte
   for byte, through the gateway the issuance pinned. Before it, a validation leg the transport lost could only be

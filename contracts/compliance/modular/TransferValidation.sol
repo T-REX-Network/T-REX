@@ -135,7 +135,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _narrowAmountRange(draft, from, to);
         _requireSpenderAllowed(draft, to, spender);
 
-        validationId = _issueValidation(from, to, spender, draft);
+        // Issued and sent at once, or kept awaiting approval while an `APPROVAL` module is bound.
+        validationId = TransferValidationLib.issue(from, to, spender, draft, address(_boundToken()));
     }
 
     /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
@@ -240,23 +241,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         require(_spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
-    /// @dev Turns a settled draft into an issued validation, see {TransferValidationLib-issue}, then sends
-    ///  one leg per satellite chain involved.
-    function _issueValidation(
-        bytes calldata from,
-        bytes calldata to,
-        bytes calldata spender,
-        TransferValidationLib.Draft memory draft
-    ) private returns (uint256 validationId) {
-        bytes memory body;
-        (validationId, body) = TransferValidationLib.issue(from, to, spender, draft, address(_boundToken()));
-        // Empty while it awaits approval: nothing is sent until `answerApproval` issues it.
-        if (body.length == 0) return validationId;
-
-        _dispatchLeg(draft.fromChainKey, validationId, body);
-        if (draft.twoLegs) _dispatchLeg(draft.toChainKey, validationId, body);
-    }
-
     /// @inheritdoc ITransferValidation
     /// @dev The answer, the narrowing and the legs live in {TransferValidationLib-answerApproval}.
     function answerApproval(uint256 validationId, uint256 approvedMax) external {
@@ -284,19 +268,21 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /* ----- Settlement ----- */
 
     /// @dev Classifies an attributed settlement against the stored validation. Reverts on a leg that does not
-    ///  match; returns a pause on the two emergencies, which write nothing: `HaltToken` on a never-issued id,
+    ///  match; returns a pause on the two emergencies, which write nothing: `HaltToken` on an id never sent,
     ///  `PauseChain` on a leg already accounted for; reconciles a `Discarded` validation late, with the warning
     ///  and the per-chain issuance pause on a breach. See {ISettlementHandler}.
     function _handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         internal
         returns (ISettlementHandler.Verdict verdict)
     {
-        TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        if (!_isIssued(store, notification.validationId)) {
+        Validation storage validation = _validationStorage().validations[notification.validationId];
+        // The hash is written when a validation is issued and sent, so a record without one was never sent
+        // anywhere: an id never taken, or a request still awaiting approval, refused, or left unanswered. No
+        // satellite could have executed it.
+        if (validation.hash == bytes32(0)) {
             emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
             return ISettlementHandler.Verdict.HaltToken;
         }
-        Validation storage validation = store.validations[notification.validationId];
 
         // 1. Which leg this is, and that its amount is inside the issued range.
         Leg leg = _matchLeg(validation, originChainKey, notification);
@@ -519,7 +505,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  pair is not resolved under the pause, see {TransferValidationLib-requireAwaitedInboundOpen}.
     function _resolveStuckValidation(uint256 validationId) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+        require(_isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
         require(
             _awaitingOtherLeg(validation.status), ErrorsLib.ValidationNotStuck(validationId, uint8(validation.status))
@@ -555,7 +541,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         bool keeper = _canCallSelector(msg.sender, this.discardExpiredValidations.selector);
         for (uint256 i = 0; i < validationIds.length; i++) {
             uint256 validationId = validationIds[i];
-            require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+            require(_isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
             Validation storage validation = store.validations[validationId];
             // Nothing was sent for a validation still awaiting approval, so no leg can be in flight: anyone may
             // discard it once its deadline passed, and the reservation comes back.
@@ -619,13 +605,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @inheritdoc ITransferValidation
     function statusOf(uint256 validationId) public view returns (ValidationStatus) {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+        require(_isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
-        // `Expired` is the one status never stored: it is `Pending` once the clock has passed `releaseAt`. Every
+        // `Expired` is the one status never stored: it is `Pending` once the clock has passed `releaseAt`, or
+        // `AwaitingApproval` once its deadline for an answer passed. Either way it can now be discarded. Every
         // other state is returned as it stands, including which leg a pair is still waiting for.
-        if (validation.status == ValidationStatus.Pending && block.timestamp > validation.releaseAt) {
-            return ValidationStatus.Expired;
-        }
+        bool pendingPastRelease =
+            validation.status == ValidationStatus.Pending && block.timestamp > validation.releaseAt;
+        bool unansweredPastDeadline =
+            validation.status == ValidationStatus.AwaitingApproval && block.timestamp >= validation.expiry;
+        if (pendingPastRelease || unansweredPastDeadline) return ValidationStatus.Expired;
         return validation.status;
     }
 
@@ -674,9 +663,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Calls `afterTransfer` on every `AFTER` module, once the positions have been updated.
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal virtual;
-
-    /// @dev Sends one leg of a validation toward `chainKey`, through the token.
-    function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal virtual;
 
     /// @dev Applies a settled validation to the ledger, through the token, once.
     function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal virtual;
@@ -779,7 +765,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Moves a validation to `next` and gives back whatever `next` no longer reserves. Because the
     ///  reservations are read off the status, a release happens exactly when the move stops reserving something,
-    ///  and arriving twice at the same state gives nothing back twice.
+    ///  and arriving twice at the same state gives nothing back twice. A validation `AwaitingApproval` is
+    ///  released in `TransferValidationLib._release` instead, which mirrors this: keep the two in step.
     /// @param heldByTheHold true when the caller is about to take an in-transit hold, which gives the wallet's
     ///  reservation back itself; this function then leaves that half alone rather than releasing it twice.
     function _moveTo(Validation storage validation, ValidationStatus next, bool heldByTheHold) private {
@@ -818,8 +805,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         return MessageTypesLib.chainKey(chainType, chainReference);
     }
 
-    /// @dev Ids start at 1 and `lastValidationId` is the last one issued.
-    function _isIssued(TransferValidationLib.ValidationStorage storage store, uint256 validationId)
+    /// @dev Whether the id was taken: issued, or recorded awaiting approval. Ids start at 1 and
+    ///  `lastValidationId` is the last one taken.
+    function _isRecorded(TransferValidationLib.ValidationStorage storage store, uint256 validationId)
         private
         view
         returns (bool)

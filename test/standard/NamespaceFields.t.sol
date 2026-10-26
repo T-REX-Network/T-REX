@@ -354,7 +354,7 @@ contract NamespaceFieldsTest is Test {
         approvalStorage.approvers[ALICE][NUMBER].push(ALICE);
         approvalStorage.requests[ALICE][NUMBER].approved = 11;
         approvalStorage.approvals[ALICE][NUMBER][KEY] = AsyncApprovalModule.Approval({ count: 22, expiry: 33 });
-        approvalStorage.usedApprovalIds[ALICE][KEY] = true;
+        approvalStorage.usedApprovalIds[ALICE][ALICE][KEY] = true;
 
         bytes32 byCompliance = _entry(_field(base, 0), _key(ALICE));
         assertEq(_word(_entry(byCompliance, bytes32(NUMBER))), 1, "approvers");
@@ -362,7 +362,7 @@ contract NamespaceFieldsTest is Test {
         uint256 packed = _word(_entry(_entry(_entry(_field(base, 2), _key(ALICE)), bytes32(NUMBER)), KEY));
         assertEq(uint64(packed), 22, "approvals.count");
         assertEq(uint64(packed >> 64), 33, "approvals.expiry");
-        assertEq(_word(_entry(_entry(_field(base, 3), _key(ALICE)), KEY)), 1, "usedApprovalIds");
+        assertEq(_word(_entry(_entry(_entry(_field(base, 3), _key(ALICE)), _key(ALICE)), KEY)), 1, "usedApprovalIds");
 
         approvalStorage.approversVersion[ALICE] = 44;
         assertEq(_word(_entry(_field(base, 4), _key(ALICE))), 44, "approversVersion");

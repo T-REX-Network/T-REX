@@ -103,7 +103,8 @@ interface ITransferValidation {
         AwaitingBurn,
         /// Every expected leg arrived: reservation released, positions and token ledger updated.
         Settled,
-        /// Derived, never stored: `Pending` and past `releaseAt`, not yet discarded.
+        /// Derived, never stored: `Pending` and past `releaseAt`, or `AwaitingApproval` and at or past `expiry`
+        /// with no answer; not yet discarded.
         Expired,
         /// Discarded and the reservation released; issuance proceeds as if it never happened.
         Discarded,
@@ -380,10 +381,11 @@ interface ITransferValidation {
     /// @param validationId The validation to look up.
     function validationOf(uint256 validationId) external view returns (Validation memory);
 
-    /// @dev Where `validationId` stands: the stored status, or `Expired` for a stored `Pending` past `releaseAt`.
+    /// @dev Where `validationId` stands: the stored status, or `Expired` for a stored `Pending` past `releaseAt`
+    /// and for a stored `AwaitingApproval` at or past `expiry`.
     ///
     /// Requirements:
-    /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
+    /// - `validationId` must have been taken; otherwise reverts with `UnknownValidation`.
     /// @param validationId The validation to look up.
     function statusOf(uint256 validationId) external view returns (ValidationStatus);
 

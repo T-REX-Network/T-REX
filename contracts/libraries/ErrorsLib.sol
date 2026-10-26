@@ -158,6 +158,7 @@ library ErrorsLib {
     error UnknownApprovalRequest(uint256 validationId);
     error ApproversChanged(uint256 validationId);
     error NotFullyApproved(uint256 validationId);
+    error AlreadyFullyApproved(uint256 validationId);
     error ExpiryInPast(uint64 expiry);
     error TransferNotApproved(address from, address to, uint256 amount);
 

@@ -135,15 +135,14 @@ library TransferValidationLib {
     }
 
     /// @dev Turns a settled draft into a validation: take the next id, keep its terms and reserve the amount.
-    ///  With no `APPROVAL` module bound, issue it at once: build the object the satellite will execute against
-    ///  and announce it. With one bound, keep it `AwaitingApproval` instead, until {answerApproval}.
+    ///  With no `APPROVAL` module bound, issue it at once: build the object the satellite will execute against,
+    ///  announce it and send one leg per satellite chain involved. With one bound, keep it `AwaitingApproval`
+    ///  instead, sent nowhere until {answerApproval}.
     /// @param token the token the compliance is bound to
     /// @return validationId the id taken
-    /// @return body the encoded validation, for the compliance to send, one leg per satellite chain involved;
-    ///  empty while it awaits approval, since nothing is sent yet
     function issue(bytes calldata from, bytes calldata to, bytes calldata spender, Draft memory draft, address token)
         external
-        returns (uint256 validationId, bytes memory body)
+        returns (uint256 validationId)
     {
         validationId = ++layout().lastValidationId;
         _record(validationId, from, to, draft, token);
@@ -151,10 +150,10 @@ library TransferValidationLib {
         address approvalModule = _approvalModule();
         if (approvalModule != address(0)) {
             _awaitApproval(validationId, from, to, spender, draft, approvalModule);
-            return (validationId, "");
+            return validationId;
         }
 
-        body = _issueRecorded(
+        bytes memory body = _issueRecorded(
             validationId,
             MessageTypesLib.ComplianceValidation({
                 validationId: validationId,
@@ -168,6 +167,7 @@ library TransferValidationLib {
                 token: token
             })
         );
+        _dispatch(token, validationId, draft.fromChainKey, draft.toChainKey, draft.twoLegs, body);
     }
 
     /// @dev Answers a validation awaiting approval, see {ITransferValidation-answerApproval}. Issuing it runs
@@ -221,8 +221,7 @@ library TransferValidationLib {
         );
         delete store.awaitedTerms[validationId];
 
-        IToken(token).dispatchComplianceValidation(validation.fromChainKey, validationId, body);
-        if (validation.twoLegs) IToken(token).dispatchComplianceValidation(validation.toChainKey, validationId, body);
+        _dispatch(token, validationId, validation.fromChainKey, validation.toChainKey, validation.twoLegs, body);
     }
 
     /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the record does not
@@ -425,6 +424,21 @@ library TransferValidationLib {
         body = abi.encode(issued);
     }
 
+    /// @dev Sends one leg of an issued validation to each satellite chain involved. The token is the wire's only
+    ///  author: it pins the route per leg and refuses a closed chain. As the compliance's DELEGATECALL target,
+    ///  this library reaches the token with the compliance as the caller.
+    function _dispatch(
+        address token,
+        uint256 validationId,
+        bytes32 fromChainKey,
+        bytes32 toChainKey,
+        bool twoLegs,
+        bytes memory body
+    ) private {
+        IToken(token).dispatchComplianceValidation(fromChainKey, validationId, body);
+        if (twoLegs) IToken(token).dispatchComplianceValidation(toChainKey, validationId, body);
+    }
+
     /// @dev Keeps a recorded validation waiting for the approval module, with the two envelopes the record does
     ///  not keep otherwise, and tells the module. The validity window from now is the deadline for the answer.
     function _awaitApproval(
@@ -456,8 +470,11 @@ library TransferValidationLib {
         IApprovalModule(approvalModule).approvalRequested(validationId, ctx, draft.expiry);
     }
 
-    /// @dev Gives back `amount` of what a validation reserved, against the identities unless it is a
-    ///  relocation, and against the sending wallet on the token.
+    /// @dev Gives back `amount` of what a validation `AwaitingApproval` reserved, against the identities unless
+    ///  it is a relocation, and against the sending wallet on the token. Mirrors what
+    ///  `TransferValidation._moveTo` releases when a status stops reserving, see `_stillReservesIdentities` and
+    ///  `_stillReservesWallet` there: keep the two in step. It lives here because a narrowing gives back part
+    ///  of the amount, which no status move does, and the library cannot call the contract's internals.
     function _release(ITransferValidation.Validation storage validation, uint256 amount, address token) private {
         if (!validation.relocation) {
             ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();

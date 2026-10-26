@@ -172,7 +172,9 @@ lowers the maximum when the answer is lower, releases the difference and sends t
 since every rule ran and the room was reserved at the request, but the chains are checked again, as one may
 have been paused while the request waited. An answer below the requested minimum is a refusal, which releases
 the reservation and ends the validation `Discarded`. A request nobody answered is discarded past its deadline
-with `discardExpiredValidations`, by anyone, since nothing was sent for it.
+with `discardExpiredValidations`, by anyone, since nothing was sent for it; `statusOf` reads it `Expired` from
+then on. A settlement for a validation that was never sent (still waiting, refused or unanswered) halts the
+token, as one for an id never taken does: no satellite could have executed it.
 
 Because the request reserves while it waits, two waiting requests cannot jointly break a rule that reads the
 ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
@@ -200,7 +202,8 @@ the approvers stop answering. Requests already waiting keep waiting until their 
   under the old list. They are discarded at their deadline.
 - Native transfers cannot wait, since the investor executes them in one call. Any approver can store an approval
   of one exact transfer (sender, recipient, amount) with an expiry, under an `approvalId` of its own, so a
-  decision delivered twice approves one transfer. `checkTransfer` passes it, `afterTransfer` uses it up, and
+  decision delivered twice approves one transfer. Ids are kept per approver, so two approvers never block each
+  other's decisions. `checkTransfer` passes it, `afterTransfer` uses it up, and
   `revokeApproval` withdraws one. Approving the same transfer again adds to the count, and the newest expiry
   applies to all of its approvals.
 - The approvers are the compliance's own, so on a module shared by several issuers, one issuer's approver

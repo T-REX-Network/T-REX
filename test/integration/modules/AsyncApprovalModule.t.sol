@@ -213,14 +213,18 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.approveValidation(address(boundCompliance), id, 150);
     }
 
-    /// @notice Once every approver approved, nobody is left to answer; once issued, the request is forgotten.
+    /// @notice Once every approver approved, nobody is left to answer and the caller is told to finalize; once
+    ///         issued, the request is forgotten.
     function test_approveValidation_RevertWhen_TheRequestWasAlreadyAnswered() public {
         uint256 id = _request(10, 150);
         _approve(backend, id, 150);
 
         vm.prank(backend);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotTheNextApprover.selector, backend, address(0)));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AlreadyFullyApproved.selector, id));
         module.approveValidation(address(boundCompliance), id, 150);
+        vm.prank(backend);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AlreadyFullyApproved.selector, id));
+        module.refuseValidation(address(boundCompliance), id);
 
         _finalize(id);
         vm.prank(backend);
@@ -334,6 +338,22 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(_ledger().pendingInOf(address(bobIdentity)), 0);
     }
 
+    /// @notice A request nobody answered by its deadline reads `Expired`, as a `Pending` validation past its
+    ///         release does: either can now be discarded.
+    function test_statusOf_Success_WhenAnUnansweredRequestPassedItsDeadline() public {
+        uint256 id = _request(10, 150);
+        vm.warp(block.timestamp + VALIDITY_WINDOW - 1);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
+
+        vm.warp(block.timestamp + 1);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        assertEq(
+            uint8(boundCompliance.validationOf(id).status),
+            uint8(ITransferValidation.ValidationStatus.AwaitingApproval),
+            "derived, never stored"
+        );
+    }
+
     function test_discardExpiredValidations_RevertWhen_TheRequestIsBeforeItsDeadline() public {
         uint256 id = _request(10, 150);
         uint64 deadline = uint64(block.timestamp + VALIDITY_WINDOW);
@@ -426,6 +446,35 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(_ledger().positionOf(address(bobIdentity)), 80);
+    }
+
+    /// @notice Nothing was sent for a request still waiting, so a settlement for it can only come from a faulty
+    ///         or compromised satellite: the token halts and nothing is applied.
+    function test_handleSettlement_HaltsTheToken_WhenTheValidationIsStillWaiting() public {
+        uint256 id = _request(10, 150);
+
+        uint256 index = _liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 100));
+        vm.expectEmit(address(boundCompliance));
+        emit EventsLib.ReplayedSettlement(id, polygon);
+        gateway.relay(index);
+
+        assertTrue(token.paused(), "halted");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
+        assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
+    }
+
+    /// @notice A refusal is final: a settlement for the refused movement halts the token rather than being
+    ///         reconciled late, since it was never sent.
+    function test_handleSettlement_HaltsTheToken_WhenTheValidationWasRefused() public {
+        uint256 id = _request(10, 150);
+        vm.prank(backend);
+        module.refuseValidation(address(boundCompliance), id);
+
+        gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 100)));
+
+        assertTrue(token.paused(), "halted");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
     }
 
     /// @notice A relocation between one identity's own wallets changes no position: the module approves it inside
@@ -536,6 +585,12 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(module.approvalOf(address(boundCompliance), charlie, bob, 100).count, 0);
     }
 
+    function test_revokeApproval_RevertWhen_TheComplianceIsNotBound() public {
+        vm.prank(backend);
+        vm.expectRevert(ErrorsLib.ComplianceNotBound.selector);
+        module.revokeApproval(makeAddr("otherCompliance"), charlie, bob, 100);
+    }
+
     function test_revokeApproval_RevertWhen_NothingIsApproved() public {
         vm.prank(backend);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TransferNotApproved.selector, charlie, bob, 100));
@@ -574,7 +629,22 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         vm.prank(backend);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApprovalIdAlreadyUsed.selector, approvalId));
         module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
-        assertTrue(module.isApprovalIdUsed(address(boundCompliance), approvalId));
+        assertTrue(module.isApprovalIdUsed(address(boundCompliance), backend, approvalId));
+    }
+
+    /// @notice Each approver has its own ids: one approver's id never blocks another's decision.
+    function test_approveTransfer_Success_WhenTwoApproversUseTheSameApprovalId() public {
+        _setApprovers(backend, riskDesk);
+        bytes32 approvalId = keccak256("decision");
+        uint64 expiry = uint64(block.timestamp + 1 days);
+
+        vm.prank(backend);
+        module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
+        vm.prank(riskDesk);
+        module.approveTransfer(address(boundCompliance), approvalId, charlie, bob, 100, expiry);
+
+        assertEq(module.approvalOf(address(boundCompliance), charlie, bob, 100).count, 2);
+        assertTrue(module.isApprovalIdUsed(address(boundCompliance), riskDesk, approvalId));
     }
 
     function test_mint_Success_WithoutAnApproval() public {

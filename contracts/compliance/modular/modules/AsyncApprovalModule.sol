@@ -68,6 +68,7 @@ import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
 } from "../../../utils/AccessManagedOwnableUpgradeable.sol";
+import { ComplianceLedgerLib } from "../ComplianceLedgerLib.sol";
 import { ITransferValidation } from "../ITransferValidation.sol";
 import { MovementKindLib } from "../MovementKindLib.sol";
 import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
@@ -140,9 +141,9 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         /// Native-transfer approvals per compliance, scoped by the bind nonce, keyed by
         /// `keccak256(abi.encode(fromWallet, toWallet, amount))` with the wallet keys the compliance builds.
         mapping(address compliance => mapping(uint256 nonce => mapping(bytes32 transferKey => Approval))) approvals;
-        /// Every native approval id an approver used, per compliance. Not scoped by the bind nonce, so a
+        /// Every native approval id each approver used, per compliance. Not scoped by the bind nonce, so a
         /// decision retried after a rebind is still refused.
-        mapping(address compliance => mapping(bytes32 approvalId => bool)) usedApprovalIds;
+        mapping(address compliance => mapping(address approver => mapping(bytes32 approvalId => bool))) usedApprovalIds;
         /// How many times each compliance set its approvers. Not scoped by the bind nonce, so a request asked
         /// before a rebind never matches a list set after it.
         mapping(address compliance => uint64) approversVersion;
@@ -199,9 +200,9 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         for (uint256 i = 0; i < approvers.length; i++) {
             require(approvers[i] != address(0), ErrorsLib.ZeroAddress());
         }
-        AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
-        $.approvers[msg.sender][getNonce(msg.sender)] = approvers;
-        $.approversVersion[msg.sender]++;
+        AsyncApprovalStorage storage store = _getAsyncApprovalStorage();
+        store.approvers[msg.sender][getNonce(msg.sender)] = approvers;
+        store.approversVersion[msg.sender]++;
         emit ApproversSet(msg.sender, approvers);
     }
 
@@ -220,17 +221,17 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         external
         onlyComplianceCall
     {
-        if (ctx.fromIdentity == ctx.toIdentity) {
+        if (ComplianceLedgerLib.isRelocation(ctx.fromIdentity, ctx.toIdentity)) {
             // The compliance already records it `AwaitingApproval`, so this answer issues it inside the request.
             ITransferValidation(msg.sender).answerApproval(validationId, ctx.amountMax);
             return;
         }
-        AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
-        address[] storage approvers = $.approvers[msg.sender][getNonce(msg.sender)];
+        AsyncApprovalStorage storage store = _getAsyncApprovalStorage();
+        address[] storage approvers = store.approvers[msg.sender][getNonce(msg.sender)];
         require(approvers.length != 0, ErrorsLib.ApproversNotSet());
-        $.requests[msg.sender][validationId] = Request({
+        store.requests[msg.sender][validationId] = Request({
             approved: 0,
-            approversVersion: $.approversVersion[msg.sender],
+            approversVersion: store.approversVersion[msg.sender],
             fullyApproved: false,
             amountMin: ctx.amountMin,
             amountMax: ctx.amountMax
@@ -299,7 +300,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         _requireApprover(compliance);
         require(amount != 0, ErrorsLib.ZeroValue());
         require(expiry > block.timestamp, ErrorsLib.ExpiryInPast(expiry));
-        mapping(bytes32 => bool) storage usedIds = _getAsyncApprovalStorage().usedApprovalIds[compliance];
+        mapping(bytes32 => bool) storage usedIds = _getAsyncApprovalStorage().usedApprovalIds[compliance][_msgSender()];
         require(!usedIds[approvalId], ErrorsLib.ApprovalIdAlreadyUsed(approvalId));
         usedIds[approvalId] = true;
 
@@ -313,7 +314,10 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
 
     /// @dev Withdraws one approval of a native transfer, expired or not, by any approver of `compliance`.
     ///  Emits `ApprovalRevoked`.
-    function revokeApproval(address compliance, address from, address to, uint256 amount) external {
+    function revokeApproval(address compliance, address from, address to, uint256 amount)
+        external
+        onlyBoundCompliance(compliance)
+    {
         _requireApprover(compliance);
         Approval storage approval =
             _approval(compliance, WalletKeyLib.walletId(from), WalletKeyLib.walletId(to), amount);
@@ -337,10 +341,10 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         return _approval(compliance, WalletKeyLib.walletId(from), WalletKeyLib.walletId(to), amount);
     }
 
-    /// @dev Whether an approver already used `approvalId` with `compliance`, so a service can tell a retry from
+    /// @dev Whether `approver` already used `approvalId` with `compliance`, so a service can tell a retry from
     ///  a new decision.
-    function isApprovalIdUsed(address compliance, bytes32 approvalId) external view returns (bool) {
-        return _getAsyncApprovalStorage().usedApprovalIds[compliance][approvalId];
+    function isApprovalIdUsed(address compliance, address approver, bytes32 approvalId) external view returns (bool) {
+        return _getAsyncApprovalStorage().usedApprovalIds[compliance][approver][approvalId];
     }
 
     /* ----- Native transfers ----- */
@@ -421,11 +425,17 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         view
         returns (Request storage request, address[] storage approvers)
     {
-        AsyncApprovalStorage storage $ = _getAsyncApprovalStorage();
-        request = $.requests[compliance][validationId];
-        require(request.amountMax != 0, ErrorsLib.UnknownApprovalRequest(validationId));
-        require(request.approversVersion == $.approversVersion[compliance], ErrorsLib.ApproversChanged(validationId));
-        approvers = $.approvers[compliance][getNonce(compliance)];
+        AsyncApprovalStorage storage store = _getAsyncApprovalStorage();
+        request = store.requests[compliance][validationId];
+        // A request is only kept once `setApprovers` ran, so its version is at least one: zero means none is
+        // waiting here, never asked or already answered.
+        require(request.approversVersion != 0, ErrorsLib.UnknownApprovalRequest(validationId));
+        require(
+            request.approversVersion == store.approversVersion[compliance], ErrorsLib.ApproversChanged(validationId)
+        );
+        require(!request.fullyApproved, ErrorsLib.AlreadyFullyApproved(validationId));
+        approvers = store.approvers[compliance][getNonce(compliance)];
+        // Past the end only after a rebind left the list empty: then nobody's turn comes.
         address expected = request.approved < approvers.length ? approvers[request.approved] : address(0);
         require(_msgSender() == expected, ErrorsLib.NotTheNextApprover(_msgSender(), expected));
     }
@@ -469,9 +479,9 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         return _getAsyncApprovalStorage().approvals[compliance][getNonce(compliance)][transferKey];
     }
 
-    function _getAsyncApprovalStorage() private pure returns (AsyncApprovalStorage storage $) {
+    function _getAsyncApprovalStorage() private pure returns (AsyncApprovalStorage storage store) {
         assembly ("memory-safe") {
-            $.slot := _ASYNC_APPROVAL_STORAGE_LOCATION
+            store.slot := _ASYNC_APPROVAL_STORAGE_LOCATION
         }
     }
 
