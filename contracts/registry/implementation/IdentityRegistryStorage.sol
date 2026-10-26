@@ -185,25 +185,22 @@ contract IdentityRegistryStorage is
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev Reverts if the wallet was revoked, or if the IdentityFactory of the bound registries links it to another
-    ///  identity, revoked or not. Binding the same identity as the factory is allowed. The check sits in the storage,
-    ///  not only in the registry, so that it holds for every holder of the writer role, including a registry on
-    ///  another factory that was never bound here. The country is ignored, since this storage keeps none.
+    /// @dev A wallet may be bound only to the identity the IdentityFactory of the bound registries gives it, if that
+    ///  factory knows it. The check sits in the storage so it holds for every holder of the writer role, not only
+    ///  for a bound registry. The country is ignored, since this storage keeps none.
     function _addIdentityToStorage(address userAddress, IIdentity userIdentity, uint16) internal override {
         require(
             _getStorage().accountStatus[userAddress] != IIdentityFactory.AccountStatus.Revoked,
             ErrorsLib.WalletAlreadyRevoked(userAddress)
         );
-        super._addIdentityToStorage(userAddress, userIdentity, 0);
-
-        IIdentityFactory boundFactory = _boundFactory();
-        if (address(boundFactory) == address(0)) return;
-        (address factoryIdentity,) =
-            boundFactory.getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
+        address factoryIdentity = _factoryIdentityOf(userAddress);
+        bool factoryKnowsTheWallet = factoryIdentity != address(0);
+        bool factoryAgrees = factoryIdentity == address(userIdentity);
         require(
-            factoryIdentity == address(0) || factoryIdentity == address(userIdentity),
+            !factoryKnowsTheWallet || factoryAgrees,
             ErrorsLib.WalletBoundToAnotherIdentity(userAddress, factoryIdentity)
         );
+        super._addIdentityToStorage(userAddress, userIdentity, 0);
     }
 
     /// @dev Always reverts, because a wallet never changes identity. To move an investor to a new identity,
@@ -251,6 +248,15 @@ contract IdentityRegistryStorage is
     ///  it exists so any future internal caller still passes through the role check.
     function _authorizeRegistryBinding(address) internal override {
         _checkCanCall(_msgSender(), _msgData());
+    }
+
+    /// @dev The identity the IdentityFactory of the bound registries links the wallet to, revoked or not. Zero when
+    ///  the factory does not know the wallet, or when no registry is bound.
+    function _factoryIdentityOf(address userAddress) private view returns (address factoryIdentity) {
+        IIdentityFactory boundFactory = _boundFactory();
+        if (address(boundFactory) == address(0)) return address(0);
+        bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
+        (factoryIdentity,) = boundFactory.getIdentityIncludingRevoked(account);
     }
 
     /// @dev The IdentityFactory every bound registry resolves through, or zero when none is bound. Reading the

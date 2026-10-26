@@ -220,7 +220,9 @@ contract LedgerAttributionTest is TREXSuiteTest {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
 
         vm.prank(agent);
-        vm.expectRevert(ErrorsLib.AddressAlreadyStored.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
+        );
         registry.registerIdentity(alice, charlieIdentity, 0);
 
         vm.prank(agent);

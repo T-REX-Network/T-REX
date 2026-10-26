@@ -66,7 +66,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     function test_addIdentityToStorage_RevertWhen_IdentityZeroAddress() public {
         vm.prank(agent);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        identityRegistryStorage.addIdentityToStorage(charlie, IIdentity(address(0)), Countries.UNITED_STATES);
+        identityRegistryStorage.addIdentityToStorage(
+            makeAddr("walletTheFactoryDoesNotKnow"), IIdentity(address(0)), Countries.UNITED_STATES
+        );
     }
 
     /// @notice Should revert when wallet is zero address
@@ -78,10 +80,10 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     /// @notice Should revert when wallet is already registered
     function test_addIdentityToStorage_RevertWhen_AlreadyStored() public {
-        // Try to add bob again
+        // Try to add bob again, with the identity the factory gives him
         vm.prank(agent);
         vm.expectRevert(ErrorsLib.AddressAlreadyStored.selector);
-        identityRegistryStorage.addIdentityToStorage(bob, charlieIdentity, Countries.FRANCE);
+        identityRegistryStorage.addIdentityToStorage(bob, bobIdentity, Countries.FRANCE);
     }
 
     /// @notice The country argument is ignored: only `IdentityStored` is emitted and no country is recorded.
