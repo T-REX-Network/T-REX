@@ -641,6 +641,25 @@ contract TREXFactoryTest is TREXSuiteTest {
         _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
     }
 
+    /// @notice Binding and deploying are two transactions and the salt is not tied to the caller. Another
+    ///         suite deployer must not be able to deploy the salt in between with the issuer's identity and
+    ///         its own admin, so only a MANAGEMENT key of the supplied identity may attach it to a token.
+    function test_deployTREXSuite_RevertWhen_CallerIsNotAManagementKeyOfTheSuppliedONCHAINID() public {
+        string memory salt = "front-run-token-salt";
+        address issuer = makeAddr("Issuer");
+        address suppliedOID = _bindTokenIdentity(salt, issuer);
+
+        // The deployer holds the suite deployer role but no key on the issuer's identity.
+        ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
+        tokenDetails.ONCHAINID = suppliedOID;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityNotManagedByCaller.selector, suppliedOID, deployer)
+        );
+        _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
+        assertEq(trexFactory.getToken(salt), address(0), "the salt must stay free for the issuer");
+    }
+
     /// @notice The auto-mint path is gated on the factory holding ASSET_DEPLOYER at the IdentityFactory's
     ///         own authority. Strip the role and a deploy that leaves ONCHAINID at zero must revert from
     ///         inside `createIdentityFor`, not silently fall back to a zero OID.
@@ -700,7 +719,7 @@ contract TREXFactoryTest is TREXSuiteTest {
         assertEq(deployedToken.onchainID(), suppliedOID, "Supplied ONCHAINID must survive the missing role");
     }
 
-    /// @notice L-05: the token's CREATE3 address is public before the suite exists, and the
+    /// @notice The token's CREATE3 address is public before the suite exists, and the
     ///         IdentityFactory's ASSET binding is write-once. Another ASSET_DEPLOYER can bind that
     ///         address to its own identity first. The auto-mint path fails loudly inside
     ///         `createIdentityFor`, but a caller-supplied ONCHAINID skips that call, so `_deployToken`
@@ -762,7 +781,7 @@ contract TREXFactoryTest is TREXSuiteTest {
 
         _grantTokenOidMinterRole(address(this));
         Structs.KeyParam[] memory ownerKeys = new Structs.KeyParam[](1);
-        ownerKeys[0] = _ecdsaKey(address(this), KeyPurposes.MANAGEMENT);
+        ownerKeys[0] = _ecdsaKey(deployer, KeyPurposes.MANAGEMENT);
         address boundIdentity =
             idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, "prebound-salt", ownerKeys);
 

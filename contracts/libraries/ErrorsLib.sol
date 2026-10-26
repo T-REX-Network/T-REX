@@ -146,6 +146,8 @@ library ErrorsLib {
     error TokenIdentityAlreadyBound(address token, address boundIdentity);
     /// @dev A supplied ONCHAINID must already be actively bound to the predicted token address in the IdentityFactory.
     error TokenIdentityNotBound(address token, address suppliedIdentity);
+    /// @dev Only a MANAGEMENT key of a supplied ONCHAINID may deploy a suite with it.
+    error TokenIdentityNotManagedByCaller(address suppliedIdentity, address caller);
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
 

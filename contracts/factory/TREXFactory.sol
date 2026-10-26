@@ -62,6 +62,7 @@
 pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IERC734 } from "@onchain-id/solidity/contracts/interface/IERC734.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
@@ -453,7 +454,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// be the IdentityFactory's active binding for that same predicted address: the suite never deploys onto
     /// an address the factory resolves to a different identity, or to none (unbound or revoked). The deployer binds it first by
     /// calling `createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)` on the IdentityFactory
-    /// with the role the ASSET policy names, and passes the returned identity as `ONCHAINID`.
+    /// with the role the ASSET policy names, and passes the returned identity as `ONCHAINID`. The caller of
+    /// the deploy must be a MANAGEMENT key of that identity.
     /// `predictedToken` is `Create3.computeAddress(bytes20(factory) | keccak256(salt ++ "Token") >> 168, factory)`.
     ///
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
@@ -492,6 +494,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             require(
                 bindingStatus == IIdentityFactory.AccountStatus.Active,
                 ErrorsLib.TokenIdentityNotBound(predictedToken, oid)
+            );
+            // Binding and deploying are two transactions and the salt is not tied to the caller, so another
+            // suite deployer could deploy this salt in between with the issuer's identity and its own admin.
+            // Only a MANAGEMENT key of the supplied identity may attach it to a token.
+            require(
+                IERC734(oid).keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), KeyPurposes.MANAGEMENT),
+                ErrorsLib.TokenIdentityNotManagedByCaller(oid, msg.sender)
             );
         }
         return

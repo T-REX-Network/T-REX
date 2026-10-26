@@ -610,7 +610,10 @@ All notable changes to this project will be documented in this file.
   token address to it: an unbound slot, or one bound to it but revoked, reverts with `TokenIdentityNotBound`, and
   a slot bound to another identity, revoked or not, with `TokenIdentityAlreadyBound`. A deployer that supplies the identity creates it first with
   `IdentityFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)`, holding the role the
-  ASSET policy names, and passes the returned address. Leaving `ONCHAINID` at zero is unchanged.
+  ASSET policy names, and passes the returned address. The deploy must then come from a MANAGEMENT key of
+  that identity, or it reverts with `TokenIdentityNotManagedByCaller`: binding and deploying are two
+  transactions and the salt is not tied to the caller, so without it another suite deployer could deploy the
+  salt in between with the issuer's identity and its own admin. Leaving `ONCHAINID` at zero is unchanged.
 - **INDIVIDUAL and CORPORATE identity creation stays off the public role** (OZ L-05, #150). The token address
   of a suite is predictable from the salt, and `createIdentityFor` binds an INDIVIDUAL or CORPORATE identity
   to any account that is its only MANAGEMENT key without a signature from it. With those types open to

@@ -79,6 +79,7 @@ interface ITREXFactory {
         // ONCHAINID of the token
         // set it to ZERO address to have the factory create it in the IdentityFactory
         // if an address is provided, the IdentityFactory must already bind the predicted token address to it
+        // and the caller must be one of its MANAGEMENT keys
         address ONCHAINID;
         // modules to bind to the compliance, indexes are corresponding to the settings callData indexes
         // if a module doesn't require settings, it can be added at the end of the array, at index > settings.length
