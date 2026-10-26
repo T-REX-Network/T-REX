@@ -302,16 +302,23 @@ contract ModularCompliance is
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
-        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
+        _requireReleasable();
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner.
-    ///
-    ///  The token stays while a validation is open. Settling or discarding one releases its reservation on the
-    ///  bound token, and once the token has left that call reverts, so the validation could never close and
-    ///  every later bind would be refused.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+        _requireReleasable();
+    }
+
+    /// @dev The bound token may leave, through an unbind or a bind of another token, only once it has no supply and
+    ///  no validation is open. The ledger's positions belong to the bound token's holders, so a token still in
+    ///  circulation would hand them to the next token. Settling or discarding a validation releases its reservation
+    ///  on the bound token, and once the token has left that call reverts, so the validation could never close.
+    ///  No token is bound, or none with code, before the first bind.
+    function _requireReleasable() private view {
+        address boundToken = _getTokenBound();
+        require(boundToken.code.length == 0 || IToken(boundToken).totalSupply() == 0, ErrorsLib.TokenCirculating());
         require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
     }
 
