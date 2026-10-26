@@ -230,6 +230,19 @@ library EventsLib {
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event ValidationDiscarded(uint256 indexed validationId);
+    /// @notice Emitted when a validation is recorded and reserved while an `APPROVAL` module decides it.
+    event TransferValidationAwaitingApproval(
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        bytes spender,
+        uint256 amountMin,
+        uint256 amountMax,
+        uint64 deadline
+    );
+    /// @notice Emitted when a validation awaiting approval is refused, or left unanswered past its deadline, and
+    ///         its reservation released.
+    event ValidationApprovalRefused(uint256 indexed validationId);
     /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
     event ValidationResent(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:

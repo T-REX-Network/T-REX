@@ -150,6 +150,17 @@ library ErrorsLib {
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(bytes spender);
     error SpenderNotListed(bytes spender);
+    error ApprovalIdAlreadyUsed(bytes32 approvalId);
+    error OneApprovalModuleOnly();
+    error ApproversNotSet();
+    error NotAnApprover(address caller);
+    error NotTheNextApprover(address caller, address expected);
+    error UnknownApprovalRequest(uint256 validationId);
+    error ApproversChanged(uint256 validationId);
+    error NotFullyApproved(uint256 validationId);
+    error AlreadyFullyApproved(uint256 validationId);
+    error ExpiryInPast(uint64 expiry);
+    error TransferNotApproved(address from, address to, uint256 amount);
 
     // TREXFactory Errors
     error AuthorityMismatch();
@@ -239,6 +250,10 @@ library ErrorsLib {
     error UnverifiedWallet(bytes wallet);
     /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
     error SenderNotOnSatellite(bytes wallet);
+    /// @dev Only a validation stored `AwaitingApproval` can be answered; `status` is the one found instead.
+    error ValidationNotAwaitingApproval(uint256 validationId, uint8 status);
+    /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
+    error NotTheApprovalModule(address caller);
     /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
     ///  it is `AwaitingMint`; `status` is the `ValidationStatus` found instead.
     error ValidationNotResendable(uint256 validationId, uint8 status);

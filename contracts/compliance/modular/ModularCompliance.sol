@@ -446,12 +446,6 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
-    function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
-        IToken(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
-    }
-
-    /// @inheritdoc TransferValidation
     function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId)
         internal
         override
