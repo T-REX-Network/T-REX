@@ -190,21 +190,19 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         view
         returns (bool topicMatch, bool pass)
     {
-        (
-            uint256 foundClaimTopic,,
-            address issuer,
-            bytes memory sig,
-            Structs.ClaimData memory data,
-            /// forge-lint: disable-next-line(asm-keccak256)
-        ) = identity.getClaim(keccak256(abi.encode(trustedIssuer, topic)));
+        /// forge-lint: disable-next-line(asm-keccak256)
+        bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
+        (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
+            identity.getClaim(claimId);
         // Same rule as the registry's `isVerified`: only a claim from the trusted issuer itself counts, and only
         // that issuer is asked about it.
         if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
-        bytes memory isClaimValidCall = abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data));
         // The registry's own question, so the checker and `isVerified` always agree on an issuer's answer.
-        pass = issuerConfirmsClaim(trustedIssuer, isClaimValidCall);
+        pass = issuerConfirmsClaim(
+            trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (identity, topic, sig, data))
+        );
     }
 
     /// @inheritdoc IUtilityChecker
