@@ -117,11 +117,11 @@ interface IERC3643IdentityRegistryStorage {
      *  a registry onto a reused storage; the TREXFactory never holds it.
      *  The number of bound registries is capped (see `MAX_BOUND_REGISTRIES` on the implementation).
      *
-     *  @dev The bound set (`linkedIdentityRegistries`) is enumeration only, NOT authorization. Write
-     *  access to the IRS (addIdentityToStorage / modify* / remove*) is gated solely by the AGENT role
-     *  on the AccessManager and is never checked against this set. Consequently an IR holding AGENT may
-     *  write to the IRS without being bound, and an unbound IR keeps AGENT until the AccessManager
-     *  revokes it. Bind/unbind deliberately carry no grantRole/revokeRole of AGENT.
+     *  @dev The bound set (`linkedIdentityRegistries`) is not authorization. Write access to the IRS
+     *  (addIdentityToStorage / modify* / remove*) is gated by the IRS_WRITER role on the AccessManager, so
+     *  an IR holding IRS_WRITER may write without being bound, and an unbound IR keeps IRS_WRITER until the
+     *  AccessManager revokes it. Bind/unbind carry no grantRole/revokeRole of IRS_WRITER. Every write is
+     *  still checked against the IdentityFactory of the bound registries, whoever the writer is.
      *  @param _identityRegistry The identity registry address to add.
      */
     function bindIdentityRegistry(address _identityRegistry) external;
@@ -129,8 +129,8 @@ interface IERC3643IdentityRegistryStorage {
     /**
      *  @notice Removes an identity registry from the list of identityRegistries linked to the storage contract.
      *  Gated by the OWNER role: unbinding is a governance operation, not a deploy-time action.
-     *  @dev See {bindIdentityRegistry} — the bound set is enumeration only; unbinding does not revoke any
-     *  AGENT authorization the IR may hold on the AccessManager.
+     *  @dev See {bindIdentityRegistry}: unbinding does not revoke the IRS_WRITER role the IR may hold on the
+     *  AccessManager.
      *  @param _identityRegistry The identity registry address to remove.
      */
     function unbindIdentityRegistry(address _identityRegistry) external;

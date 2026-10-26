@@ -541,16 +541,16 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
     // ============ sticky bindings against the IdentityFactory ============
 
-    /// @notice The storage does not read any IdentityFactory: the rule that a local binding may not contradict the
-    ///         factory belongs to the registry, which owns the factory. A deployed suite grants the storage's
-    ///         writer role to its registry only; an account granted that role by hand writes past the rule.
-    function test_addIdentityToStorage_Succeeds_WhenFactoryLinksWalletToAnotherIdentity() public {
-        _deployIdentity(another, "another");
+    /// @notice The storage checks every write against the IdentityFactory of its bound registries, so an account
+    ///         granted the writer role directly cannot bind a wallet the factory links to another identity either.
+    function test_addIdentityToStorage_RevertWhen_FactoryLinksWalletToAnotherIdentity() public {
+        IIdentity anotherIdentity = _deployIdentity(another, "another");
 
         vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, another, address(anotherIdentity))
+        );
         identityRegistryStorage.addIdentityToStorage(another, charlieIdentity, 0);
-
-        assertEq(address(identityRegistryStorage.storedIdentity(another)), address(charlieIdentity));
     }
 
     /// @notice A wallet the factory links to one identity cannot be registered locally to another.

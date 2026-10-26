@@ -8,6 +8,7 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
@@ -120,6 +121,36 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         vm.prank(charlie);
         vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
         token.transfer(bob, 1);
+    }
+
+    /// @notice The cap can be priced against a stale position only if a funded wallet changes identity, so that its
+    ///         balance has not followed yet when the rules run. Every registry path that could do that is
+    ///         refused, so bob's balance stays bob's and charlie's position is the one the cap reads.
+    function test_registry_CannotRelinkAFundedWallet_SoTheCapNeverReadsAStalePosition() public {
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        vm.startPrank(agent);
+        token.mint(charlie, CAP * 6 / 10);
+        token.mint(bob, CAP * 6 / 10);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
+        registry.updateIdentity(bob, charlieIdentity);
+
+        vm.expectRevert(ErrorsLib.AddressAlreadyStored.selector);
+        registry.registerIdentity(bob, charlieIdentity, 0);
+
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
+        registry.setIdentityRegistryStorage(makeAddr("anotherStorage"));
+
+        registry.deleteIdentity(bob);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, bob));
+        registry.registerIdentity(bob, charlieIdentity, 0);
+        vm.stopPrank();
+
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
+        assertEq(_position(address(bobIdentity)), CAP * 6 / 10);
+        assertEq(_position(address(charlieIdentity)), CAP * 6 / 10);
     }
 
     /// @notice A burn is never limited: it lowers a position, so no cap can be breached by one.

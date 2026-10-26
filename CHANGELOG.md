@@ -523,14 +523,20 @@ All notable changes to this project will be documented in this file.
   registry in turn, in an order an unbind could change, while each registry judged revocation and identity
   type in its own factory. A registry could resolve a wallet to another factory's identity and admit it, and
   unbinding a registry changed who wallets were in the others or left its own wallets with no identity.
-  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only, and the storage reads
-  no IdentityFactory. `TREXRegistry` resolves a wallet the storage does not bind through its own factory,
+  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only. `TREXRegistry` resolves a wallet the storage does not bind through its own factory,
   revoked bindings included, and refuses in `registerIdentity` a binding that contradicts that factory
   (`WalletBoundToAnotherIdentity`). `IdentityRegistryStorage.bindIdentityRegistry` refuses a registry whose
   IdentityFactory differs from the one of the registries already bound (`IdentityFactoryMismatch`), so that
   check covers every registry sharing the storage: otherwise one registry's agent could bind a wallet another
-  registry's factory links elsewhere, and move that wallet's tokens to another owner there. Unbinding no
-  longer changes any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the set.
+  registry's factory links elsewhere, and move that wallet's tokens to another owner there. Since the writer
+  role is not tied to the bound set, `addIdentityToStorage` also checks every write against the factory of the
+  bound registries (`WalletBoundToAnotherIdentity`), so neither a registry on another factory that holds the
+  role without being bound, nor an account granted it by hand, can bind a wallet that factory links elsewhere.
+  Unbinding no longer changes any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the
+  set. With every relink path closed, a funded wallet never changes identity, so a holding cap is never priced
+  against a position its balance has not reached yet (L-27 #163). **Upgrade:** upgrade the storage and the
+  registries sharing it together. A registry still on the old code resolves a wallet only it knows through the
+  storage's old global fallback, which the new storage no longer has, so it would lose those wallets.
 - **A registry keeps its identity storage for life** (L-30 #164). `setIdentityRegistryStorage` let the owner
   point a registry at a storage that does not hold its local bindings, so every wallet bound only in the old
   one lost its identity while its tokens circulated. `TREXRegistry.setIdentityRegistryStorage` now always
@@ -553,7 +559,7 @@ All notable changes to this project will be documented in this file.
   - `registerIdentity` reverts with `WalletBoundToAnotherIdentity` when the registry's factory links the
     wallet, actively or revoked, to a different identity, and with `WalletAlreadyRevoked` for a revoked
     wallet. Registering the identity the factory names still works. The storage's `addIdentityToStorage`
-    checks the revocation only, since it reads no factory.
+    checks the revocation, and the factory of its bound registries.
   - The storage records the status in a new namespace, `erc3643.storage.TREXIdentityRegistryStorage`.
     Bindings stored before the upgrade read as `Active`.
   - Removed: `IIdentityRegistryStorage.isLocallyRegistered`, replaced by `localAccountStatus`, which returns

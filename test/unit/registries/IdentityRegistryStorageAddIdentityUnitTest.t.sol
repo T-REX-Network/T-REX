@@ -13,16 +13,22 @@ import {
 
 contract IdentityRegistryStorageAddIdentityUnitTest is IdentityRegistryStorageBaseUnitTest {
 
-    /// @dev The storage reads no IdentityFactory; the registry refuses a binding that contradicts its own factory.
-    function test_addIdentityToStorage_DoesNotAskTheBoundRegistriesFactories() public {
+    /// @dev Every write is checked against the IdentityFactory of the bound registries, whoever the writer is.
+    function test_addIdentityToStorage_RevertWhen_TheBoundFactoryLinksTheWalletToAnotherIdentity() public {
         irs.bindIdentityRegistry(registry);
-        vm.expectCall(idFactory, abi.encodeWithSelector(IIdentityFactory.getIdentityIncludingRevoked.selector), 0);
-        vm.expectCall(otherIdFactory, abi.encodeWithSelector(IIdentityFactory.getIdentityIncludingRevoked.selector), 0);
 
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, wallet, globalIdentity));
         irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
+    }
+
+    /// @dev Binding the identity the factory already links is allowed, and so is a wallet the factory does not know.
+    function test_addIdentityToStorage_Succeeds_WhenTheBoundFactoryAgreesOrDoesNotKnowTheWallet() public {
+        irs.bindIdentityRegistry(registry);
+
+        irs.addIdentityToStorage(wallet, IIdentity(globalIdentity), 0);
         irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
 
-        assertEq(address(irs.storedIdentity(wallet)), localIdentity);
+        assertEq(address(irs.storedIdentity(wallet)), globalIdentity);
         assertEq(address(irs.storedIdentity(otherWallet)), localIdentity);
     }
 
