@@ -200,7 +200,9 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         bytes32 claimId = keccak256(abi.encode(trustedIssuer, topic));
         (uint256 foundClaimTopic,, address issuer, bytes memory sig, Structs.ClaimData memory data,) =
             identity.getClaim(claimId);
-        if (foundClaimTopic != topic) return (false, false);
+        // The identity answers `getClaim`, so the issuer it returns is untrusted: like `isVerified`, only a claim
+        // naming the trusted issuer itself counts.
+        if (foundClaimTopic != topic || issuer != trustedIssuer) return (false, false);
         topicMatch = true;
 
         try IClaimIssuer(issuer).isClaimValid(identity, topic, sig, data) returns (bool validity) {
