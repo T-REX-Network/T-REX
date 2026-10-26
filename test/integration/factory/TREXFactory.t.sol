@@ -738,11 +738,13 @@ contract TREXFactoryTest is TREXSuiteTest {
             idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, "squatter-salt", squatterKeys);
 
         ITREXFactory.TokenDetails memory tokenDetails = _createEmptyTokenDetails();
-        tokenDetails.ONCHAINID = makeAddr("SuppliedOID");
+        address suppliedOID = makeAddr("SuppliedOID");
+        tokenDetails.ONCHAINID = suppliedOID;
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.TokenIdentityAlreadyBound.selector, predictedToken, squattedIdentity)
+        assertEq(
+            idFactory.getIdentity(InteroperableAddress.formatEvmV1(block.chainid, predictedToken)), squattedIdentity
         );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, predictedToken, suppliedOID));
         _deploySuite(salt, tokenDetails, _createEmptyClaimDetails());
     }
 

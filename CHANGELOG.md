@@ -607,8 +607,8 @@ All notable changes to this project will be documented in this file.
   predicted token address and never bound it either, so any holder of the ASSET role could later bind the live
   token to an identity of its own, and the token and the IdentityFactory would name different identities.
   The factory now refuses a supplied identity unless the IdentityFactory already resolves the predicted
-  token address to it: an unbound slot, or one bound to it but revoked, reverts with `TokenIdentityNotBound`, and
-  a slot bound to another identity, revoked or not, with `TokenIdentityAlreadyBound`. A deployer that supplies the identity creates it first with
+  token address to it: an unbound slot, a revoked one, or one bound to another identity reverts with
+  `TokenIdentityNotBound`. A deployer that supplies the identity creates it first with
   `IdentityFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)`, holding the role the
   ASSET policy names, and passes the returned address. The deploy must then come from a MANAGEMENT key of
   that identity, or it reverts with `TokenIdentityNotManagedByCaller`: binding and deploying are two

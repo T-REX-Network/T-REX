@@ -485,16 +485,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             // the token would then answer to one identity while the IdentityFactory answers another.
             // An unbound slot is refused too: this factory never binds a supplied identity, so the
             // slot would stay open for anyone to take once the token is live.
-            // Revoked slots are dead but still occupied, so ask for those too, not just active ones.
-            (address boundIdentity, IIdentityFactory.AccountStatus bindingStatus) = IIdentityFactory(_idFactory)
-                .getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, predictedToken));
-            require(boundIdentity != address(0), ErrorsLib.TokenIdentityNotBound(predictedToken, oid));
-            require(boundIdentity == oid, ErrorsLib.TokenIdentityAlreadyBound(predictedToken, boundIdentity));
-            // A revoked binding no longer resolves, so the IdentityFactory would answer no identity for the token.
-            require(
-                bindingStatus == IIdentityFactory.AccountStatus.Active,
-                ErrorsLib.TokenIdentityNotBound(predictedToken, oid)
-            );
+            // `getIdentity` answers only an active binding, so an unbound, a revoked and a squatted slot all fail.
+            address boundIdentity = IIdentityFactory(_idFactory)
+                .getIdentity(InteroperableAddress.formatEvmV1(block.chainid, predictedToken));
+            require(boundIdentity == oid, ErrorsLib.TokenIdentityNotBound(predictedToken, oid));
             // Binding and deploying are two transactions and the salt is not tied to the caller, so another
             // suite deployer could deploy this salt in between with the issuer's identity and its own admin.
             // Only a MANAGEMENT key of the supplied identity may attach it to a token.
