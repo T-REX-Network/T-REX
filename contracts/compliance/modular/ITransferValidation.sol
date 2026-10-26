@@ -247,6 +247,13 @@ interface ITransferValidation {
     /// would be resolvable anyway, and a reservation never stays locked on a keeper that is gone. The batch is
     /// atomic: one refused id reverts the whole call.
     ///
+    /// A discard cannot know whether the satellite executed the validation before its deadline: the satellite
+    /// reports only what it executed. If it did and the report is still in flight, the wallet's room is given
+    /// back early, a newer validation may reserve it, and the late report still debits the wallet when it lands.
+    /// The newer one's settlement then reverts `InsufficientBridgedBalance` until the wallet is credited again;
+    /// it stays deliverable, so reconciliation is delayed, not lost. Set each chain's reconciliation window
+    /// above the longest delivery delay its gateway can have, so a report this late is not expected.
+    ///
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
     /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
