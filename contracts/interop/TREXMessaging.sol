@@ -188,12 +188,4 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         return TREXMessagingLib.sendComplianceValidation(chainKey, validationId, body);
     }
 
-    /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current route.
-    function _sendMessage(bytes32 chainKey, MessageTypesLib.Message messageType, bytes memory body)
-        internal
-        returns (bytes32 sendId)
-    {
-        return TREXMessagingLib.sendMessage(chainKey, messageType, body);
-    }
-
 }
