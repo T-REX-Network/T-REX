@@ -522,7 +522,11 @@ All notable changes to this project will be documented in this file.
   `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only. `TREXRegistry` resolves a wallet the storage does not bind through its own factory,
   revoked bindings included, and refuses in `registerIdentity` a binding that contradicts that factory
   (`WalletBoundToAnotherIdentity`). `IdentityRegistryStorage.init` now takes the storage's IdentityFactory,
-  which never changes, and the TREXFactory passes its own. `bindIdentityRegistry` refuses a registry on
+  which never changes, and the TREXFactory passes its own. The storage binds that first registry before it
+  has code, so without asking its factory: the TREXFactory checks it instead and refuses a suite whose
+  registry beacon is on another IdentityFactory (`IdentityFactoryMismatch`). Upgrading the registry beacon to
+  an implementation on another factory stays an admin decision; the registry's own check above still refuses
+  a contradicting binding then. `bindIdentityRegistry` refuses a registry on
   another IdentityFactory (`IdentityFactoryMismatch`), so that check covers every registry sharing the storage:
   otherwise one registry's agent could bind a wallet another registry's factory links elsewhere, and move that
   wallet's tokens to another owner there. Since the writer role is not tied to the bound set,
