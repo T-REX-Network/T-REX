@@ -149,22 +149,21 @@ library AccessManagerSetupLib {
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](14);
-        table[0] = SelectorRole(IERC3643IdentityRegistry.setIdentityRegistryStorage.selector, RolesLib.Role.OWNER);
-        table[1] = SelectorRole(TREXRegistry.disableEligibilityChecks.selector, RolesLib.Role.OWNER);
-        table[2] = SelectorRole(TREXRegistry.enableEligibilityChecks.selector, RolesLib.Role.OWNER);
-        table[3] = SelectorRole(IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector, RolesLib.Role.OWNER);
-        table[4] = SelectorRole(IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector, RolesLib.Role.OWNER);
-        table[5] = SelectorRole(IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector, RolesLib.Role.OWNER);
-        table[6] = SelectorRole(IERC3643ClaimTopicsRegistry.addClaimTopic.selector, RolesLib.Role.OWNER);
-        table[7] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.Role.OWNER);
-        table[8] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
-        table[9] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        table = new SelectorRole[](13);
+        table[0] = SelectorRole(TREXRegistry.disableEligibilityChecks.selector, RolesLib.Role.OWNER);
+        table[1] = SelectorRole(TREXRegistry.enableEligibilityChecks.selector, RolesLib.Role.OWNER);
+        table[2] = SelectorRole(IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector, RolesLib.Role.OWNER);
+        table[3] = SelectorRole(IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector, RolesLib.Role.OWNER);
+        table[4] = SelectorRole(IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector, RolesLib.Role.OWNER);
+        table[5] = SelectorRole(IERC3643ClaimTopicsRegistry.addClaimTopic.selector, RolesLib.Role.OWNER);
+        table[6] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.Role.OWNER);
+        table[7] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        table[8] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
         // {_requireFreshOrInDomain} reads this row to tell which domain a registry is in.
-        table[10] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.Role.AGENT);
-        table[11] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.Role.AGENT);
-        table[12] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.Role.AGENT);
-        table[13] = SelectorRole(IERC3643IdentityRegistry.deleteIdentity.selector, RolesLib.Role.AGENT);
+        table[9] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.Role.AGENT);
+        table[10] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.Role.AGENT);
+        table[11] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.Role.AGENT);
+        table[12] = SelectorRole(IERC3643IdentityRegistry.deleteIdentity.selector, RolesLib.Role.AGENT);
     }
 
     function storageTable() internal pure returns (SelectorRole[] memory table) {
@@ -179,7 +178,7 @@ library AccessManagerSetupLib {
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](14);
+        table = new SelectorRole[](13);
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.forceRemoveModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
@@ -194,7 +193,6 @@ library AccessManagerSetupLib {
         table[10] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
         table[11] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
         table[12] = SelectorRole(ModularCompliance.resolveStuckValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
-        table[13] = SelectorRole(ModularCompliance.fixPosition.selector, RolesLib.Role.OWNER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {

@@ -451,7 +451,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             salt,
             IRS,
             _beaconProxyBytecode(
-                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, REGISTRY)))
+                irsBeacon,
+                abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, REGISTRY), _idFactory))
             )
         );
     }

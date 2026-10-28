@@ -14,10 +14,9 @@ import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
-/// @dev The registries and their identity factories are mocked at the ABI level: on a write the storage only
-///      asks each bound registry for its factory and that factory for the wallet's identity, to tell whether the
-///      local binding shadows a global one. `wallet` is known to the first factory as `globalIdentity`,
-///      `otherWallet` only to the second one as `otherIdentity`.
+/// @dev The registry and the identity factory are mocked at the ABI level: on a write the storage only asks its
+///      factory for the wallet's identity, to tell whether the local binding shadows a global one. The factory knows
+///      `wallet` as `globalIdentity` and does not know `otherWallet`.
 abstract contract IdentityRegistryStorageBaseUnitTest is Test {
 
     IdentityRegistryStorage internal irs;
@@ -29,20 +28,18 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
     address internal globalIdentity = makeAddr("globalIdentity");
     address internal localIdentity = makeAddr("localIdentity");
 
-    address internal otherRegistry = makeAddr("otherRegistry");
-    address internal otherIdFactory = makeAddr("otherIdFactory");
     address internal otherWallet = makeAddr("otherWallet");
-    address internal otherIdentity = makeAddr("otherIdentity");
 
     function setUp() public virtual {
         accessManager = new AccessManager(address(this));
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(
             BeaconProxyDeployer.newProxy(
-                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), idFactory))
             )
         );
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
@@ -58,20 +55,6 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
             idFactory,
             abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(otherWallet))),
             abi.encode(address(0), IIdentityFactory.AccountStatus.None)
-        );
-
-        // A second registry built on another factory: it knows `otherWallet`, the first one does not.
-        vm.mockCall(otherRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
-        vm.mockCall(otherRegistry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(otherIdFactory));
-        vm.mockCall(
-            otherIdFactory,
-            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(wallet))),
-            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
-        );
-        vm.mockCall(
-            otherIdFactory,
-            abi.encodeCall(IIdentityFactory.getIdentityIncludingRevoked, (_account(otherWallet))),
-            abi.encode(otherIdentity, IIdentityFactory.AccountStatus.Active)
         );
     }
 

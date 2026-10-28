@@ -9,6 +9,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
@@ -19,6 +20,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
     address private irsBeacon;
 
     address private notOwner = makeAddr("NotOwner");
+    address private identityFactory = makeAddr("identityFactory");
 
     function setUp() public {
         irsImplementation = new IdentityRegistryStorage();
@@ -62,6 +64,8 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir2 must report the storage's
         // AccessManager as its authority.
         vm.mockCall(ir2, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        // Every registry bound to one storage must resolve through the storage's IdentityFactory.
+        vm.mockCall(ir2, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(identityFactory));
         storageContract.bindIdentityRegistry(ir2);
 
         address[] memory linked = storageContract.linkedIdentityRegistries();
@@ -79,6 +83,7 @@ contract IdentityRegistryStorageInitUnitTest is Test {
         // The external bindIdentityRegistry is gated by onlySharedAuthority: ir must report the storage's
         // AccessManager as its authority.
         vm.mockCall(ir, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(ir, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(identityFactory));
         storageContract.bindIdentityRegistry(ir);
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), ir, 0);
 
@@ -95,13 +100,23 @@ contract IdentityRegistryStorageInitUnitTest is Test {
 
     function test_init_RevertWhen_AccessManagerIsZeroAddress() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        BeaconProxyDeployer.newProxy(irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(0), address(0))));
+        BeaconProxyDeployer.newProxy(
+            irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(0), address(0), identityFactory))
+        );
+    }
+
+    function test_init_RevertWhen_IdentityFactoryIsZeroAddress() public {
+        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        BeaconProxyDeployer.newProxy(
+            irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), address(0)))
+        );
     }
 
     function _deployProxy(address _initialIR) private returns (IdentityRegistryStorage) {
         IdentityRegistryStorage irs = IdentityRegistryStorage(
             BeaconProxyDeployer.newProxy(
-                irsBeacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), _initialIR))
+                irsBeacon,
+                abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), _initialIR, identityFactory))
             )
         );
         AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);

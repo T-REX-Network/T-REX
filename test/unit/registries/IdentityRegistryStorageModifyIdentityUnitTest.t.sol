@@ -13,27 +13,29 @@ contract IdentityRegistryStorageModifyIdentityUnitTest is IdentityRegistryStorag
     address private newIdentity = makeAddr("newIdentity");
 
     function test_modifyStoredIdentity_RevertsWhen_WalletIsBound() public {
-        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
+        irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, wallet, localIdentity));
-        irs.modifyStoredIdentity(wallet, IIdentity(newIdentity));
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, otherWallet, localIdentity)
+        );
+        irs.modifyStoredIdentity(otherWallet, IIdentity(newIdentity));
 
-        assertEq(address(irs.storedIdentity(wallet)), localIdentity);
+        assertEq(address(irs.storedIdentity(otherWallet)), localIdentity);
     }
 
     function test_modifyStoredIdentity_RevertsWhen_RebindingToTheSameIdentity() public {
-        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
+        irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyLinkedToIdentity.selector, wallet));
-        irs.modifyStoredIdentity(wallet, IIdentity(localIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyLinkedToIdentity.selector, otherWallet));
+        irs.modifyStoredIdentity(otherWallet, IIdentity(localIdentity));
     }
 
     function test_modifyStoredIdentity_RevertsWhen_WalletWasRevoked() public {
-        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
-        irs.removeIdentityFromStorage(wallet);
+        irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
+        irs.removeIdentityFromStorage(otherWallet);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, wallet));
-        irs.modifyStoredIdentity(wallet, IIdentity(newIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, otherWallet));
+        irs.modifyStoredIdentity(otherWallet, IIdentity(newIdentity));
     }
 
     function test_modifyStoredIdentity_RevertsWhen_WalletIsOnlyBoundGlobally() public {
