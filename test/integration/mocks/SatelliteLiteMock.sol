@@ -102,8 +102,10 @@ contract SatelliteLiteMock is IERC7786Recipient {
         returns (bytes4)
     {
         require(msg.sender == address(gateway), NotTheGateway(msg.sender));
-        require(!delivered[receiveId], AlreadyDelivered(receiveId));
-        delivered[receiveId] = true;
+        if (receiveId != bytes32(0)) {
+            require(!delivered[receiveId], AlreadyDelivered(receiveId));
+            delivered[receiveId] = true;
+        }
 
         (uint8 messageType,, bytes memory body) = abi.decode(payload, (uint8, uint8, bytes));
         uint256 seenFrom = gateway.originChainId();

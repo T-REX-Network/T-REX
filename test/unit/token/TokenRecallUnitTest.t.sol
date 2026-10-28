@@ -10,6 +10,8 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 
+/// @notice The ledger half of a recall, driven through `TokenLedgerHarness.ledgerRecall`: the buckets and the
+///         envelope only. The burn proof checks are covered in `DelegationAndRecall.t.sol`.
 contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
 
     function setUp() public override {

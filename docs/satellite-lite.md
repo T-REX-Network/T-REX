@@ -25,8 +25,9 @@ that recall was dispatched to.
 
 ### Transport
 
-1. **Act on each delivery once.** A gateway may redeliver; the Lite dedupes on the receive id, and also on the
-   operation id (rules 9 and 10), since a resend arrives under a new receive id.
+1. **Act on each delivery once.** A gateway may redeliver; the Lite dedupes on a nonzero receive id, and also on
+   the operation id (rules 3, 9 and 10), since a resend arrives under a new receive id. A zero receive id names no
+   delivery (ERC-7786 allows it) and is never recorded, or the first one would refuse every later message.
 2. **Accept only the reference token as author**, through its own gateway.
 
 ### Validations

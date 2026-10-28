@@ -194,8 +194,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev The native burn happens here, the only part the library cannot reach; {TokenDelegationLib-delegateOut}
     ///  then checks the burn stayed inside the free balance, credits the bridged position, checks the wallets, tells
     ///  the compliance, commits and sends the instruction. One transaction, so a refusal anywhere undoes the burn,
-    ///  and the satellite is never told to mint what this chain still holds. Together these are the transition
-    ///  {_delegateOut} describes.
+    ///  and the satellite is never told to mint what this chain still holds. It is the only way a native position
+    ///  reaches a satellite, and `totalSupply` never moves.
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount)
         external
         whenNotPaused
@@ -391,33 +391,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     // so that the pause halts every movement between wallets, native or satellite, while mints and burns stay
     // allowed.
 
-    /// @dev The test harness's transition; production goes through {delegateOut} and {TokenDelegationLib}.
-    /// @dev Moves `amount` of `holder`'s free balance out to `toWallet`, a wallet on a satellite chain: a native
-    ///  burn (`Transfer(holder, 0x0)`, so `balanceOf` drops) and a bridged credit; `totalSupply` never moves.
-    ///  Relocation of one identity's own position, so ownership does not move: the calling flow checks pause,
-    ///  freeze, eligibility, compliance and that `toWallet` belongs to `holder`'s identity, and the ledger checks
-    ///  the buckets and the envelope only. It is the only way a native position reaches a satellite.
-    /// @param delegationId the id the mint instruction carries, zero on a transition with no instruction
-    function _delegateOut(address holder, bytes memory toWallet, uint256 amount, uint256 delegationId) internal {
-        require(holder != address(0), ErrorsLib.ZeroAddress());
-        bytes32 toKey = TokenLedgerLib.creditFromNative(holder, toWallet, amount, freeBalanceOf(holder));
-        ERC20Upgradeable._update(holder, address(0), amount);
-
-        emit EventsLib.DelegatedOut(holder, toKey, delegationId, toWallet, amount);
-    }
-
-    /// @dev The test harness's transition; production goes through {_handleBurnProof} and {TokenDelegationLib}.
-    /// @dev Brings `amount` back from `fromWallet`, a wallet on a satellite chain, onto `holder`'s free balance:
-    ///  a bridged debit and a native mint (`Transfer(0x0, holder)`). The mirror of {_delegateOut}, applied on a
-    ///  consumed burn proof; {_handleBurnProof} checks that `holder` belongs to the burned wallet's identity and
-    ///  has the compliance follow any relink of `holder` first, so ownership does not move here either. A settlement leg that crosses identities is {_settle}.
-    function _recall(bytes memory fromWallet, address holder, uint256 amount) internal {
-        bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, holder, amount);
-        ERC20Upgradeable._update(address(0), holder, amount);
-
-        emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
-    }
-
     /// @dev Applies the settled leg of a validation: `from`'s satellite position down, and either `to`'s free
     ///  balance up when `to` is on the reference chain (a native mint, `Transfer(0x0, to)`, and a distinct event
     ///  because ownership moves between identities), or `to`'s satellite position up otherwise (a bridged
@@ -599,7 +572,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc TREXMessaging
     /// @dev The recall path: the proof is judged against the instruction it answers and the bridged position
     ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
-    ///      minted to: together, the transition {_recall} describes. Same pause and halt policy as
+    ///      minted to, so a recall never moves ownership or `totalSupply`. Same pause and halt policy as
     ///      {_handleSettlement}: a paused token leaves the proof deliverable, and a proof the token cannot account
     ///      for pauses it. A duplicate of a settled proof changes nothing.
     function _handleBurnProof(bytes32 chainKey, bytes memory body)
