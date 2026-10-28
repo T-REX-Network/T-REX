@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
@@ -107,20 +108,70 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertEq(rule.totalHookCalls(), 0);
     }
 
-    /// @notice A forced transfer reaches the transfer hook, like a normal transfer does.
-    function test_transferred_Success_WhenForcedTransfer() public {
+    /// @notice A forced transfer reaches the transfer hook, like a normal transfer does, and is reported as
+    ///         forced: a tracker that counts the investor's own activity can leave it out.
+    function test_agentTransferred_Success_WhenForcedTransfer() public {
         vm.prank(agent);
         token.forcedTransfer(alice, bob, 100);
 
         assertEq(tracker.transferActionCalls(), 1);
         assertEq(tracker.mintActionCalls(), 0);
         assertEq(tracker.burnActionCalls(), 0);
+        assertEq(_lastKind(), MovementKindLib.FORCED_TRANSFER);
+    }
+
+    /// @notice An investor's own transfer is reported as a transfer, and the extension field is empty: nothing
+    ///         fills it yet, and a module that decodes it has to see that.
+    function test_transferred_Success_WhenReportingTheKindOfAPlainTransfer() public {
+        vm.prank(alice);
+        token.transfer(bob, 100);
+
+        assertEq(_lastKind(), MovementKindLib.TRANSFER);
+        assertEq(_lastData().length, 0);
+    }
+
+    /// @notice A burn is reported as a burn.
+    function test_destroyed_Success_WhenReportingTheKindOfABurn() public {
+        vm.prank(agent);
+        token.burn(alice, 100);
+
+        assertEq(_lastKind(), MovementKindLib.BURN);
+    }
+
+    /// @notice Nobody but the bound token may report an agent's movement.
+    function test_agentTransferred_RevertWhen_CallerIsNotTheBoundToken() public {
+        vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
+        mc.agentTransferred(alice, bob, 100, MovementKindLib.FORCED_TRANSFER);
+    }
+
+    /// @notice An agent's movement is guarded like `transferred`: no zero wallet, no zero amount.
+    function test_agentTransferred_RevertWhen_AWalletOrTheAmountIsZero() public {
+        vm.startPrank(address(token));
+        vm.expectRevert(ERC3643ErrorsLib.ZeroAddress.selector);
+        mc.agentTransferred(address(0), bob, 100, MovementKindLib.FORCED_TRANSFER);
+        vm.expectRevert(ERC3643ErrorsLib.ZeroAddress.selector);
+        mc.agentTransferred(alice, address(0), 100, MovementKindLib.RECOVERY);
+        vm.expectRevert(ERC3643ErrorsLib.ZeroValue.selector);
+        mc.agentTransferred(alice, bob, 0, MovementKindLib.RECOVERY);
+        vm.stopPrank();
+    }
+
+    function _lastKind() private view returns (uint8 kind) {
+        (,,,,,,, kind,,,) = tracker.lastContext();
+    }
+
+    function _lastData() private view returns (bytes memory data) {
+        (,,,,,,,,,, data) = tracker.lastContext();
+    }
+
+    function _lastSpender() private view returns (bytes memory spender) {
+        (,,,,,,,,, spender,) = tracker.lastContext();
     }
 
     /// @notice A recovery reaches the transfer hook too. It moves the balance outside `_update`, so without an
     ///         explicit notification modules would keep crediting the lost wallet, and the lost wallet is
     ///         removed from the identity registry, so nothing could fix it afterwards.
-    function test_transferred_Success_WhenRecoveringAWallet() public {
+    function test_agentTransferred_Success_WhenRecoveringAWallet() public {
         uint256 aliceBalance = token.balanceOf(alice);
 
         // Both wallets resolve to the same identity during the hook, which is what keeps a recovery from
@@ -133,8 +184,10 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             toWallet: bytes32(uint256(uint160(another))),
             amountMin: aliceBalance,
             amountMax: aliceBalance,
+            kind: MovementKindLib.RECOVERY,
             isIssuance: false,
-            spender: ""
+            spender: "",
+            data: ""
         });
         vm.expectCall(address(tracker), abi.encodeCall(IModule.afterTransfer, (expected)), 1);
         vm.prank(agent);
@@ -156,8 +209,10 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             toWallet: bytes32(uint256(uint160(bob))),
             amountMin: 100,
             amountMax: 100,
+            kind: MovementKindLib.MINT,
             isIssuance: false,
-            spender: ""
+            spender: "",
+            data: ""
         });
         vm.expectCall(address(tracker), abi.encodeCall(IModule.afterTransfer, (expected)), 1);
         vm.prank(agent);
@@ -271,21 +326,16 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     /// @notice The trackers are told who called `transferFrom`, and a direct transfer after it carries no
     ///         spender: the compliance forgets it once the transfer is recorded.
     function test_transferFrom_Success_WhenTrackersSeeTheSpender() public {
-        TrackerOnlyModule tracker = TrackerOnlyModule(_deploy(address(new TrackerOnlyModule())));
-        vm.prank(deployer);
-        mc.addModule(address(tracker));
         vm.prank(alice);
         token.approve(charlie, 100);
 
         vm.prank(charlie);
         token.transferFrom(alice, bob, 100);
-        (,,,,,,,, bytes memory spender) = tracker.lastContext();
-        assertEq(spender, InteroperableAddress.formatEvmV1(block.chainid, charlie));
+        assertEq(_lastSpender(), InteroperableAddress.formatEvmV1(block.chainid, charlie));
 
         vm.prank(alice);
         token.transfer(bob, 100);
-        (,,,,,,,, spender) = tracker.lastContext();
-        assertEq(spender, "");
+        assertEq(_lastSpender(), "");
     }
 
     /// @notice A rule sees who called `transferFrom`, so it can cap delegated transfers without touching
@@ -330,8 +380,10 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             toWallet: keccak256(to),
             amountMin: 10,
             amountMax: 100,
+            kind: MovementKindLib.CROSS_CHAIN,
             isIssuance: true,
-            spender: ""
+            spender: "",
+            data: ""
         });
         vm.expectCall(address(firstRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
         vm.expectCall(address(secondRule), abi.encodeCall(IModule.allowedAmount, (expected)), 1);
@@ -366,7 +418,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
         envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
         vm.prank(agent);
-        TokenLedgerHarness(address(token)).delegateOut(alice, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerDelegateOut(alice, envelope, amount);
     }
 
 }

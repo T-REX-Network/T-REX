@@ -8,6 +8,7 @@ import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityReg
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
@@ -61,11 +62,26 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
         assertEq(address(token.identityRegistry()), identityRegistry, "rejected registry must not be recorded");
     }
 
+    /// @notice A registry with only the standard interface is refused: the spender check on every
+    ///  `transferFrom`, recovery and delegation call T-REX methods it does not have.
+    function testTokenSetIdentityRegistryRevertsWhenOnlyStandardInterface() public {
+        vm.mockCall(
+            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
+        );
+        mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
+
+        vm.expectRevert(ErrorsLib.InvalidIdentityRegistry.selector);
+        token.setIdentityRegistry(newIdentityRegistry);
+
+        assertEq(address(token.identityRegistry()), identityRegistry, "rejected registry must not be recorded");
+    }
+
     function testTokenSetIdentityRegistryNominal() public {
         vm.mockCall(
             newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager))
         );
         mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
+        mockSupportsInterface(newIdentityRegistry, type(ITREXRegistry).interfaceId);
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, newIdentityRegistry, 1);
         accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT), address(token), 0);
 

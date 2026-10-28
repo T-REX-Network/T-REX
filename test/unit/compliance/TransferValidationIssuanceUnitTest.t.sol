@@ -5,6 +5,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -372,6 +373,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         expected.toWallet = keccak256(toSat);
         expected.amountMin = 10;
         expected.amountMax = 90;
+        expected.kind = MovementKindLib.CROSS_CHAIN;
         expected.isIssuance = true;
         expected.spender = spender;
         vm.expectCall(module, abi.encodeCall(IModule.allowedAmount, (expected)));
