@@ -105,9 +105,7 @@ abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, A
     function _checkCanCallSelector(bytes4 selector) internal virtual {
         // A batch is authorized by its single-item counterpart, unless the called function has a nonzero
         // role of its own. Taking the own-selector path first keeps scheduled operations working for
-        // functions that are configured. A zero answer is read as "no row", never as `ADMIN_ROLE`, because
-        // every selector without a row also answers zero, and sending those to the admin would lock the
-        // single-item role holders out of every batch.
+        // functions that are configured.
         if (selector == msg.sig || IAccessManager(authority()).getTargetFunctionRole(address(this), msg.sig) != 0) {
             _checkCanCall(_msgSender(), _msgData());
             return;
