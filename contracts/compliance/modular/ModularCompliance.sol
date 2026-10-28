@@ -235,7 +235,7 @@ contract ModularCompliance is
         onlyBoundToken
         returns (bool)
     {
-        _rememberTransferFromSpender(_spender);
+        _transferFromSpender = _spender;
         if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
         return _spenderAllowed(_buildNativeContext(_from, _to, _value));
     }
@@ -404,7 +404,7 @@ contract ModularCompliance is
         IModule.TransferContext memory ctx = TransferContextLib.native(
             address(this), kind, fromIdentity, toIdentity, from, to, value, _transferFromSpenderEnvelope()
         );
-        _forgetTransferFromSpender();
+        _transferFromSpender = address(0);
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         _callAfterTransfer(ctx);
     }
@@ -427,16 +427,6 @@ contract ModularCompliance is
         return TransferContextLib.native(
             address(this), kind, fromIdentity, toIdentity, from, to, value, _transferFromSpenderEnvelope()
         );
-    }
-
-    /// @dev Kept for the rules and trackers of the `transferFrom` the token is about to run.
-    function _rememberTransferFromSpender(address spender) private {
-        _transferFromSpender = spender;
-    }
-
-    /// @dev Called before the trackers run, so a transfer one of them makes is not taken for the spender's.
-    function _forgetTransferFromSpender() private {
-        _transferFromSpender = address(0);
     }
 
     /// @dev {_transferFromSpender} as the ERC-7930 envelope a module reads, empty when no `transferFrom` runs.

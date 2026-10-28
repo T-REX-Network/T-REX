@@ -94,10 +94,11 @@ library WalletKeyLib {
 
         // `tryParseV1` ignores bytes after the address, and they would be the same wallet under another key.
         bool noTrailingBytes = HEADER_LENGTH + chainReference.length + addr.length == envelope.length;
+        // Only an EVM envelope has one standard spelling this library can rebuild and compare against.
+        bool writtenTheStandardWay = chainType != EVM_CHAIN_TYPE || _isCanonicalEvm(envelope);
 
         require(
-            success && noTrailingBytes && (chainType != EVM_CHAIN_TYPE || _isCanonicalEvm(envelope)),
-            ErrorsLib.NonCanonicalInteroperableAddress(envelope)
+            success && noTrailingBytes && writtenTheStandardWay, ErrorsLib.NonCanonicalInteroperableAddress(envelope)
         );
     }
 

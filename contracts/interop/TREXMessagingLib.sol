@@ -196,8 +196,8 @@ library TREXMessagingLib {
 
             bool hasAccount = account.length > 0;
             bool noTrailingBytes = peer.length == ERC7930_V1_FIXED_LENGTH + chainReference.length + account.length;
-            bool isEvmSizedOrNotEvm = chainType != MessageTypesLib.EVM_CHAIN_TYPE || account.length == 20;
-            require(hasAccount && noTrailingBytes && isEvmSizedOrNotEvm, ErrorsLib.InvalidPeer(peer));
+            bool accountFitsItsChain = chainType != MessageTypesLib.EVM_CHAIN_TYPE || account.length == 20;
+            require(hasAccount && noTrailingBytes && accountFitsItsChain, ErrorsLib.InvalidPeer(peer));
 
             bytes32 peerChainKey = _registerChain(s, chainType, chainReference);
             require(peerChainKey == chainKey, ErrorsLib.PeerChainMismatch(chainKey, peerChainKey));
