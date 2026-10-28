@@ -104,5 +104,55 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
         assertEq(token.totalSupply(), amount1 + amount2);
     }
 
-}
+    /// @notice Mapping a batch to `ADMIN_ROLE` does not restrict it: `ADMIN_ROLE` is role zero, which the manager
+    ///         also answers for a selector with no row, so `batchMint` still follows `mint`'s role.
+    function testTokenBatchMintStillFollowsMintWhenMappedToAdminRole() public {
+        address minter = makeAddr("Minter");
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
+        _mapBatchMint(accessManager.ADMIN_ROLE());
 
+        vm.prank(minter);
+        token.batchMint(_oneRecipient(), _oneAmount());
+
+        assertEq(token.balanceOf(user1), mintAmount);
+    }
+
+    /// @notice A batch is restricted through a nonzero role: once `batchMint` has one, a holder of `mint`'s role
+    ///         alone is refused, and a holder of the batch's role is let through.
+    function testTokenBatchMintRestrictedWhenMappedToNonzeroRole() public {
+        address minter = makeAddr("Minter");
+        address batchMinter = makeAddr("BatchMinter");
+        uint64 batchRole = RolesLib.forDomain(1, RolesLib.Role.OWNER);
+        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
+        accessManager.grantRole(batchRole, batchMinter, 0);
+        _mapBatchMint(batchRole);
+
+        address[] memory recipients = _oneRecipient();
+        uint256[] memory amounts = _oneAmount();
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, minter));
+        vm.prank(minter);
+        token.batchMint(recipients, amounts);
+
+        vm.prank(batchMinter);
+        token.batchMint(recipients, amounts);
+
+        assertEq(token.balanceOf(user1), mintAmount);
+    }
+
+    function _mapBatchMint(uint64 roleId) internal {
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = token.batchMint.selector;
+        accessManager.setTargetFunctionRole(address(token), selectors, roleId);
+    }
+
+    function _oneRecipient() internal view returns (address[] memory recipients) {
+        recipients = new address[](1);
+        recipients[0] = user1;
+    }
+
+    function _oneAmount() internal view returns (uint256[] memory amounts) {
+        amounts = new uint256[](1);
+        amounts[0] = mintAmount;
+    }
+
+}

@@ -198,6 +198,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_handleSettlement_Success_WhenALateLegIsReplayed() public {
+        _track();
         uint256 id = _issue();
         _discard(id);
         vm.prank(token);
@@ -214,6 +215,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_handleSettlement_Success_WhenTheChainIsAlreadyPausedOnALateLeg() public {
+        _track();
         uint256 id = _issue();
         _discard(id);
         mc.setIssuancePaused(polygon, true);
@@ -370,6 +372,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     /// @notice A settlement on either end of the issued range is accepted: the bounds are inclusive.
     function test_handleSettlement_Success_WhenTheAmountIsOnABound() public {
+        _track();
         uint256 first = _issue();
         // The first validation reserved its maximum against the sending wallet, so the second can only be
         // issued for what is left of it.
@@ -522,6 +525,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_handleSettlement_Success_WhenTheMintLegLandsFirst() public {
+        _track();
         uint256 id = _issueCrossChain();
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), 0);

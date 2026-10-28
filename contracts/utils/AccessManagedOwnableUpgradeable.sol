@@ -85,24 +85,27 @@ abstract contract AccessManagedOwnableUpgradeable is AccessManagedUpgradeable, A
         return super.authority();
     }
 
-    /// @inheritdoc AccessManagedOwnableBase
-    function setAuthority(address newAuthority)
-        public
-        virtual
-        override(AccessManagedUpgradeable, AccessManagedOwnableBase)
-    {
-        super.setAuthority(newAuthority);
+    /// @dev Every owner change passes here: the initializer and the manager's `updateAuthority`. ERC-173 requires
+    ///      `OwnershipTransferred` on each, including creation, where the previous owner is the zero address.
+    function _setAuthority(address newAuthority) internal virtual override {
+        // `authority()` reads this contract's own storage; the linter mistakes it for an external call.
+        /// forge-lint: disable-next-line(reentrancy-events)
+        emit OwnershipTransferred(authority(), newAuthority);
+        super._setAuthority(newAuthority);
     }
 
     /// @dev Reverts unless the caller may call `selector`. Its own selector gets the full
     ///  `AccessManaged` path, including consuming a scheduled operation; any other selector (a batch
     ///  authorized as its single-item counterpart) gets immediate permission only, because the
     ///  AccessManager schedules by the calldata's own selector.
+    /// @dev A batch can be restricted only through a nonzero role. The AccessManager answers zero both for a
+    ///  selector it has no row for and for one mapped to `ADMIN_ROLE`, which is role zero, so a batch mapped
+    ///  to `ADMIN_ROLE` still follows its single-item function's role. To keep a batch from the holders of
+    ///  that role, map it to any other role.
     function _checkCanCallSelector(bytes4 selector) internal virtual {
-        // A batch is authorized by its single-item counterpart, unless the called function has a role of
-        // its own. Taking the own-selector path first keeps scheduled operations working for functions
-        // that are configured; `getTargetFunctionRole` distinguishes that from the ADMIN_ROLE fallback
-        // an unconfigured selector returns, which must not silently widen access to the admin.
+        // A batch is authorized by its single-item counterpart, unless the called function has a nonzero
+        // role of its own. Taking the own-selector path first keeps scheduled operations working for
+        // functions that are configured.
         if (selector == msg.sig || IAccessManager(authority()).getTargetFunctionRole(address(this), msg.sig) != 0) {
             _checkCanCall(_msgSender(), _msgData());
             return;
