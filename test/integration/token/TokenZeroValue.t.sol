@@ -52,6 +52,15 @@ contract TokenZeroValueTest is TREXSuiteTest {
         _assertNothingMoved();
     }
 
+    /// @notice A forced transfer reports to the compliance through `agentTransferred`, which takes a zero amount
+    ///         like the other notifications, so a zero row cannot revert a whole `batchForcedTransfer`.
+    function test_forcedTransfer_Succeeds_WhenAmountIsZero() public {
+        vm.prank(agent);
+        token.forcedTransfer(alice, bob, 0);
+
+        _assertNothingMoved();
+    }
+
     function _assertNothingMoved() internal view {
         assertEq(token.totalSupply(), 100);
         assertEq(token.balanceOf(alice), 100);
