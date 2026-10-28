@@ -221,6 +221,15 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         token.setPeer(nonEvmChain, chainOnly);
     }
 
+    /// @dev A left-padded EVM account names the same Lite, but a gateway reports 20 bytes, so no message would match.
+    function testSetPeerRevertsOnAnEvmAccountThatIsNotTwentyBytes() public {
+        bytes memory padded = InteroperableAddress.formatV1(evmType, evmRef, abi.encode(makeAddr("OtherLite")));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidPeer.selector, padded));
+        vm.prank(identityManager);
+        token.setPeer(evmChain, padded);
+    }
+
     function testEmptyPeerRestoresTheDefault() public {
         vm.startPrank(identityManager);
         token.setRoute(evmType, evmRef, trustedGateway);

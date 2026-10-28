@@ -5,6 +5,8 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
+import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -355,6 +357,29 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, spender), 1);
+    }
+
+    /// @notice A rule capping the range sees who will execute it, as the spender modules do.
+    function test_requestTransferValidation_Success_RulesAreAskedWithTheNamedSpender() public configured {
+        bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
+        _bind(spender, makeAddr("SpenderIdentity"));
+        address module = _bindAllowedAmountModule();
+
+        IModule.TransferContext memory expected;
+        expected.compliance = address(mc);
+        expected.fromIdentity = aliceIdentity;
+        expected.toIdentity = bobIdentity;
+        expected.fromWallet = keccak256(fromSat);
+        expected.toWallet = keccak256(toSat);
+        expected.amountMin = 10;
+        expected.amountMax = 90;
+        expected.kind = MovementKindLib.CROSS_CHAIN;
+        expected.isIssuance = true;
+        expected.spender = spender;
+        vm.expectCall(module, abi.encodeCall(IModule.allowedAmount, (expected)));
+
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);
     }
 
     /* ----- The reservation ----- */

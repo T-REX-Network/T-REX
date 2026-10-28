@@ -108,6 +108,12 @@ contract ModularCompliance is
 
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    /// @dev The caller of the `transferFrom` the token is running. The ERC-3643 hooks carry no spender, so
+    ///  {canSpenderCall}, which the token asks right before that transfer moves anything, writes it here for
+    ///  the rules and trackers of the same transfer, and {_applyMovement} forgets it. Transient: it never
+    ///  outlives the transaction and takes no storage slot.
+    address private transient _transferFromSpender;
+
     constructor() {
         _disableInitializers();
     }
@@ -224,11 +230,14 @@ contract ModularCompliance is
      *  Every `SPENDER` module must agree. The context is built, and the wallets resolved, only when one is
      *  bound, so a token with no spender policy pays nothing here.
      */
-    function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool) {
+    function canSpenderCall(address _spender, address _from, address _to, uint256 _value)
+        external
+        onlyBoundToken
+        returns (bool)
+    {
+        _transferFromSpender = _spender;
         if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
-        return _spenderAllowed(
-            _buildNativeContext(_from, _to, _value, InteroperableAddress.formatEvmV1(block.chainid, _spender))
-        );
+        return _spenderAllowed(_buildNativeContext(_from, _to, _value));
     }
 
     /**
@@ -369,7 +378,8 @@ contract ModularCompliance is
     }
 
     /// @dev Moves the positions and tells the trackers. One function serves all three hooks: the absent side of
-    ///  a mint or a burn is a zero wallet and stays a zero identity.
+    ///  a mint or a burn is a zero wallet and stays a zero identity. The context carries the kind the token
+    ///  reported and the spender the rules were asked about, with each side's owner settled.
     ///
     ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
@@ -380,6 +390,9 @@ contract ModularCompliance is
     ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
     ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
     ///  the full adjustment.
+    ///
+    ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
+    ///  is not taken for it.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
@@ -390,23 +403,18 @@ contract ModularCompliance is
         if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), adjustment);
         if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -adjustment);
 
-        IModule.TransferContext memory ctx =
-            TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");
+        IModule.TransferContext memory ctx = TransferContextLib.native(
+            address(this), kind, fromIdentity, toIdentity, from, to, value, _transferFromSpenderEnvelope()
+        );
+        _transferFromSpender = address(0);
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         _callAfterTransfer(ctx);
     }
 
     /// @dev Resolves both wallets once, through the registry's native lookup, and builds the context of a
-    ///  native movement. A zero wallet (the mint or burn side) stays a zero identity and a zero key.
+    ///  native movement. A zero wallet (the mint or burn side) stays a zero identity and a zero key. The
+    ///  spender is the caller of the `transferFrom` in progress, empty on any other movement.
     function _buildNativeContext(address from, address to, uint256 value)
-        private
-        view
-        returns (IModule.TransferContext memory)
-    {
-        return _buildNativeContext(from, to, value, "");
-    }
-
-    function _buildNativeContext(address from, address to, uint256 value, bytes memory spender)
         private
         view
         returns (IModule.TransferContext memory)
@@ -418,7 +426,15 @@ contract ModularCompliance is
         if (to != address(0)) toIdentity = address(registry.identity(to));
         // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
         uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
-        return TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, spender);
+        return TransferContextLib.native(
+            address(this), kind, fromIdentity, toIdentity, from, to, value, _transferFromSpenderEnvelope()
+        );
+    }
+
+    /// @dev {_transferFromSpender} as the ERC-7930 envelope a module reads, empty when no `transferFrom` runs.
+    function _transferFromSpenderEnvelope() private view returns (bytes memory) {
+        if (_transferFromSpender == address(0)) return "";
+        return InteroperableAddress.formatEvmV1(block.chainid, _transferFromSpender);
     }
 
     /* ----- What the validation layer needs ----- */

@@ -134,6 +134,19 @@ contract WalletKeyLibUnitTest is Test {
         lib.canonicalKey(padded);
     }
 
+    /// @dev A left-padded address names the same wallet as its 20 bytes; only the 20 bytes key.
+    function test_canonicalKey_RevertWhen_EvmAddressIsPadded() public {
+        bytes memory padded = InteroperableAddress.formatV1(0x0000, hex"2105", abi.encode(wallet));
+        _expectNonCanonical(padded);
+        lib.canonicalKey(padded);
+    }
+
+    function test_canonicalKey_RevertWhen_EvmChainReferenceIsEmpty() public {
+        bytes memory noChain = InteroperableAddress.formatEvmV1(wallet);
+        _expectNonCanonical(noChain);
+        lib.canonicalKey(noChain);
+    }
+
     function test_canonicalKey_ChainZeroFormatsAsALoneZeroByte() public view {
         bytes memory envelope = _evm(0, wallet);
         (, bytes memory chainReference,) = lib.parse(envelope);
@@ -165,9 +178,10 @@ contract WalletKeyLibUnitTest is Test {
         lib.satelliteKey(envelope);
     }
 
+    /// @dev An EVM envelope without an address names no wallet.
     function test_satelliteKey_RevertWhen_ThisChainWithoutAnAddress() public {
         bytes memory envelope = InteroperableAddress.formatEvmV1(block.chainid);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, envelope));
+        _expectNonCanonical(envelope);
         lib.satelliteKey(envelope);
     }
 
@@ -222,9 +236,10 @@ contract WalletKeyLibUnitTest is Test {
         assertEq(unwrapped, address(0));
     }
 
-    function test_isReferenceChain_FalseWithoutAnAddress() public view {
-        (bool onReferenceChain,) = lib.isReferenceChain(InteroperableAddress.formatEvmV1(block.chainid));
-        assertFalse(onReferenceChain);
+    function test_isReferenceChain_RevertWhen_WithoutAnAddress() public {
+        bytes memory envelope = InteroperableAddress.formatEvmV1(block.chainid);
+        _expectNonCanonical(envelope);
+        lib.isReferenceChain(envelope);
     }
 
     function test_isReferenceChain_RevertWhen_PaddedEnvelope() public {

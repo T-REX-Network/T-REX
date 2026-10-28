@@ -352,6 +352,22 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertFalse(issuance);
     }
 
+    /// @notice The trackers are told who executed the validation: the spender it names.
+    function test_handleSettlement_Success_WhenTheContextNamesTheValidationSpender() public {
+        _track();
+        address recorder = _bindAfterTransferModule();
+        bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
+        vm.prank(aliceIdentity);
+        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);
+
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        (,,,,,,,,, bytes memory recorded,) = TrackerOnlyModule(recorder).lastContext();
+        assertEq(recorded, spender);
+        assertEq(mc.validationOf(id).spender, spender);
+    }
+
     /// @notice A settlement always moves the positions, and always tells the trackers. There is no mode in
     ///         which the compliance applies a movement without recording who now owns the tokens.
     function test_handleSettlement_Success_WhenPositionsMoveAndModulesAreTold() public {

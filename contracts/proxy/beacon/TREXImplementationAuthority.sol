@@ -88,7 +88,8 @@ contract TREXImplementationAuthority is ITREXImplementationAuthority, AccessMana
     constructor(address accessManager, Version v0, SuiteImplementations memory impls)
         AccessManagedOwnable(accessManager)
     {
-        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+        // The same line `setAuthority` holds later: an address with no code answers no to every `restricted` call.
+        require(accessManager.code.length != 0, ErrorsLib.AccessManagerNotAContract(accessManager));
 
         _publish(v0, impls);
 
