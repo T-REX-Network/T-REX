@@ -231,48 +231,60 @@ contract LedgerAttributionTest is TREXSuiteTest {
     }
 
     /// @notice No supported path relinks a wallet: bindings are sticky and the registry's storage is fixed at
-    ///         init. Should a wallet ever resolve to another identity, rules and positions follow the same one:
-    ///         the lockup on the new identity refuses alice's transfer, and an agent's burn debits the new
-    ///         identity, which the wallet's balance followed to.
-    function test_relinkedWallet_RulesAndPositionsFollowTheSameIdentity() public {
+    ///         init. Should a funded wallet ever resolve to another identity, the ledger refuses every movement
+    ///         through it rather than move its balance to an identity no rule checked, and the wallet moves again
+    ///         once the registry names the owner the ledger credited.
+    function test_relinkedWallet_RevertWhen_ItHoldsTokens_UntilTheRegistryNamesItsOwnerAgain() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
-        LockedSenderModule lockup = _bindLockup(address(charlieIdentity));
         _resolveAliceTo(charlieIdentity);
+        bytes memory refused =
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity));
 
         vm.prank(alice);
-        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        vm.expectRevert(refused);
         token.transfer(bob, 1);
-        assertEq(lockup.allowedAmount(_contextFrom(charlieIdentity)), 0, "the rule judges the new identity");
 
         vm.prank(agent);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.WalletOwnerChanged(alice, address(aliceIdentity), address(charlieIdentity), BALANCE);
+        vm.expectRevert(refused);
         token.burn(alice, 100);
 
-        assertEq(ledger.ownerOf(alice), address(charlieIdentity), "the ledger followed");
-        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
-        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE - 100, "the burn debited the new identity");
+        vm.prank(agent);
+        vm.expectRevert(refused);
+        token.forcedTransfer(alice, bob, 100);
+
+        assertEq(ledger.ownerOf(alice), address(aliceIdentity), "the ledger kept the credited owner");
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
+
+        vm.clearMockedCalls();
+        assertEq(address(registry.identity(alice)), address(aliceIdentity), "the registry names her owner again");
+        vm.prank(agent);
+        token.burn(alice, 100);
+
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE - 100, "the burn debited the credited owner");
         _assertPositionsRecountTheSupply();
     }
 
-    /// @notice A recovery of a relinked wallet stays within one identity: the lost wallet's balance follows to
-    ///         the identity the registry names, and the recovery moves it between that identity's wallets.
-    function test_relinkedWallet_RecoveryStaysWithinTheNewIdentity() public {
+    /// @notice A recovery is a movement like any other: it cannot carry a funded wallet to the identity the
+    ///         registry now names, since that identity's rules never saw the balance.
+    function test_relinkedWallet_RevertWhen_RecoveredWhileItHoldsTokens() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
         _resolveAliceTo(charlieIdentity);
 
         vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
+        );
         token.recoveryAddress(alice, another, address(charlieIdentity));
 
-        assertEq(token.balanceOf(another), BALANCE);
-        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
-        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE, "one identity before and after");
-        _assertPositionsRecountTheSupply();
+        assertEq(token.balanceOf(alice), BALANCE);
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
     }
 
-    /// @notice A self-transfer as the first movement after a relink moves the wallet's balance, not the balance
-    ///         plus the amount: the wallet's balance did not change, so nothing is added back on either side.
-    function test_transfer_Success_FollowsTheRelink_WhenTheFirstMovementIsASelfTransfer() public {
+    /// @notice A self-transfer as the first movement after a relink is judged on the wallet's balance, not the
+    ///         balance plus the amount: it is refused for holding tokens, and the error names the credited owner.
+    function test_transfer_RevertWhen_TheFirstMovementAfterARelinkIsASelfTransfer() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
         _resolveAliceTo(charlieIdentity);
         // The factory still links alice to her first identity, so the swapped answer is not verified; the token
@@ -280,13 +292,14 @@ contract LedgerAttributionTest is TREXSuiteTest {
         vm.mockCall(address(registry), abi.encodeCall(registry.isVerified, (alice)), abi.encode(true));
 
         vm.prank(alice);
-        vm.expectEmit(address(compliance));
-        emit EventsLib.WalletOwnerChanged(alice, address(aliceIdentity), address(charlieIdentity), BALANCE);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
+        );
         token.transfer(alice, 100);
 
         assertEq(token.balanceOf(alice), BALANCE);
-        assertEq(ledger.positionOf(address(aliceIdentity)), 0);
-        assertEq(ledger.positionOf(address(charlieIdentity)), BALANCE, "the new owner gets the balance only");
+        assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
         _assertPositionsRecountTheSupply();
     }
 

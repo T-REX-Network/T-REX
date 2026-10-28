@@ -773,16 +773,21 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validation.status = next;
     }
 
-    /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its
-    ///  mind. `adjustment` is what this very movement already did to the wallet's balance on the token, so that
-    ///  what moves is what the wallet held before it: `+amount` for a sender the token already debited,
-    ///  `-amount` for a recipient it already credited, zero when the token has not moved yet.
+    /// @dev Who a native wallet's tokens belong to now. An empty wallet follows the registry; a funded one is
+    ///  refused until the registry names the identity the ledger credited again, since a balance changing identity
+    ///  outside a movement is a position no rule ever checked. `adjustment` is what this very movement already did
+    ///  to the wallet's balance on the token, so that what is judged is what the wallet held before it: `+amount`
+    ///  for a sender the token already debited, `-amount` for a recipient it already credited, zero otherwise.
     function _currentOwner(address wallet, address resolved, int256 adjustment) internal returns (address owner) {
         address previous;
         (owner, previous) = _followOwner(wallet, resolved);
         if (previous == address(0)) return owner;
         uint256 balance = uint256(int256(_boundToken().balanceOf(wallet)) + adjustment);
-        _moveWalletBalance(wallet, previous, owner, balance);
+        // A balance never changes identity without the rules seeing it, and the rules only see movements. So a
+        // funded wallet keeps the owner the ledger credited until that owner is named again or the wallet is empty.
+        bool walletIsEmpty = balance == 0;
+        require(walletIsEmpty, ErrorsLib.WalletBoundToAnotherIdentity(wallet, previous));
+        _recordOwnerChange(wallet, previous, owner);
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.
