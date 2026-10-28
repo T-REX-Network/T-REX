@@ -145,8 +145,10 @@ library ErrorsLib {
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
+    /// @dev A supplied ONCHAINID must already be actively bound to the predicted token address in the IdentityFactory.
+    error TokenIdentityNotBound(address token, address suppliedIdentity);
+    /// @dev Only a MANAGEMENT key of a supplied ONCHAINID may deploy a suite with it.
+    error TokenIdentityNotManagedByCaller(address suppliedIdentity, address caller);
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
 
@@ -169,9 +171,11 @@ library ErrorsLib {
 
     // AccessManagerSetupLib Errors
     error NotAssigned(address target);
-    error PendingDelayChange(address account, uint64 role);
-    error PendingRoleGrant(address account, uint64 role);
-    error RoleNotHeld(address account, uint64 role);
+    error SuiteDeployerCannotConfigureFactory();
+    error PlatformRoleCannotBePublic();
+    /// @dev `target`, a storage, a registry or a compliance, is already set up in `domainId`, so a suite of
+    ///      another domain cannot use it.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();
