@@ -371,18 +371,6 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(address(s.tokenY.identityRegistry().identityStorage()), address(s.irs));
     }
 
-    /// @dev A storage that no suite uses yet: its rows are all at `ADMIN_ROLE`, so the admin binds and writes it.
-    function _deployFreshStorage() private returns (IdentityRegistryStorage) {
-        return IdentityRegistryStorage(
-            address(
-                new ERC1967Proxy(
-                    address(identityRegistryStorageImplementation),
-                    abi.encodeCall(IdentityRegistryStorage.init, (address(domainManager), address(0)))
-                )
-            )
-        );
-    }
-
     function test_registry_ShareClassesOfOneFundShareOneTeam() public {
         Token classA = _deployBare("class-a", address(0), address(domainManager));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(classA.identityRegistry().identityStorage()));
@@ -511,10 +499,13 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(domainManager.getTargetFunctionRole(address(tokenX), IERC3643.mint.selector), 0);
     }
 
-    /// @notice A registry belongs to one domain too, so two domains cannot share one. X's registry moves to
-    ///         a fresh storage, which the storage check has nothing to say about, and Y's token adopts X's
-    ///         registry. Commissioning Y is refused on the registry's own rows: X's agents keep their
+    /// @notice A registry belongs to one domain too, so two domains cannot share one. X's token moves to a
+    ///         registry on a fresh storage, which the storage check has nothing to say about, and Y's token
+    ///         adopts X's registry. Commissioning Y is refused on the registry's own rows: X's agents keep their
     ///         registry and Y's agents never get it.
+    /// @dev A registry keeps its storage for life, so the registry on a fresh storage comes from a suite that is
+    ///      never commissioned. Its rows are mapped to X by hand, without its storage's, so that only the
+    ///      registry's row can refuse Y.
     function test_registry_RevertWhen_TheRegistryIsSetUpInAnotherDomain() public {
         Token tokenX = _deployBare("one-reg-x", address(0), address(domainManager));
         Token tokenY = _deployBare("one-reg-y", address(0), address(domainManager));
@@ -523,13 +514,16 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         domainManager.assign(fundX, address(tokenX));
         domainManager.assign(fundY, address(tokenY));
         AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        ITREXRegistry registryX = ITREXRegistry(address(tokenX.identityRegistry()));
+        Token neverCommissioned = _deployBare("one-reg-fresh", address(0), address(domainManager));
+        ITREXRegistry registryX = ITREXRegistry(address(neverCommissioned.identityRegistry()));
 
-        // X's OWNER points X's registry at a never commissioned storage, then Y's token adopts X's registry.
-        IdentityRegistryStorage freshStorage = _deployFreshStorage();
-        freshStorage.bindIdentityRegistry(address(registryX));
-        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.OWNER), address(this), 0);
-        registryX.setIdentityRegistryStorage(address(freshStorage));
+        // X's IDENTITY_MANAGER points X's token, which has no supply, at the registry on a never commissioned
+        // storage, the registry is mapped to X, then Y's token adopts X's registry. `IDENTITY_MANAGER` is handed
+        // out by `SUITE_ADMIN` once X is commissioned.
+        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.SUITE_ADMIN), address(this), 0);
+        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
+        tokenX.setIdentityRegistry(address(registryX));
+        AccessManagerSetupLib.setupTREXRegistryRoles(domainManager, address(registryX), fundX);
         tokenY.setIdentityRegistry(address(registryX));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(registryX), fundX));

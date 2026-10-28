@@ -141,7 +141,8 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
         vm.expectEmit(nextStorage);
         emit IERC173.OwnershipTransferred(address(0), address(accessManager));
         new ERC1967Proxy(
-            storageImplementation, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0)))
+            storageImplementation,
+            abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), address(idFactory)))
         );
     }
 

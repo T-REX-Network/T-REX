@@ -25,7 +25,6 @@
 
 pragma solidity 0.8.30;
 
-import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
@@ -48,12 +47,14 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * registry names nobody, the remembered owner still answers. Satellite wallets resolve through the
  * IdentityFactory only, so they never change owner.
  *
- * One rule decides what happens when a write still cannot be honoured. The compliance's own bookkeeping, the
- * pending amounts it reserves and releases, uses checked arithmetic and reverts: an inconsistency there is a
- * bug in this contract. A position write that finds nobody, a wallet the ledger never credited and the registry
- * does not know, never reverts, because blocking the movement would make the repair harder. The amount is
- * counted in `gap`, signed, so that `sum(positions) + gap == totalSupply` holds regardless, and `fixPosition`
- * lets the owner move it to where it belongs.
+ * Every token has an owner: the registry admits no wallet without an active identity, even with its
+ * eligibility checks disabled, and each native wallet's balance is always counted under its recorded owner.
+ * So `sum(positions) == totalSupply` always holds, and every write uses checked arithmetic: a debit the
+ * position cannot cover is a bug in this contract, and reverts.
+ *
+ * Nothing repairs a position. A debit that reverts means the invariant is broken, so the agent's own calls on
+ * that identity (burn, forced transfer, recovery) revert with it. The fix is a compliance implementation upgrade
+ * through the version manager, not an owner call.
  */
 abstract contract ComplianceLedger is IComplianceLedger {
 
@@ -77,11 +78,6 @@ abstract contract ComplianceLedger is IComplianceLedger {
         return _ledger().ownerOf[wallet];
     }
 
-    /// @inheritdoc IComplianceLedger
-    function positionGap() external view returns (int256) {
-        return _ledger().gap;
-    }
-
     /// @dev Who a native wallet's tokens belong to now, given who the registry names. Records the first owner
     ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody.
     /// @return owner the identity to debit or credit for this wallet
@@ -99,17 +95,11 @@ abstract contract ComplianceLedger is IComplianceLedger {
     /// @dev Moves what `wallet` held from the identity it was credited to onto the one the registry names now.
     function _moveWalletBalance(address wallet, address previous, address owner, uint256 balance) internal {
         if (balance != 0) {
-            _debitPosition(previous, bytes32(uint256(uint160(wallet))), balance);
-            _creditPosition(owner, bytes32(uint256(uint160(wallet))), balance);
+            mapping(address identity => uint256 amount) storage position = _ledger().position;
+            position[previous] -= balance;
+            position[owner] += balance;
         }
         emit EventsLib.WalletOwnerChanged(wallet, previous, owner, balance);
-    }
-
-    /// @dev Moves `amount` of position from one side to the other. A zero side is the gap between the positions and
-    ///  the supply, so this can give tokens that landed on nobody their owner, or take a stale position off an
-    ///  identity a change of owner left too high.
-    function _fixPosition(address from, address to, uint256 amount) internal {
-        ComplianceLedgerLib.fixPosition(from, to, amount);
     }
 
     /// @dev Moves `amount` of position from one identity to the other: one side loses it, the other gains it.
@@ -124,44 +114,9 @@ abstract contract ComplianceLedger is IComplianceLedger {
         uint256 amount
     ) internal {
         if (_isRelocation(fromIdentity, toIdentity)) return;
-        if (fromWallet != bytes32(0)) _debitPosition(fromIdentity, fromWallet, amount);
-        if (toWallet != bytes32(0)) _creditPosition(toIdentity, toWallet, amount);
-    }
-
-    /// @dev Takes `amount` off an identity's position.
-    ///
-    ///  Two things the registry can do leave nothing, or too little, to debit: a wallet that resolves to nobody,
-    ///  and an identity relinked to a wallet after another identity's position was credited for it. Neither
-    ///  reverts, since the cause is outside this contract and blocking a burn or a forced transfer would make
-    ///  the repair harder. What could not be debited leaves the positions over the supply, so it comes off
-    ///  the gap, and the event names it for the owner who will `fixPosition` it.
-    function _debitPosition(address identity, bytes32 wallet, uint256 amount) private {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        if (identity == address(0)) {
-            ledger.gap -= int256(amount);
-            emit EventsLib.PositionUnresolved(wallet, amount);
-            return;
-        }
-        uint256 held = ledger.position[identity];
-        if (held < amount) {
-            ledger.gap -= int256(amount - held);
-            ledger.position[identity] = 0;
-            emit EventsLib.PositionUnderflow(identity, amount - held);
-            return;
-        }
-        ledger.position[identity] = held - amount;
-    }
-
-    /// @dev Adds `amount` to an identity's position. A wallet that resolves to nobody is credited to the gap
-    ///  instead, which leaves the positions short of the supply by exactly that amount.
-    function _creditPosition(address identity, bytes32 wallet, uint256 amount) private {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        if (identity == address(0)) {
-            ledger.gap += int256(amount);
-            emit EventsLib.PositionUnresolved(wallet, amount);
-            return;
-        }
-        ledger.position[identity] += amount;
+        mapping(address identity => uint256 amount) storage position = _ledger().position;
+        if (fromWallet != bytes32(0)) position[fromIdentity] -= amount;
+        if (toWallet != bytes32(0)) position[toIdentity] += amount;
     }
 
     /// @dev Undoes the identities' half of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation
@@ -170,6 +125,7 @@ abstract contract ComplianceLedger is IComplianceLedger {
         ComplianceLedgerLib.Ledger storage ledger = _ledger();
         ledger.pendingOut[fromIdentity] -= amountMax;
         ledger.pendingIn[toIdentity] -= amountMax;
+        ledger.pendingTotal -= amountMax;
     }
 
     /// @dev See {ComplianceLedgerLib-isRelocation}.

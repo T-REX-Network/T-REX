@@ -139,38 +139,6 @@ contract TREXRegistryTest is TREXSuiteTest {
         assertEq(address(registry.identity(bob)), address(bobIdentity));
     }
 
-    /// @notice `setIdentityRegistryStorage` is OWNER-only — non-owner callers are rejected by the
-    ///         AccessManager.
-    function test_identity_setIdentityRegistryStorage_RevertWhen_NotOwner() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        registry.setIdentityRegistryStorage(address(0));
-    }
-
-    /// @notice The owner can swap the identity storage and `IdentityStorageSet` is emitted. The suite's
-    ///         own storage is used, since the replacement must be a real IRS sharing the suite authority.
-    function test_identity_setIdentityRegistryStorage_Success() public {
-        address irs = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectEmit(true, false, false, false);
-        emit IERC3643IdentityRegistry.IdentityStorageSet(irs);
-        registry.setIdentityRegistryStorage(irs);
-
-        assertEq(address(registry.identityStorage()), irs);
-    }
-
-    /// @notice A contract that is not an IRS is refused, so it cannot halt the token at the next transfer.
-    function test_identity_setIdentityRegistryStorage_RevertWhen_NotAnIdentityStorage() public {
-        address before = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.InvalidIdentityRegistryStorage.selector);
-        registry.setIdentityRegistryStorage(address(registry));
-
-        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
-    }
-
     // =============================================================================================
     // Deprecated cross-registry setters
     // =============================================================================================
@@ -203,6 +171,16 @@ contract TREXRegistryTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.setTrustedIssuersRegistry(address(0));
+    }
+
+    /// @notice `setIdentityRegistryStorage` reverts even for the owner, with the suite's own storage: the storage
+    ///         is fixed at init. Changing storage means pointing the token at a new registry.
+    function test_deprecation_setIdentityRegistryStorage_RevertWhen_Owner() public {
+        address irs = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
+        registry.setIdentityRegistryStorage(irs);
     }
 
     /// @notice The registry reports itself for both sibling registries.
@@ -317,7 +295,8 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.disableEligibilityChecks();
     }
 
-    /// @notice Disabling eligibility checks short-circuits `isVerified` to true for every address.
+    /// @notice Disabling eligibility checks skips the claims: a registered wallet without them passes, an address
+    ///         with no identity does not.
     function test_eligibility_disableEligibilityChecks_Success() public {
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false);
@@ -325,6 +304,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.disableEligibilityChecks();
 
         assertTrue(registry.isVerified(charlie));
+        assertFalse(registry.isVerified(another));
     }
 
     /// @notice Disabling twice in a row reverts with `EligibilityChecksDisabledAlready`.
@@ -348,14 +328,14 @@ contract TREXRegistryTest is TREXSuiteTest {
     function test_eligibility_enableEligibilityChecks_Success() public {
         vm.prank(deployer);
         registry.disableEligibilityChecks();
-        assertTrue(registry.isVerified(another));
+        assertTrue(registry.isVerified(charlie));
 
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false);
         emit EventsLib.EligibilityChecksEnabled();
         registry.enableEligibilityChecks();
 
-        assertFalse(registry.isVerified(another));
+        assertFalse(registry.isVerified(charlie), "charlie holds no claim for the token's topic");
     }
 
     /// @notice Enabling when already enabled reverts with `EligibilityChecksEnabledAlready`.
