@@ -2,14 +2,18 @@
 pragma solidity 0.8.30;
 
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
+import { Token } from "contracts/token/Token.sol";
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { Countries } from "test/integration/helpers/Countries.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import {
@@ -20,6 +24,17 @@ import {
     TrackerOnlyModule,
     UndeclaredRuleModule
 } from "test/integration/mocks/CapabilityModules.sol";
+
+/// @dev Pulls a holder's tokens with `transferFrom` and sends them on with a plain `transfer` in one call, so
+///      both movements share one transaction and its transient storage.
+contract PullThenSend {
+
+    function pullThenSend(Token token, address holder, address recipient, uint256 amount) external {
+        token.transferFrom(holder, address(this), amount);
+        token.transfer(recipient, amount);
+    }
+
+}
 
 /// @dev The point of the whole type design: a module is reached for the types it named and for no other.
 ///      Every test here asserts the negative as well as the positive.
@@ -323,8 +338,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         token.transfer(bob, 100);
     }
 
-    /// @notice The trackers are told who called `transferFrom`, and a direct transfer after it carries no
-    ///         spender: the compliance forgets it once the transfer is recorded.
+    /// @notice The trackers are told who called `transferFrom`, and a direct transfer in a later transaction
+    ///         carries no spender.
     function test_transferFrom_Success_WhenTrackersSeeTheSpender() public {
         vm.prank(alice);
         token.approve(charlie, 100);
@@ -335,6 +350,23 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
         vm.prank(alice);
         token.transfer(bob, 100);
+        assertEq(_lastSpender(), "");
+    }
+
+    /// @notice A plain transfer right after a `transferFrom` in the same transaction carries no spender: the
+    ///         compliance forgets it once the `transferFrom` is recorded. Each call a test makes is its own
+    ///         transaction, which clears transient storage, so one contract makes both movements here.
+    function test_transferFrom_Success_WhenATransferInTheSameTransactionCarriesNoSpender() public {
+        PullThenSend relay = new PullThenSend();
+        IIdentity relayIdentity = _deployIdentity(address(relay), "relay");
+        IERC3643IdentityRegistry identityRegistry = token.identityRegistry();
+        vm.prank(agent);
+        identityRegistry.registerIdentity(address(relay), relayIdentity, Countries.SPAIN);
+        vm.prank(alice);
+        token.approve(address(relay), 100);
+
+        relay.pullThenSend(token, alice, bob, 100);
+
         assertEq(_lastSpender(), "");
     }
 
