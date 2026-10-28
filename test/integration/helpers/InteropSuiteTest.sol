@@ -60,7 +60,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         envelope = _linkSatelliteWallet(identity, chainId, signer);
         vm.startPrank(agent);
         token.mint(holder, amount);
-        TokenLedgerHarness(address(token)).delegateOut(holder, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerDelegateOut(holder, envelope, amount);
         vm.stopPrank();
     }
 
@@ -170,14 +170,12 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return _settlement(validationId, "", to, amount);
     }
 
-    function _burnProof(uint256 chainId, address burned, uint256 amount, address nativeWallet)
+    function _burnProof(uint256 recallId, bytes memory burnedWallet, uint256 amount)
         internal
         pure
         returns (MessageTypesLib.BurnProof memory)
     {
-        return MessageTypesLib.BurnProof({
-            burnedWallet: InteroperableAddress.formatEvmV1(chainId, burned), amount: amount, nativeWallet: nativeWallet
-        });
+        return MessageTypesLib.BurnProof({ recallId: recallId, burnedWallet: burnedWallet, amount: amount });
     }
 
 }
