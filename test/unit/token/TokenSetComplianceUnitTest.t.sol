@@ -5,6 +5,8 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
+import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -33,8 +35,10 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         // same AccessManager authority as the Token, so the mock advertises the suite's AccessManager.
         vm.mockCall(newCompliance, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
 
-        // setCompliance also requires the target to advertise IERC3643Compliance via ERC-165.
+        // setCompliance also requires the target to advertise, via ERC-165, every interface the token calls.
         mockSupportsInterface(newCompliance, type(IERC3643Compliance).interfaceId);
+        mockSupportsInterface(newCompliance, type(IModularCompliance).interfaceId);
+        mockSupportsInterface(newCompliance, type(ISettlementHandler).interfaceId);
     }
 
     function testTokenSetComplianceRevertsWhenUnauthorized(address caller) public {
@@ -80,6 +84,40 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
 
         vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
         token.setCompliance(wrongType);
+
+        assertEq(address(token.compliance()), compliance, "rejected compliance must not be recorded");
+    }
+
+    /// @notice A compliance with only the standard interface is refused: the token calls `canSpenderCall` on
+    ///  every `transferFrom` and `handleSettlement` on every settlement delivery, and those would revert.
+    function testTokenSetComplianceRevertsWhenOnlyStandardInterface() public {
+        address standardOnly = makeAddr("StandardOnlyCompliance");
+        vm.mockCall(standardOnly, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(
+            standardOnly, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(0))
+        );
+        vm.mockCall(standardOnly, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector, address(token)), "");
+        mockSupportsInterface(standardOnly, type(IERC3643Compliance).interfaceId);
+
+        vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
+        token.setCompliance(standardOnly);
+
+        assertEq(address(token.compliance()), compliance, "rejected compliance must not be recorded");
+    }
+
+    /// @notice A compliance that is modular but cannot receive settlements is refused as well.
+    function testTokenSetComplianceRevertsWhenNoSettlementHandler() public {
+        address noSettlement = makeAddr("NoSettlementCompliance");
+        vm.mockCall(noSettlement, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(
+            noSettlement, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(0))
+        );
+        vm.mockCall(noSettlement, abi.encodeWithSelector(IERC3643Compliance.bindToken.selector, address(token)), "");
+        mockSupportsInterface(noSettlement, type(IERC3643Compliance).interfaceId);
+        mockSupportsInterface(noSettlement, type(IModularCompliance).interfaceId);
+
+        vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
+        token.setCompliance(noSettlement);
 
         assertEq(address(token.compliance()), compliance, "rejected compliance must not be recorded");
     }

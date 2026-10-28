@@ -107,6 +107,35 @@ contract StuckValidationTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
     }
 
+    /// @notice A validation issued with a zero minimum may burn nothing. That burn held nothing in transit, so the
+    ///         resolution has nothing to give back, and still releases the reservations and ends in `Resolved`.
+    function test_resolveStuckValidation_Success_WhenTheBurnMovedNothing() public {
+        uint256 zeroMinimum = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 0, 100);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(zeroMinimum, token, aliceSat, 0)));
+        assertEq(token.inTransitOf(zeroMinimum), 0, "a burn of nothing holds nothing");
+
+        vm.warp(resolvableAt + 1);
+        vm.expectEmit(address(boundCompliance));
+        emit EventsLib.ValidationResolved(zeroMinimum, 0);
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(zeroMinimum);
+
+        assertEq(uint8(boundCompliance.statusOf(zeroMinimum)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "nothing left the wallet");
+        assertEq(token.reservedOf(aliceSat), 100, "only the first validation still reserves the wallet");
+        assertEq(
+            IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
+            100,
+            "only the first validation is pending"
+        );
+        assertEq(
+            IComplianceLedger(address(boundCompliance)).pendingOutOf(address(aliceIdentity)),
+            100,
+            "only the first validation is pending"
+        );
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "the burn chain owes nothing");
+    }
+
     /* ----- The mint leg landed and the burn never came ----- */
 
     /// @notice Nothing on this chain can be returned, so the chain that owes the burn stops being issued to and

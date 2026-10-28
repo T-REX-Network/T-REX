@@ -15,7 +15,7 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.delegateOut(user1, satellite1, 60);
+        ledger.ledgerDelegateOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
