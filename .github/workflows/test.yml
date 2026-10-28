@@ -49,6 +49,8 @@ jobs:
         run: forge test
         id: test
 
+      # Coverage builds without the optimizer, and OpenZeppelin's P256 verifier then runs out of stack.
+      # The WebAuthn issuer test deploys that verifier, so coverage skips it; `forge test` above still runs it.
       - name: Run coverage
-        run: forge coverage --no-match-coverage "(test|dependencies|scripts|vendor)"
+        run: forge coverage --no-match-coverage "(test|dependencies|scripts|vendor)" --skip HeaviestHonestClaimIssuer
         id: coverage
