@@ -135,6 +135,11 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         _details = new EligibilityCheckDetails[](topicsCount);
         for (uint256 claimTopic; claimTopic < topicsCount; claimTopic++) {
             uint256 topic = requiredClaimTopics[claimTopic];
+            // Every row names its topic, with no issuer and `pass` false until a trusted issuer's claim matches.
+            _details[claimTopic].topic = topic;
+            // A wallet with no identity holds no claim, and asking the zero address for one would revert: its
+            // topics stay not found, as `isVerified` refuses the wallet.
+            if (address(identity) == address(0)) continue;
             address[] memory trustedIssuers = tokenIssuersRegistry.getTrustedIssuersForClaimTopic(topic);
 
             for (uint256 i; i < trustedIssuers.length; i++) {
@@ -143,6 +148,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
                     _details[claimTopic] =
                         EligibilityCheckDetails({ issuer: IClaimIssuer(trustedIssuers[i]), topic: topic, pass: pass });
                 }
+                // `isVerified` accepts a topic on its first valid claim, so a later issuer must not overwrite it.
+                if (pass) break;
             }
         }
     }
@@ -233,8 +240,19 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         // others would report a pass they never gave.
         address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
         IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
+        // A zero wallet is the missing side of a mint or a burn, not a wallet without an identity.
+        // The compliance refuses a sender with no identity before asking any rule, so every rule is reported as
+        // allowing nothing and as failing, a zero amount included. A recipient with no identity is refused by the
+        // registry instead, which `getTransferStatus` reports as eligibility.
+        bool senderHasNoIdentity = _from != address(0) && ctx.fromIdentity == address(0);
+
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
+            if (senderHasNoIdentity) {
+                _details[i] =
+                    ComplianceCheckDetails({ moduleName: IModule(rules[i]).name(), allowedAmount: 0, pass: false });
+                continue;
+            }
             uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
             _details[i] = ComplianceCheckDetails({
                 moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed

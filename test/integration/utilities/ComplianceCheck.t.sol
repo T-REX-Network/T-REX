@@ -147,4 +147,53 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertEq(keccak256(bytes(results[0].moduleName)), keccak256(bytes("TestModule")));
     }
 
+    /// @notice A sender that resolves to no identity is refused by the compliance while a rule is bound, and the
+    ///         preview agrees instead of reporting what the rule alone would allow.
+    function test_getTransferDetails_ReportsNoPass_WhenTheSenderHasNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), stranger, bob, 100);
+
+        assertEq(results.length, 1);
+        assertEq(results[0].allowedAmount, 0);
+        assertFalse(results[0].pass);
+        assertFalse(compliance.canTransfer(stranger, bob, 100), "and the compliance agrees");
+    }
+
+    /// @notice A zero amount from a sender with no identity is refused too: the compliance refuses it before any
+    ///         rule, so the preview cannot pass it on `0 <= 0`.
+    function test_getTransferDetails_ReportsNoPass_WhenAZeroAmountLeavesAWalletWithNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), stranger, bob, 0);
+
+        assertEq(results.length, 1);
+        assertEq(results[0].allowedAmount, 0);
+        assertFalse(results[0].pass);
+        assertFalse(compliance.canTransfer(stranger, bob, 0), "and the compliance agrees");
+    }
+
+    /// @notice A recipient with no identity is the registry's to refuse, not the compliance's, so the rule rows
+    ///         report what the compliance answers.
+    function test_getTransferDetails_MatchesTheCompliance_WhenTheRecipientHasNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), alice, stranger, 100);
+
+        assertEq(results.length, 1);
+        assertEq(results[0].pass, compliance.canTransfer(alice, stranger, 100));
+    }
+
 }

@@ -69,6 +69,7 @@ import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IERC3643ClaimTopicsRegistry } from "../ERC-3643/IERC3643ClaimTopicsRegistry.sol";
+import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
@@ -188,21 +189,22 @@ library AccessManagerSetupLib {
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](13);
+        table = new SelectorRole[](14);
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.forceRemoveModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
         // {_requireFreshOrInDomain} reads this row to tell which domain a compliance is in.
         table[3] = SelectorRole(ModularCompliance.addModule.selector, RolesLib.Role.OWNER);
         table[4] = SelectorRole(ModularCompliance.callModuleFunction.selector, RolesLib.Role.OWNER);
-        table[5] = SelectorRole(RolesLib.BIND_UNBIND_TOKEN, RolesLib.Role.OWNER);
-        table[6] = SelectorRole(ModularCompliance.resyncModuleTypes.selector, RolesLib.Role.OWNER);
-        table[7] = SelectorRole(ModularCompliance.setDefaultValidityWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[8] = SelectorRole(ModularCompliance.setReconciliationWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[9] = SelectorRole(ModularCompliance.setIssuancePaused.selector, RolesLib.Role.COMPLIANCE_MANAGER);
-        table[10] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
-        table[11] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
-        table[12] = SelectorRole(ModularCompliance.resolveStuckValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
+        table[5] = SelectorRole(IERC3643Compliance.bindToken.selector, RolesLib.Role.OWNER);
+        table[6] = SelectorRole(IERC3643Compliance.unbindToken.selector, RolesLib.Role.OWNER);
+        table[7] = SelectorRole(ModularCompliance.resyncModuleTypes.selector, RolesLib.Role.OWNER);
+        table[8] = SelectorRole(ModularCompliance.setDefaultValidityWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[9] = SelectorRole(ModularCompliance.setReconciliationWindow.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[10] = SelectorRole(ModularCompliance.setIssuancePaused.selector, RolesLib.Role.COMPLIANCE_MANAGER);
+        table[11] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
+        table[12] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
+        table[13] = SelectorRole(ModularCompliance.resolveStuckValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {
