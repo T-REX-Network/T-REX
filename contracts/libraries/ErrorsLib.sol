@@ -173,15 +173,14 @@ library ErrorsLib {
     // IdentityRegistry Errors
     error EligibilityChecksDisabledAlready();
     error EligibilityChecksEnabledAlready();
-    error InvalidIdentityRegistryStorage();
-    /// @dev The identity registry storage does not list this registry in its bound set.
-    error RegistryNotBoundToStorage();
 
     // IdentityRegistryStorage Errors
     error AddressAlreadyStored();
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
+    /// @dev The registry resolves through another IdentityFactory than the one the storage was initialised with.
+    error IdentityFactoryMismatch(address expected, address actual);
     // Same names as the ONCHAINID IdentityFactory errors, but keyed by address.
     /// @dev The wallet is bound to another identity.
     error WalletBoundToAnotherIdentity(address wallet, address boundIdentity);

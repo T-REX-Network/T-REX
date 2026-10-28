@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -219,7 +220,9 @@ contract LedgerAttributionTest is TREXSuiteTest {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
 
         vm.prank(agent);
-        vm.expectRevert(ErrorsLib.AddressAlreadyStored.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
+        );
         registry.registerIdentity(alice, charlieIdentity, 0);
 
         vm.prank(agent);
@@ -237,10 +240,11 @@ contract LedgerAttributionTest is TREXSuiteTest {
         assertEq(ledger.positionOf(address(aliceIdentity)), BALANCE);
     }
 
-    /// @notice Registry writes never relink a wallet, but swapping the registry's storage can. Rules and positions
-    ///         then follow the same identity: the lockup on the new identity refuses alice's transfer, and an
-    ///         agent's burn debits the new identity, which the wallet's balance followed to.
-    function test_storageSwap_RulesAndPositionsFollowTheSameIdentity() public {
+    /// @notice No supported path relinks a wallet: bindings are sticky and the registry's storage is fixed at
+    ///         init. Should a wallet ever resolve to another identity, rules and positions follow the same one:
+    ///         the lockup on the new identity refuses alice's transfer, and an agent's burn debits the new
+    ///         identity, which the wallet's balance followed to.
+    function test_relinkedWallet_RulesAndPositionsFollowTheSameIdentity() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
         LockedSenderModule lockup = _bindLockup(address(charlieIdentity));
         _resolveAliceTo(charlieIdentity);
@@ -262,9 +266,9 @@ contract LedgerAttributionTest is TREXSuiteTest {
         _assertPositionsPlusGapRecountTheSupply();
     }
 
-    /// @notice A recovery after a storage swap stays within one identity: the lost wallet's balance follows to
+    /// @notice A recovery of a relinked wallet stays within one identity: the lost wallet's balance follows to
     ///         the identity the registry names, and the recovery moves it between that identity's wallets.
-    function test_storageSwap_RecoveryStaysWithinTheNewIdentity() public {
+    function test_relinkedWallet_RecoveryStaysWithinTheNewIdentity() public {
         IComplianceLedger ledger = IComplianceLedger(address(compliance));
         _resolveAliceTo(charlieIdentity);
 
@@ -315,18 +319,26 @@ contract LedgerAttributionTest is TREXSuiteTest {
 
     /* ----- Helpers ----- */
 
-    /// @dev Alice keeps no binding anywhere. Bindings are sticky, so no registry write produces this; it stands
-    ///      for the registry's storage being swapped for one that does not know her.
+    /// @dev Alice keeps no binding anywhere. Bindings are sticky and the storage is fixed, so no supported path
+    ///      produces this; the mocks force it.
     function _unlinkAliceEverywhere() private {
         vm.mockCall(
             address(registry.identityStorage()),
             abi.encodeCall(registry.identityStorage().storedIdentity, (alice)),
             abi.encode(address(0))
         );
+        vm.mockCall(
+            address(registry.identityFactory()),
+            abi.encodeCall(
+                registry.identityFactory().getIdentityIncludingRevoked,
+                (InteroperableAddress.formatEvmV1(block.chainid, alice))
+            ),
+            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
+        );
         assertEq(address(registry.identity(alice)), address(0), "alice attributes to nobody");
     }
 
-    /// @dev The registry's storage names `identity` for alice, as a swapped storage would.
+    /// @dev The registry's storage names `identity` for alice, which no supported path produces; the mock forces it.
     function _resolveAliceTo(IIdentity identity) private {
         vm.mockCall(
             address(registry.identityStorage()),

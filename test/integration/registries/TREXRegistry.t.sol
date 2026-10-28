@@ -139,38 +139,6 @@ contract TREXRegistryTest is TREXSuiteTest {
         assertEq(address(registry.identity(bob)), address(bobIdentity));
     }
 
-    /// @notice `setIdentityRegistryStorage` is OWNER-only — non-owner callers are rejected by the
-    ///         AccessManager.
-    function test_identity_setIdentityRegistryStorage_RevertWhen_NotOwner() public {
-        vm.prank(another);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, another));
-        registry.setIdentityRegistryStorage(address(0));
-    }
-
-    /// @notice The owner can swap the identity storage and `IdentityStorageSet` is emitted. The suite's
-    ///         own storage is used, since the replacement must be a real IRS sharing the suite authority.
-    function test_identity_setIdentityRegistryStorage_Success() public {
-        address irs = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectEmit(true, false, false, false);
-        emit IERC3643IdentityRegistry.IdentityStorageSet(irs);
-        registry.setIdentityRegistryStorage(irs);
-
-        assertEq(address(registry.identityStorage()), irs);
-    }
-
-    /// @notice A contract that is not an IRS is refused, so it cannot halt the token at the next transfer.
-    function test_identity_setIdentityRegistryStorage_RevertWhen_NotAnIdentityStorage() public {
-        address before = address(registry.identityStorage());
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.InvalidIdentityRegistryStorage.selector);
-        registry.setIdentityRegistryStorage(address(registry));
-
-        assertEq(address(registry.identityStorage()), before, "rejected storage must not be recorded");
-    }
-
     // =============================================================================================
     // Deprecated cross-registry setters
     // =============================================================================================
@@ -203,6 +171,16 @@ contract TREXRegistryTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.Deprecated.selector);
         registry.setTrustedIssuersRegistry(address(0));
+    }
+
+    /// @notice `setIdentityRegistryStorage` reverts even for the owner, with the suite's own storage: the storage
+    ///         is fixed at init. Changing storage means pointing the token at a new registry.
+    function test_deprecation_setIdentityRegistryStorage_RevertWhen_Owner() public {
+        address irs = address(registry.identityStorage());
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.Deprecated.selector);
+        registry.setIdentityRegistryStorage(irs);
     }
 
     /// @notice The registry reports itself for both sibling registries.
