@@ -520,8 +520,8 @@ All notable changes to this project will be documented in this file.
   transfer makes, and were reported to the compliance as a recovery, which trackers leave out of what they
   count. An agent holding only the recovery role could also map a wallet to any identity through the
   token's own AGENT grant. `TokenRecoveryLib.checkRecovery` now requires every wallet the registry knows to
-  belong to the named identity, and reverts with `RecoveryNotPossible` otherwise. Moving an investor to a new
-  identity is two explicit steps: `updateIdentity` on the lost wallet, then `recoveryAddress`. The v4.2
+  belong to the named identity, and reverts with `RecoveryNotPossible` otherwise. A wallet never changes
+  identity, so moving an investor to a new identity is a forced transfer to a wallet of that identity. The v4.2
   decision that the new wallet need not be a key on the identity is unchanged. `Token`'s size is unchanged.
 - **Recovery requires the new wallet to be verified, as a forced transfer does.** Minting, transfers and
   forced transfers all require the recipient to pass `isVerified`; `recoveryAddress` did not. A wallet revoked

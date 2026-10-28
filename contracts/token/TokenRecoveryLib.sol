@@ -86,8 +86,8 @@ library TokenRecoveryLib {
     /// @dev Recovery moves one investor's tokens between that investor's wallets. Without the lost-wallet check
     ///  an agent could name another identity: the tokens would land in a wallet registered to it, skipping the
     ///  verification a forced transfer requires and reported to the compliance as a recovery, and the registry
-    ///  would map the new wallet through the token's own AGENT grant. To move an investor to a new identity,
-    ///  rebind the lost wallet with `updateIdentity` first, then recover.
+    ///  would map the new wallet through the token's own AGENT grant. A wallet never changes identity. To move an
+    ///  investor to a new identity, register a wallet of that identity and force transfer to it.
     /// @param lostBalance the lost wallet's current balance, read by the token
     function checkRecovery(
         IERC3643IdentityRegistry registry,
