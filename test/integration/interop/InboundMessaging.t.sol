@@ -20,7 +20,6 @@ contract InboundMessagingTest is InteropSuiteTest {
     ERC7786GatewayMock untrustedGateway;
 
     address impostor = makeAddr("Impostor");
-    address holder = makeAddr("Holder");
 
     address compliance;
 
@@ -170,27 +169,40 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /* ----- Burn proof: the recall path ----- */
 
-    /// @dev The proof reaches the recall path with every field intact, and the compliance never sees it.
-    function testBurnProofReachesTheRecallPathWithItsDestinationWalletIntact() public {
-        address burned = makeAddr("BurnedSatelliteWallet");
-        MessageTypesLib.BurnProof memory proof = _burnProof(POLYGON, burned, amount, holder);
-        uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(proof));
+    /// @dev The proof reaches the recall path with every field intact and credits the instructed wallet; the
+    ///      settlement handler never sees it.
+    function testBurnProofReachesTheRecallPathIntact() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 index =
+            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+        uint256 nativeBefore = token.balanceOf(alice);
 
         vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 0);
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.BurnProofReceived(originChain, InteroperableAddress.formatEvmV1(POLYGON, burned), holder, amount);
-
+        emit EventsLib.BurnProofReceived(originChain, recallId, satelliteFrom, 100);
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.RecallSettled(recallId, originChain, 100);
         routedGateway.relay(index);
+
+        assertEq(token.balanceOf(alice), nativeBefore + 100);
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 900);
     }
 
-    function testBurnProofWithNoDestinationWalletIsRefused() public {
-        MessageTypesLib.BurnProof memory proof = _burnProof(POLYGON, makeAddr("Burned"), amount, address(0));
-        uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(proof));
+    /// @dev A proof answering a recall this token never issued is the never-issued emergency: nothing moves and
+    ///      the token pauses itself.
+    function testBurnProofForANeverIssuedRecallHaltsTheToken() public {
+        uint256 index =
+            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(99, satelliteFrom, amount)));
+        uint256 nativeBefore = token.balanceOf(alice);
 
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.ReplayedBurnProof(99, originChain);
         routedGateway.relay(index);
 
-        _assertNothingApplied(routedGateway, index);
+        assertTrue(token.paused());
+        assertEq(token.balanceOf(alice), nativeBefore);
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 1000);
     }
 
     /* ----- Outbound-only types have no inbound handler ----- */
@@ -314,6 +326,96 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         assertTrue(token.paused(), "the emergency halts the token");
         assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
+    }
+
+    /* ----- Zero receive ids: no transport record, deduplicated by what the message carries ----- */
+
+    /// @dev The routed gateway delivering from the token's peer on Polygon without naming the delivery.
+    function _deliverWithZeroReceiveId(bytes memory payload) private {
+        vm.prank(address(routedGateway));
+        token.receiveMessage(bytes32(0), InteroperableAddress.formatEvmV1(POLYGON, address(token)), payload);
+    }
+
+    /// @dev A gateway that names no delivery keeps delivering: a first zero id must not refuse every later one.
+    function testZeroReceiveIdDoesNotBlockLaterMessages() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 nativeBefore = token.balanceOf(alice);
+
+        _deliverWithZeroReceiveId(_settlementPayload());
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount, "the settlement applied");
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "the burn proof applied");
+        assertFalse(token.messageReceived(address(routedGateway), bytes32(0)), "a zero id is never recorded");
+        assertFalse(token.paused());
+    }
+
+    /// @dev A settlement delivered twice under a zero id is refused by its validation's status: applied once, and
+    ///      the second delivery is the replay emergency, as under two distinct ids.
+    function testZeroReceiveIdSettlementReplayIsRefusedByTheValidationStatus() public {
+        _deliverWithZeroReceiveId(_settlementPayload());
+
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(validationId, originChain);
+        _deliverWithZeroReceiveId(_settlementPayload());
+
+        assertTrue(token.paused(), "the emergency halts the token");
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 1000 - amount, "debited once");
+    }
+
+    /// @dev The first leg of a pair delivered twice under a zero id is refused by its validation's status too: the
+    ///      burn is held in transit once, and the second delivery is the replay emergency.
+    function testZeroReceiveIdBurnLegReplayIsRefusedByTheValidationStatus() public {
+        ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
+        _openEvmChain(token, OPTIMISM, address(optimismGateway));
+        bytes memory bobOnOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
+        uint256 pairId = _requestValidation(address(aliceIdentity), satelliteFrom, bobOnOptimism, 1, 100);
+        bytes memory burnLeg = MessageTypesLib.encodeSettlement(_burnLeg(pairId, token, satelliteFrom, 100));
+
+        _deliverWithZeroReceiveId(burnLeg);
+
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(pairId, originChain);
+        _deliverWithZeroReceiveId(burnLeg);
+
+        assertTrue(token.paused(), "the emergency halts the token");
+        assertEq(token.inTransitOf(pairId), 100, "held once");
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 900, "debited once");
+    }
+
+    /// @dev A burn proof delivered twice under a zero id is recognised by the settled proof's hash: credited once,
+    ///      and the second delivery changes nothing.
+    function testZeroReceiveIdBurnProofReplayIsRefusedByTheSettledProof() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        bytes memory proof = MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100));
+        uint256 nativeBefore = token.balanceOf(alice);
+        _deliverWithZeroReceiveId(proof);
+
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.BurnProofDuplicate(recallId, originChain);
+        _deliverWithZeroReceiveId(proof);
+
+        assertFalse(token.paused());
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 900, "debited once");
+    }
+
+    /// @dev A different proof for the recall already settled, under a zero id, is the replay emergency.
+    function testZeroReceiveIdDifferentProofForASettledRecallHaltsTheToken() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 nativeBefore = token.balanceOf(alice);
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.ReplayedBurnProof(recallId, originChain);
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 60)));
+
+        assertTrue(token.paused());
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
     }
 
     /* ----- Envelope refusals ----- */

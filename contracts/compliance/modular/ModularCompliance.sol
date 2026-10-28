@@ -63,9 +63,11 @@
 pragma solidity 0.8.30;
 
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Compliance } from "../../ERC-3643/base/ERC3643Compliance.sol";
 import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
@@ -80,6 +82,7 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
+import { MovementKindLib } from "./MovementKindLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
 import { IModule } from "./modules/IModule.sol";
@@ -114,7 +117,8 @@ contract ModularCompliance is
         address[] calldata modules,
         bytes[] calldata moduleSettings
     ) external initializer {
-        require(tokenAddress != address(0) && accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        // `_bindToken` refuses a zero token with the same error, so only the manager is checked here.
+        require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
         require(modules.length >= moduleSettings.length, ErrorsLib.InvalidCompliancePattern());
 
         __AccessManaged_init(accessManagerAddress);
@@ -268,7 +272,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function discardExpiredValidations(uint256[] calldata validationIds) external restricted {
+    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
+    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
+    function discardExpiredValidations(uint256[] calldata validationIds) external {
         _discardExpiredValidations(validationIds);
     }
 
@@ -287,20 +293,36 @@ contract ModularCompliance is
     ///  claim a fresh compliance during setup), and anyone else needs the role the AccessManager binds to
     ///  `bindToken`, checked the way `restricted` checks it, so an owner granted with a delay schedules the call.
     ///
+    ///  A token claiming the compliance must be one this compliance's AccessManager governs: it has given the
+    ///  token's `setCompliance` a role. The caller writes its own `compliance()` and `authority()`, so neither
+    ///  proves anything; only the manager's admin can configure a target, so any contract with no supply could
+    ///  otherwise bind itself and write positions for any identity through a registry it chose.
+    ///
     ///  Neither door admits a token that already has supply. The ledger keeps every position from the
     ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
     ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
     ///  same; this covers the owner calling here directly.
+    ///
+    ///  Nor does a bind displace a bound token that has supply: its every hook would revert from then on, and
+    ///  no path binds a circulating token back, so its holders would be frozen until an upgrade.
     function _authorizeTokenBinding(address token) internal override {
-        bool tokenClaimsFreshCompliance = _getTokenBound() == address(0) && msg.sender == token;
-        if (!tokenClaimsFreshCompliance) _checkCanCall(_msgSender(), _msgData());
+        address boundToken = _getTokenBound();
+        bool tokenClaimsUnboundCompliance = boundToken == address(0) && msg.sender == token;
+        // A target the manager never configured answers the admin role, 0, for every selector.
+        bool tokenGovernedByThisManager =
+            IAccessManager(authority()).getTargetFunctionRole(token, IERC3643.setCompliance.selector) != 0;
+        bool governedTokenClaimsUnboundCompliance = tokenClaimsUnboundCompliance && tokenGovernedByThisManager;
+        if (!governedTokenClaimsUnboundCompliance) _checkCanCall(msg.sender, _msgData());
         if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
+        require(!_hasSupply(boundToken), ErrorsLib.TokenCirculating());
     }
 
     /// @dev Unbinding does not allow the "first bind" path: only the token itself, or the role bound to
-    ///  `unbindToken`.
+    ///  `unbindToken`. A bound token with supply stays bound, even for the owner: nothing could bind it back, so a
+    ///  detach would only freeze its holders. A compliance that must change under a circulating token is upgraded.
     function _authorizeTokenUnbinding(address token) internal override {
-        if (msg.sender != token) _checkCanCall(_msgSender(), _msgData());
+        if (msg.sender != token) _checkCanCall(msg.sender, _msgData());
+        require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -323,17 +345,30 @@ contract ModularCompliance is
 
     /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
-        _applyMovement(from, to, value);
+        _applyMovement(from, to, value, MovementKindLib.TRANSFER);
     }
 
     /// @dev A mint: no sender, the recipient's position grows.
     function _created(address to, uint256 value) internal override {
-        _applyMovement(address(0), to, value);
+        _applyMovement(address(0), to, value, MovementKindLib.MINT);
     }
 
     /// @dev A burn: no recipient, the sender's position shrinks.
     function _destroyed(address from, uint256 value) internal override {
-        _applyMovement(from, address(0), value);
+        _applyMovement(from, address(0), value, MovementKindLib.BURN);
+    }
+
+    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
+    ///  and no module is told.
+    function syncOwner(address wallet) external onlyBoundToken {
+        _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
+    }
+
+    /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
+    ///  the token's forced, recovery and delegation paths so that the trackers learn what moved the tokens.
+    function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
+        require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
+        _applyMovement(from, to, amount, kind);
     }
 
     /// @dev Moves the positions and tells the trackers. One function serves all three hooks: the absent side of
@@ -341,9 +376,9 @@ contract ModularCompliance is
     ///
     ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
-    ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
+    ///  minus what just arrived. A wallet whose owner changed since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
-    function _applyMovement(address from, address to, uint256 value) private {
+    function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
@@ -351,7 +386,7 @@ contract ModularCompliance is
         if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -int256(value));
 
         IModule.TransferContext memory ctx =
-            TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, "");
+            TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, "");
         _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
         _callAfterTransfer(ctx);
     }
@@ -376,7 +411,9 @@ contract ModularCompliance is
         address toIdentity;
         if (from != address(0)) fromIdentity = address(registry.identity(from));
         if (to != address(0)) toIdentity = address(registry.identity(to));
-        return TransferContextLib.native(address(this), fromIdentity, toIdentity, from, to, value, spender);
+        // Only a transfer or a mint is previewed: a burn asks no rule, and an agent's movement asks none either.
+        uint8 kind = from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
+        return TransferContextLib.native(address(this), kind, fromIdentity, toIdentity, from, to, value, spender);
     }
 
     /* ----- What the validation layer needs ----- */
@@ -473,6 +510,12 @@ contract ModularCompliance is
     /// @dev Forwards `callData` to a bound `_module`. No caller check: wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         ModuleSetLib.callModuleFunction(callData, _module);
+    }
+
+    /// @dev An address with no code has no supply. A compliance is bound to the token's predicted address before
+    ///  the token is deployed, and a spare compliance is prepared by binding a placeholder then unbinding it.
+    function _hasSupply(address token) private view returns (bool) {
+        return token.code.length != 0 && IToken(token).totalSupply() != 0;
     }
 
     function _moduleSet() private pure returns (ModuleSetLib.ModuleSet storage) {

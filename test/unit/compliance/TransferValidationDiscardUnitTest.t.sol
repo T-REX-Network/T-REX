@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
@@ -194,20 +193,37 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingOutOf(aliceId), 0);
     }
 
-    function test_discardExpiredValidations_RevertWhen_CallerIsNotTheKeeper() public {
+    function test_discardExpiredValidations_RevertWhen_NonKeeperBeforeTheSecondWindow() public {
         uint256 id = _issue();
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        uint64 publicAt = uint64(ISSUED_AT + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
+        vm.warp(publicAt);
 
         vm.prank(agentAccount);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agentAccount));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         mc.discardExpiredValidations(_ids(id));
 
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         mc.discardExpiredValidations(_ids(id));
 
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         mc.discardExpiredValidations(_ids(id));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+    }
+
+    function test_discardExpiredValidations_Success_WhenAnyoneAfterTheSecondWindow() public {
+        uint256 id = _issue();
+        vm.warp(ISSUED_AT + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+
+        vm.expectEmit(true, false, false, true, address(mc));
+        emit EventsLib.ValidationDiscarded(id);
+        vm.prank(stranger);
+        mc.discardExpiredValidations(_ids(id));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(mc.pendingInOf(bobId), 0);
+        assertEq(mc.pendingOutOf(aliceId), 0);
     }
 
     function test_discardExpiredValidations_RevertWhen_IdWasNeverIssued() public {

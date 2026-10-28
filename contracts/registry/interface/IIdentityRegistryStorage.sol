@@ -62,13 +62,15 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+
 import { IERC3643IdentityRegistryStorage } from "../../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 
 interface IIdentityRegistryStorage is IERC3643IdentityRegistryStorage {
 
-    /// @notice Returns true when the wallet has an identity stored locally in this IRS,
-    /// ignoring the global identity registry fallback.
-    function isLocallyRegistered(address userAddress) external view returns (bool);
+    /// @notice The status of the wallet in this storage, ignoring the IdentityFactory. `None` if never bound,
+    /// `Active` if bound, `Revoked` after `removeIdentityFromStorage`.
+    function localAccountStatus(address userAddress) external view returns (IIdentityFactory.AccountStatus);
 
     /// @notice Returns true when `identityRegistry` is bound to this IRS.
     function isIdentityRegistryBound(address identityRegistry) external view returns (bool);

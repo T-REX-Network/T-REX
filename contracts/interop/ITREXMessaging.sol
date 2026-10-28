@@ -73,7 +73,7 @@ interface ITREXMessaging {
     event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event BurnProofReceived(
-        bytes32 indexed originChainKey, bytes burnedWallet, address indexed nativeWallet, uint256 amount
+        bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
 
     error ChainNotOpen(bytes32 chainKey);
