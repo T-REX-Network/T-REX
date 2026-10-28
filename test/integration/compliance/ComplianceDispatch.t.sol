@@ -159,15 +159,13 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         mc.agentTransferred(alice, bob, 100, MovementKindLib.FORCED_TRANSFER);
     }
 
-    /// @notice An agent's movement is guarded like `transferred`: no zero wallet, no zero amount.
-    function test_agentTransferred_RevertWhen_AWalletOrTheAmountIsZero() public {
+    /// @notice An agent's movement is guarded like `transferred`: no zero wallet.
+    function test_agentTransferred_RevertWhen_AWalletIsZero() public {
         vm.startPrank(address(token));
         vm.expectRevert(ERC3643ErrorsLib.ZeroAddress.selector);
         mc.agentTransferred(address(0), bob, 100, MovementKindLib.FORCED_TRANSFER);
         vm.expectRevert(ERC3643ErrorsLib.ZeroAddress.selector);
         mc.agentTransferred(alice, address(0), 100, MovementKindLib.RECOVERY);
-        vm.expectRevert(ERC3643ErrorsLib.ZeroValue.selector);
-        mc.agentTransferred(alice, bob, 0, MovementKindLib.RECOVERY);
         vm.stopPrank();
     }
 

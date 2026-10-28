@@ -283,16 +283,13 @@ contract InboundMessagingTest is InteropSuiteTest {
         _assertNothingApplied(routedGateway, index);
     }
 
-    /// @dev The token's own address, but on a chain the issuer never opened: not a peer either.
-    function testTheTokensAddressOnAnUnopenedChainIsNotAPeer() public {
+    /// @dev The token's own address, but on a chain the issuer never opened: a chain with no route accepts
+    ///      no settlement.
+    function testASettlementFromAnUnopenedChainIsRefused() public {
         ERC7786GatewayMock strangerChain = _newTrustedGateway(OPTIMISM);
         uint256 index = _liteSends(strangerChain, token, _settlementPayload());
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.SenderNotPeer.selector, optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(token))
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
         strangerChain.relay(index);
     }
 
