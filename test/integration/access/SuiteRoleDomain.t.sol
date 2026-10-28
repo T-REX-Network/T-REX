@@ -494,7 +494,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         ITREXRegistry registryX = ITREXRegistry(address(neverCommissioned.identityRegistry()));
 
         // X's IDENTITY_MANAGER points X's token, which has no supply, at the registry on a never commissioned
-        // storage, the registry is mapped to X, then Y's token adopts X's registry.
+        // storage, the registry is mapped to X, then Y's token adopts X's registry. `IDENTITY_MANAGER` is handed
+        // out by `SUITE_ADMIN` once X is commissioned.
+        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.SUITE_ADMIN), address(this), 0);
         domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
         tokenX.setIdentityRegistry(address(registryX));
         AccessManagerSetupLib.setupTREXRegistryRoles(domainManager, address(registryX), fundX);
