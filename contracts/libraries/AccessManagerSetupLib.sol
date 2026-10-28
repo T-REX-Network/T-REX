@@ -173,7 +173,7 @@ library AccessManagerSetupLib {
         table[1] = SelectorRole(IdentityRegistryStorage.unbindIdentityRegistry.selector, RolesLib.Role.OWNER);
         // {_requireFreshOrInDomain} reads this row to tell which domain a storage is in.
         table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.Role.IRS_WRITER);
-        table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.IRS_WRITER);
+        table[3] = SelectorRole(IERC3643IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.IRS_WRITER);
         table[4] =
             SelectorRole(IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector, RolesLib.Role.IRS_WRITER);
     }

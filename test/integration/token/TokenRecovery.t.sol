@@ -58,10 +58,10 @@ contract TokenRecoveryTest is TREXSuiteTest {
         token.recoveryAddress(bob, another, address(bobIdentity));
     }
 
-    /// @notice Should still recover when the lost wallet is no longer locally registered but is known
-    /// globally through the IdFactory fallback — the global fallback makes the identity resolvable.
-    function test_recoveryAddress_Success_WhenLostWalletOnlyGloballyRegistered() public {
-        // Delete bob from the local identity registry. Bob still has a global identity.
+    /// @notice Should still recover when the lost wallet was revoked: a revoked binding keeps its identity, so
+    /// the lost wallet still resolves to its investor, and it is not revoked a second time.
+    function test_recoveryAddress_Success_WhenLostWalletWasRevoked() public {
+        // Revoke bob's local binding. Bob keeps his identity.
         vm.prank(agent);
         identityRegistry.deleteIdentity(bob);
 
@@ -128,10 +128,9 @@ contract TokenRecoveryTest is TREXSuiteTest {
         assertTrue(identityRegistry.isLocallyRegistered(another));
     }
 
-    /// @notice The lost wallet's local binding shadowed a different global identity: deleting it during
-    ///         recovery hands the wallet back to that global identity, which the agent must reconcile.
-    function test_recoveryAddress_EmitsIdentityOverrideReleased_WhenLostWalletShadowedAGlobalIdentity() public {
-        address identityStorage = address(identityRegistry.identityStorage());
+    /// @notice The factory links the lost wallet to another identity than the storage does. The wallet may no
+    ///         longer act, and recovery to a fresh wallet of the local identity is the way out.
+    function test_recoveryAddress_Success_WhenLostWalletMismatchesTheFactory() public {
         vm.mockCall(
             address(idFactory),
             abi.encodeWithSelector(
@@ -139,14 +138,14 @@ contract TokenRecoveryTest is TREXSuiteTest {
             ),
             abi.encode(address(charlieIdentity), IIdentityFactory.AccountStatus.Active)
         );
+        assertFalse(identityRegistry.isVerified(bob), "the mismatch already denies the wallet");
 
-        vm.expectEmit(identityStorage);
-        emit EventsLib.IdentityOverrideReleased(bob, bobIdentity, charlieIdentity);
         vm.prank(agent);
         token.recoveryAddress(bob, another, address(bobIdentity));
 
+        assertTrue(identityRegistry.isVerified(another), "the fresh wallet may act");
         assertFalse(identityRegistry.isLocallyRegistered(bob));
-        assertEq(address(identityRegistry.identity(bob)), address(charlieIdentity));
+        assertEq(address(identityRegistry.identity(bob)), address(bobIdentity));
         assertEq(token.balanceOf(another), 500);
     }
 
@@ -309,18 +308,21 @@ contract TokenRecoveryTest is TREXSuiteTest {
         assertEq(address(identityRegistry.identity(another)), address(bobIdentity));
     }
 
-    /// @notice Recovering onto a wallet that already belongs to another identity is a real change of ownership:
-    ///         the lost identity is emptied and the new one carries the balance.
-    function test_recoveryAddress_Success_PositionMovesAcrossIdentities() public {
+    /// @notice Bindings are sticky, so the lost wallet cannot be rebound to another identity. Moving an investor to
+    ///  another identity is a forced transfer to a wallet of that identity, and the position follows.
+    function test_recoveryAddress_MigrationToAnotherIdentity_IsAForcedTransfer() public {
         IComplianceLedger ledger = IComplianceLedger(address(token.compliance()));
         uint256 recovered = token.balanceOf(bob);
         uint256 alicePositionBefore = ledger.positionOf(address(aliceIdentity));
-        _unbindGlobally(bob);
-        vm.prank(agent);
-        identityRegistry.registerIdentity(another, aliceIdentity, 1);
 
         vm.prank(agent);
-        token.recoveryAddress(bob, another, address(aliceIdentity));
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
+        identityRegistry.updateIdentity(bob, aliceIdentity);
+
+        vm.prank(agent);
+        token.forcedTransfer(bob, alice, recovered);
 
         assertEq(ledger.positionOf(address(bobIdentity)), 0, "lost identity not debited");
         assertEq(
