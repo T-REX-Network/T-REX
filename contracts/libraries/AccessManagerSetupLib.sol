@@ -125,8 +125,12 @@ library AccessManagerSetupLib {
         _apply(accessManager, modularCompliance, complianceTable(), domainId);
     }
 
+    /// @dev Each batch has a row of its own, on the role of its single-item function. Without one it is
+    ///      authorized through that function's role with immediate permission only, so an agent granted with
+    ///      an execution delay could not schedule it. To restrict a batch further, map it to a nonzero role:
+    ///      `ADMIN_ROLE` is role zero, which reads as "no row" (see `_checkCanCallSelector`).
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](19);
+        table = new SelectorRole[](25);
         table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.Role.TOKEN_MANAGER);
         table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.Role.TOKEN_MANAGER);
         table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.Role.IDENTITY_MANAGER);
@@ -138,33 +142,38 @@ library AccessManagerSetupLib {
         table[8] = SelectorRole(IToken.instructRecall.selector, RolesLib.Role.AGENT);
         table[9] = SelectorRole(IToken.resend.selector, RolesLib.Role.AGENT);
         table[10] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
-        table[11] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
-        table[12] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[13] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[14] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
-        table[15] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
-        table[16] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
-        table[17] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
-        table[18] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[11] = SelectorRole(IERC3643.batchMint.selector, RolesLib.Role.AGENT_MINTER);
+        table[12] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
+        table[13] = SelectorRole(IERC3643.batchBurn.selector, RolesLib.Role.AGENT_BURNER);
+        table[14] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[15] = SelectorRole(IERC3643.batchFreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[16] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[17] = SelectorRole(IERC3643.batchUnfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[18] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[19] = SelectorRole(IERC3643.batchSetAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[20] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
+        table[21] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[22] = SelectorRole(IERC3643.batchForcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[23] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[24] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](14);
-        table[0] = SelectorRole(IERC3643IdentityRegistry.setIdentityRegistryStorage.selector, RolesLib.Role.OWNER);
-        table[1] = SelectorRole(TREXRegistry.disableEligibilityChecks.selector, RolesLib.Role.OWNER);
-        table[2] = SelectorRole(TREXRegistry.enableEligibilityChecks.selector, RolesLib.Role.OWNER);
-        table[3] = SelectorRole(IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector, RolesLib.Role.OWNER);
-        table[4] = SelectorRole(IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector, RolesLib.Role.OWNER);
-        table[5] = SelectorRole(IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector, RolesLib.Role.OWNER);
-        table[6] = SelectorRole(IERC3643ClaimTopicsRegistry.addClaimTopic.selector, RolesLib.Role.OWNER);
-        table[7] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.Role.OWNER);
-        table[8] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
-        table[9] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        table = new SelectorRole[](13);
+        table[0] = SelectorRole(TREXRegistry.disableEligibilityChecks.selector, RolesLib.Role.OWNER);
+        table[1] = SelectorRole(TREXRegistry.enableEligibilityChecks.selector, RolesLib.Role.OWNER);
+        table[2] = SelectorRole(IERC3643TrustedIssuersRegistry.addTrustedIssuer.selector, RolesLib.Role.OWNER);
+        table[3] = SelectorRole(IERC3643TrustedIssuersRegistry.removeTrustedIssuer.selector, RolesLib.Role.OWNER);
+        table[4] = SelectorRole(IERC3643TrustedIssuersRegistry.updateIssuerClaimTopics.selector, RolesLib.Role.OWNER);
+        table[5] = SelectorRole(IERC3643ClaimTopicsRegistry.addClaimTopic.selector, RolesLib.Role.OWNER);
+        table[6] = SelectorRole(IERC3643ClaimTopicsRegistry.removeClaimTopic.selector, RolesLib.Role.OWNER);
+        table[7] = SelectorRole(TREXRegistry.addClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
+        table[8] = SelectorRole(TREXRegistry.removeClaimTopicForIdentityType.selector, RolesLib.Role.OWNER);
         // {_requireFreshOrInDomain} reads this row to tell which domain a registry is in.
-        table[10] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.Role.AGENT);
-        table[11] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.Role.AGENT);
-        table[12] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.Role.AGENT);
-        table[13] = SelectorRole(IERC3643IdentityRegistry.deleteIdentity.selector, RolesLib.Role.AGENT);
+        table[9] = SelectorRole(IERC3643IdentityRegistry.registerIdentity.selector, RolesLib.Role.AGENT);
+        table[10] = SelectorRole(IERC3643IdentityRegistry.batchRegisterIdentity.selector, RolesLib.Role.AGENT);
+        table[11] = SelectorRole(IERC3643IdentityRegistry.updateIdentity.selector, RolesLib.Role.AGENT);
+        table[12] = SelectorRole(IERC3643IdentityRegistry.deleteIdentity.selector, RolesLib.Role.AGENT);
     }
 
     function storageTable() internal pure returns (SelectorRole[] memory table) {
@@ -179,7 +188,7 @@ library AccessManagerSetupLib {
     }
 
     function complianceTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](14);
+        table = new SelectorRole[](13);
         table[0] = SelectorRole(ModularCompliance.removeModule.selector, RolesLib.Role.OWNER);
         table[1] = SelectorRole(ModularCompliance.forceRemoveModule.selector, RolesLib.Role.OWNER);
         table[2] = SelectorRole(ModularCompliance.addAndSetModule.selector, RolesLib.Role.OWNER);
@@ -194,7 +203,6 @@ library AccessManagerSetupLib {
         table[10] = SelectorRole(ITransferValidation.requestTransferValidation.selector, RolesLib.Role.AGENT);
         table[11] = SelectorRole(ModularCompliance.discardExpiredValidations.selector, RolesLib.Role.VALIDATION_KEEPER);
         table[12] = SelectorRole(ModularCompliance.resolveStuckValidation.selector, RolesLib.Role.VALIDATION_KEEPER);
-        table[13] = SelectorRole(ModularCompliance.fixPosition.selector, RolesLib.Role.OWNER);
     }
 
     function roleAdminTable() internal pure returns (RoleAdmin[] memory table) {

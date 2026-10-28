@@ -164,15 +164,15 @@ contract TREXRegistryIsVerifiedUnitTest is TREXRegistryBaseUnitTest {
         assertTrue(registry.isVerified(another));
     }
 
-    /// @notice The kill switch still admits a revoked wallet: it bypasses the binding check as well.
-    function test_isVerified_ReturnsTrue_WhenWalletIsRevokedAndChecksAreDisabled() public {
+    /// @notice The kill switch does not admit a revoked wallet: it skips the claims, never the binding.
+    function test_isVerified_ReturnsFalse_WhenWalletIsRevokedAndChecksAreDisabled() public {
         vm.prank(address(aliceIdentity));
         idFactory.revokeAccount(InteroperableAddress.formatEvmV1(block.chainid, alice));
         assertFalse(registry.isVerified(alice));
 
         vm.prank(deployer);
         registry.disableEligibilityChecks();
-        assertTrue(registry.isVerified(alice));
+        assertFalse(registry.isVerified(alice));
     }
 
     // ============ Topic / issuer mutations ============
