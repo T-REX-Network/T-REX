@@ -184,10 +184,14 @@ All notable changes to this project will be documented in this file.
   - Storage writes (`addIdentityToStorage`, `modifyStoredIdentity`, `removeIdentityFromStorage`) are
     gated by `IRS_WRITER`, which only registries hold. `IRS_WRITER` stays under `ADMIN_ROLE`, no
     domain administrator can hand it out, so this holds by construction. Agents edit investor
-    records through a registry, never directly, and a storage shared across domains gives the other
-    domain's agents nothing.
+    records through a registry, never directly, and a storage is never shared across domains: one
+    record per wallet serves every registry bound to it, so whoever writes it can admit and revoke any
+    of its holders.
     Binding stays `IRS_BINDER` and unbinding `OWNER`, both in the storage's domain: whoever owns the
-    storage's domain owns its bindings.
+    storage's domain owns its bindings. A registry of another domain bound by hand writes nothing, as
+    it holds `IRS_WRITER` in its own domain only. The isolation is between the domains' roles, not
+    from the manager's admin: every domain of one manager shares its `ADMIN_ROLE`, which can grant
+    `IRS_WRITER` of any domain by hand.
   - `TREXAccessManager` keeps the registry, in its own ERC-7201 slot: `createDomain(name)` returns
     the next id, `assign(domainId, target)` records the domain of a token or a storage,
     `domainOf(target)`, `domainName(id)` and `domainCount()` read it back. Both writers use
@@ -200,36 +204,28 @@ All notable changes to this project will be documented in this file.
     on the T-REX storage, used by commissioning to skip an already bound registry.
      `domainOf` is a registry, not the authorization boundary: authorization is the
     role id on each selector and the grants behind it, and the manager never consults `domainOf`.
-    Commissioning and migration keep the two in step; `assign` alone records the domain, rewrites no
-    selector mapping and revokes nothing. Moving commissioned tokens to other domains is
-    `moveSuitesToDomains(TREXAccessManager, …)`, which assigns the tokens and then runs
-    `migrateSuitesToDomains`: remap the suites, grant the new domains' roles, revoke the old domain's
-    `AGENT`, all in one call. The `IAccessManager` form does the same without the assignment. Re-running `commissionSuite` after a bare reassignment
-    remaps but leaves the old grant in place.
+    Commissioning keeps the two in step; `assign` alone records the domain, rewrites no selector
+    mapping and revokes nothing. Re-running `commissionSuite` after a bare reassignment remaps but
+    leaves the old grant in place.
   - Two tiers. `AccessManagerSetupLib.commissionSuite(manager, token)` reads `domainOf(token)` and
     needs a `TREXAccessManager` (`NotAssigned` if the token is not assigned); it assigns the storage to
-    the token's domain on first use and keeps a storage already assigned where it is, so a storage
-    reused across domains keeps one owner and every registry bound to it writes with that
-    domain's `IRS_WRITER`. `commissionSuite(manager, token, domainId, storageDomainId)` is
-    the pure form and works on any `IAccessManager`: the storage's domain is explicit, so a storage
-    already shared with another domain is passed with the domain it lives in and is not
-    remapped. Every other suite `setup*` function takes a `domainId` and is pure. Commissioning is
-    idempotent: re-running re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps
-    selectors and grants `IRS_WRITER` to the registry, and attaching a registry to a storage is a
-    governance act. A second suite into a domain already administered also needs `AGENT_ADMIN` there
-    for the token's `AGENT` grant; binding to a mapped storage needs `IRS_BINDER` in the storage's
-    domain.
-  - The library keeps no state of its own and validates no preconditions: no markers, no
-    "already configured" checks, no migration preflight. Which suites were configured alike is the
-    operator's record.
-  - `migrateSuitesToDomains(manager, tokens, fromDomainId, toDomainIds, assignments,
-    revocations)` moves suites from one domain into others in one call: grant the new roles, map
-    the domains, revoke the old ones. `RoleAssignment(account, role, domainId)` grants the role
-    in the new domain to an account that holds it in the source one, same execution delay
-    (`RoleNotHeld`, `PendingRoleGrant`, `PendingDelayChange` otherwise); `RoleRevocation(account,
-    role)` revokes it in the source domain, administrative roles last. Storages are not touched. On
-    a `TREXAccessManager`, `assign` the tokens to their new domains as well. Atomicity is the
-    caller's: run it from one transaction, a script broadcasts it as many.
+    the token's domain on first use and keeps a storage already in that domain where it is.
+    `commissionSuite(manager, token, domainId)` is the pure form and works on any `IAccessManager`:
+    the caller names the domain, and the four suite contracts, the storage included, are set up in it.
+    Both forms refuse a storage, a registry or a compliance already set up in another domain
+    (`SuiteAlreadySetUp(target, domainId)`): the domain a contract is in is read from one of its own
+    selector rows, the one that decides who controls it (`addIdentityToStorage`, `registerIdentity`,
+    `addModule`), so neither the manager's domain record nor the caller's `domainId` can move a
+    contract another domain's token relies on, and every registry bound to a storage writes with the
+    storage's own `IRS_WRITER`. Tokens of one domain still share a storage, and a registry. Every other
+    suite `setup*` function takes a `domainId` and is pure. Commissioning is idempotent: re-running
+    re-applies the standard tables. Commissioning needs `ADMIN_ROLE`: it maps selectors and grants
+    `IRS_WRITER` to the registry, and attaching a registry to a storage is a governance act. A second
+    suite into a domain already administered also needs `AGENT_ADMIN` there for the token's `AGENT`
+    grant; binding to a mapped storage needs `IRS_BINDER` in the storage's domain.
+  - The library keeps no state of its own and validates no preconditions beyond the domain of the
+    three contracts a token can share: no markers, no "already configured" checks. Which suites were
+    configured alike is the operator's record.
 - **Upgradeable suite AccessManager** (OZ M-10): `TREXAccessManager` is OpenZeppelin's
   `AccessManagerUpgradeable` behind a beacon proxy, published and upgraded through
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
@@ -548,6 +544,70 @@ All notable changes to this project will be documented in this file.
   nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
   `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
   moved a registry to another storage.
+- **An identity storage belongs to one domain** (OZ H-01). `commissionSuite` used to keep a reused
+  storage in the domain of its first suite and grant the next domain's registry `IRS_WRITER` there, so
+  a storage could serve suites of two domains. The storage holds one record per wallet whichever
+  registry wrote it, so an agent of the second domain could, through their own registry, register a
+  wallet under any holder of the first domain's token, rebind a holder's wallet and move its balance
+  with `identityTransfer`, or revoke it: the isolation the domains promised did not hold.
+  Both forms of `commissionSuite` now refuse a storage of another domain
+  (`SuiteAlreadySetUp(storage, domainId)`): the check reads the storage's own `addIdentityToStorage`
+  row, the one that decides who may write it, so a bare `assign` of the storage or a call of the pure
+  form with another domain cannot move a live storage either. A fresh storage is mapped to the suite's
+  own domain, and `IRS_WRITER` is granted in that domain only; the pure form drops its
+  `storageDomainId` parameter. Tokens of one domain still share a storage. The migration helpers
+  `moveSuitesToDomains` and `migrateSuitesToDomains` are removed: they moved a suite without its
+  storage, which left the same shared storage behind, and they never ran outside tests. With them go
+  `RoleAssignment`, `RoleRevocation` and the errors `RoleNotHeld`, `PendingRoleGrant`,
+  `PendingDelayChange`. Moving a suite between domains is a script if the need appears.
+- **A shared registry or compliance stays in its first domain** (OZ L-28). Commissioning mapped the
+  registry's and the compliance's functions to the token's domain every time, so a second token that
+  shared a registry, commissioned into another domain, moved that registry to the second domain: the
+  first domain's agents lost their own registry, and the second domain's agents could edit the
+  identities every token on it relies on. The same check now covers the three contracts a token can
+  share: `commissionSuite` reads one row of the storage, the registry and the compliance, the row that
+  decides who controls it (`addIdentityToStorage`, `registerIdentity`, `addModule`), lets a fresh
+  contract or one already in the token's domain through, and refuses one set up in another domain with
+  `SuiteAlreadySetUp(target, domainId)`, the error `develop-diff` raises for the same case. Two tokens
+  of one domain still share a registry.
+- **Over-freezing a partly frozen wallet reports the missing balance** (audit N-09). `freezePartialTokens` added
+  the amount to the frozen part under checked math, so a large enough amount reverted with `Panic(0x11)` instead
+  of `ERC20InsufficientBalance`. It now compares the amount with the balance minus the frozen part, which cannot
+  underflow because the frozen part never exceeds the balance.
+- **A trusted issuer that burns its gas no longer blocks verification** (audit L-12). `isVerified` gave each
+  trusted issuer's `isClaimValid` all remaining gas, so an issuer that burned it left 1/64 for the rest of the
+  loop and a holder with a valid claim from another issuer could not be verified. Each call now gets at most
+  `IS_CLAIM_VALID_GAS` (500,000), and a call that runs out reads as an invalid claim. The heaviest honest check
+  measured, an ONCHAINID issuer with a WebAuthn signer verified without the P-256 precompile, needs 314,207.
+  `UtilityChecker.getVerifiedDetails` uses the same cap, so the two still agree.
+- **A trusted issuer that answers nothing no longer validates a claim.** `isVerified` read the issuer's
+  `isClaimValid` answer with `LowLevelCall.staticcallReturn64Bytes`, which reads memory without checking that
+  anything was returned. A call to a wallet, or to a contract that answers nothing, still succeeds, so leftover
+  memory read as `true`: with such an issuer trusted, an identity reporting a claim from it passed `isVerified`.
+  The registry now counts an answer only when it is exactly one word equal to `true`. An issuer that reverts,
+  answers nothing or answers something else is skipped like an invalid claim, never a revert, so one broken
+  issuer cannot halt transfers and another trusted issuer for the same topic can still verify the holder.
+  `addTrustedIssuer` also refuses an issuer without code (`TrustedIssuerHasNoCode`), as an early signal for a
+  wrong address; the check runs at trust time only, so an issuer must be deployed before a suite that trusts
+  it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
+  `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
+  claim that names another issuer as the registry already did, so the two report the same result.
+- **A stuck pair whose burn leg moved nothing resolves** (OZ N-10, #170): a validation issued with a zero minimum
+  may burn 0, which holds nothing in transit, and `resolveStuckValidation` then reverted `NothingInTransit`, leaving
+  the validation and both identities' pending amounts in place for good. Resolution now skips the hold return when
+  the executed amount is 0. Issuance still accepts a zero minimum.
+- **A zero receive id is not recorded** (OZ L-19, #158): ERC-7786 lets a gateway pass `bytes32(0)`, and recording
+  `(gateway, 0)` refused every later message from that gateway with `MessageAlreadyReceived`. A zero id now skips
+  the transport record. Every inbound type keeps its own replay protection: a settlement or a leg delivered again
+  finds its validation already past that leg and halts the token (`ReplayedSettlement`); the proof that settled a
+  recall delivered again changes nothing (`BurnProofDuplicate`), and any other proof for it halts the token
+  (`ReplayedBurnProof`). Nonzero ids are recorded and refused on repeat as before.
+- **A late report for a discarded validation is documented** (OZ L-06, #151): a keeper discard cannot know whether
+  the satellite already executed, so it may release a reservation whose settlement is still in flight. When that
+  report lands, its debit is applied, and a newer validation that reserved the same balance can see its own
+  settlement wait with `InsufficientBridgedBalance` until an inbound credit lands; it stays deliverable. No code
+  changes: `discardExpiredValidations` states the limit, and each chain's reconciliation window should be set above
+  the longest delivery delay of its gateway.
 - **Identity bindings in the registry storage are sticky, as in the ONCHAINID IdentityFactory** (#117).
   The local book let an agent move a wallet to another identity with `updateIdentity`, or delete it and
   register it to someone else, even over a wallet the factory links elsewhere. The factory forbids both.
@@ -621,6 +681,30 @@ All notable changes to this project will be documented in this file.
   and uri to the claim signature), `createIdentityFor` no longer takes a module bundle (modules are
   registered per identity type on the IdentityFactory via `setIdentityTypeModules`), and
   `setIdentityTypePolicy` gained a `singleBinding` flag (ASSET registers as single-binding).
+- **An identity resolves to itself** (ONCHAINID dependency repinned from `edcc9f3` to `4c6d074`, the
+  merge of T-REX-Network/ONCHAINID#97). The registry attributes positions through
+  `getIdentityIncludingRevoked`, which previously answered nothing for an identity's own address, so
+  an identity could not hold the token on that address: `identity()`, `contains()` and `isVerified()`
+  returned the zero identity and a mint or transfer to it reverted with `UnverifiedIdentity`. The
+  factory now answers `(identity, Active)` on every resolution view, so an identity is attributed and
+  admitted on its own address with no local registration, and `getVerifiedDetails` reports it as
+  `Active`. The self-resolution entry is seeded outside the identity's account set, so it can never be
+  revoked; T-REX now pins that, since the attribution depends on it.
+  - The range is 26 commits and carries five more upstream PRs than the fix itself: ONCHAINID #88
+    (`caller` on the observability events), #89 (unused imports and errors removed), #91 (trusted
+    issuers add claims through `addClaim`), #92 (`getIdentity` self-resolution), #93 (deployment
+    tooling) and #97 (the remaining resolution views).
+  - **Event signatures break.** ONCHAINID #88 appends a `caller` (or `deployer` / `executor` /
+    `approver`) argument to the observability events, which changes their topic0: `AccountLinked`,
+    `AccountRevoked`, `IdentityTypePolicySet`, `IdentityTypePolicyRemoved`, `IdentityTypeModulesSet`,
+    `TrustedGatewaySet`, `TrustedVerifierSet`, `BeaconInitialized`, `PendingCrossChainLinkProposed`
+    (also gains `gateway` and `receiveId`), `BeaconUpgraded` (also gains `version`), `ClaimRevoked`,
+    `ClaimAddedTo`, `TopicAdded` / `TopicUpdated` / `TopicRemoved`, `Approved` and `Executed`.
+    `IdentityDeployed` is new. No T-REX contract consumes these, so nothing here changed, but the
+    Identity SDK and any indexer do: a filter built against the old signatures silently stops matching
+    rather than failing. Rebuild those filters when taking this version.
+  - Ripple absorbed here: ONCHAINID folded `addClaimByTrustedIssuer` into `addClaim`, so the test
+    module bundle drops that selector.
 - **`TREXFactory` module plumbing removed**: identity module configuration now belongs to the
   ONCHAINID IdentityFactory, so `setIdentityModules` / `getIdentityModules`, the constructor's
   module parameters, the `IdentityModulesSet` event and the `IdentityModulesLib` library are gone.
@@ -691,6 +775,59 @@ All notable changes to this project will be documented in this file.
   `(address indexed target, bytes4 selector)`. `data` is the full calldata sent to the module
   through `callModuleFunction`; its first 4 bytes are the former `selector`. Only the selector was
   logged, so a module's configuration could not be rebuilt from logs. The event topic changes.
+- **Suite deployment is no longer gated by the role that configures the factory** (#100).
+  `AccessManagerSetupLib.setupTREXFactoryRoles` mapped the five restricted functions of `TREXFactory`
+  to the platform `OWNER` role, so every issuer or tokenization provider allowed to deploy a token
+  could also repoint the factory's implementation authority, identity factory or trusted gateway
+  registry, which every later suite is wired to. The function now takes four role ids chosen by
+  governance: a suite deployer role for `deployTREXSuite` and `deployTREXSuiteIsolated`, and for each setter
+  the role that already owns its subject. `setImplementationAuthority` goes to the version manager role,
+  which decides the code new suites run; `setTrustedGatewayRegistry` to the interop manager role, which
+  decides the bridges new tokens trust; `setIdFactory` to the platform owner role. No role exists only to
+  configure the factory, so nobody can go around the version manager or the interop manager by repointing
+  it. The function refuses the suite deployer role as any setter role, and the manager's `ADMIN_ROLE` as the
+  suite deployer role (`SuiteDeployerCannotConfigureFactory`), and the public role for any of the four
+  (`PlatformRoleCannotBePublic`). A platform picks any id of its manager, including a named platform role
+  through the new `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles
+  do. The `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
+  platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
+  The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
+  `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
+  `OWNER` from them.
+- **A supplied token ONCHAINID must already be bound to the token address** (OZ L-24, #161). With
+  `TokenDetails.ONCHAINID` set, `_deployToken` accepted an IdentityFactory slot that bound nothing to the
+  predicted token address and never bound it either, so any holder of the ASSET role could later bind the live
+  token to an identity of its own, and the token and the IdentityFactory would name different identities.
+  The factory now refuses a supplied identity unless the IdentityFactory already resolves the predicted
+  token address to it: an unbound slot, a revoked one, or one bound to another identity reverts with
+  `TokenIdentityNotBound`. A deployer that supplies the identity creates it first with
+  `IdentityFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)`, holding the role the
+  ASSET policy names, and passes the returned address. The deploy must then come from a MANAGEMENT key of
+  that identity, or it reverts with `TokenIdentityNotManagedByCaller`: binding and deploying are two
+  transactions and the salt is not tied to the caller, so without it another suite deployer could deploy the
+  salt in between with the issuer's identity and its own admin. Leaving `ONCHAINID` at zero is unchanged.
+- **INDIVIDUAL and CORPORATE identity creation stays off the public role** (OZ L-05, #150). The token address
+  of a suite is predictable from the salt, and `createIdentityFor` binds an INDIVIDUAL or CORPORATE identity
+  to any account that is its only MANAGEMENT key without a signature from it. With those types open to
+  `PUBLIC_ROLE`, anyone could bind a predicted token address first and make that salt unusable on the chain.
+  `TREXFactory` now documents that every type that is not single-binding must stay off `PUBLIC_ROLE` for
+  `createIdentityFor` on the IdentityFactory it uses; self-deploy may stay open. The reference policy in the
+  test fixture gates INDIVIDUAL, CORPORATE and CLAIM_ISSUER behind a named platform role. No contract logic
+  changes; proof of account control for third-party bindings belongs to ONCHAINID.
+- **A token claims an unbound compliance only if the compliance's AccessManager governs it** (L-35): the token path
+  of `bindToken` also requires that the compliance's manager gives the token's `setCompliance` a role. Before, any
+  contract with no supply could bind itself and write positions through a registry it chose.
+- **A compliance keeps a bound token that has supply** (L-31): `unbindToken`, and a `bindToken` that would replace
+  the bound token, revert with `TokenCirculating` while the bound token has supply. Detaching it made every mint,
+  burn, transfer, recovery and settlement revert, and no path could bind it back.
+- **`setCompliance` requires every interface the token calls** (L-22): the new compliance must advertise
+  `IModularCompliance` and `ISettlementHandler` through ERC-165, besides `IERC3643Compliance`, or the call reverts
+  with `InvalidCompliance`. A base ERC-3643 compliance was accepted, then every `transferFrom` and settlement
+  delivery reverted, and once tokens were minted the compliance could not be replaced.
+- **`setIdentityRegistry` requires `ITREXRegistry`** (N-06): the new registry must advertise `ITREXRegistry` through
+  ERC-165, besides `IERC3643IdentityRegistry`, or the call reverts with `InvalidIdentityRegistry`. The
+  `SpenderVerificationModule` calls `isWalletVerified` on every `transferFrom`, and the token's recovery and
+  delegation call other T-REX registry methods; a standard-only registry made those revert.
 
 ### Removed
 

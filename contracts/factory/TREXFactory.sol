@@ -62,6 +62,7 @@
 pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IERC734 } from "@onchain-id/solidity/contracts/interface/IERC734.sol";
 import { IdentityTypes } from "@onchain-id/solidity/contracts/libraries/IdentityTypes.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
@@ -88,6 +89,15 @@ import { AccessManagedOwnable } from "../utils/AccessManagedOwnable.sol";
 import { TREXAccessManager } from "../utils/TREXAccessManager.sol";
 import { ITREXFactory } from "./ITREXFactory.sol";
 
+/// @title TREXFactory
+/// @notice Deploys T-REX suites at CREATE3 addresses anyone can compute from the salt before the suite exists.
+/// @dev Deployment requirement on the IdentityFactory this factory uses: INDIVIDUAL and CORPORATE identity
+///      creation for another account (`createIdentityFor`) must never be open to the IdentityFactory
+///      authority's `PUBLIC_ROLE`, and neither may any other type that is not single-binding. Such a type binds
+///      its new identity to any account set as its only MANAGEMENT key, without a signature from that account,
+///      so anyone could bind a predicted token address first. The binding is permanent: the auto-created token
+///      identity and a supplied ONCHAINID both revert on the occupied address, and that salt is lost on the
+///      chain. Self-deploy (`createIdentity`) binds the caller only and may stay open.
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
@@ -441,9 +451,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     }
 
     /// Resolves the OID (caller-supplied or minted via `IIdentityFactory.createIdentityFor` against the
-    /// Token's predicted CREATE3 address) and deploys the Token proxy. A caller-supplied OID is checked
-    /// against the IdentityFactory's binding for that same predicted address, so the suite cannot deploy
-    /// onto an address the factory already resolves to a different identity.
+    /// Token's predicted CREATE3 address) and deploys the Token proxy. A caller-supplied OID must already
+    /// be the IdentityFactory's active binding for that same predicted address: the suite never deploys onto
+    /// an address the factory resolves to a different identity, or to none (unbound or revoked). The deployer binds it first by
+    /// calling `createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys)` on the IdentityFactory
+    /// with the role the ASSET policy names, and passes the returned identity as `ONCHAINID`. The caller of
+    /// the deploy must be a MANAGEMENT key of that identity.
+    /// `predictedToken` is `Create3.computeAddress(bytes20(factory) | keccak256(salt ++ "Token") >> 168, factory)`.
     ///
     /// Minting is gated: the IdentityFactory resolves the role configured for `IdentityTypes.ASSET`
     /// against its own authority, so this factory must hold that role there for the auto-mint path
@@ -470,12 +484,18 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             // The token address is predictable, so anyone allowed to create ASSET identities can
             // bind it to their own identity before this deploy runs. The binding is permanent, and
             // the token would then answer to one identity while the IdentityFactory answers another.
-            // Revoked slots are dead but still occupied, so ask for those too, not just active ones.
-            (address boundIdentity,) = IIdentityFactory(_idFactory)
-                .getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, predictedToken));
+            // An unbound slot is refused too: this factory never binds a supplied identity, so the
+            // slot would stay open for anyone to take once the token is live.
+            // `getIdentity` answers only an active binding, so an unbound, a revoked and a squatted slot all fail.
+            address boundIdentity = IIdentityFactory(_idFactory)
+                .getIdentity(InteroperableAddress.formatEvmV1(block.chainid, predictedToken));
+            require(boundIdentity == oid, ErrorsLib.TokenIdentityNotBound(predictedToken, oid));
+            // Binding and deploying are two transactions and the salt is not tied to the caller, so another
+            // suite deployer could deploy this salt in between with the issuer's identity and its own admin.
+            // Only a MANAGEMENT key of the supplied identity may attach it to a token.
             require(
-                boundIdentity == address(0) || boundIdentity == oid,
-                ErrorsLib.TokenIdentityAlreadyBound(predictedToken, boundIdentity)
+                IERC734(oid).keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), KeyPurposes.MANAGEMENT),
+                ErrorsLib.TokenIdentityNotManagedByCaller(oid, msg.sender)
             );
         }
         return
