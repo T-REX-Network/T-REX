@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Token } from "contracts/token/Token.sol";
+import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
 
 /// @title TokenLedgerHarness
 /// @notice Exposes the token's internal ledger transitions so tests can drive them before any flow references
@@ -19,18 +23,29 @@ contract TokenLedgerHarness is Token {
         _;
     }
 
+    /// @dev The ledger half of `delegateOut` alone: a bridged credit and a native burn, with none of the checks
+    ///  `delegateOut` and `TokenDelegationLib` add (amount, pause, freeze, linked wallets, compliance, instruction).
     function ledgerDelegateOut(address holder, bytes calldata toWallet, uint256 amount)
         external
         restrictedFor(this.mint.selector)
     {
-        _delegateOut(holder, toWallet, amount, 0);
+        require(holder != address(0), ErrorsLib.ZeroAddress());
+        bytes32 toKey = TokenLedgerLib.creditFromNative(holder, toWallet, amount, freeBalanceOf(holder));
+        ERC20Upgradeable._update(holder, address(0), amount);
+
+        emit EventsLib.DelegatedOut(holder, toKey, 0, toWallet, amount);
     }
 
+    /// @dev The ledger half of a recall alone: a bridged debit and a native mint, with none of the checks the burn
+    ///  proof path adds.
     function ledgerRecall(bytes calldata fromWallet, address holder, uint256 amount)
         external
         restrictedFor(this.mint.selector)
     {
-        _recall(fromWallet, holder, amount);
+        bytes32 fromKey = TokenLedgerLib.debitToNative(fromWallet, holder, amount);
+        ERC20Upgradeable._update(address(0), holder, amount);
+
+        emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
     }
 
     function bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId)

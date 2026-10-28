@@ -10,6 +10,9 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 
+/// @notice The ledger half of a delegation, driven through `TokenLedgerHarness.ledgerDelegateOut`: the buckets and
+///         the envelope only. Amount, pause, freeze and compliance checks belong to `Token.delegateOut` and are
+///         covered in `DelegationAndRecall.t.sol`.
 contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
 
     function setUp() public override {

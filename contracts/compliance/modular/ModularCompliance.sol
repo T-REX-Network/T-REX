@@ -63,9 +63,11 @@
 pragma solidity 0.8.30;
 
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Compliance } from "../../ERC-3643/base/ERC3643Compliance.sol";
 import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
@@ -283,34 +285,42 @@ contract ModularCompliance is
             || interfaceId == type(IComplianceLedger).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev An unbound compliance accepts a bind from the token itself, so a token can claim a fresh compliance
-    ///  during setup; the owner may always bind. The ledger keeps every position from the token's first mint and
-    ///  nothing seeds it, so the new token must have no supply, and the token it replaces must be able to leave.
+    /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
+    ///  claim a fresh compliance during setup), and the owner may always bind.
+    ///
+    ///  A token claiming the compliance must be one this compliance's AccessManager governs: it has given the
+    ///  token's `setCompliance` a role. The caller writes its own `compliance()` and `authority()`, so neither
+    ///  proves anything; only the manager's admin can configure a target, so any contract with no supply could
+    ///  otherwise bind itself and write positions for any identity through a registry it chose.
+    ///
+    ///  The ledger keeps every position from the token's first mint and nothing seeds it, so the new token must
+    ///  have no supply, and the token it replaces must be able to leave.
     function _authorizeTokenBinding(address token) internal view override {
-        bool tokenClaimsFreshCompliance = _getTokenBound() == address(0) && msg.sender == token;
-        require(tokenClaimsFreshCompliance || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+        bool tokenClaimsUnboundCompliance = _getTokenBound() == address(0) && msg.sender == token;
+        // A target the manager never configured answers the admin role, 0, for every selector.
+        bool tokenGovernedByThisManager =
+            IAccessManager(authority()).getTargetFunctionRole(token, IERC3643.setCompliance.selector) != 0;
+        require(
+            (tokenClaimsUnboundCompliance && tokenGovernedByThisManager) || _isOwner(msg.sender),
+            ErrorsLib.OnlyOwnerOrTokenCanCall()
+        );
         require(!_hasSupply(token), ErrorsLib.TokenCirculating());
         _requireBoundTokenCanLeave();
     }
 
-    /// @dev Only the token itself or the owner may unbind, and only once the token can leave.
+    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner, and only once
+    ///  the token can leave.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
         _requireBoundTokenCanLeave();
     }
 
-    /// @dev The ledger's positions belong to the bound token's holders, so the token may leave only once it has
-    ///  no supply. An open validation keeps it too: closing one releases its reservation on the bound token.
+    /// @dev The ledger's positions belong to the bound token's holders, and no path binds a circulating token
+    ///  back, so the token may leave only once it has no supply. An open validation keeps it too: closing one
+    ///  releases its reservation on the bound token. A compliance that must change under it is upgraded instead.
     function _requireBoundTokenCanLeave() private view {
         require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
         require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
-    }
-
-    /// @dev A token with no code has no supply. That covers no token at all, and a token still being deployed: the
-    ///  factory binds the compliance to the token's predicted address before the token exists.
-    function _hasSupply(address token) private view returns (bool) {
-        if (token.code.length == 0) return false;
-        return IToken(token).totalSupply() != 0;
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -351,7 +361,7 @@ contract ModularCompliance is
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
+    ///  the token's forced, recovery and delegation paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         require(amount > 0, ErrorsLib.ZeroValue());
@@ -504,6 +514,12 @@ contract ModularCompliance is
     /// @dev Forwards `callData` to a bound `_module`. No caller check: wrappers enforce it.
     function _callModuleFunction(bytes calldata callData, address _module) internal {
         ModuleSetLib.callModuleFunction(callData, _module);
+    }
+
+    /// @dev An address with no code has no supply. A compliance is bound to the token's predicted address before
+    ///  the token is deployed, and a spare compliance is prepared by binding a placeholder then unbinding it.
+    function _hasSupply(address token) private view returns (bool) {
+        return token.code.length != 0 && IToken(token).totalSupply() != 0;
     }
 
     function _isOwner(address caller) internal view returns (bool) {

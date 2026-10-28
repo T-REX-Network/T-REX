@@ -331,6 +331,96 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
     }
 
+    /* ----- Zero receive ids: no transport record, deduplicated by what the message carries ----- */
+
+    /// @dev The routed gateway delivering from the token's peer on Polygon without naming the delivery.
+    function _deliverWithZeroReceiveId(bytes memory payload) private {
+        vm.prank(address(routedGateway));
+        token.receiveMessage(bytes32(0), InteroperableAddress.formatEvmV1(POLYGON, address(token)), payload);
+    }
+
+    /// @dev A gateway that names no delivery keeps delivering: a first zero id must not refuse every later one.
+    function testZeroReceiveIdDoesNotBlockLaterMessages() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 nativeBefore = token.balanceOf(alice);
+
+        _deliverWithZeroReceiveId(_settlementPayload());
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount, "the settlement applied");
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "the burn proof applied");
+        assertFalse(token.messageReceived(address(routedGateway), bytes32(0)), "a zero id is never recorded");
+        assertFalse(token.paused());
+    }
+
+    /// @dev A settlement delivered twice under a zero id is refused by its validation's status: applied once, and
+    ///      the second delivery is the replay emergency, as under two distinct ids.
+    function testZeroReceiveIdSettlementReplayIsRefusedByTheValidationStatus() public {
+        _deliverWithZeroReceiveId(_settlementPayload());
+
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(validationId, originChain);
+        _deliverWithZeroReceiveId(_settlementPayload());
+
+        assertTrue(token.paused(), "the emergency halts the token");
+        assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 1000 - amount, "debited once");
+    }
+
+    /// @dev The first leg of a pair delivered twice under a zero id is refused by its validation's status too: the
+    ///      burn is held in transit once, and the second delivery is the replay emergency.
+    function testZeroReceiveIdBurnLegReplayIsRefusedByTheValidationStatus() public {
+        ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
+        _openEvmChain(token, OPTIMISM, address(optimismGateway));
+        bytes memory bobOnOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
+        uint256 pairId = _requestValidation(address(aliceIdentity), satelliteFrom, bobOnOptimism, 1, 100);
+        bytes memory burnLeg = MessageTypesLib.encodeSettlement(_burnLeg(pairId, token, satelliteFrom, 100));
+
+        _deliverWithZeroReceiveId(burnLeg);
+
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReplayedSettlement(pairId, originChain);
+        _deliverWithZeroReceiveId(burnLeg);
+
+        assertTrue(token.paused(), "the emergency halts the token");
+        assertEq(token.inTransitOf(pairId), 100, "held once");
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 900, "debited once");
+    }
+
+    /// @dev A burn proof delivered twice under a zero id is recognised by the settled proof's hash: credited once,
+    ///      and the second delivery changes nothing.
+    function testZeroReceiveIdBurnProofReplayIsRefusedByTheSettledProof() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        bytes memory proof = MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100));
+        uint256 nativeBefore = token.balanceOf(alice);
+        _deliverWithZeroReceiveId(proof);
+
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.BurnProofDuplicate(recallId, originChain);
+        _deliverWithZeroReceiveId(proof);
+
+        assertFalse(token.paused());
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
+        assertEq(token.bridgedBalanceOf(satelliteFrom), 900, "debited once");
+    }
+
+    /// @dev A different proof for the recall already settled, under a zero id, is the replay emergency.
+    function testZeroReceiveIdDifferentProofForASettledRecallHaltsTheToken() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        uint256 nativeBefore = token.balanceOf(alice);
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+
+        vm.expectEmit(true, true, false, true, address(token));
+        emit EventsLib.ReplayedBurnProof(recallId, originChain);
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 60)));
+
+        assertTrue(token.paused());
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
+    }
+
     /* ----- Envelope refusals ----- */
 
     /// @dev The refusal carries no data, so what is asserted is that it lands before any handler and
