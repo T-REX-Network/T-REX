@@ -34,6 +34,18 @@ contract MessageTypesHarness {
         return MessageTypesLib.decodeBurnProof(body);
     }
 
+    function decodeMintInstruction(bytes calldata body) external pure returns (MessageTypesLib.MintInstruction memory) {
+        return MessageTypesLib.decodeMintInstruction(body);
+    }
+
+    function decodeRecallInstruction(bytes calldata body)
+        external
+        pure
+        returns (MessageTypesLib.RecallInstruction memory)
+    {
+        return MessageTypesLib.decodeRecallInstruction(body);
+    }
+
     function decodeValidation(bytes calldata body) external pure returns (MessageTypesLib.ComplianceValidation memory) {
         return MessageTypesLib.decodeValidation(body);
     }
@@ -156,18 +168,49 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function testBurnProofRoundTrip() public view {
-        MessageTypesLib.BurnProof memory p = MessageTypesLib.BurnProof({
-            burnedWallet: hex"0001000001890114", amount: 9, nativeWallet: address(0xCAFE)
-        });
+        MessageTypesLib.BurnProof memory p =
+            MessageTypesLib.BurnProof({ recallId: 7, burnedWallet: hex"0001000001890114", amount: 9 });
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
             harness.decode(MessageTypesLib.encodeBurnProof(p));
         MessageTypesLib.BurnProof memory back = harness.decodeBurnProof(decodedBody);
 
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BURN_PROOF));
+        assertEq(back.recallId, p.recallId);
         assertEq(back.burnedWallet, p.burnedWallet);
         assertEq(back.amount, p.amount);
-        assertEq(back.nativeWallet, p.nativeWallet);
+    }
+
+    function testMintInstructionRoundTrip() public view {
+        MessageTypesLib.MintInstruction memory i = MessageTypesLib.MintInstruction({
+            delegationId: 4, toWallet: hex"0001000001890114", amount: 12, holder: address(0xBEEF)
+        });
+
+        (MessageTypesLib.Message messageType, bytes memory decodedBody) =
+            harness.decode(MessageTypesLib.encode(MessageTypesLib.Message.MINT_INSTRUCTION, abi.encode(i)));
+        MessageTypesLib.MintInstruction memory back = harness.decodeMintInstruction(decodedBody);
+
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
+        assertEq(back.delegationId, i.delegationId);
+        assertEq(back.toWallet, i.toWallet);
+        assertEq(back.amount, i.amount);
+        assertEq(back.holder, i.holder);
+    }
+
+    function testRecallInstructionRoundTrip() public view {
+        MessageTypesLib.RecallInstruction memory i = MessageTypesLib.RecallInstruction({
+            recallId: 3, wallet: hex"0001000001890114", amount: 40, nativeWallet: address(0xCAFE)
+        });
+
+        (MessageTypesLib.Message messageType, bytes memory decodedBody) =
+            harness.decode(MessageTypesLib.encode(MessageTypesLib.Message.RECALL_INSTRUCTION, abi.encode(i)));
+        MessageTypesLib.RecallInstruction memory back = harness.decodeRecallInstruction(decodedBody);
+
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.RECALL_INSTRUCTION));
+        assertEq(back.recallId, i.recallId);
+        assertEq(back.wallet, i.wallet);
+        assertEq(back.amount, i.amount);
+        assertEq(back.nativeWallet, i.nativeWallet);
     }
 
     function testValidationRoundTrip() public view {
@@ -244,6 +287,12 @@ contract MessageTypesLibUnitTest is Test {
 
         vm.expectRevert();
         harness.decodeBurnProof(abi.encode(uint256(1)));
+
+        vm.expectRevert();
+        harness.decodeMintInstruction(abi.encode(uint256(1)));
+
+        vm.expectRevert();
+        harness.decodeRecallInstruction(hex"deadbeef");
 
         vm.expectRevert();
         harness.decodeValidation(abi.encode(_settlement()));
