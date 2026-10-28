@@ -79,6 +79,7 @@ import { issuerConfirmsClaim } from "../ERC-3643/base/ERC3643IdentityRegistry.so
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
+import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
@@ -128,7 +129,11 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         IERC3643IdentityRegistry identityRegistry = IERC3643(_token).identityRegistry();
         _walletStatus = _walletStatusOf(identityRegistry, _userAddress);
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
-        IIdentity identity = identityRegistry.identity(_userAddress);
+        // The registry keeps naming the identity a revoked wallet belonged to, for attribution, but `isVerified`
+        // reads a revoked wallet as having no identity. The rows follow `isVerified`, so the two never disagree.
+        IIdentity identity;
+        bool walletMayAct = _walletStatus != IIdentityFactory.AccountStatus.Revoked;
+        if (walletMayAct) identity = identityRegistry.identity(_userAddress);
 
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
@@ -179,11 +184,19 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         return topicsRegistry.getClaimTopics();
     }
 
+    /// @dev The same two reads as `TREXRegistry.isVerified`: a wallet the registry agent revoked locally is
+    ///  `Revoked` whatever the IdentityFactory says, then the factory's own status. A plain ERC-3643 registry
+    ///  has neither read and reports `None`.
     function _walletStatusOf(IERC3643IdentityRegistry identityRegistry, address userAddress)
         internal
         view
         returns (IIdentityFactory.AccountStatus)
     {
+        IIdentityRegistryStorage identityStorage = IIdentityRegistryStorage(address(identityRegistry.identityStorage()));
+        try identityStorage.localAccountStatus(userAddress) returns (IIdentityFactory.AccountStatus localStatus) {
+            if (localStatus == IIdentityFactory.AccountStatus.Revoked) return localStatus;
+        } catch { }
+
         try ITREXRegistry(address(identityRegistry)).identityFactory() returns (IIdentityFactory factory) {
             return factory.getAccountStatus(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
         } catch {
