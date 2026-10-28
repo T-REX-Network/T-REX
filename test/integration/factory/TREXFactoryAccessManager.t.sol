@@ -118,8 +118,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
     }
 
     function test_deployTREXSuite_Success_SuppliedIdentityKeysAreUntouched() public {
-        address wallet = makeAddr("issuerWallet");
-        address supplied = address(_deployIdentity(wallet, "supplied-oid"));
+        address supplied = _bindTokenIdentity("supplied-oid", deployer);
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.ONCHAINID = supplied;
 
@@ -128,14 +127,13 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
         Token deployed = Token(trexFactory.getToken("supplied-oid"));
         assertEq(deployed.onchainID(), supplied);
-        assertTrue(_isManager(supplied, wallet));
+        assertTrue(_isManager(supplied, deployer));
         assertFalse(_isManager(supplied, IERC173(address(deployed)).owner()));
         assertFalse(_isManager(supplied, address(trexFactory)));
     }
 
     function test_deployTREXSuiteIsolated_Success_SuppliedIdentityKeysAreUntouched() public {
-        address wallet = makeAddr("issuerWallet");
-        address supplied = address(_deployIdentity(wallet, "supplied-oid-isolated"));
+        address supplied = _bindTokenIdentity("supplied-oid-isolated", deployer);
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.ONCHAINID = supplied;
 
@@ -144,7 +142,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
         Token deployed = Token(trexFactory.getToken("supplied-oid-isolated"));
         assertEq(deployed.onchainID(), supplied);
-        assertTrue(_isManager(supplied, wallet));
+        assertTrue(_isManager(supplied, deployer));
         assertFalse(_isManager(supplied, IERC173(address(deployed)).owner()));
         assertFalse(_isManager(supplied, address(trexFactory)));
     }
