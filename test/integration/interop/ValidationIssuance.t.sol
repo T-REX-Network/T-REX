@@ -3,11 +3,15 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
 /// @dev Issuance through the real messaging layer: which legs leave toward which chain, what they carry, how
@@ -150,6 +154,61 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         _revokeWallet(aliceIdentity, aliceSat);
 
         assertEq(_requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90), 1);
+    }
+
+    /* ----- Eligibility checks disabled ----- */
+
+    function _disableEligibilityChecks() private {
+        vm.prank(deployer);
+        ITREXRegistry(address(token.identityRegistry())).disableEligibilityChecks();
+    }
+
+    /// @notice Disabling the claim checks does not disable the identity: a recipient the registry cannot
+    ///         name gets no validation, native or satellite, so no position can land on identity zero.
+    function test_requestTransferValidation_RevertWhen_ChecksAreDisabledAndTheRecipientHasNoIdentity() public {
+        _disableEligibilityChecks();
+        bytes memory nobodyNative = InteroperableAddress.formatEvmV1(block.chainid, david);
+        bytes memory nobodySatellite = InteroperableAddress.formatEvmV1(POLYGON, david);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, nobodyNative));
+        boundCompliance.requestTransferValidation(aliceSat, nobodyNative, 10, 90, "");
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, nobodySatellite));
+        boundCompliance.requestTransferValidation(aliceSat, nobodySatellite, 10, 90, "");
+    }
+
+    /// @notice With the claim checks disabled a recipient with an identity is issued against the rules, the
+    ///         cap narrows the range, and the settlement lands on that identity, not on identity zero.
+    function test_requestTransferValidation_Success_WhenChecksAreDisabledTheCapStillApplies() public {
+        _disableEligibilityChecks();
+        CappedRecipientModule cappedRule = CappedRecipientModule(
+            address(
+                new ModuleProxy(address(new CappedRecipientModule()), abi.encodeCall(RecordingModule.initialize, ()))
+            )
+        );
+        vm.startPrank(deployer);
+        boundCompliance.addModule(address(cappedRule));
+        boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (50)), address(cappedRule));
+        vm.stopPrank();
+        IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
+
+        uint256 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
+
+        ITransferValidation.Validation memory validation = boundCompliance.validationOf(validationId);
+        assertEq(validation.toIdentity, address(bobIdentity), "issued to bob's identity");
+        assertEq(validation.amountMax, 50, "the cap narrowed the range");
+        assertEq(ledger.pendingInOf(address(bobIdentity)), 50);
+        assertEq(ledger.pendingInOf(address(0)), 0, "nothing promised to identity zero");
+
+        vm.prank(agent);
+        token.unpause();
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, aliceSat, bobSat, 40)));
+
+        assertEq(ledger.positionOf(address(bobIdentity)), 40, "settled on bob's identity");
+        assertEq(ledger.positionOf(address(0)), 0, "nothing on identity zero");
+        assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "the promise is released");
     }
 
     /* ----- Fail closed ----- */
