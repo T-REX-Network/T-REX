@@ -84,20 +84,6 @@ All notable changes to this project will be documented in this file.
     wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
     balance to the new owner before counting the movement (`WalletOwnerChanged`), and a wallet the
     registry no longer names keeps its remembered owner. No owner call, no underflow, no stale position.
-  - What no lookup can place is counted, not floored away. `positionGap()` is signed: a
-    credit that lands on no identity adds to it, a debit that finds no identity or too small a position
-    subtracts from it, so `sum(positions) + positionGap == totalSupply` holds through any registry
-    change. `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` name the
-    amount, and `fixPosition(from, to, amount)`, owner only, moves it, a zero side being the pool.
-    The ledger invariant harness holds the pool to zero under every transition that is not an agent
-    action. One rule now governs the ledger's writes: the compliance's own bookkeeping reverts, a write
-    the registry made impossible is counted for repair.
-  - `refundValidation(validationId)`, keeper only, is the way out of a two-leg validation of which one
-    leg never came, a second reconciliation window past `releaseAt`. Burn leg in: the held amount goes
-    back to the wallet it left through `Token.returnInTransit`, the reservation is released, the status is
-    `Refunded`, and a mint leg arriving afterwards halts the token as a replay would. Mint leg in: the
-    chain that owes the burn is paused for issuance and `ValidationStuck` is emitted, since nothing on
-    this chain can be returned.
   - `TransferContextLib` builds the three shapes a movement takes, `native`, `issuance` and
     `settlement`, each filled where it is built. The ledger no longer knows modules exist.
     `WalletKeyLib.walletId` is the one place a wallet's ledger id is computed. `LedgerAttribution.t.sol` pins the separation of the two reads, and the ledger
@@ -315,7 +301,7 @@ All notable changes to this project will be documented in this file.
     expose the state.
   - **Single author per side.** The bound compliance dispatches validations through
     `Token.dispatchComplianceValidation(chainKey, validationId, body)` with no role of its own;
-    `dispatchMintInstruction` is the agent's fire-and-forget delegation-out. Inbound, the token proves
+    `delegateOut` is the holder's delegation-out, answered by nothing. Inbound, the token proves
     the gateway is trusted, is the one it expects for that message, and that the ERC-7930 author is its
     peer on the origin chain, then forwards a settlement to `ISettlementHandler.handleSettlement` on
     the compliance and a burn proof to its own recall path. `ModularCompliance` implements the handler,
@@ -569,6 +555,12 @@ All notable changes to this project will be documented in this file.
   already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
   set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
   pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **`TREXFactory` and `TrustedGatewayRegistry` refuse an access manager with no code**, as the implementation
+  authority already did: an address with no code answers no to every `restricted` call, so the contract would
+  deploy dead. Both constructors revert with `AccessManagerNotAContract` instead of `ZeroAddress`.
+- **CI builds the ONCHAINID `IdentityFactory` with its own via-IR profile and checks its size.** The size gate
+  listed T-REX contracts only; under T-REX's non-via-IR profile the factory is over EIP-170, so a T-REX script
+  deploying it that way would fail on chain. The gate now shows it under the profile ONCHAINID deploys with.
 - **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
   pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
   peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed
@@ -963,6 +955,9 @@ All notable changes to this project will be documented in this file.
   that identity, or it reverts with `TokenIdentityNotManagedByCaller`: binding and deploying are two
   transactions and the salt is not tied to the caller, so without it another suite deployer could deploy the
   salt in between with the issuer's identity and its own admin. Leaving `ONCHAINID` at zero is unchanged.
+  One consequence to know before pre-binding: the key must be one the deployer holds at deploy time. An
+  identity whose only MANAGEMENT key is the predicted suite AccessManager can never be supplied, since that
+  address has no code before the deploy, and the salt is lost.
 - **INDIVIDUAL and CORPORATE identity creation stays off the public role** (OZ L-05, #150). The token address
   of a suite is predictable from the salt, and `createIdentityFor` binds an INDIVIDUAL or CORPORATE identity
   to any account that is its only MANAGEMENT key without a signature from it. With those types open to

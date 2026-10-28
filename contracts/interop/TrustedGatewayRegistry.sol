@@ -80,7 +80,8 @@ contract TrustedGatewayRegistry is ITrustedGatewayRegistry, AccessManagedOwnable
     mapping(address gateway => bool) private _trusted;
 
     constructor(address accessManager) AccessManagedOwnable(accessManager) {
-        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+        // The same line `setAuthority` holds later: an address with no code answers no to every `restricted` call.
+        require(accessManager.code.length != 0, ErrorsLib.AccessManagerNotAContract(accessManager));
     }
 
     /// @inheritdoc ITrustedGatewayRegistry

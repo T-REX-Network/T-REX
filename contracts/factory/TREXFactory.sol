@@ -97,7 +97,9 @@ import { ITREXFactory } from "./ITREXFactory.sol";
 ///      its new identity to any account set as its only MANAGEMENT key, without a signature from that account,
 ///      so anyone could bind a predicted token address first. The binding is permanent: the auto-created token
 ///      identity and a supplied ONCHAINID both revert on the occupied address, and that salt is lost on the
-///      chain. Self-deploy (`createIdentity`) binds the caller only and may stay open.
+///      chain. Self-deploy (`createIdentity`) binds the caller only and may stay open. The same loss happens to a
+///      deployer who pre-binds the predicted token with the predicted suite AccessManager as the only MANAGEMENT
+///      key: that address has no code before the deploy, so nothing can hold the key and nothing can add one.
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
@@ -125,7 +127,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address trustedGatewayRegistry,
         address accessManager
     ) AccessManagedOwnable(accessManager) {
-        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+        // The same line `setAuthority` holds later: an address with no code answers no to every `restricted` call.
+        require(accessManager.code.length != 0, ErrorsLib.AccessManagerNotAContract(accessManager));
 
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);
