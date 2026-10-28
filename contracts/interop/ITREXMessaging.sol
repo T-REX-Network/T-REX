@@ -116,8 +116,8 @@ interface ITREXMessaging {
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - A non-empty `peer` must be a canonical ERC-7930 v1 address with an account part and no
-    ///   trailing bytes; otherwise reverts with `InvalidPeer`.
+    /// - A non-empty `peer` must be a canonical ERC-7930 v1 address with an account part, 20 bytes on EVM,
+    ///   and no trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
     ///
     /// A validation already sent keeps settling from the peer it was sent to; only what is sent after the

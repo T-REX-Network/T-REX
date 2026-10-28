@@ -2,23 +2,39 @@
 pragma solidity 0.8.30;
 
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
+import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
+import { Token } from "contracts/token/Token.sol";
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { Countries } from "test/integration/helpers/Countries.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import {
+    DelegatedCapRuleModule,
     RecordingModule,
     RuleOnlyModule,
     SpenderOnlyModule,
     TrackerOnlyModule,
     UndeclaredRuleModule
 } from "test/integration/mocks/CapabilityModules.sol";
+
+/// @dev Pulls a holder's tokens with `transferFrom` and sends them on with a plain `transfer` in one call, so
+///      both movements share one transaction and its transient storage.
+contract PullThenSend {
+
+    function pullThenSend(Token token, address holder, address recipient, uint256 amount) external {
+        token.transferFrom(holder, address(this), amount);
+        token.transfer(recipient, amount);
+    }
+
+}
 
 /// @dev The point of the whole type design: a module is reached for the types it named and for no other.
 ///      Every test here asserts the negative as well as the positive.
@@ -161,6 +177,10 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         (,,,,,,,,,, data) = tracker.lastContext();
     }
 
+    function _lastSpender() private view returns (bytes memory spender) {
+        (,,,,,,,,, spender,) = tracker.lastContext();
+    }
+
     /// @notice A recovery reaches the transfer hook too. It moves the balance outside `_update`, so without an
     ///         explicit notification modules would keep crediting the lost wallet, and the lost wallet is
     ///         removed from the identity registry, so nothing could fix it afterwards.
@@ -273,8 +293,16 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     // ==== .canSpenderCall routing Tests ====
 
     /// @notice With no spender-aware module bound, nothing objects.
-    function test_canSpenderCall_Success_WhenNoModuleDeclaresTheSpenderCheck() public view {
+    function test_canSpenderCall_Success_WhenNoModuleDeclaresTheSpenderCheck() public {
+        vm.prank(address(token));
         assertTrue(mc.canSpenderCall(charlie, alice, bob, 100));
+    }
+
+    /// @notice Only the bound token asks, since the spender it names is kept for the transfer that follows.
+    function test_canSpenderCall_RevertWhen_CallerIsNotTheToken() public {
+        vm.prank(charlie);
+        vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
+        mc.canSpenderCall(charlie, alice, bob, 100);
     }
 
     /// @notice A bound spender module decides the answer.
@@ -283,9 +311,11 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(deployer);
         mc.addModule(address(spenderCheck));
 
+        vm.prank(address(token));
         assertTrue(mc.canSpenderCall(charlie, alice, bob, 100));
 
         spenderCheck.setAllow(false);
+        vm.prank(address(token));
         assertFalse(mc.canSpenderCall(charlie, alice, bob, 100));
     }
 
@@ -299,6 +329,57 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertTrue(mc.canTransfer(alice, bob, 100));
         vm.prank(alice);
         token.transfer(bob, 100);
+    }
+
+    /// @notice The trackers are told who called `transferFrom`, and a direct transfer in a later transaction
+    ///         carries no spender.
+    function test_transferFrom_Success_WhenTrackersSeeTheSpender() public {
+        vm.prank(alice);
+        token.approve(charlie, 100);
+
+        vm.prank(charlie);
+        token.transferFrom(alice, bob, 100);
+        assertEq(_lastSpender(), InteroperableAddress.formatEvmV1(block.chainid, charlie));
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+        assertEq(_lastSpender(), "");
+    }
+
+    /// @notice A plain transfer right after a `transferFrom` in the same transaction carries no spender: the
+    ///         compliance forgets it once the `transferFrom` is recorded. Each call a test makes is its own
+    ///         transaction, which clears transient storage, so one contract makes both movements here.
+    function test_transferFrom_Success_WhenATransferInTheSameTransactionCarriesNoSpender() public {
+        PullThenSend relay = new PullThenSend();
+        IIdentity relayIdentity = _deployIdentity(address(relay), "relay");
+        IERC3643IdentityRegistry identityRegistry = token.identityRegistry();
+        vm.prank(agent);
+        identityRegistry.registerIdentity(address(relay), relayIdentity, Countries.SPAIN);
+        vm.prank(alice);
+        token.approve(address(relay), 100);
+
+        relay.pullThenSend(token, alice, bob, 100);
+
+        assertEq(_lastSpender(), "");
+    }
+
+    /// @notice A rule sees who called `transferFrom`, so it can cap delegated transfers without touching
+    ///         direct ones.
+    function test_transferFrom_RevertWhen_ARuleCapsDelegatedTransfers() public {
+        DelegatedCapRuleModule cap = DelegatedCapRuleModule(_deploy(address(new DelegatedCapRuleModule())));
+        vm.prank(deployer);
+        mc.addModule(address(cap));
+        cap.setAllowedAmount(50);
+        vm.prank(alice);
+        token.approve(charlie, 100);
+
+        vm.prank(charlie);
+        vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
+        token.transferFrom(alice, bob, 100);
+
+        vm.prank(alice);
+        token.transfer(bob, 100);
+        assertEq(token.balanceOf(bob), 100);
     }
 
     // ==== .requestTransferValidation routing Tests ====

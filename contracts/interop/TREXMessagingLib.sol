@@ -191,15 +191,16 @@ library TREXMessagingLib {
     function setPeer(bytes32 chainKey, bytes calldata peer) external {
         MessagingStorage storage s = layout();
 
-        // Empty restores the default; anything else must be a canonical envelope for this very chain.
+        // Empty restores the default; anything else must be a canonical envelope for this very chain. An EVM
+        // account is 20 bytes: a gateway reports its sender that way, so any other length could never match.
         if (peer.length > 0) {
             (bytes2 chainType, bytes calldata chainReference, bytes calldata account) =
                 InteroperableAddress.parseV1Calldata(peer);
 
-            require(
-                account.length > 0 && peer.length == ERC7930_V1_FIXED_LENGTH + chainReference.length + account.length,
-                ErrorsLib.InvalidPeer(peer)
-            );
+            bool hasAccount = account.length > 0;
+            bool noTrailingBytes = peer.length == ERC7930_V1_FIXED_LENGTH + chainReference.length + account.length;
+            bool accountFitsItsChain = chainType != MessageTypesLib.EVM_CHAIN_TYPE || account.length == 20;
+            require(hasAccount && noTrailingBytes && accountFitsItsChain, ErrorsLib.InvalidPeer(peer));
 
             bytes32 peerChainKey = _registerChain(s, chainType, chainReference);
             require(peerChainKey == chainKey, ErrorsLib.PeerChainMismatch(chainKey, peerChainKey));
