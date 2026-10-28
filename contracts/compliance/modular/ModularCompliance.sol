@@ -74,7 +74,6 @@ import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
-import { RolesLib } from "../../libraries/RolesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
@@ -295,7 +294,8 @@ contract ModularCompliance is
     }
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
-    ///  claim a fresh compliance during setup), and the owner may always bind.
+    ///  claim a fresh compliance during setup), and anyone else needs the role the AccessManager binds to
+    ///  `bindToken`, checked the way `restricted` checks it, so an owner granted with a delay schedules the call.
     ///
     ///  A token claiming the compliance must be one this compliance's AccessManager governs: it has given the
     ///  token's `setCompliance` a role. The caller writes its own `compliance()` and `authority()`, so neither
@@ -304,23 +304,21 @@ contract ModularCompliance is
     ///
     ///  The ledger keeps every position from the token's first mint and nothing seeds it, so the new token must
     ///  have no supply, and the token it replaces must be able to leave.
-    function _authorizeTokenBinding(address token) internal view override {
+    function _authorizeTokenBinding(address token) internal override {
         bool tokenClaimsUnboundCompliance = _getTokenBound() == address(0) && msg.sender == token;
         // A target the manager never configured answers the admin role, 0, for every selector.
         bool tokenGovernedByThisManager =
             IAccessManager(authority()).getTargetFunctionRole(token, IERC3643.setCompliance.selector) != 0;
-        require(
-            (tokenClaimsUnboundCompliance && tokenGovernedByThisManager) || _isOwner(msg.sender),
-            ErrorsLib.OnlyOwnerOrTokenCanCall()
-        );
+        bool governedTokenClaimsUnboundCompliance = tokenClaimsUnboundCompliance && tokenGovernedByThisManager;
+        if (!governedTokenClaimsUnboundCompliance) _checkCanCall(msg.sender, _msgData());
         require(!_hasSupply(token), ErrorsLib.TokenCirculating());
         _requireBoundTokenCanLeave();
     }
 
-    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner, and only once
-    ///  the token can leave.
-    function _authorizeTokenUnbinding(address token) internal view override {
-        require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+    /// @dev Unbinding does not allow the "first bind" path: only the token itself, or the role bound to
+    ///  `unbindToken`, and only once the token can leave.
+    function _authorizeTokenUnbinding(address token) internal override {
+        if (msg.sender != token) _checkCanCall(msg.sender, _msgData());
         _requireBoundTokenCanLeave();
     }
 
@@ -373,7 +371,6 @@ contract ModularCompliance is
     ///  the token's forced, recovery and delegation paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
-        require(amount > 0, ErrorsLib.ZeroValue());
         _applyMovement(from, to, amount, kind);
     }
 
@@ -537,12 +534,6 @@ contract ModularCompliance is
     ///  the token is deployed, and a spare compliance is prepared by binding a placeholder then unbinding it.
     function _hasSupply(address token) private view returns (bool) {
         return token.code.length != 0 && IToken(token).totalSupply() != 0;
-    }
-
-    function _isOwner(address caller) internal view returns (bool) {
-        (bool isOwner,) =
-            AuthorityUtils.canCallWithDelay(authority(), caller, address(this), RolesLib.BIND_UNBIND_TOKEN);
-        return isOwner;
     }
 
     function _moduleSet() private pure returns (ModuleSetLib.ModuleSet storage) {

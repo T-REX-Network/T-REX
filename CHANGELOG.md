@@ -565,6 +565,51 @@ All notable changes to this project will be documented in this file.
   moves anything, now keeps the spender in transient storage for the rest of that transfer, and the native
   context carries it. `canSpenderCall` is no longer a `view` and only the bound token may call it, so no one
   else can name a spender for a transfer. The ERC-3643 hook signatures are unchanged.
+- **Closing a chain stops the settlements already on their way** (audit L-10). A settlement for a validation
+  already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
+  set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
+  pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
+  pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
+  peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed
+  unreconciled. The peer is now pinned with the gateway, a pinned settlement is checked against it, and a
+  re-dispatch to a different peer reverts with `ValidationAlreadyRouted`. Burn proofs and settlements for ids this
+  token never dispatched still follow the current peer.
+- **A zero-value transfer, mint or burn goes through** (audit L-02). The token lets a zero amount pass every
+  check and notifies compliance with it, as an ERC-20 hook should, but `ERC3643Compliance.transferred`,
+  `created` and `destroyed` reverted it with `ZeroValue`, so `transfer`, `transferFrom`, `mint` and `burn` of 0
+  all failed. The three guards are removed: a zero amount reaches the modules and moves nothing.
+  `agentTransferred`, which replaces `transferred` on the forced, recovery and delegation paths, drops its zero
+  amount guard too, so an agent's movement of 0 reaches the modules like any other.
+  `ERC3643ErrorsLib.ZeroValue` had no other use and is removed. The token does not skip compliance on 0, since a
+  zero-value transfer still emits `Transfer` and the modules should see it.
+- **A settlement to a native wallet credits the identity the registry names when it lands** (audit L-34). The
+  settlement path re-resolved a native recipient's owner, but from the identity stored at issuance instead of the
+  registry, so a wallet relinked in between was credited to its old identity, and when the ledger had already
+  followed the relink, the wallet's balance was moved back to the old identity. The owner is now resolved through
+  the registry's native lookup, as every native movement does; a wallet the registry no longer names keeps the
+  identity it was issued to.
+- **An owner granted with a delay can bind and unbind a compliance's token** (audit L-13). `bindToken` and
+  `unbindToken` were authorized through one synthetic selector, `RolesLib.BIND_UNBIND_TOKEN`, asked for immediate
+  permission only. An owner granted with an execution delay could not schedule either call: the AccessManager
+  schedules by the real selector, which had no row and fell back to `ADMIN_ROLE`. The compliance table of
+  `AccessManagerSetupLib` now maps `bindToken` and `unbindToken` to `OWNER` like every other owner function, and
+  the compliance checks them the way `restricted` does, consuming a scheduled operation. A caller without the role
+  now reverts with `AccessManagedUnauthorized` instead of `OnlyOwnerOrTokenCanCall`. Removed:
+  `RolesLib.BIND_UNBIND_TOKEN` and the error `OnlyOwnerOrTokenCanCall`. The token's own bind and unbind paths are
+  unchanged. A suite set up before this change needs the two rows added to its manager.
+- **`UtilityChecker` predictions follow the registry and the compliance** (audit L-32). `getVerifiedDetails` let
+  the last trusted issuer holding a claim for a topic overwrite the row, so a valid claim from a first issuer was
+  reported as failing when a later issuer's claim did not validate, while `isVerified` accepts the first valid
+  one. The row now keeps the first valid claim. `getTransferDetails` asked every rule even when the sender or the
+  recipient resolves to no identity, which the compliance refuses outright while a rule is bound; every row now
+  reports `allowedAmount` zero and `pass` false in that case, for any amount, zero included, so
+  `getTransferStatus` agrees with `canTransfer`.
+- **`UtilityChecker.getVerifiedDetails` answers for a wallet with no identity** (audit L-09). It asked the zero
+  identity for its claims, and a call to an address with no code reverts, so the diagnostic for the one wallet
+  most likely to need it failed outright. A wallet with no identity now gets one unmatched row per required topic
+  (the `topic` filled, `issuer` zero, `pass` false) and its wallet status, as `isVerified` refuses it. A topic no
+  trusted issuer matches is reported the same way, so every row names the topic it stands for.
 - **Each registry resolves wallets through its own IdentityFactory** (L-08 #153, L-15 #156, L-16 #157,
   L-26 #162). The storage resolved a wallet it did not bind by asking the IdentityFactory of every bound
   registry in turn, in an order an unbind could change, while each registry judged revocation and identity

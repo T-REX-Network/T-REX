@@ -122,11 +122,10 @@ contract ComplianceBaseTest is Test {
         compliance.transferred(address(0), bob, 1);
     }
 
-    function test_transferred_RevertWhen_ZeroValue() public {
+    function test_transferred_Succeeds_WhenValueIsZero() public {
         compliance.bindToken(token);
 
         vm.prank(token);
-        vm.expectRevert(ERC3643ErrorsLib.ZeroValue.selector);
         compliance.transferred(alice, bob, 0);
     }
 

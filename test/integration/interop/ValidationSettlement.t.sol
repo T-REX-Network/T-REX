@@ -106,6 +106,28 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
     }
 
+    /// @notice A native recipient relinked between issuance and settlement is credited to the identity the registry
+    ///         names when the leg lands, not to the one recorded at issuance.
+    function test_handleSettlement_Success_CreditsTheCurrentOwner_WhenTheNativeRecipientWasRelinked() public {
+        uint256 id = _issue(aliceSat, nativeBob, 10, 100);
+        // Registry writes never relink a wallet, so the relink is simulated as the owner swapping the storage.
+        IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
+        address storageAddress = address(token.identityRegistry().identityStorage());
+        vm.mockCall(
+            storageAddress,
+            abi.encodeCall(token.identityRegistry().identityStorage().storedIdentity, (bob)),
+            abi.encode(address(charlieIdentity))
+        );
+        uint256 charlieBefore = ledger.positionOf(address(charlieIdentity));
+        uint256 bobBefore = ledger.positionOf(address(bobIdentity));
+
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, nativeBob, 40)));
+
+        assertEq(ledger.ownerOf(bob), address(charlieIdentity), "the ledger follows the registry");
+        assertEq(ledger.positionOf(address(charlieIdentity)), charlieBefore + 40, "credited to the current owner");
+        assertEq(ledger.positionOf(address(bobIdentity)), bobBefore, "not to the identity stored at issuance");
+    }
+
     /// @notice Past the release deadline but before any discard, a leg settles normally: the slot is still held.
     function test_handleSettlement_Success_WhenTheLegArrivesAfterTheDeadlineBeforeAnyDiscard() public {
         uint256 id = _issue(aliceSat, bobSat, 90, 100);

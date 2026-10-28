@@ -105,7 +105,8 @@ interface ITREXMessaging {
     /// Emits `ChainRegistered` on first sight of the prefix, then `RouteSet`.
     /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
     /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
-    /// @param gateway The trusted gateway to route through, or zero to close the chain.
+    /// @param gateway The trusted gateway to route through, or zero to close the chain: nothing is sent to
+    /// or accepted from it, settlements of validations already sent included, until a route is set again.
     function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
 
     /// @dev Registers this token's Lite on `chainKey`: the outbound recipient and the only accepted
@@ -118,6 +119,9 @@ interface ITREXMessaging {
     /// - A non-empty `peer` must be a canonical ERC-7930 v1 address with an account part, 20 bytes on EVM,
     ///   and no trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
+    ///
+    /// A validation already sent keeps settling from the peer it was sent to; only what is sent after the
+    /// change goes to, and is accepted from, the new peer.
     ///
     /// Emits `ChainRegistered` on first sight of the prefix, then `PeerSet`.
     /// @param chainKey The chain the peer is on.
