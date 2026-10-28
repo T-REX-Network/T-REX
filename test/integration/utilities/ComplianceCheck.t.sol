@@ -164,8 +164,26 @@ contract ComplianceCheckTest is TREXSuiteTest {
         assertFalse(compliance.canTransfer(stranger, bob, 100), "and the compliance agrees");
     }
 
-    /// @notice The same for a recipient that resolves to no identity.
-    function test_getTransferDetails_ReportsNoPass_WhenTheRecipientHasNoIdentity() public {
+    /// @notice A zero amount from a sender with no identity is refused too: the compliance refuses it before any
+    ///         rule, so the preview cannot pass it on `0 <= 0`.
+    function test_getTransferDetails_ReportsNoPass_WhenAZeroAmountLeavesAWalletWithNoIdentity() public {
+        address stranger = makeAddr("stranger");
+        vm.mockCall(
+            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
+        );
+
+        UtilityChecker.ComplianceCheckDetails[] memory results =
+            utilityChecker.getTransferDetails(address(mockContract), stranger, bob, 0);
+
+        assertEq(results.length, 1);
+        assertEq(results[0].allowedAmount, 0);
+        assertFalse(results[0].pass);
+        assertFalse(compliance.canTransfer(stranger, bob, 0), "and the compliance agrees");
+    }
+
+    /// @notice A recipient with no identity is the registry's to refuse, not the compliance's, so the rule rows
+    ///         report what the compliance answers.
+    function test_getTransferDetails_MatchesTheCompliance_WhenTheRecipientHasNoIdentity() public {
         address stranger = makeAddr("stranger");
         vm.mockCall(
             address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
@@ -175,25 +193,7 @@ contract ComplianceCheckTest is TREXSuiteTest {
             utilityChecker.getTransferDetails(address(mockContract), alice, stranger, 100);
 
         assertEq(results.length, 1);
-        assertFalse(results[0].pass);
-        assertFalse(compliance.canTransfer(alice, stranger, 100), "and the compliance agrees");
-    }
-
-    /// @notice A zero amount is refused too: the compliance refuses a wallet with no identity before any rule, so
-    ///         the preview cannot pass it on `0 <= 0`.
-    function test_getTransferDetails_ReportsNoPass_WhenAZeroAmountGoesToAWalletWithNoIdentity() public {
-        address stranger = makeAddr("stranger");
-        vm.mockCall(
-            address(mockContract), abi.encodeCall(IERC3643IdentityRegistry.identity, (stranger)), abi.encode(address(0))
-        );
-
-        UtilityChecker.ComplianceCheckDetails[] memory results =
-            utilityChecker.getTransferDetails(address(mockContract), alice, stranger, 0);
-
-        assertEq(results.length, 1);
-        assertEq(results[0].allowedAmount, 0);
-        assertFalse(results[0].pass);
-        assertFalse(compliance.canTransfer(alice, stranger, 0), "and the compliance agrees");
+        assertEq(results[0].pass, compliance.canTransfer(alice, stranger, 100));
     }
 
 }

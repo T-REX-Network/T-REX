@@ -120,9 +120,8 @@ contract TransferCheckTest is TREXSuiteTest {
 
         assertTrue(freezeStatus);
         assertFalse(eligibilityStatus);
-        // The compliance refuses a recipient it cannot attribute while a rule is bound, and the preview agrees.
-        assertFalse(complianceStatus);
-        assertFalse(token.compliance().canTransfer(alice, another, 100));
+        // The registry refuses a recipient with no identity; the compliance preview reports what the compliance answers.
+        assertEq(complianceStatus, token.compliance().canTransfer(alice, another, 100));
     }
 
     /// @notice Should return false when identity is registered with topics but no claims

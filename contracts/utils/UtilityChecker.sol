@@ -241,15 +241,14 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
         IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
         // A zero wallet is the missing side of a mint or a burn, not a wallet without an identity.
+        // The compliance refuses a sender with no identity before asking any rule, so every rule is reported as
+        // allowing nothing and as failing, a zero amount included. A recipient with no identity is refused by the
+        // registry instead, which `getTransferStatus` reports as eligibility.
         bool senderHasNoIdentity = _from != address(0) && ctx.fromIdentity == address(0);
-        bool recipientHasNoIdentity = _to != address(0) && ctx.toIdentity == address(0);
-        // The compliance refuses either case before asking any rule, so every rule is reported as allowing nothing
-        // and as failing, a zero amount included.
-        bool refusedBeforeTheRules = senderHasNoIdentity || recipientHasNoIdentity;
 
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
-            if (refusedBeforeTheRules) {
+            if (senderHasNoIdentity) {
                 _details[i] =
                     ComplianceCheckDetails({ moduleName: IModule(rules[i]).name(), allowedAmount: 0, pass: false });
                 continue;
