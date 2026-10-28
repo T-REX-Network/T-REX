@@ -647,6 +647,39 @@ All notable changes to this project will be documented in this file.
   amount)`.
 - `DelegatedOut` gains an indexed `delegationId`, so its topic hash changed; consumers of the old event need an
   ABI update.
+
+- **Disabling the eligibility checks no longer admits a wallet without an identity** (#119). In 4.2,
+  `disableEligibilityChecks` made `isVerified` return true for every address, so tokens could be minted to and
+  moved between wallets no identity owns, and they stayed there after the checks were enabled again. The switch
+  now skips the claim checks only, required topics and trusted issuers: `isVerified` and `isWalletVerified`
+  still need an active identity, so an unbound or revoked wallet is refused in every mode. Every holder of an
+  open-mode token needs an ONCHAINID, contracts that hold tokens (pools, escrows, vaults) included; the agent
+  registers them like any investor. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
+  interfaces, so the standard is unaffected.
+  - Every token now has an owner, so the compliance ledger drops its repair path: `sum(positions) ==
+    totalSupply` always holds and a debit the position cannot cover reverts. Removed: `positionGap`,
+    `fixPosition` and its AccessManager row, the events `PositionUnresolved`, `PositionUnderflow` and
+    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`. The ledger's `gap` field
+    becomes `__deprecatedGap`, so `ownerOf` keeps its slot in `erc3643.storage.ComplianceLedger` and a
+    deployed compliance proxy can be upgraded.
+  - Nothing repairs a position any more. A debit that reverts means the invariant is broken, and the agent's
+    calls on that identity revert with it; the fix is a compliance implementation upgrade.
+  - `canTransfer` no longer refuses a recipient with no identity itself, since the token's `isVerified`
+    refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
+    resolve to nobody after the registry's storage is swapped.
+
+- **A compliance is bound to another token only once the previous token has no supply and no validation open** (#152).
+  `_authorizeTokenBinding` checked only that the incoming token had no supply, so a token with no supply could
+  leave its compliance with validations still open, and their `pendingIn` and `pendingOut` amounts counted
+  against the next token's holders, in `MaxBalancePerIdentityModule` for one. The ledger now keeps
+  `pendingTotal`, what every open validation promises, and both an unbind and a bind revert with
+  `ValidationsPending` until it is zero: settle or discard the validations while the token is still bound,
+  since releasing a reservation calls the bound token and would revert once it has left. An `ownerOf` entry left
+  behind moves nothing when the wallet is first credited.
+  `pendingTotal` is appended after `ownerOf` in `erc3643.storage.ComplianceLedger`, so a deployed proxy keeps
+  its layout. Upgrade a deployed compliance only when no validation is open: one issued before the upgrade is
+  not in `pendingTotal`, and releasing it would underflow and revert.
+
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

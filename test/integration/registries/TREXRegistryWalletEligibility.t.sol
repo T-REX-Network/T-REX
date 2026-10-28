@@ -106,7 +106,11 @@ contract TREXRegistryWalletEligibilityTest is TREXSuiteTest {
         assertEq(claimed.balanceOf(self), 250);
         assertEq(ledger.positionOf(address(aliceIdentity)), 250, "inbound transfer not credited");
         assertEq(ledger.positionOf(address(bobIdentity)), 50, "bob not debited");
-        assertEq(ledger.positionGap(), 0, "positions drifted from the supply");
+        assertEq(
+            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity)),
+            claimed.totalSupply(),
+            "positions drifted from the supply"
+        );
     }
 
     /// @notice An identity can never revoke its own address, so it cannot break the attribution the two tests

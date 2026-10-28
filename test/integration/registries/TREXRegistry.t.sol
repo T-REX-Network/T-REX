@@ -295,7 +295,8 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.disableEligibilityChecks();
     }
 
-    /// @notice Disabling eligibility checks short-circuits `isVerified` to true for every address.
+    /// @notice Disabling eligibility checks skips the claims: a registered wallet without them passes, an address
+    ///         with no identity does not.
     function test_eligibility_disableEligibilityChecks_Success() public {
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false);
@@ -303,6 +304,7 @@ contract TREXRegistryTest is TREXSuiteTest {
         registry.disableEligibilityChecks();
 
         assertTrue(registry.isVerified(charlie));
+        assertFalse(registry.isVerified(another));
     }
 
     /// @notice Disabling twice in a row reverts with `EligibilityChecksDisabledAlready`.
@@ -326,14 +328,14 @@ contract TREXRegistryTest is TREXSuiteTest {
     function test_eligibility_enableEligibilityChecks_Success() public {
         vm.prank(deployer);
         registry.disableEligibilityChecks();
-        assertTrue(registry.isVerified(another));
+        assertTrue(registry.isVerified(charlie));
 
         vm.prank(deployer);
         vm.expectEmit(false, false, false, false);
         emit EventsLib.EligibilityChecksEnabled();
         registry.enableEligibilityChecks();
 
-        assertFalse(registry.isVerified(another));
+        assertFalse(registry.isVerified(charlie), "charlie holds no claim for the token's topic");
     }
 
     /// @notice Enabling when already enabled reverts with `EligibilityChecksEnabledAlready`.
