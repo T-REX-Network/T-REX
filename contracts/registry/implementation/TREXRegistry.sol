@@ -389,10 +389,21 @@ contract TREXRegistry is
 
         IIdentity localIdentity = _identityStorage().storedIdentity(userAddress);
         if (address(localIdentity) == address(0)) return IIdentity(factoryIdentity);
-        bool factoryKnowsTheWallet = factoryIdentity != address(0);
-        bool factoryAgrees = factoryIdentity == address(localIdentity);
-        if (factoryKnowsTheWallet && !factoryAgrees) return IIdentity(address(0));
+        if (factoryIdentity != address(0) && factoryIdentity != address(localIdentity)) return IIdentity(address(0));
         return localIdentity;
+    }
+
+    /// @dev A local binding may not contradict this registry's IdentityFactory: binding the same identity as the
+    ///  factory is allowed, another one is not. Every registration enters here, the token's recovery included.
+    ///  Checked after the storage write, so a revoked or already stored wallet still fails with the storage's error.
+    function _registerIdentity(address userAddress, IIdentity userIdentity, uint16 country) internal override {
+        super._registerIdentity(userAddress, userIdentity, country);
+
+        (address factoryIdentity,) = _factoryIdentityOf(userAddress);
+        require(
+            factoryIdentity == address(0) || factoryIdentity == address(userIdentity),
+            ErrorsLib.WalletBoundToAnotherIdentity(userAddress, factoryIdentity)
+        );
     }
 
     /// @dev Deleting revokes the wallet in the storage. It stays in the registry, so `IdentityRevoked` is emitted
