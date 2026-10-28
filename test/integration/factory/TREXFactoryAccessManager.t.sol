@@ -9,7 +9,6 @@ import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol"
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -128,8 +127,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
     }
 
     function test_deployTREXSuite_Success_SuppliedIdentityKeysAreUntouched() public {
-        address wallet = makeAddr("issuerWallet");
-        address supplied = address(_deployIdentity(wallet, "supplied-oid"));
+        address supplied = _bindTokenIdentity("supplied-oid", deployer);
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.ONCHAINID = supplied;
 
@@ -138,14 +136,13 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
         Token deployed = Token(trexFactory.getToken("supplied-oid"));
         assertEq(deployed.onchainID(), supplied);
-        assertTrue(_isManager(supplied, wallet));
+        assertTrue(_isManager(supplied, deployer));
         assertFalse(_isManager(supplied, IERC173(address(deployed)).owner()));
         assertFalse(_isManager(supplied, address(trexFactory)));
     }
 
     function test_deployTREXSuiteIsolated_Success_SuppliedIdentityKeysAreUntouched() public {
-        address wallet = makeAddr("issuerWallet");
-        address supplied = address(_deployIdentity(wallet, "supplied-oid-isolated"));
+        address supplied = _bindTokenIdentity("supplied-oid-isolated", deployer);
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.ONCHAINID = supplied;
 
@@ -154,7 +151,7 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
 
         Token deployed = Token(trexFactory.getToken("supplied-oid-isolated"));
         assertEq(deployed.onchainID(), supplied);
-        assertTrue(_isManager(supplied, wallet));
+        assertTrue(_isManager(supplied, deployer));
         assertFalse(_isManager(supplied, IERC173(address(deployed)).owner()));
         assertFalse(_isManager(supplied, address(trexFactory)));
     }
@@ -351,12 +348,6 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);
         trexFactory.deployTREXSuite("predicted-admin", _details(address(0), admin), _noClaims());
-    }
-
-    /// @dev Mirrors TREXFactory._saltBytes and _predictAddress.
-    function _predictSuiteAddress(string memory salt, string memory contractType) private view returns (address) {
-        bytes32 saltBytes = bytes20(address(trexFactory)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
-        return Create3.computeAddress(saltBytes, address(trexFactory));
     }
 
     function _details(address manager, address admin) private pure returns (ITREXFactory.TokenDetails memory) {

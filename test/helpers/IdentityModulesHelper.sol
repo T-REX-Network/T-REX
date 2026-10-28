@@ -8,7 +8,6 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { IKeyExecutor } from "@onchain-id/solidity/contracts/interface/IKeyExecutor.sol";
 import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurposes.sol";
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
-import { ERC734Validator } from "@onchain-id/solidity/contracts/modules/validators/ERC734Validator.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 import {
     MODULE_TYPE_EXECUTOR,
@@ -34,9 +33,9 @@ import {
 library IdentityModulesHelper {
 
     /// @notice Number of module installs in {legacyQueueModules}: 1 validator install for the merged
-    ///         ERC734Validator, 4 for the KeyApprovalModule (1 executor + 3 fallbacks), and 15 for the
-    ///         ERC734Validator claim/getter surface (1 executor + 14 fallbacks).
-    uint256 private constant MODULE_INSTALL_COUNT = 20;
+    ///         ERC734Validator, 4 for the KeyApprovalModule (1 executor + 3 fallbacks), and 14 for the
+    ///         ERC734Validator claim/getter surface (1 executor + 13 fallbacks).
+    uint256 private constant MODULE_INSTALL_COUNT = 19;
 
     /// @notice Builds the module bundle that restores the legacy ERC-734/735 surface on a new identity.
     /// @param keyApprovalModule the KeyApprovalModule singleton (executor + execute/approve/getCurrentNonce
@@ -67,7 +66,7 @@ library IdentityModulesHelper {
         installs[3] = _fallback(keyApprovalModule, IKeyExecutor.approve.selector);
         installs[4] = _fallback(keyApprovalModule, IKeyExecutor.getCurrentNonce.selector);
 
-        // ----- ERC734Validator claim surface: 1 executor + 10 claim fallbacks -----
+        // ----- ERC734Validator claim surface: 1 executor + 9 claim fallbacks -----
         installs[5] = Structs.ModuleInstall({
             moduleType: MODULE_TYPE_EXECUTOR, module: validatorModule, initData: "", purpose: 0
         });
@@ -80,13 +79,12 @@ library IdentityModulesHelper {
         installs[12] = _fallback(validatorModule, IClaimIssuer.revokeClaimByDigest.selector);
         installs[13] = _fallback(validatorModule, IClaimIssuer.isDigestRevoked.selector);
         installs[14] = _fallback(validatorModule, IClaimIssuer.addClaimTo.selector);
-        installs[15] = _fallback(validatorModule, ERC734Validator.addClaimByTrustedIssuer.selector);
 
         // ----- ERC-734 getters served by the merged module via fallback -----
-        installs[16] = _fallback(validatorModule, IERC734.keyHasPurpose.selector);
-        installs[17] = _fallback(validatorModule, IERC734.getKey.selector);
-        installs[18] = _fallback(validatorModule, IERC734.getKeyPurposes.selector);
-        installs[19] = _fallback(validatorModule, IERC734.getKeysByPurpose.selector);
+        installs[15] = _fallback(validatorModule, IERC734.keyHasPurpose.selector);
+        installs[16] = _fallback(validatorModule, IERC734.getKey.selector);
+        installs[17] = _fallback(validatorModule, IERC734.getKeyPurposes.selector);
+        installs[18] = _fallback(validatorModule, IERC734.getKeysByPurpose.selector);
     }
 
     function _fallback(address module, bytes4 selector) private pure returns (Structs.ModuleInstall memory) {
