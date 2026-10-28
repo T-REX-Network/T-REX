@@ -107,6 +107,15 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
         trexFactory.deployTREXSuiteIsolated("self-admin", _details(address(0), address(trexFactory)), _noClaims());
     }
 
+    /// @dev None of the five contracts the factory is about to deploy at these addresses can administer the manager.
+    function test_deployTREXSuite_RevertWhen_AccessManagerAdminIsAPredictedSuiteAddress() public {
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "AccessManager"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "Token"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "REGISTRY"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "IRS"));
+        _expectAdminRefused(_predictSuiteAddress("predicted-admin", "MC"));
+    }
+
     function test_deployTREXSuite_RevertWhen_FreshManagerReusesAStorage() public {
         ITREXFactory.TokenDetails memory details = _details(address(0), issuerAdmin);
         details.irs = address(token.identityRegistry().identityStorage());
@@ -333,6 +342,12 @@ contract TREXFactoryAccessManagerTest is TREXSuiteTest {
             }
         }
         assertNotEq(beacons.tokenBeacon, address(0));
+    }
+
+    function _expectAdminRefused(address admin) private {
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.InvalidAccessManagerAdmin.selector);
+        trexFactory.deployTREXSuite("predicted-admin", _details(address(0), admin), _noClaims());
     }
 
     function _details(address manager, address admin) private pure returns (ITREXFactory.TokenDetails memory) {

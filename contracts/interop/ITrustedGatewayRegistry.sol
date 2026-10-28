@@ -73,6 +73,10 @@ interface ITrustedGatewayRegistry {
     /// underlying protocol. Removal is an emergency lever: it severs every token route through the
     /// gateway with no further call, because routes are checked against this set on use, not on write.
     ///
+    /// A token calls `sendMessage` with no value and no attributes, so only a gateway that takes its fee
+    /// out of band (post-paid, or funded by a relayer) can carry its traffic; one that must be paid with
+    /// the call cannot. Review covers this too.
+    ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - `gateway` must not be the zero address; otherwise the call reverts with `ZeroAddress`.

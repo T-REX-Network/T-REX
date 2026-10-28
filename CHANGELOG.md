@@ -532,6 +532,39 @@ All notable changes to this project will be documented in this file.
   registered, and reverts with `UnverifiedIdentity` otherwise. **Behaviour change**: a fresh wallet is judged
   on the identity's claims, so recovering an investor whose identity lacks the token's required claims is
   now refused; restore the claims first.
+- **An EVM peer must be a 20-byte account** (`setPeer`). The peer check accepted any non-empty account, so a
+  left-padded or truncated EVM address was stored as the Lite. A gateway reports an EVM sender as its 20 bytes and
+  inbound messages are matched to the peer byte for byte, so such a peer refused every message from the real Lite.
+  An EVM peer whose account is not 20 bytes now reverts with `InvalidPeer`; non-EVM peers are unchanged.
+- **An EVM wallet is accepted only as a 20-byte address on a named chain** (`WalletKeyLib.parse`). An EVM
+  envelope with a left-padded address, an empty chain reference or no address was accepted. A padded address names
+  the same wallet yet hashes to a second ledger key, and a native wallet written that way was read as a satellite.
+  Such envelopes now revert with `NonCanonicalInteroperableAddress`; non-EVM envelopes are unchanged.
+- **The issuance rules see the spender a validation names.** `requestTransferValidation` asked the `RULE` modules
+  with an empty spender, while the spender modules got the named one, so a rule could not see who would execute
+  the validation. The named spender is now in the rule context.
+- **The implementation authority requires code at its access manager.** The `TREXImplementationAuthority`
+  constructor rejected only the zero address, so a codeless address could become the authority every publish and
+  upgrade asks, and such an address refuses every restricted call. The constructor now reverts with
+  `AccessManagerNotAContract`, as the factory and `setAuthority` already do; the zero address reverts the same way.
+- **A predicted suite address cannot be the access manager administrator.** `deployTREXSuite` refused the zero
+  address, the factory and the predicted access manager as `accessManagerAdmin`, but accepted the predicted token,
+  identity registry, identity storage and compliance. None of them ever acts as the administrator, so such a suite
+  had none. All of them now revert with `InvalidAccessManagerAdmin`.
+- **Documented: delisting a spender leaves issued validations to expire.** `SpenderWhitelistModule.disallowSpender`
+  takes effect on the next `transferFrom` and the next validation. A validation already issued to that spender is on
+  the satellite and may execute until its expiry; the validity window bounds that exposure.
+- **Documented: only gateways paid out of band carry token traffic.** A token calls `sendMessage` with no value and
+  no attributes, so a gateway that must be paid with the call cannot carry its messages (`ITrustedGatewayRegistry`).
+- **A settlement tells the trackers the spender the validation names.** `afterTransfer` on a settlement always
+  received an empty `TransferContext.spender`, since the validation record did not keep it. The record now keeps
+  the spender it was issued with (`Validation.spender`) and the settlement context carries it.
+- **Rules and trackers see the caller of `transferFrom`.** The ERC-3643 hooks carry no spender, so `allowedAmount`
+  and `afterTransfer` always received it empty on a native movement, and a rule capping delegated transfers could
+  not tell one from a direct transfer. `canSpenderCall`, which the token asks right before every `transferFrom`
+  moves anything, now keeps the spender in transient storage for the rest of that transfer, and the native
+  context carries it. `canSpenderCall` is no longer a `view` and only the bound token may call it, so no one
+  else can name a spender for a transfer. The ERC-3643 hook signatures are unchanged.
 - **Each registry resolves wallets through its own IdentityFactory** (L-08 #153, L-15 #156, L-16 #157,
   L-26 #162). The storage resolved a wallet it did not bind by asking the IdentityFactory of every bound
   registry in turn, in an order an unbind could change, while each registry judged revocation and identity
