@@ -73,9 +73,11 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
 
     /// @dev Disables the eligibility checks for token transfers and other operations.
     ///
-    /// Once disabled, `isVerified` returns true for every address, including addresses with no
-    /// identity binding at all: the identity-exists check is bypassed along with the required-claims
-    /// and trusted-issuer verification.
+    /// Once disabled, `isVerified` skips the required-claims and trusted-issuer verification. A wallet
+    /// still needs an active identity: one that is unbound or revoked is refused in every mode. Unlike 4.2,
+    /// disabling the checks does not verify every address, so every holder of an open-mode token needs an
+    /// ONCHAINID, contracts that hold tokens (pools, escrows, vaults) included. The agent registers them
+    /// like any investor.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -97,10 +99,10 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// Emits an `EligibilityChecksEnabled` event upon successful execution.
     function enableEligibilityChecks() external;
 
-    /// @dev Returns the ONCHAINID IdentityFactory whose type record backs per-type claim topic
-    /// resolution. Baked into the implementation at construction, so changing it takes a new
-    /// implementation published through the beacon. `identityTypeOf` on it returns 0 for identities
-    /// it did not mint, which resolve to the default claim topics.
+    /// @dev Returns the ONCHAINID IdentityFactory this registry resolves through: a wallet the storage does
+    /// not bind resolves here, and its type record backs per-type claim topic resolution. Baked into the
+    /// implementation at construction, so changing it takes a new implementation published through the beacon.
+    /// `identityTypeOf` on it returns 0 for identities it did not mint, which resolve to the default claim topics.
     function identityFactory() external view returns (IIdentityFactory);
 
     /// @dev Adds a claim topic to the override set of an identity type.
@@ -160,8 +162,8 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// A wallet on this chain reads its registry entry; every other wallet resolves its active binding
     /// through the IdentityFactory. A wallet the IdentityFactory has revoked is not eligible on either
     /// path, however it was registered, even though `resolveIdentity` still attributes it. The identity
-    /// then passes the same claim check as `isVerified`, and `disableEligibilityChecks` short-circuits it
-    /// the same way.
+    /// then passes the same claim check as `isVerified`, and `disableEligibilityChecks` skips that check
+    /// the same way, still requiring the active identity.
     ///
     /// Requirements:
     /// - `wallet` must be a canonical ERC-7930 v1 envelope; otherwise reverts with

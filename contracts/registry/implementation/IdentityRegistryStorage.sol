@@ -75,14 +75,11 @@ import { IIdentityRegistryStorage } from "../interface/IIdentityRegistryStorage.
 import { ITREXRegistry } from "../interface/ITREXRegistry.sol";
 
 /// @title IdentityRegistryStorage
-/// @notice Wallet-to-identity bindings shared by the registries bound to it. This storage is a local
-///  override layer on top of the global ONCHAINID identity registry (the `IdentityFactory` of each bound
-///  registry): a wallet with no local binding resolves through the global registry, and a locally stored
-///  binding takes precedence over the global one for every token wired to this storage.
-/// @dev {ERC3643IdentityRegistryStorage} plus AccessManager authorization, the `onlySharedAuthority`
-///  guard on binding, the global fallback, the override signals and ERC-165. A local binding that shadows
-///  a different global identity is signalled by `IdentityOverridden`, and the end of that divergence by
-///  `IdentityOverrideReleased`.
+/// @notice Local wallet-to-identity bindings shared by the registries bound to it, which all resolve through one
+///  IdentityFactory. It holds only its own bindings: a wallet it does not bind resolves, in each registry, through
+///  that registry's IdentityFactory.
+/// @dev {ERC3643IdentityRegistryStorage} plus AccessManager authorization, the `onlySharedAuthority` guard on
+///  binding, sticky bindings, revocation and ERC-165.
 contract IdentityRegistryStorage is
     IIdentityRegistryStorage,
     ERC3643IdentityRegistryStorage,
@@ -94,14 +91,15 @@ contract IdentityRegistryStorage is
         /// @dev The status of each local wallet. Only `Revoked` is written. A wallet with no entry is `Active`
         ///  when it has a stored identity, and `None` otherwise.
         mapping(address wallet => IIdentityFactory.AccountStatus) accountStatus;
+        /// @dev The IdentityFactory every bound registry resolves through. Set at `init` and never changed, so
+        ///  unbinding registries can never lift the check on a write or let a registry on another factory in.
+        IIdentityFactory identityFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXIdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant STORAGE_LOCATION = 0xcb64a18d0bc273a26dd2f33432c876864881ae0a84f136720d41c3286c288f00;
 
-    /// @notice Upper bound on the registries bound to this storage. It caps the cost of the global
-    ///  fallback, which asks the IdentityFactory of every bound registry in turn (one external call each)
-    ///  whenever a wallet has no local binding.
+    /// @notice Upper bound on the registries bound to this storage. It caps the cost of enumerating them.
     function MAX_BOUND_REGISTRIES() external pure returns (uint256) {
         return MAX_IDENTITY_REGISTRIES;
     }
@@ -110,9 +108,16 @@ contract IdentityRegistryStorage is
         _disableInitializers();
     }
 
-    function init(address accessManagerAddress, address initialIRAddress) external initializer {
+    /// @dev The initial registry is bound without asking it for its factory: the TREXFactory passes the registry's
+    ///  predicted address, which has no code yet.
+    function init(address accessManagerAddress, address initialIRAddress, address identityFactoryAddress)
+        external
+        initializer
+    {
         require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        require(identityFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
+        _getStorage().identityFactory = IIdentityFactory(identityFactoryAddress);
 
         if (initialIRAddress != address(0)) {
             _bindIdentityRegistry(initialIRAddress);
@@ -132,12 +137,22 @@ contract IdentityRegistryStorage is
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
     /// @dev `onlySharedAuthority` is a misconfiguration guard only: `authority()` is spoofable.
+    ///  Every registry bound here must resolve through the same IdentityFactory. A registry checks a new local
+    ///  binding against its own factory only, so on a storage shared across factories one registry's agent could
+    ///  bind a wallet that another registry's factory links to another identity, and change who owns that
+    ///  wallet's tokens in the other registry.
     function bindIdentityRegistry(address identityRegistry)
         external
         override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
         restricted
         onlySharedAuthority(identityRegistry)
     {
+        IIdentityFactory storageFactory = _getStorage().identityFactory;
+        IIdentityFactory registryFactory = ITREXRegistry(identityRegistry).identityFactory();
+        require(
+            registryFactory == storageFactory,
+            ErrorsLib.IdentityFactoryMismatch(address(storageFactory), address(registryFactory))
+        );
         _bindIdentityRegistry(identityRegistry);
     }
 
@@ -148,22 +163,6 @@ contract IdentityRegistryStorage is
         restricted
     {
         _unbindIdentityRegistry(_identityRegistry);
-    }
-
-    /// @inheritdoc IERC3643IdentityRegistryStorage
-    /// @dev The local binding takes precedence; without one, the wallet resolves through the global
-    ///  identity registry (see `_globalIdentity`). A revoked wallet still returns its identity.
-    function storedIdentity(address _userAddress)
-        external
-        view
-        override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
-        returns (IIdentity)
-    {
-        IIdentity localIdentity = _storedIdentity(_userAddress);
-        if (address(localIdentity) != address(0)) {
-            return localIdentity;
-        }
-        return _globalIdentity(_userAddress);
     }
 
     /// @inheritdoc IERC3643IdentityRegistryStorage
@@ -193,20 +192,22 @@ contract IdentityRegistryStorage is
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev Reverts if the wallet was revoked, or if the IdentityFactory links it to another identity. Binding
-    ///  the same identity as the factory is allowed. The country is ignored, since this storage keeps none.
+    /// @dev A wallet may be bound only to the identity the storage's IdentityFactory gives it, if that factory knows
+    ///  it. The check sits in the storage so it holds for every holder of the writer role, not only
+    ///  for a bound registry. The country is ignored, since this storage keeps none.
     function _addIdentityToStorage(address userAddress, IIdentity userIdentity, uint16) internal override {
         require(
             _getStorage().accountStatus[userAddress] != IIdentityFactory.AccountStatus.Revoked,
             ErrorsLib.WalletAlreadyRevoked(userAddress)
         );
-        super._addIdentityToStorage(userAddress, userIdentity, 0);
-
-        IIdentity globalIdentity = _globalIdentity(userAddress);
+        address factoryIdentity = _factoryIdentityOf(userAddress);
+        bool factoryKnowsTheWallet = factoryIdentity != address(0);
+        bool factoryAgrees = factoryIdentity == address(userIdentity);
         require(
-            address(globalIdentity) == address(0) || globalIdentity == userIdentity,
-            ErrorsLib.WalletBoundToAnotherIdentity(userAddress, address(globalIdentity))
+            !factoryKnowsTheWallet || factoryAgrees,
+            ErrorsLib.WalletBoundToAnotherIdentity(userAddress, factoryIdentity)
         );
+        super._addIdentityToStorage(userAddress, userIdentity, 0);
     }
 
     /// @dev Always reverts, because a wallet never changes identity. To move an investor to a new identity,
@@ -256,22 +257,11 @@ contract IdentityRegistryStorage is
         _checkCanCall(_msgSender(), _msgData());
     }
 
-    /// @dev Asks the IdentityFactory of each bound registry in turn and returns the first identity found,
-    ///  or the zero identity when none knows the wallet. A revoked binding still answers: this is the
-    ///  attribution read behind `identity` and `contains`, and a wallet that holds tokens must keep its owner
-    ///  after the investor revokes it, so the compliance can still debit the right position on a burn, a
-    ///  recovery or a forced transfer. Whether the wallet may still act is the admission read, `isVerified`,
-    ///  which asks the factory for the status itself. The factory keys wallets by ERC-7930
-    ///  interoperable address, built with `formatEvmV1(block.chainid, wallet)`, so it resolves EVM wallets
-    ///  on this chain only. Wallets of another chain type, or the same wallet on another chain, are out of
-    ///  scope for this fallback and resolve to the zero identity; bind them locally instead.
-    function _globalIdentity(address userAddress) internal view returns (IIdentity identity) {
+    /// @dev The identity the storage's IdentityFactory links the wallet to, revoked or not. Zero when the factory
+    ///  does not know the wallet.
+    function _factoryIdentityOf(address userAddress) private view returns (address factoryIdentity) {
         bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
-        address[] memory registries = _linkedIdentityRegistries();
-        for (uint256 i = 0; i < registries.length && address(identity) == address(0); i++) {
-            (address resolved,) = ITREXRegistry(registries[i]).identityFactory().getIdentityIncludingRevoked(account);
-            identity = IIdentity(resolved);
-        }
+        (factoryIdentity,) = _getStorage().identityFactory.getIdentityIncludingRevoked(account);
     }
 
     /// @dev The status of a local wallet, as described on `Storage.accountStatus`.

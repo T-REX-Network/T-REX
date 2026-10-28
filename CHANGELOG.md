@@ -231,7 +231,8 @@ All notable changes to this project will be documented in this file.
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
   so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
   Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
-  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  ERC-173 `transferOwnership` shim reverts (`UseUpdateAuthority`), and `updateAuthority` does not move
+  the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
     suite salt, creates a domain named after the token, assigns the token and its storage to it,
     commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
@@ -514,6 +515,59 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Each registry resolves wallets through its own IdentityFactory** (L-08 #153, L-15 #156, L-16 #157,
+  L-26 #162). The storage resolved a wallet it did not bind by asking the IdentityFactory of every bound
+  registry in turn, in an order an unbind could change, while each registry judged revocation and identity
+  type in its own factory. A registry could resolve a wallet to another factory's identity and admit it, and
+  unbinding a registry changed who wallets were in the others or left its own wallets with no identity.
+  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only. `TREXRegistry`
+  resolves a wallet the storage does not bind through its own factory, revoked bindings included.
+  `IdentityRegistryStorage.init` now takes the storage's IdentityFactory, which never changes, and the
+  TREXFactory passes its own. `addIdentityToStorage` checks every write against that factory
+  (`WalletBoundToAnotherIdentity`), so no holder of the writer role, bound registry or not, can bind a wallet
+  the factory links elsewhere. `bindIdentityRegistry` refuses a registry on another IdentityFactory
+  (`IdentityFactoryMismatch`), so every registry sharing the storage resolves through the factory its writes
+  are checked against: otherwise one registry's agent could bind a wallet another registry's factory links
+  elsewhere, and move that wallet's tokens to another owner there. Since the factory belongs to the storage,
+  unbinding every registry neither lifts the write check nor lets a registry on another factory in.
+  Unbinding no longer changes any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the
+  set. With every relink path closed, a funded wallet never changes identity, so a holding cap is never priced
+  against a position its balance has not reached yet (L-27 #163). **Upgrade:** upgrade the storage and the
+  registries sharing it together. A registry still on the old code resolves a wallet only it knows through the
+  storage's old global fallback, which the new storage no longer has, so it would lose those wallets. A storage
+  deployed before this change has no IdentityFactory set, so it refuses every write and bind: deploy a new one.
+- **A registry keeps its identity storage for life** (L-30 #164). `setIdentityRegistryStorage` let the owner
+  point a registry at a storage that does not hold its local bindings, so every wallet bound only in the old
+  one lost its identity while its tokens circulated. `TREXRegistry.setIdentityRegistryStorage` now always
+  reverts with `Deprecated`, like `setClaimTopicsRegistry` and `setTrustedIssuersRegistry`; the storage is
+  set at `init` only. To change storage, point the token at a new registry, which the token allows only while
+  nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
+  `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
+  moved a registry to another storage.
+- **`OwnershipTransferred` is emitted on every owner change** (ERC-173). The owner of every T-REX contract is
+  its AccessManager, and the AccessManager's own `updateAuthority` changes it without going through
+  `transferOwnership`, so explorers and indexers that follow `OwnershipTransferred` kept showing the old
+  owner. Creation emitted nothing either. The event now comes from `_setAuthority`, which every owner change
+  passes through: the constructor or initializer, and `updateAuthority` (`transferOwnership` reverts, see
+  below). Upgradeable contracts on the AccessManagedOwnable layer grow by 1 byte, constructor based ones by 5
+  to 10 bytes.
+- **`transferOwnership` always reverts** (#166, L-33). The ERC-173 shim called `setAuthority` on the
+  contract itself and was mapped to no role, so it fell to `ADMIN_ROLE` with none of the target admin delay
+  the AccessManager applies to `updateAuthority`. An admin with no execution delay could replace a
+  contract's authority at once through the manager's `execute`, leaving no window to notice or cancel it.
+  `transferOwnership` now reverts with `UseUpdateAuthority` for every caller; the authority changes only
+  through `AccessManager.updateAuthority`. `owner()` is unchanged. **Breaking** for any integration that
+  wrote ownership through ERC-173.
+- **Every token batch function has a role row of its own** (#149, L-04). A batch without a row is
+  authorized through its single-item function's role, and `_checkCanCallSelector` detects "no row" as a zero
+  `getTargetFunctionRole`. `ADMIN_ROLE` is also zero, so mapping a batch to `ADMIN_ROLE` changed nothing:
+  `AGENT_MINTER` holders could still call `batchMint`. `AccessManagerSetupLib.tokenTable` now maps
+  `batchMint`, `batchBurn`, `batchFreezePartialTokens`, `batchUnfreezePartialTokens`, `batchSetAddressFrozen`
+  and `batchForcedTransfer` to the role of their single-item function, as `batchRegisterIdentity` already was
+  on the registry, so a batch takes the full check, scheduled operations included. The AccessManager still
+  cannot tell an unset selector from one set to `ADMIN_ROLE`, so `_checkCanCallSelector` now states that a
+  batch can be restricted only through a nonzero role. Existing suites get the rows by calling
+  `setTargetFunctionRole` for the six selectors.
 - **An identity storage belongs to one domain** (OZ H-01). `commissionSuite` used to keep a reused
   storage in the domain of its first suite and grant the next domain's registry `IRS_WRITER` there, so
   a storage could serve suites of two domains. The storage holds one record per wallet whichever
@@ -618,6 +672,39 @@ All notable changes to this project will be documented in this file.
   amount)`.
 - `DelegatedOut` gains an indexed `delegationId`, so its topic hash changed; consumers of the old event need an
   ABI update.
+
+- **Disabling the eligibility checks no longer admits a wallet without an identity** (#119). In 4.2,
+  `disableEligibilityChecks` made `isVerified` return true for every address, so tokens could be minted to and
+  moved between wallets no identity owns, and they stayed there after the checks were enabled again. The switch
+  now skips the claim checks only, required topics and trusted issuers: `isVerified` and `isWalletVerified`
+  still need an active identity, so an unbound or revoked wallet is refused in every mode. Every holder of an
+  open-mode token needs an ONCHAINID, contracts that hold tokens (pools, escrows, vaults) included; the agent
+  registers them like any investor. `disableEligibilityChecks` is part of `ITREXRegistry`, not of the ERC-3643
+  interfaces, so the standard is unaffected.
+  - Every token now has an owner, so the compliance ledger drops its repair path: `sum(positions) ==
+    totalSupply` always holds and a debit the position cannot cover reverts. Removed: `positionGap`,
+    `fixPosition` and its AccessManager row, the events `PositionUnresolved`, `PositionUnderflow` and
+    `PositionFixed`, the errors `InsufficientPosition` and `FromAndToAreTheSame`. The ledger's `gap` field
+    becomes `__deprecatedGap`, so `ownerOf` keeps its slot in `erc3643.storage.ComplianceLedger` and a
+    deployed compliance proxy can be upgraded.
+  - Nothing repairs a position any more. A debit that reverts means the invariant is broken, and the agent's
+    calls on that identity revert with it; the fix is a compliance implementation upgrade.
+  - `canTransfer` no longer refuses a recipient with no identity itself, since the token's `isVerified`
+    refuses it first. A sender with no identity is still refused while a rule is bound: a holding wallet can
+    resolve to nobody after the registry's storage is swapped.
+
+- **A compliance is bound to another token only once the previous token has no supply and no validation open** (#152).
+  `_authorizeTokenBinding` checked only that the incoming token had no supply, so a token with no supply could
+  leave its compliance with validations still open, and their `pendingIn` and `pendingOut` amounts counted
+  against the next token's holders, in `MaxBalancePerIdentityModule` for one. The ledger now keeps
+  `pendingTotal`, what every open validation promises, and both an unbind and a bind revert with
+  `ValidationsPending` until it is zero: settle or discard the validations while the token is still bound,
+  since releasing a reservation calls the bound token and would revert once it has left. An `ownerOf` entry left
+  behind moves nothing when the wallet is first credited.
+  `pendingTotal` is appended after `ownerOf` in `erc3643.storage.ComplianceLedger`, so a deployed proxy keeps
+  its layout. Upgrade a deployed compliance only when no validation is open: one issued before the upgrade is
+  not in `pendingTotal`, and releasing it would underflow and revert.
+
 - **A revoked wallet is no longer verified when registered locally** (#69). `isVerified` (and the
   same-chain path of `isWalletVerified`) returned true for a wallet the ONCHAINID IdentityFactory had
   revoked whenever that wallet held a local entry in the `IdentityRegistryStorage`, while the same

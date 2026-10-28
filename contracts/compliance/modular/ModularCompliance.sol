@@ -267,11 +267,6 @@ contract ModularCompliance is
         _resolveStuckValidation(validationId);
     }
 
-    /// @inheritdoc IComplianceLedger
-    function fixPosition(address from, address to, uint256 amount) external restricted {
-        _fixPosition(from, to, amount);
-    }
-
     /// @inheritdoc ITransferValidation
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
@@ -291,23 +286,17 @@ contract ModularCompliance is
     }
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
-    ///  claim a fresh compliance during setup), and the owner may always bind or unbind.
+    ///  claim a fresh compliance during setup), and the owner may always bind.
     ///
     ///  A token claiming the compliance must be one this compliance's AccessManager governs: it has given the
     ///  token's `setCompliance` a role. The caller writes its own `compliance()` and `authority()`, so neither
     ///  proves anything; only the manager's admin can configure a target, so any contract with no supply could
     ///  otherwise bind itself and write positions for any identity through a registry it chose.
     ///
-    ///  Neither door admits a token that already has supply. The ledger keeps every position from the
-    ///  token's first mint and nothing seeds it, so binding a circulating token would start every holder at
-    ///  zero, on top of whatever a previous token left behind. The token's own `setCompliance` refuses the
-    ///  same; this covers the owner calling here directly.
-    ///
-    ///  Nor does a bind displace a bound token that has supply: its every hook would revert from then on, and
-    ///  no path binds a circulating token back, so its holders would be frozen until an upgrade.
+    ///  The ledger keeps every position from the token's first mint and nothing seeds it, so the new token must
+    ///  have no supply, and the token it replaces must be able to leave.
     function _authorizeTokenBinding(address token) internal view override {
-        address boundToken = _getTokenBound();
-        bool tokenClaimsUnboundCompliance = boundToken == address(0) && msg.sender == token;
+        bool tokenClaimsUnboundCompliance = _getTokenBound() == address(0) && msg.sender == token;
         // A target the manager never configured answers the admin role, 0, for every selector.
         bool tokenGovernedByThisManager =
             IAccessManager(authority()).getTargetFunctionRole(token, IERC3643.setCompliance.selector) != 0;
@@ -315,16 +304,23 @@ contract ModularCompliance is
             (tokenClaimsUnboundCompliance && tokenGovernedByThisManager) || _isOwner(msg.sender),
             ErrorsLib.OnlyOwnerOrTokenCanCall()
         );
-        if (token != address(0)) require(IToken(token).totalSupply() == 0, ErrorsLib.TokenCirculating());
-        require(!_hasSupply(boundToken), ErrorsLib.TokenCirculating());
+        require(!_hasSupply(token), ErrorsLib.TokenCirculating());
+        _requireBoundTokenCanLeave();
     }
 
-    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner. A bound token
-    ///  with supply stays bound, even for the owner: nothing could bind it back, so a detach would only
-    ///  freeze its holders. A compliance that must change under a circulating token is upgraded instead.
+    /// @dev Unbinding does not allow the "first bind" path: only the token itself or the owner, and only once
+    ///  the token can leave.
     function _authorizeTokenUnbinding(address token) internal view override {
         require(msg.sender == token || _isOwner(msg.sender), ErrorsLib.OnlyOwnerOrTokenCanCall());
+        _requireBoundTokenCanLeave();
+    }
+
+    /// @dev The ledger's positions belong to the bound token's holders, and no path binds a circulating token
+    ///  back, so the token may leave only once it has no supply. An open validation keeps it too: closing one
+    ///  releases its reservation on the bound token. A compliance that must change under it is upgraded instead.
+    function _requireBoundTokenCanLeave() private view {
         require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
+        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -332,16 +328,14 @@ contract ModularCompliance is
     /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
-    ///  A wallet that resolves to no identity is refused outright while a rule is bound, on either side. Every
-    ///  rule about distribution keys on the identity: a zero recipient would read as the absent side of a burn
-    ///  and answer "no limit", letting tokens land where no cap can ever reach them; a zero sender would read as
-    ///  a mint and escape every rule about leaving. Only a wallet the registry no longer attributes reaches
-    ///  this, since `isVerified` refuses an unknown recipient first and a revoked wallet still attributes.
+    ///  A sender that resolves to no identity is refused outright while a rule is bound: it would read as a mint
+    ///  and escape every rule about leaving. A holding wallet resolves to nobody only after the owner swaps the
+    ///  registry's storage or unbinds a registry from it. The recipient needs no such guard, since the token asks
+    ///  `isVerified` first, and that requires an active identity even with the eligibility checks disabled.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
         if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        if (to != address(0) && ctx.toIdentity == address(0)) return false;
         return value <= _minAllowedAmount(ctx);
     }
 
