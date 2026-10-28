@@ -99,10 +99,10 @@ interface ITREXRegistry is IERC3643IdentityRegistry, IERC3643TrustedIssuersRegis
     /// Emits an `EligibilityChecksEnabled` event upon successful execution.
     function enableEligibilityChecks() external;
 
-    /// @dev Returns the ONCHAINID IdentityFactory whose type record backs per-type claim topic
-    /// resolution. Baked into the implementation at construction, so changing it takes a new
-    /// implementation published through the beacon. `identityTypeOf` on it returns 0 for identities
-    /// it did not mint, which resolve to the default claim topics.
+    /// @dev Returns the ONCHAINID IdentityFactory this registry resolves through: a wallet the storage does
+    /// not bind resolves here, and its type record backs per-type claim topic resolution. Baked into the
+    /// implementation at construction, so changing it takes a new implementation published through the beacon.
+    /// `identityTypeOf` on it returns 0 for identities it did not mint, which resolve to the default claim topics.
     function identityFactory() external view returns (IIdentityFactory);
 
     /// @dev Adds a claim topic to the override set of an identity type.

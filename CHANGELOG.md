@@ -514,6 +514,35 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Each registry resolves wallets through its own IdentityFactory** (L-08 #153, L-15 #156, L-16 #157,
+  L-26 #162). The storage resolved a wallet it did not bind by asking the IdentityFactory of every bound
+  registry in turn, in an order an unbind could change, while each registry judged revocation and identity
+  type in its own factory. A registry could resolve a wallet to another factory's identity and admit it, and
+  unbinding a registry changed who wallets were in the others or left its own wallets with no identity.
+  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only. `TREXRegistry`
+  resolves a wallet the storage does not bind through its own factory, revoked bindings included.
+  `IdentityRegistryStorage.init` now takes the storage's IdentityFactory, which never changes, and the
+  TREXFactory passes its own. `addIdentityToStorage` checks every write against that factory
+  (`WalletBoundToAnotherIdentity`), so no holder of the writer role, bound registry or not, can bind a wallet
+  the factory links elsewhere. `bindIdentityRegistry` refuses a registry on another IdentityFactory
+  (`IdentityFactoryMismatch`), so every registry sharing the storage resolves through the factory its writes
+  are checked against: otherwise one registry's agent could bind a wallet another registry's factory links
+  elsewhere, and move that wallet's tokens to another owner there. Since the factory belongs to the storage,
+  unbinding every registry neither lifts the write check nor lets a registry on another factory in.
+  Unbinding no longer changes any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the
+  set. With every relink path closed, a funded wallet never changes identity, so a holding cap is never priced
+  against a position its balance has not reached yet (L-27 #163). **Upgrade:** upgrade the storage and the
+  registries sharing it together. A registry still on the old code resolves a wallet only it knows through the
+  storage's old global fallback, which the new storage no longer has, so it would lose those wallets. A storage
+  deployed before this change has no IdentityFactory set, so it refuses every write and bind: deploy a new one.
+- **A registry keeps its identity storage for life** (L-30 #164). `setIdentityRegistryStorage` let the owner
+  point a registry at a storage that does not hold its local bindings, so every wallet bound only in the old
+  one lost its identity while its tokens circulated. `TREXRegistry.setIdentityRegistryStorage` now always
+  reverts with `Deprecated`, like `setClaimTopicsRegistry` and `setTrustedIssuersRegistry`; the storage is
+  set at `init` only. To change storage, point the token at a new registry, which the token allows only while
+  nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
+  `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
+  moved a registry to another storage.
 - **An identity storage belongs to one domain** (OZ H-01). `commissionSuite` used to keep a reused
   storage in the domain of its first suite and grant the next domain's registry `IRS_WRITER` there, so
   a storage could serve suites of two domains. The storage holds one record per wallet whichever
