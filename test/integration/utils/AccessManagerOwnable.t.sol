@@ -3,15 +3,21 @@ pragma solidity 0.8.30;
 
 import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 
 import { IERC173 } from "contracts/vendor/IERC173.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 /// @notice Covers the ERC-173 ownership compatibility shim that the suite contracts inherit on top
-///         of AccessManager. `owner()` is expected to mirror the AccessManager authority, while
-///         `transferOwnership()` is unsupported because authority changes flow through the
-///         AccessManager rather than ERC-173.
+///         of AccessManager. `owner()` mirrors the AccessManager authority, the authority changes only through
+///         the manager's `updateAuthority` (`transferOwnership` always reverts), and every change emits
+///         `OwnershipTransferred` exactly once.
 contract AccessManagerOwnableTest is TREXSuiteTest {
 
     /// @dev Every suite contract inheriting AccessManagerOwnable.
@@ -63,28 +69,87 @@ contract AccessManagerOwnableTest is TREXSuiteTest {
 
     // ============ transferOwnership() Tests ============
 
-    /// @notice transferOwnership() forwards to AccessManaged.setAuthority, which only the current authority
-    ///         (the AccessManager) may drive. A call from anyone else reverts with AccessManagedUnauthorized.
-    function test_transferOwnership_RevertWhen_NotAuthority() public {
+    /// @notice transferOwnership() is refused for every caller, the current authority included, and the owner
+    ///         stays the same.
+    function test_transferOwnership_RevertWhen_CalledByAnyone() public {
         AccessManager newAuthority = new AccessManager(address(this));
         IERC173[] memory contractsList = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
             vm.prank(deployer);
-            vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, deployer));
+            vm.expectRevert(ErrorsLib.UseUpdateAuthority.selector);
             contractsList[i].transferOwnership(address(newAuthority));
+
+            vm.prank(address(accessManager));
+            vm.expectRevert(ErrorsLib.UseUpdateAuthority.selector);
+            contractsList[i].transferOwnership(address(newAuthority));
+
+            assertEq(contractsList[i].owner(), address(accessManager));
         }
     }
 
-    /// @notice When the current authority drives transferOwnership, the authority is rotated and owner()
-    ///         reflects the new AccessManager.
-    function test_transferOwnership_Success_WhenCalledByAuthority() public {
+    /// @notice With a target admin delay set, an admin with no execution delay cannot replace the token's
+    ///         authority at once: `updateAuthority` must be scheduled, and the manager's `execute` of
+    ///         `transferOwnership`, which is mapped to no role and so carries no delay, is refused.
+    function test_transferOwnership_RevertWhen_ExecutedToSkipTargetAdminDelay() public {
+        AccessManager newAuthority = new AccessManager(address(this));
+        accessManager.setTargetAdminDelay(address(token), 1 days);
+        // A new target admin delay only takes effect after the manager's minimum setback.
+        vm.warp(block.timestamp + accessManager.minSetback() + 1);
+        assertEq(accessManager.getTargetAdminDelay(address(token)), 1 days);
+
+        bytes memory updateCall = abi.encodeCall(AccessManager.updateAuthority, (address(token), address(newAuthority)));
+        bytes32 updateOperation = accessManager.hashOperation(address(this), address(accessManager), updateCall);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, updateOperation));
+        accessManager.updateAuthority(address(token), address(newAuthority));
+
+        vm.expectRevert(ErrorsLib.UseUpdateAuthority.selector);
+        accessManager.execute(address(token), abi.encodeCall(IERC173.transferOwnership, (address(newAuthority))));
+
+        assertEq(IERC173(address(token)).owner(), address(accessManager));
+    }
+
+    // ============ OwnershipTransferred Tests ============
+
+    /// @notice The manager's own `updateAuthority` changes the owner without `transferOwnership`, and must still
+    ///         announce it, exactly once.
+    function test_updateAuthority_EmitsOwnershipTransferredOnce() public {
         AccessManager newAuthority = new AccessManager(address(this));
         IERC173[] memory contractsList = _shimmedContracts();
         for (uint256 i = 0; i < contractsList.length; i++) {
-            vm.prank(address(accessManager));
-            contractsList[i].transferOwnership(address(newAuthority));
-            assertEq(contractsList[i].owner(), address(newAuthority));
+            vm.expectEmit(address(contractsList[i]));
+            emit IERC173.OwnershipTransferred(address(accessManager), address(newAuthority));
+            vm.recordLogs();
+            accessManager.updateAuthority(address(contractsList[i]), address(newAuthority));
+            assertEq(vm.getRecordedLogs().length, 2, "one AuthorityUpdated and one OwnershipTransferred");
         }
+    }
+
+    /// @notice A contract built with a constructor announces its first owner, from the zero address.
+    function test_constructor_EmitsOwnershipTransferredFromZero() public {
+        address nextRegistry = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+
+        vm.expectEmit(nextRegistry);
+        emit IERC173.OwnershipTransferred(address(0), address(accessManager));
+        new TrustedGatewayRegistry(address(accessManager));
+    }
+
+    /// @notice A proxy built with an initializer announces its first owner, from the zero address.
+    function test_initializer_EmitsOwnershipTransferredFromZero() public {
+        address storageImplementation = address(new IdentityRegistryStorage());
+        address nextStorage = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+
+        vm.expectEmit(nextStorage);
+        emit IERC173.OwnershipTransferred(address(0), address(accessManager));
+        new ERC1967Proxy(
+            storageImplementation,
+            abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), address(idFactory)))
+        );
+    }
+
+    /// @notice Ownership cannot be renounced: the owner is the AccessManager, and a zero authority is refused.
+    function test_updateAuthority_RevertWhen_RenouncingToZero() public {
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedInvalidAuthority.selector, address(0)));
+        accessManager.updateAuthority(address(token), address(0));
     }
 
 }

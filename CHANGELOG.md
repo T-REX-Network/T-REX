@@ -231,7 +231,8 @@ All notable changes to this project will be documented in this file.
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
   so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
   Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
-  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  ERC-173 `transferOwnership` shim reverts (`UseUpdateAuthority`), and `updateAuthority` does not move
+  the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
     suite salt, creates a domain named after the token, assigns the token and its storage to it,
     commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
@@ -543,6 +544,30 @@ All notable changes to this project will be documented in this file.
   nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
   `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
   moved a registry to another storage.
+- **`OwnershipTransferred` is emitted on every owner change** (ERC-173). The owner of every T-REX contract is
+  its AccessManager, and the AccessManager's own `updateAuthority` changes it without going through
+  `transferOwnership`, so explorers and indexers that follow `OwnershipTransferred` kept showing the old
+  owner. Creation emitted nothing either. The event now comes from `_setAuthority`, which every owner change
+  passes through: the constructor or initializer, and `updateAuthority` (`transferOwnership` reverts, see
+  below). Upgradeable contracts on the AccessManagedOwnable layer grow by 1 byte, constructor based ones by 5
+  to 10 bytes.
+- **`transferOwnership` always reverts** (#166, L-33). The ERC-173 shim called `setAuthority` on the
+  contract itself and was mapped to no role, so it fell to `ADMIN_ROLE` with none of the target admin delay
+  the AccessManager applies to `updateAuthority`. An admin with no execution delay could replace a
+  contract's authority at once through the manager's `execute`, leaving no window to notice or cancel it.
+  `transferOwnership` now reverts with `UseUpdateAuthority` for every caller; the authority changes only
+  through `AccessManager.updateAuthority`. `owner()` is unchanged. **Breaking** for any integration that
+  wrote ownership through ERC-173.
+- **Every token batch function has a role row of its own** (#149, L-04). A batch without a row is
+  authorized through its single-item function's role, and `_checkCanCallSelector` detects "no row" as a zero
+  `getTargetFunctionRole`. `ADMIN_ROLE` is also zero, so mapping a batch to `ADMIN_ROLE` changed nothing:
+  `AGENT_MINTER` holders could still call `batchMint`. `AccessManagerSetupLib.tokenTable` now maps
+  `batchMint`, `batchBurn`, `batchFreezePartialTokens`, `batchUnfreezePartialTokens`, `batchSetAddressFrozen`
+  and `batchForcedTransfer` to the role of their single-item function, as `batchRegisterIdentity` already was
+  on the registry, so a batch takes the full check, scheduled operations included. The AccessManager still
+  cannot tell an unset selector from one set to `ADMIN_ROLE`, so `_checkCanCallSelector` now states that a
+  batch can be restricted only through a nonzero role. Existing suites get the rows by calling
+  `setTargetFunctionRole` for the six selectors.
 - **An identity storage belongs to one domain** (OZ H-01). `commissionSuite` used to keep a reused
   storage in the domain of its first suite and grant the next domain's registry `IRS_WRITER` there, so
   a storage could serve suites of two domains. The storage holds one record per wallet whichever

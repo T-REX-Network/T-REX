@@ -71,7 +71,7 @@ import { IERC173 } from "../vendor/IERC173.sol";
 
 /// @dev Shared IERC173 ownership surface layered on top of an AccessManager-backed authority.
 ///      Concrete contracts mix this with either `AccessManaged` or `AccessManagedUpgradeable`,
-///      which supply `authority()` and the public `setAuthority`.
+///      which supply `authority()`.
 abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
     /// @dev Misconfiguration guard, NOT a trust boundary: `other.authority()` is spoofable, so always
@@ -82,14 +82,11 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
     }
 
     /// @inheritdoc IERC173
-    /// @dev Rotates this contract's authority only. Replacing a suite's AccessManager is not a supported
-    ///      operation: the manager is a beacon proxy upgraded in place, and the token identity's MANAGEMENT
-    ///      key stays with the manager that deployed the suite.
-    function transferOwnership(address newAuthority) external {
-        address oldAuthority = authority();
-        setAuthority(newAuthority);
-
-        emit OwnershipTransferred(oldAuthority, newAuthority);
+    /// @dev Always reverts. The owner is the AccessManager, and a change of manager must wait for the target's
+    ///      admin delay, which the manager applies only to its own `updateAuthority`. This function is a
+    ///      call on the target itself, mapped to no role, so the manager would run it with no delay.
+    function transferOwnership(address) external pure {
+        revert ErrorsLib.UseUpdateAuthority();
     }
 
     /// @inheritdoc IERC173
@@ -108,8 +105,5 @@ abstract contract AccessManagedOwnableBase is IERC173, ERC165 {
 
     /// @dev Supplied by the concrete AccessManaged base (upgradeable or not).
     function authority() public view virtual returns (address);
-
-    /// @dev Supplied by the concrete AccessManaged base (upgradeable or not); its caller/code checks still apply.
-    function setAuthority(address newAuthority) public virtual;
 
 }
