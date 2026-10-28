@@ -112,7 +112,12 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     /// mapping containing info about the token contracts corresponding to salt already used for CREATE3 deployments
     mapping(string => address) public tokenDeployed;
 
+    /// The contract type each suite contract is predicted and deployed under, so both paths use one spelling.
     string private constant ACCESS_MANAGER = "AccessManager";
+    string private constant TOKEN = "Token";
+    string private constant REGISTRY = "REGISTRY";
+    string private constant IRS = "IRS";
+    string private constant MC = "MC";
 
     constructor(
         address implementationAuthority,
@@ -203,8 +208,9 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         if (tokenDetails.accessManager == address(0)) {
             address admin = tokenDetails.accessManagerAdmin;
             require(admin != address(0), ErrorsLib.ZeroAddress());
-            require(admin != address(this), ErrorsLib.InvalidAccessManagerAdmin());
-            require(admin != _predictAddress(salt, ACCESS_MANAGER), ErrorsLib.InvalidAccessManagerAdmin());
+            // None of these contracts ever acts as the manager's administrator, so naming one would leave the
+            // suite with none.
+            require(!_isFactoryOrSuiteContract(salt, admin), ErrorsLib.InvalidAccessManagerAdmin());
         } else {
             require(
                 tokenDetails.accessManager.code.length != 0,
@@ -355,6 +361,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return Create3.computeAddress(_saltBytes(salt, contractType), address(this));
     }
 
+    /// @dev Whether `account` is this factory or one of the contracts the suite for `salt` will be deployed at.
+    function _isFactoryOrSuiteContract(string memory salt, address account) private view returns (bool) {
+        return account == address(this) || account == _predictAddress(salt, ACCESS_MANAGER)
+            || account == _predictAddress(salt, TOKEN) || account == _predictAddress(salt, REGISTRY)
+            || account == _predictAddress(salt, IRS) || account == _predictAddress(salt, MC);
+    }
+
     /**
      * @dev Computes the CREATE3 salt for a given (salt, contractType) pair.
      *      Salt layout (32 bytes) — preserved from the previous CreateX integration so the per-factory address
@@ -399,7 +412,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     ) private returns (address) {
         return _deploy(
             salt,
-            "REGISTRY",
+            REGISTRY,
             _beaconProxyBytecode(
                 trexRegistryBeacon,
                 abi.encodeCall(
@@ -423,13 +436,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     {
         return _deploy(
             salt,
-            "MC",
+            MC,
             _beaconProxyBytecode(
                 mcBeacon,
                 abi.encodeCall(
                     ModularCompliance.init,
                     (
-                        _predictAddress(salt, "Token"),
+                        _predictAddress(salt, TOKEN),
                         manager,
                         tokenDetails.complianceModules,
                         tokenDetails.complianceSettings
@@ -443,10 +456,10 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
     function _deployIRS(string memory salt, address irsBeacon, address manager) private returns (address) {
         return _deploy(
             salt,
-            "IRS",
+            IRS,
             _beaconProxyBytecode(
                 irsBeacon,
-                abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, "REGISTRY"), _idFactory))
+                abi.encodeCall(IdentityRegistryStorage.init, (manager, _predictAddress(salt, REGISTRY), _idFactory))
             )
         );
     }
@@ -482,7 +495,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address identityRegistry,
         address compliance
     ) private returns (address) {
-        address predictedToken = _predictAddress(salt, "Token");
+        address predictedToken = _predictAddress(salt, TOKEN);
         address oid = tokenDetails.ONCHAINID;
         if (oid == address(0)) {
             oid = IIdentityFactory(_idFactory)
@@ -506,9 +519,7 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             );
         }
         return
-            _deploy(
-                salt, "Token", _tokenBytecode(tokenBeacon, tokenDetails, manager, identityRegistry, compliance, oid)
-            );
+            _deploy(salt, TOKEN, _tokenBytecode(tokenBeacon, tokenDetails, manager, identityRegistry, compliance, oid));
     }
 
     /// @dev Builds the single-entry MANAGEMENT key set granting `managementKey` control of the minted

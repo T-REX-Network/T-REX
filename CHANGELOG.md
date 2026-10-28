@@ -231,7 +231,8 @@ All notable changes to this project will be documented in this file.
   `TREXImplementationAuthority` like the four suite contracts. The manager's address never changes,
   so the token identity's MANAGEMENT key, every `authority()` and all role state survive an upgrade.
   Key rotation is role rotation inside the manager. Replacing the manager is not supported; the
-  ERC-173 `transferOwnership` shim forwards to `setAuthority` and does not move the identity key.
+  ERC-173 `transferOwnership` shim reverts (`UseUpdateAuthority`), and `updateAuthority` does not move
+  the identity key.
   - `deployTREXSuite` with `TokenDetails.accessManager == address(0)` deploys a manager under the
     suite salt, creates a domain named after the token, assigns the token and its storage to it,
     commissions the suite, grants `ADMIN_ROLE` to `TokenDetails.accessManagerAdmin` and renounces its
@@ -514,6 +515,56 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
+  identity from the agent and never compared it with the lost wallet's owner. An agent could name another
+  identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
+  transfer makes, and were reported to the compliance as a recovery, which trackers leave out of what they
+  count. An agent holding only the recovery role could also map a wallet to any identity through the
+  token's own AGENT grant. `TokenRecoveryLib.checkRecovery` now requires every wallet the registry knows to
+  belong to the named identity, and reverts with `RecoveryNotPossible` otherwise. A wallet never changes
+  identity, so moving an investor to a new identity is a forced transfer to a wallet of that identity. The v4.2
+  decision that the new wallet need not be a key on the identity is unchanged. `Token`'s size is unchanged.
+- **Recovery requires the new wallet to be verified, as a forced transfer does.** Minting, transfers and
+  forced transfers all require the recipient to pass `isVerified`; `recoveryAddress` did not. A wallet revoked
+  in ONCHAINID keeps its binding while `isVerified` refuses it, so a recovery agent could move the lost
+  wallet's whole balance onto it, and the revoked wallet could then transfer it out.
+  `TokenRecoveryLib.registerRecoveredWallet` now requires `isVerified(newWallet)` once the new wallet is
+  registered, and reverts with `UnverifiedIdentity` otherwise. **Behaviour change**: a fresh wallet is judged
+  on the identity's claims, so recovering an investor whose identity lacks the token's required claims is
+  now refused; restore the claims first.
+- **An EVM peer must be a 20-byte account** (`setPeer`). The peer check accepted any non-empty account, so a
+  left-padded or truncated EVM address was stored as the Lite. A gateway reports an EVM sender as its 20 bytes and
+  inbound messages are matched to the peer byte for byte, so such a peer refused every message from the real Lite.
+  An EVM peer whose account is not 20 bytes now reverts with `InvalidPeer`; non-EVM peers are unchanged.
+- **An EVM wallet is accepted only as a 20-byte address on a named chain** (`WalletKeyLib.parse`). An EVM
+  envelope with a left-padded address, an empty chain reference or no address was accepted. A padded address names
+  the same wallet yet hashes to a second ledger key, and a native wallet written that way was read as a satellite.
+  Such envelopes now revert with `NonCanonicalInteroperableAddress`; non-EVM envelopes are unchanged.
+- **The issuance rules see the spender a validation names.** `requestTransferValidation` asked the `RULE` modules
+  with an empty spender, while the spender modules got the named one, so a rule could not see who would execute
+  the validation. The named spender is now in the rule context.
+- **The implementation authority requires code at its access manager.** The `TREXImplementationAuthority`
+  constructor rejected only the zero address, so a codeless address could become the authority every publish and
+  upgrade asks, and such an address refuses every restricted call. The constructor now reverts with
+  `AccessManagerNotAContract`, as the factory and `setAuthority` already do; the zero address reverts the same way.
+- **A predicted suite address cannot be the access manager administrator.** `deployTREXSuite` refused the zero
+  address, the factory and the predicted access manager as `accessManagerAdmin`, but accepted the predicted token,
+  identity registry, identity storage and compliance. None of them ever acts as the administrator, so such a suite
+  had none. All of them now revert with `InvalidAccessManagerAdmin`.
+- **Documented: delisting a spender leaves issued validations to expire.** `SpenderWhitelistModule.disallowSpender`
+  takes effect on the next `transferFrom` and the next validation. A validation already issued to that spender is on
+  the satellite and may execute until its expiry; the validity window bounds that exposure.
+- **Documented: only gateways paid out of band carry token traffic.** A token calls `sendMessage` with no value and
+  no attributes, so a gateway that must be paid with the call cannot carry its messages (`ITrustedGatewayRegistry`).
+- **A settlement tells the trackers the spender the validation names.** `afterTransfer` on a settlement always
+  received an empty `TransferContext.spender`, since the validation record did not keep it. The record now keeps
+  the spender it was issued with (`Validation.spender`) and the settlement context carries it.
+- **Rules and trackers see the caller of `transferFrom`.** The ERC-3643 hooks carry no spender, so `allowedAmount`
+  and `afterTransfer` always received it empty on a native movement, and a rule capping delegated transfers could
+  not tell one from a direct transfer. `canSpenderCall`, which the token asks right before every `transferFrom`
+  moves anything, now keeps the spender in transient storage for the rest of that transfer, and the native
+  context carries it. `canSpenderCall` is no longer a `view` and only the bound token may call it, so no one
+  else can name a spender for a transfer. The ERC-3643 hook signatures are unchanged.
 - **Each registry resolves wallets through its own IdentityFactory** (L-08 #153, L-15 #156, L-16 #157,
   L-26 #162). The storage resolved a wallet it did not bind by asking the IdentityFactory of every bound
   registry in turn, in an order an unbind could change, while each registry judged revocation and identity
@@ -548,6 +599,30 @@ All notable changes to this project will be documented in this file.
   nothing circulates. `InvalidIdentityRegistryStorage` and `RegistryNotBoundToStorage` are removed, and
   `AccessManagerSetupLib.registryTable` no longer maps the setter. **Breaking** for any integration that
   moved a registry to another storage.
+- **`OwnershipTransferred` is emitted on every owner change** (ERC-173). The owner of every T-REX contract is
+  its AccessManager, and the AccessManager's own `updateAuthority` changes it without going through
+  `transferOwnership`, so explorers and indexers that follow `OwnershipTransferred` kept showing the old
+  owner. Creation emitted nothing either. The event now comes from `_setAuthority`, which every owner change
+  passes through: the constructor or initializer, and `updateAuthority` (`transferOwnership` reverts, see
+  below). Upgradeable contracts on the AccessManagedOwnable layer grow by 1 byte, constructor based ones by 5
+  to 10 bytes.
+- **`transferOwnership` always reverts** (#166, L-33). The ERC-173 shim called `setAuthority` on the
+  contract itself and was mapped to no role, so it fell to `ADMIN_ROLE` with none of the target admin delay
+  the AccessManager applies to `updateAuthority`. An admin with no execution delay could replace a
+  contract's authority at once through the manager's `execute`, leaving no window to notice or cancel it.
+  `transferOwnership` now reverts with `UseUpdateAuthority` for every caller; the authority changes only
+  through `AccessManager.updateAuthority`. `owner()` is unchanged. **Breaking** for any integration that
+  wrote ownership through ERC-173.
+- **Every token batch function has a role row of its own** (#149, L-04). A batch without a row is
+  authorized through its single-item function's role, and `_checkCanCallSelector` detects "no row" as a zero
+  `getTargetFunctionRole`. `ADMIN_ROLE` is also zero, so mapping a batch to `ADMIN_ROLE` changed nothing:
+  `AGENT_MINTER` holders could still call `batchMint`. `AccessManagerSetupLib.tokenTable` now maps
+  `batchMint`, `batchBurn`, `batchFreezePartialTokens`, `batchUnfreezePartialTokens`, `batchSetAddressFrozen`
+  and `batchForcedTransfer` to the role of their single-item function, as `batchRegisterIdentity` already was
+  on the registry, so a batch takes the full check, scheduled operations included. The AccessManager still
+  cannot tell an unset selector from one set to `ADMIN_ROLE`, so `_checkCanCallSelector` now states that a
+  batch can be restricted only through a nonzero role. Existing suites get the rows by calling
+  `setTargetFunctionRole` for the six selectors.
 - **An identity storage belongs to one domain** (OZ H-01). `commissionSuite` used to keep a reused
   storage in the domain of its first suite and grant the next domain's registry `IRS_WRITER` there, so
   a storage could serve suites of two domains. The storage holds one record per wallet whichever

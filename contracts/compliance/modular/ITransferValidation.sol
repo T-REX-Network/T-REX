@@ -168,6 +168,9 @@ interface ITransferValidation {
         uint256 executedAmount;
         /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
         bytes legWallet;
+        /// The spender the validation names, empty when `from` executes itself. Kept so the `TRACKER` modules
+        /// are told who executed it when it settles.
+        bytes spender;
     }
 
     /// @dev Issues a `ComplianceValidation` for a movement out of a satellite wallet, toward another satellite

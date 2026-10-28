@@ -134,6 +134,9 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
     }
 
     /// @dev Delists a spender for the calling compliance. Emits `SpenderDisallowed`.
+    /// Takes effect on the next `transferFrom` and the next validation issued. A validation already issued
+    /// naming this spender is not withdrawn: its leg is on the satellite, which may execute it until `expiry`,
+    /// and the reference chain then records what the satellite did. The validity window bounds that exposure.
     /// @param _spender ERC-7930 envelope of the wallet to delist
     function disallowSpender(bytes calldata _spender) external onlyComplianceCall {
         bytes32 key = WalletKeyLib.canonicalKey(_spender);
