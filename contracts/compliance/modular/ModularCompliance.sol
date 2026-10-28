@@ -394,6 +394,7 @@ contract ModularCompliance is
         ITREXRegistry registry = _boundRegistry();
         address fromIdentity;
         address toIdentity;
+        // A self-transfer leaves the balance where it was; a delegation reports holder to holder after its burn.
         bool balanceUnchanged = from == to && kind != MovementKindLib.DELEGATION;
         int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
         if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), adjustment);
