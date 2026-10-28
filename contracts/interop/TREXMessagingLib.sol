@@ -235,10 +235,10 @@ library TREXMessagingLib {
 
             emit EventsLib.ValidationRoutePinned(validationId, chainKey, gateway);
         } else {
-            require(
-                pinned == gateway && s.pinnedPeers[validationId][chainKey] == keccak256(peer),
-                ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned)
-            );
+            bool sameGateway = pinned == gateway;
+            bool samePeer = s.pinnedPeers[validationId][chainKey] == keccak256(peer);
+            require(sameGateway, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
+            require(samePeer, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
         }
 
         sendId = _send(gateway, peer, chainKey, MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);

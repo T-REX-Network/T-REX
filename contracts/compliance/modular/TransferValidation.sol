@@ -409,9 +409,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         address toIdentity = validation.toIdentity;
         (bool toNative, address toWallet) = WalletKeyLib.isReferenceChain(to);
         if (toNative) {
-            address resolved = address(_boundRegistry().identity(toWallet));
-            if (resolved == address(0)) resolved = toIdentity;
-            toIdentity = _currentOwner(toWallet, resolved, 0);
+            address registryIdentity = address(_boundRegistry().identity(toWallet));
+            if (registryIdentity == address(0)) registryIdentity = toIdentity;
+            toIdentity = _currentOwner(toWallet, registryIdentity, 0);
         }
 
         return TransferContextLib.settlement(

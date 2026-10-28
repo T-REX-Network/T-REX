@@ -249,12 +249,14 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
 
         _details = new ComplianceCheckDetails[](rules.length);
         for (uint256 i; i < rules.length; i++) {
-            uint256 allowed = refusedBeforeTheRules ? 0 : IModule(rules[i]).allowedAmount(ctx);
-            bool withinAllowance = _value <= allowed;
+            if (refusedBeforeTheRules) {
+                _details[i] =
+                    ComplianceCheckDetails({ moduleName: IModule(rules[i]).name(), allowedAmount: 0, pass: false });
+                continue;
+            }
+            uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
             _details[i] = ComplianceCheckDetails({
-                moduleName: IModule(rules[i]).name(),
-                allowedAmount: allowed,
-                pass: !refusedBeforeTheRules && withinAllowance
+                moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed
             });
         }
     }
