@@ -101,6 +101,7 @@ library ERC3643ErrorsLib {
     ///  `TrustedClaimTopicsCannotBeEmpty` so callers can tell the two entry points apart.
     error ClaimTopicsCannotBeEmpty();
     error TrustedIssuerAlreadyExists();
+    error TrustedIssuerHasNoCode(address issuer);
 
     // IdentityRegistryStorage
     error AddressAlreadyStored();

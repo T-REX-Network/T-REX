@@ -100,6 +100,9 @@ library RolesLib {
 
     uint32 constant PLATFORM_DOMAIN = type(uint32).max;
 
+    // The manager's open role, which no packed id may equal.
+    uint64 constant PUBLIC_ROLE = type(uint64).max;
+
     // Role numbers start at 1 so no standard role packs to a zero role number.
     uint32 constant ROLE_NUMBER_OFFSET = 1;
 
@@ -116,6 +119,16 @@ library RolesLib {
 
     function platform(PlatformRole role) internal pure returns (uint64) {
         return _pack(PLATFORM_DOMAIN, uint32(role) + ROLE_NUMBER_OFFSET);
+    }
+
+    /// Platform roles governance names itself, with no release: the name hashes into the role number the
+    /// same way a custom suite role does, so it can never collide with a {PlatformRole} entry.
+    /// The platform domain is all ones, so a name whose hash has every low bit set would pack to the
+    /// manager's `PUBLIC_ROLE`; such a name is refused and cannot be used. Enum roles cannot reach it.
+    function platform(bytes32 customName) internal pure returns (uint64) {
+        uint64 id = _pack(PLATFORM_DOMAIN, uint32(uint256(keccak256(abi.encode(customName)))) | CUSTOM_ROLE_FLAG);
+        require(id != PUBLIC_ROLE, ErrorsLib.PlatformRoleCannotBePublic());
+        return id;
     }
 
     function decode(uint64 roleId) internal pure returns (uint32 domainId, uint32 roleNumber, bool custom) {
