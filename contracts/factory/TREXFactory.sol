@@ -242,6 +242,13 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
             require(authority == manager, ErrorsLib.StorageAuthorityMismatch(irs, manager, authority));
         }
         address registry = _deployTREXRegistry(salt, beacons.trexRegistryBeacon, manager, irs, claimDetails);
+        // A fresh storage pins `_idFactory` and binds this registry before it has code, so without asking its
+        // factory; `setIdFactory` can leave the registry beacon on another one. A supplied storage binds a registry
+        // through `bindIdentityRegistry`, which checks the factory itself.
+        if (tokenDetails.irs == address(0)) {
+            address registryFactory = address(TREXRegistry(registry).identityFactory());
+            require(registryFactory == _idFactory, ErrorsLib.IdentityFactoryMismatch(_idFactory, registryFactory));
+        }
         address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;

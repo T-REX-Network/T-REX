@@ -22,6 +22,7 @@ import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { VersionLib } from "contracts/libraries/VersionLib.sol";
 import {
     ITREXImplementationAuthority,
     TREXImplementationAuthority
@@ -1153,6 +1154,25 @@ contract TREXFactoryTest is TREXSuiteTest {
         trexFactory.setIdFactory(address(newIdFactory));
 
         assertEq(trexFactory.getIdFactory(), address(newIdFactory), "IdentityFactory should be updated");
+    }
+
+    /// @notice A fresh storage is pinned to the factory's IdentityFactory and binds the new registry without asking
+    ///         its factory, so a suite whose registry beacon resolves through another IdentityFactory is refused
+    ///         instead of deployed with two factories that disagree.
+    function test_deployTREXSuite_RevertWhen_TheRegistryUsesAnotherIdentityFactory() public {
+        IdentityFactory otherIdFactory = _newIdentityFactory();
+        ITREXImplementationAuthority.SuiteImplementations memory implementations = _suiteImplementations();
+        implementations.trexRegistryImplementation = address(new TREXRegistry(address(otherIdFactory)));
+        vm.prank(deployer);
+        trexImplementationAuthority.publishAndUpgrade(VersionLib.pack(5, 0, 1), implementations);
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.IdentityFactoryMismatch.selector, address(idFactory), address(otherIdFactory)
+            )
+        );
+        trexFactory.deployTREXSuite("mismatched-factory", _createEmptyTokenDetails(), _createEmptyClaimDetails());
     }
 
     // ============ setTrustedGatewayRegistry() Tests ============

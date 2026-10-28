@@ -615,16 +615,21 @@ All notable changes to this project will be documented in this file.
   registry in turn, in an order an unbind could change, while each registry judged revocation and identity
   type in its own factory. A registry could resolve a wallet to another factory's identity and admit it, and
   unbinding a registry changed who wallets were in the others or left its own wallets with no identity.
-  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only. `TREXRegistry`
-  resolves a wallet the storage does not bind through its own factory, revoked bindings included.
-  `IdentityRegistryStorage.init` now takes the storage's IdentityFactory, which never changes, and the
-  TREXFactory passes its own. `addIdentityToStorage` checks every write against that factory
-  (`WalletBoundToAnotherIdentity`), so no holder of the writer role, bound registry or not, can bind a wallet
-  the factory links elsewhere. `bindIdentityRegistry` refuses a registry on another IdentityFactory
-  (`IdentityFactoryMismatch`), so every registry sharing the storage resolves through the factory its writes
-  are checked against: otherwise one registry's agent could bind a wallet another registry's factory links
-  elsewhere, and move that wallet's tokens to another owner there. Since the factory belongs to the storage,
-  unbinding every registry neither lifts the write check nor lets a registry on another factory in.
+  `IdentityRegistryStorage.storedIdentity` now returns the storage's own binding only. `TREXRegistry` resolves a wallet the storage does not bind through its own factory,
+  revoked bindings included, and refuses in `registerIdentity` a binding that contradicts that factory
+  (`WalletBoundToAnotherIdentity`). `IdentityRegistryStorage.init` now takes the storage's IdentityFactory,
+  which never changes, and the TREXFactory passes its own. The storage binds that first registry before it
+  has code, so without asking its factory: the TREXFactory checks it instead and refuses a suite whose
+  registry beacon is on another IdentityFactory (`IdentityFactoryMismatch`). Upgrading the registry beacon to
+  an implementation on another factory stays an admin decision; the registry's own check above still refuses
+  a contradicting binding then. `bindIdentityRegistry` refuses a registry on
+  another IdentityFactory (`IdentityFactoryMismatch`), so that check covers every registry sharing the storage:
+  otherwise one registry's agent could bind a wallet another registry's factory links elsewhere, and move that
+  wallet's tokens to another owner there. Since the writer role is not tied to the bound set,
+  `addIdentityToStorage` also checks every write against the storage's factory (`WalletBoundToAnotherIdentity`),
+  so neither a registry on another factory that holds the role without being bound, nor an account granted it
+  by hand, can bind a wallet that factory links elsewhere. Since the factory belongs to the storage, unbinding
+  every registry neither lifts the write check nor lets a registry on another factory in.
   Unbinding no longer changes any resolution. `MAX_BOUND_REGISTRIES` now only caps the cost of enumerating the
   set. With every relink path closed, a funded wallet never changes identity, so a holding cap is never priced
   against a position its balance has not reached yet (L-27 #163). **Upgrade:** upgrade the storage and the
@@ -738,9 +743,10 @@ All notable changes to this project will be documented in this file.
     registered again. Revoking twice reverts with `WalletNotActive`. The storage and the registry emit
     `IdentityRevoked` instead of the standard `IdentityUnstored` and `IdentityRemoved`, which mean the
     wallet left the registry. See docs/erc3643-oz-swap.md for integrators.
-  - `addIdentityToStorage`, and so `registerIdentity`, reverts with `WalletBoundToAnotherIdentity` when the
-    factory links the wallet, actively or revoked, to a different identity, and with
-    `WalletAlreadyRevoked` for a revoked wallet. Registering the identity the factory names still works.
+  - `registerIdentity` reverts with `WalletBoundToAnotherIdentity` when the registry's factory links the
+    wallet, actively or revoked, to a different identity, and with `WalletAlreadyRevoked` for a revoked
+    wallet. Registering the identity the factory names still works. The storage's `addIdentityToStorage`
+    checks the revocation, and the factory of its bound registries.
   - The storage records the status in a new namespace, `erc3643.storage.TREXIdentityRegistryStorage`.
     Bindings stored before the upgrade read as `Active`.
   - Removed: `IIdentityRegistryStorage.isLocallyRegistered`, replaced by `localAccountStatus`, which returns
