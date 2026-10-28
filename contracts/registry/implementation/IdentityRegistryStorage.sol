@@ -91,6 +91,9 @@ contract IdentityRegistryStorage is
         /// @dev The status of each local wallet. Only `Revoked` is written. A wallet with no entry is `Active`
         ///  when it has a stored identity, and `None` otherwise.
         mapping(address wallet => IIdentityFactory.AccountStatus) accountStatus;
+        /// @dev The IdentityFactory every bound registry resolves through. Set at `init` and never changed, so
+        ///  unbinding registries can never lift the check on a write or let a registry on another factory in.
+        IIdentityFactory identityFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXIdentityRegistryStorage")) - 1)) & ~bytes32(uint256(0xff));
@@ -105,9 +108,16 @@ contract IdentityRegistryStorage is
         _disableInitializers();
     }
 
-    function init(address accessManagerAddress, address initialIRAddress) external initializer {
+    /// @dev The initial registry is bound without asking it for its factory: the TREXFactory passes the registry's
+    ///  predicted address, which has no code yet.
+    function init(address accessManagerAddress, address initialIRAddress, address identityFactoryAddress)
+        external
+        initializer
+    {
         require(accessManagerAddress != address(0), ErrorsLib.ZeroAddress());
+        require(identityFactoryAddress != address(0), ErrorsLib.ZeroAddress());
         __AccessManaged_init(accessManagerAddress);
+        _getStorage().identityFactory = IIdentityFactory(identityFactoryAddress);
 
         if (initialIRAddress != address(0)) {
             _bindIdentityRegistry(initialIRAddress);
@@ -130,22 +140,19 @@ contract IdentityRegistryStorage is
     ///  Every registry bound here must resolve through the same IdentityFactory. A registry checks a new local
     ///  binding against its own factory only, so on a storage shared across factories one registry's agent could
     ///  bind a wallet that another registry's factory links to another identity, and change who owns that
-    ///  wallet's tokens in the other registry. Comparing with one bound registry is enough, since every bound
-    ///  registry passed the same check.
+    ///  wallet's tokens in the other registry.
     function bindIdentityRegistry(address identityRegistry)
         external
         override(ERC3643IdentityRegistryStorage, IERC3643IdentityRegistryStorage)
         restricted
         onlySharedAuthority(identityRegistry)
     {
-        IIdentityFactory boundFactory = _boundFactory();
-        if (address(boundFactory) != address(0)) {
-            IIdentityFactory newFactory = ITREXRegistry(identityRegistry).identityFactory();
-            require(
-                newFactory == boundFactory,
-                ErrorsLib.IdentityFactoryMismatch(address(boundFactory), address(newFactory))
-            );
-        }
+        IIdentityFactory storageFactory = _getStorage().identityFactory;
+        IIdentityFactory registryFactory = ITREXRegistry(identityRegistry).identityFactory();
+        require(
+            registryFactory == storageFactory,
+            ErrorsLib.IdentityFactoryMismatch(address(storageFactory), address(registryFactory))
+        );
         _bindIdentityRegistry(identityRegistry);
     }
 
@@ -185,8 +192,8 @@ contract IdentityRegistryStorage is
         return interfaceId == type(IERC3643IdentityRegistryStorage).interfaceId || super.supportsInterface(interfaceId);
     }
 
-    /// @dev A wallet may be bound only to the identity the IdentityFactory of the bound registries gives it, if that
-    ///  factory knows it. The check sits in the storage so it holds for every holder of the writer role, not only
+    /// @dev A wallet may be bound only to the identity the storage's IdentityFactory gives it, if that factory knows
+    ///  it. The check sits in the storage so it holds for every holder of the writer role, not only
     ///  for a bound registry. The country is ignored, since this storage keeps none.
     function _addIdentityToStorage(address userAddress, IIdentity userIdentity, uint16) internal override {
         require(
@@ -250,21 +257,11 @@ contract IdentityRegistryStorage is
         _checkCanCall(_msgSender(), _msgData());
     }
 
-    /// @dev The identity the IdentityFactory of the bound registries links the wallet to, revoked or not. Zero when
-    ///  the factory does not know the wallet, or when no registry is bound.
+    /// @dev The identity the storage's IdentityFactory links the wallet to, revoked or not. Zero when the factory
+    ///  does not know the wallet.
     function _factoryIdentityOf(address userAddress) private view returns (address factoryIdentity) {
-        IIdentityFactory boundFactory = _boundFactory();
-        if (address(boundFactory) == address(0)) return address(0);
         bytes memory account = InteroperableAddress.formatEvmV1(block.chainid, userAddress);
-        (factoryIdentity,) = boundFactory.getIdentityIncludingRevoked(account);
-    }
-
-    /// @dev The IdentityFactory every bound registry resolves through, or zero when none is bound. Reading the
-    ///  first one is enough, since `bindIdentityRegistry` refuses a registry on another factory.
-    function _boundFactory() private view returns (IIdentityFactory) {
-        address[] memory boundRegistries = _linkedIdentityRegistries(0, 1);
-        if (boundRegistries.length == 0) return IIdentityFactory(address(0));
-        return ITREXRegistry(boundRegistries[0]).identityFactory();
+        (factoryIdentity,) = _getStorage().identityFactory.getIdentityIncludingRevoked(account);
     }
 
     /// @dev The status of a local wallet, as described on `Storage.accountStatus`.

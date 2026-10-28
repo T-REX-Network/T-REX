@@ -50,7 +50,7 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     function test_init_RevertWhen_AlreadyInitialized() public {
         vm.prank(deployer);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        identityRegistryStorage.init(deployer, address(0));
+        identityRegistryStorage.init(deployer, address(0), address(idFactory));
     }
 
     // ============ addIdentityToStorage() Tests ============
@@ -671,7 +671,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
     /// @notice Should revert when the beacon is the zero address
     function test_constructor_RevertWhen_BeaconIsZeroAddress() public {
         vm.expectRevert();
-        new BeaconProxy(address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
+        new BeaconProxy(
+            address(0), abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0), address(idFactory)))
+        );
     }
 
     /// @notice Should revert when initialization fails (implementation without init())
@@ -681,7 +683,9 @@ contract IdentityRegistryStorageTest is TREXSuiteTest {
 
         // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
         vm.expectRevert();
-        new BeaconProxy(beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0))));
+        new BeaconProxy(
+            beacon, abi.encodeCall(IdentityRegistryStorage.init, (deployer, address(0), address(idFactory)))
+        );
     }
 
 }

@@ -13,18 +13,17 @@ import {
 contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorageBaseUnitTest {
 
     function test_removeIdentityFromStorage_RevokesAndKeepsTheOwner() public {
-        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
+        irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
 
         vm.recordLogs();
-        irs.removeIdentityFromStorage(wallet);
+        irs.removeIdentityFromStorage(otherWallet);
 
         _assertOnlyIdentityRevoked();
-        assertEq(address(irs.storedIdentity(wallet)), localIdentity);
-        assertEq(uint8(irs.localAccountStatus(wallet)), uint8(IIdentityFactory.AccountStatus.Revoked));
+        assertEq(address(irs.storedIdentity(otherWallet)), localIdentity);
+        assertEq(uint8(irs.localAccountStatus(otherWallet)), uint8(IIdentityFactory.AccountStatus.Revoked));
     }
 
     function test_removeIdentityFromStorage_KeepsTheLocalOwner_WhenGlobalIdentityMatches() public {
-        irs.bindIdentityRegistry(registry);
         irs.addIdentityToStorage(wallet, IIdentity(globalIdentity), 0);
 
         vm.expectEmit(address(irs));
@@ -36,11 +35,11 @@ contract IdentityRegistryStorageRemoveIdentityUnitTest is IdentityRegistryStorag
     }
 
     function test_removeIdentityFromStorage_RevertsWhen_AlreadyRevoked() public {
-        irs.addIdentityToStorage(wallet, IIdentity(localIdentity), 0);
-        irs.removeIdentityFromStorage(wallet);
+        irs.addIdentityToStorage(otherWallet, IIdentity(localIdentity), 0);
+        irs.removeIdentityFromStorage(otherWallet);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletNotActive.selector, wallet));
-        irs.removeIdentityFromStorage(wallet);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletNotActive.selector, otherWallet));
+        irs.removeIdentityFromStorage(otherWallet);
     }
 
     function test_removeIdentityFromStorage_RevertsWhen_WalletIsOnlyBoundGlobally() public {

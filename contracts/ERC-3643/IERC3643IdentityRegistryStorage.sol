@@ -121,7 +121,7 @@ interface IERC3643IdentityRegistryStorage {
      *  (addIdentityToStorage / modify* / remove*) is gated by the IRS_WRITER role on the AccessManager, so
      *  an IR holding IRS_WRITER may write without being bound, and an unbound IR keeps IRS_WRITER until the
      *  AccessManager revokes it. Bind/unbind carry no grantRole/revokeRole of IRS_WRITER. Every write is
-     *  still checked against the IdentityFactory of the bound registries, whoever the writer is.
+     *  still checked against the storage's IdentityFactory, set at init, whoever the writer is.
      *  @param _identityRegistry The identity registry address to add.
      */
     function bindIdentityRegistry(address _identityRegistry) external;

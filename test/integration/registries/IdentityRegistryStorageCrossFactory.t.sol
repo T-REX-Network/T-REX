@@ -15,6 +15,7 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
     TREXRegistry internal suiteRegistry;
     TREXRegistry internal otherRegistry;
     IdentityRegistryStorage internal irs;
+    IdentityFactory internal otherFactory;
 
     function setUp() public override {
         super.setUp();
@@ -22,7 +23,7 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
         irs = IdentityRegistryStorage(address(suiteRegistry.identityStorage()));
         vm.prank(agent);
         token.unpause();
-        IdentityFactory otherFactory = _newIdentityFactory();
+        otherFactory = _newIdentityFactory();
         otherRegistry = TREXRegistry(
             address(
                 new ERC1967Proxy(
@@ -36,11 +37,12 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
         );
         AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(otherRegistry), DOMAIN);
         _grantStorageWriterRole(address(otherRegistry));
+        _grantIRSBinderRole(address(this));
     }
 
     /// @notice A registry on another IdentityFactory holding the storage's writer role, never bound to it, cannot
-    ///         bind a funded wallet to another identity: the storage checks the write against its bound
-    ///         registry's factory, which links the wallet to its holder.
+    ///         bind a funded wallet to another identity: the storage checks the write against its own factory,
+    ///         which links the wallet to its holder.
     function test_registerIdentity_RevertWhen_ARegistryOnAnotherFactoryBindsAFundedWallet() public {
         address registryAgent = makeAddr("registryAgent");
         _grantAgentRole(registryAgent);
@@ -58,6 +60,43 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
 
         assertEq(address(suiteRegistry.identity(victim)), address(victimIdentity));
         assertEq(token.balanceOf(victim), 1000);
+    }
+
+    /// @notice Unbinding every registry does not lift the check: the storage keeps the factory it was created with,
+    ///         so a writer on another factory still cannot bind a funded wallet to another identity.
+    function test_registerIdentity_RevertWhen_EveryRegistryIsUnbound_AndARegistryOnAnotherFactoryBindsAFundedWallet()
+        public
+    {
+        address registryAgent = makeAddr("registryAgent");
+        _grantAgentRole(registryAgent);
+        IIdentity agentIdentity = _deployIdentity(registryAgent, "registryAgent");
+        address victim = makeAddr("victim");
+        IIdentity victimIdentity = _deployIdentity(victim, "victim");
+        vm.prank(agent);
+        token.mint(victim, 1000);
+        irs.unbindIdentityRegistry(address(suiteRegistry));
+
+        vm.prank(registryAgent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, victim, address(victimIdentity))
+        );
+        otherRegistry.registerIdentity(victim, agentIdentity, 0);
+
+        assertEq(address(suiteRegistry.identity(victim)), address(victimIdentity));
+        assertEq(token.balanceOf(victim), 1000);
+    }
+
+    /// @notice A storage with no registry bound still refuses a registry on another factory, so unbinding
+    ///         everything cannot switch the storage to a factory that does not know its funded wallets.
+    function test_bindIdentityRegistry_RevertWhen_EveryRegistryIsUnbound_AndTheNewRegistryIsOnAnotherFactory() public {
+        irs.unbindIdentityRegistry(address(suiteRegistry));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.IdentityFactoryMismatch.selector, address(idFactory), address(otherFactory)
+            )
+        );
+        irs.bindIdentityRegistry(address(otherRegistry));
     }
 
 }

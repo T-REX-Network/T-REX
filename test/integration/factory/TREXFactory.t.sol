@@ -1265,7 +1265,9 @@ contract TREXFactoryTest is TREXSuiteTest {
         address foreignIRS = address(
             new BeaconProxy(
                 trexImplementationAuthority.beacons().irsBeacon,
-                abi.encodeCall(IdentityRegistryStorage.init, (address(otherAccessManager), address(0)))
+                abi.encodeCall(
+                    IdentityRegistryStorage.init, (address(otherAccessManager), address(0), address(idFactory))
+                )
             )
         );
 
