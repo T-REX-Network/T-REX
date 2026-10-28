@@ -30,9 +30,36 @@ abstract contract AccessManagerHelper is Test {
         return accessManager;
     }
 
-    /// @notice Wires the factory selectors (deployTREXSuite, setters) to the OWNER role.
+    /// @notice The platform roles the tests pick. The suite deployer role is a named platform role, which is how a
+    ///         platform mints one without a release; the others are the default `RolesLib.PlatformRole` vocabulary.
+    function _suiteDeployerRole() internal pure returns (uint64) {
+        return RolesLib.platform(bytes32("TOKEN_ISSUER"));
+    }
+
+    function _platformOwnerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.OWNER);
+    }
+
+    function _versionManagerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER);
+    }
+
+    function _interopManagerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER);
+    }
+
+    /// @notice Wires the two deploy selectors to the suite deployer role, and each setter to the role that owns its
+    ///         subject: the implementation authority to the version manager, the gateway registry to the interop
+    ///         manager, the identity factory to the platform owner.
     function _setupFactoryRoles(address trexFactory) internal {
-        AccessManagerSetupLib.setupTREXFactoryRoles(accessManager, trexFactory);
+        AccessManagerSetupLib.setupTREXFactoryRoles(
+            accessManager,
+            trexFactory,
+            _suiteDeployerRole(),
+            _versionManagerRole(),
+            _interopManagerRole(),
+            _platformOwnerRole()
+        );
     }
 
     /// @notice Wires the TREXImplementationAuthority governance selectors to the OWNER role for `ia`.
@@ -53,9 +80,27 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.forDomain(DOMAIN, role);
     }
 
+    /// @notice Grants the suite OWNER role. Platform powers are a separate grant, see {_grantPlatformRoles}: one
+    ///         account holding both is a fixture choice, never a default.
     function _grantOwnerRole(address account) internal {
         accessManager.grantRole(_role(RolesLib.Role.OWNER), account, NO_EXECUTION_DELAY);
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.OWNER), account, NO_EXECUTION_DELAY);
+    }
+
+    /// @notice Grants every platform role that opens a factory function: suite deployment and the three setter
+    ///         roles.
+    function _grantPlatformRoles(address account) internal {
+        _grantSuiteDeployerRole(account);
+        _grantVersionManagerRole(account);
+        _grantInteropManagerRole(account);
+        _grantPlatformOwnerRole(account);
+    }
+
+    function _grantSuiteDeployerRole(address account) internal {
+        accessManager.grantRole(_suiteDeployerRole(), account, NO_EXECUTION_DELAY);
+    }
+
+    function _grantPlatformOwnerRole(address account) internal {
+        accessManager.grantRole(_platformOwnerRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantStorageWriterRole(address account) internal {
@@ -68,11 +113,11 @@ abstract contract AccessManagerHelper is Test {
 
     /// @notice Grants VERSION_MANAGER, which gates publish/upgrade on the TREXImplementationAuthority.
     function _grantVersionManagerRole(address account) internal {
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.VERSION_MANAGER), account, NO_EXECUTION_DELAY);
+        accessManager.grantRole(_versionManagerRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantInteropManagerRole(address account) internal {
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER), account, NO_EXECUTION_DELAY);
+        accessManager.grantRole(_interopManagerRole(), account, NO_EXECUTION_DELAY);
     }
 
     /// @notice Grants VALIDATION_KEEPER, which gates the discard of expired validations on ModularCompliance.
