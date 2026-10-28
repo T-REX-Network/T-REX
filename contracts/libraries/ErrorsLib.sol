@@ -168,11 +168,11 @@ library ErrorsLib {
 
     // AccessManagerSetupLib Errors
     error NotAssigned(address target);
-    error PendingDelayChange(address account, uint64 role);
-    error PendingRoleGrant(address account, uint64 role);
-    error RoleNotHeld(address account, uint64 role);
     error SuiteDeployerCannotConfigureFactory();
     error PlatformRoleCannotBePublic();
+    /// @dev `target`, a storage, a registry or a compliance, is already set up in `domainId`, so a suite of
+    ///      another domain cannot use it.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();
