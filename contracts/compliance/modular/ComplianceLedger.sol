@@ -84,20 +84,20 @@ abstract contract ComplianceLedger is IComplianceLedger {
     /// @return previous the identity that was credited before, when the owner just changed and the wallet's
     ///  balance has to follow; zero otherwise
     function _followOwner(address wallet, address resolved) internal returns (address owner, address previous) {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        address recorded = ledger.ownerOf[wallet];
+        mapping(address => address) storage ownerOf = _ledger().ownerOf;
+        address recorded = ownerOf[wallet];
         if (resolved == address(0)) return (recorded, address(0));
         if (recorded == resolved) return (resolved, address(0));
-        ledger.ownerOf[wallet] = resolved;
+        ownerOf[wallet] = resolved;
         return (resolved, recorded);
     }
 
     /// @dev Moves what `wallet` held from the identity it was credited to onto the one the registry names now.
     function _moveWalletBalance(address wallet, address previous, address owner, uint256 balance) internal {
         if (balance != 0) {
-            ComplianceLedgerLib.Ledger storage ledger = _ledger();
-            ledger.position[previous] -= balance;
-            ledger.position[owner] += balance;
+            mapping(address identity => uint256 amount) storage position = _ledger().position;
+            position[previous] -= balance;
+            position[owner] += balance;
         }
         emit EventsLib.WalletOwnerChanged(wallet, previous, owner, balance);
     }
@@ -114,9 +114,9 @@ abstract contract ComplianceLedger is IComplianceLedger {
         uint256 amount
     ) internal {
         if (_isRelocation(fromIdentity, toIdentity)) return;
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        if (fromWallet != bytes32(0)) ledger.position[fromIdentity] -= amount;
-        if (toWallet != bytes32(0)) ledger.position[toIdentity] += amount;
+        mapping(address identity => uint256 amount) storage position = _ledger().position;
+        if (fromWallet != bytes32(0)) position[fromIdentity] -= amount;
+        if (toWallet != bytes32(0)) position[toIdentity] += amount;
     }
 
     /// @dev Undoes the identities' half of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation

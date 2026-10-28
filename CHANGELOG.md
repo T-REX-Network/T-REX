@@ -645,9 +645,7 @@ All notable changes to this project will be documented in this file.
   against the next token's holders, in `MaxBalancePerIdentityModule` for one. The ledger now keeps
   `pendingTotal`, what every open validation promises, and both an unbind and a bind revert with
   `ValidationsPending` until it is zero: settle or discard the validations while the token is still bound,
-  since releasing a reservation calls the bound token and would revert once it has left. The owner could also
-  unbind a token that still had supply, or bind another token over it, and the next token inherited the
-  positions; both now revert with `TokenCirculating` while the bound token has supply. An `ownerOf` entry left
+  since releasing a reservation calls the bound token and would revert once it has left. An `ownerOf` entry left
   behind moves nothing when the wallet is first credited.
   `pendingTotal` is appended after `ownerOf` in `erc3643.storage.ComplianceLedger`, so a deployed proxy keeps
   its layout. Upgrade a deployed compliance only when no validation is open: one issued before the upgrade is

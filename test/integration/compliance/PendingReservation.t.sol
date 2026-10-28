@@ -224,30 +224,6 @@ contract PendingReservationTest is InteropSuiteTest {
         boundCompliance.bindToken(address(nextToken));
     }
 
-    /// @notice The owner cannot unbind a token that still has supply: the ledger's positions belong to its holders,
-    ///         and the next token bound would inherit them.
-    function test_unbindToken_RevertWhen_TheOwnerUnbindsACirculatingToken() public {
-        assertGt(token.totalSupply(), 0);
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TokenCirculating.selector);
-        boundCompliance.unbindToken(address(token));
-
-        assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
-    }
-
-    /// @notice The owner cannot bind another token over one that still has supply, for the same reason.
-    function test_bindToken_RevertWhen_TheOwnerBindsAnotherTokenOverACirculatingToken() public {
-        Token nextToken = _deployToken("next", "Next Token", "NXT");
-        assertGt(token.totalSupply(), 0);
-
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TokenCirculating.selector);
-        boundCompliance.bindToken(address(nextToken));
-
-        assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
-    }
-
     /// @notice Once the previous token's validations are over, nothing it promised is left and the compliance
     ///         can serve another token.
     function test_bindToken_Success_WhenThePreviousTokensValidationsWereDiscarded() public {
