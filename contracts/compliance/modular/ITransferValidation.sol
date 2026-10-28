@@ -103,7 +103,7 @@ interface ITransferValidation {
         Settled,
         /// Derived, never stored: `Pending` and past `releaseAt`, not yet discarded.
         Expired,
-        /// The keeper gave up and released the reservation; issuance proceeds as if it never happened.
+        /// Discarded and the reservation released; issuance proceeds as if it never happened.
         Discarded,
         /// Discarded, then the burn leg arrived late. Still owed the mint leg.
         DiscardedAwaitingMint,
@@ -240,16 +240,27 @@ interface ITransferValidation {
     function setIssuancePaused(bytes32 chainKey, bool paused) external;
 
     /// @dev Discards expired validations in a batch: releases their reservations, so the next issuance is
-    /// computed as if the pre-approved transfers never happened. Rollback is never automatic; this is the
-    /// keeper's job, a restricted role by design: see `RolesLib.VALIDATION_KEEPER` for why it is not
-    /// permissionless. The batch is atomic: one refused id reverts the whole call.
+    /// computed as if the pre-approved transfers never happened. Rollback is never automatic. From `releaseAt`
+    /// the keeper may discard; from the end of the second reconciliation window, one more window past
+    /// `releaseAt`, anyone may. A discard turns a leg that lands afterwards into a late reconciliation, which
+    /// can pause its chain's issuance, so the first window is the keeper's to judge; past the second the pair
+    /// would be resolvable anyway, and a reservation never stays locked on a keeper that is gone. The batch is
+    /// atomic: one refused id reverts the whole call.
+    ///
+    /// A discard cannot know whether the satellite executed the validation before its deadline: the satellite
+    /// reports only what it executed. If it did and the report is still in flight, the wallet's room is given
+    /// back early, a newer validation may reserve it, and the late report still debits the wallet when it lands.
+    /// The newer one's settlement then reverts `InsufficientBridgedBalance` until the wallet is credited again;
+    /// it stays deliverable, so reconciliation is delayed, not lost. Set each chain's reconciliation window
+    /// above the longest delivery delay its gateway can have, so a report this late is not expected.
     ///
     /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - Each id must have been issued; otherwise reverts with `UnknownValidation`.
     /// - Each id must be stored `Pending`; otherwise reverts with `ValidationNotDiscardable`. A pair still
     ///   awaiting a leg is refused whatever the clock says, since one satellite has already executed.
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
+    /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
+    ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
     ///
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.

@@ -18,6 +18,12 @@ contract TokenLibrariesAbiUnitTest is Test {
         assertEq(IToken.ReturnedInTransit.selector, EventsLib.ReturnedInTransit.selector);
         assertEq(IToken.HeldInTransit.selector, EventsLib.HeldInTransit.selector);
         assertEq(IToken.BridgedTransfer.selector, EventsLib.BridgedTransfer.selector);
+        assertEq(IToken.DelegatedOut.selector, EventsLib.DelegatedOut.selector);
+        assertEq(IToken.RecallInstructed.selector, EventsLib.RecallInstructed.selector);
+        assertEq(IToken.RecallSettled.selector, EventsLib.RecallSettled.selector);
+        assertEq(IToken.BurnProofDuplicate.selector, EventsLib.BurnProofDuplicate.selector);
+        assertEq(IToken.ReplayedBurnProof.selector, EventsLib.ReplayedBurnProof.selector);
+        assertEq(IToken.InstructionResent.selector, EventsLib.InstructionResent.selector);
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
@@ -27,6 +33,15 @@ contract TokenLibrariesAbiUnitTest is Test {
         assertEq(IToken.NothingInTransit.selector, ErrorsLib.NothingInTransit.selector);
         assertEq(IToken.TransitAlreadyHeld.selector, ErrorsLib.TransitAlreadyHeld.selector);
         assertEq(IToken.TransitAmountMismatch.selector, ErrorsLib.TransitAmountMismatch.selector);
+        assertEq(IToken.WalletsNotLinked.selector, ErrorsLib.WalletsNotLinked.selector);
+        assertEq(IToken.RecallMismatch.selector, ErrorsLib.RecallMismatch.selector);
+        assertEq(IToken.RecallAmountExceeded.selector, ErrorsLib.RecallAmountExceeded.selector);
+        assertEq(IToken.RecallPending.selector, ErrorsLib.RecallPending.selector);
+        assertEq(IToken.RecallNotPending.selector, ErrorsLib.RecallNotPending.selector);
+        assertEq(IToken.DelegationMismatch.selector, ErrorsLib.DelegationMismatch.selector);
+        assertEq(IToken.PeerChanged.selector, ErrorsLib.PeerChanged.selector);
+        assertEq(IToken.UnknownResendKind.selector, ErrorsLib.UnknownResendKind.selector);
+        assertEq(IToken.UnverifiedWallet.selector, ErrorsLib.UnverifiedWallet.selector);
         assertEq(IToken.NoTokenToRecover.selector, ErrorsLib.NoTokenToRecover.selector);
         assertEq(IToken.RecoveryNotPossible.selector, ErrorsLib.RecoveryNotPossible.selector);
         assertEq(IToken.SameWalletRecovery.selector, ErrorsLib.SameWalletRecovery.selector);

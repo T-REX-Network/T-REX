@@ -557,6 +557,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
 
     /// @notice A compliance belongs to one domain too. X's OWNER unbinds X's compliance (X has no supply),
     ///         Y's token adopts it, and commissioning Y is refused on the compliance's own rows.
+    /// @dev A compliance only accepts a token its manager governs, so Y's token functions are mapped to fund Y
+    ///      first, as an admin does before handing a token to its team. Y's `IDENTITY_MANAGER` then points
+    ///      the token at X's compliance.
     function test_registry_RevertWhen_TheComplianceIsSetUpInAnotherDomain() public {
         Token tokenX = _deployBare("one-mc-x", address(0), address(domainManager));
         Token tokenY = _deployBare("one-mc-y", address(0), address(domainManager));
@@ -569,18 +572,28 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
 
         domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.OWNER), address(this), 0);
         complianceX.unbindToken(address(tokenX));
+        AccessManagerSetupLib.setupTokenRoles(domainManager, address(tokenY), fundY);
+        domainManager.grantRole(RolesLib.forDomain(fundY, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
         tokenY.setCompliance(address(complianceX));
         assertEq(complianceX.getTokenBound(), address(tokenY));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(complianceX), fundX));
         this.commissionExternally(address(tokenY));
 
-        // The compliance's rows still belong to X, and nothing of Y's suite was set up.
+        // The compliance's rows still belong to X, and nothing else of Y's suite was set up: Y's registry has
+        // no row and Y's token is not an agent of fund Y.
         assertEq(
             domainManager.getTargetFunctionRole(address(complianceX), IModularCompliance.addModule.selector),
             RolesLib.forDomain(fundX, RolesLib.Role.OWNER)
         );
-        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
+        assertEq(
+            domainManager.getTargetFunctionRole(
+                address(tokenY.identityRegistry()), IERC3643IdentityRegistry.registerIdentity.selector
+            ),
+            0
+        );
+        (bool tokenYIsAgent,) = domainManager.hasRole(RolesLib.forDomain(fundY, RolesLib.Role.AGENT), address(tokenY));
+        assertFalse(tokenYIsAgent);
     }
 
     /// @notice Two tokens of one domain may share one registry: its rows are already in that domain, so the

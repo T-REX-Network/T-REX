@@ -129,16 +129,14 @@ contract TREXRegistryTest is TREXSuiteTest {
     // =============================================================================================
 
     /// @notice Updating an identity emits `IdentityUpdated` and persists the new identity.
-    function test_identity_updateIdentity_Success() public {
-        IIdentity oldIdentity = registry.identity(bob);
-        assertEq(address(oldIdentity), address(bobIdentity));
-
-        vm.expectEmit(true, true, false, false, address(registry));
-        emit IERC3643IdentityRegistry.IdentityUpdated(oldIdentity, charlieIdentity);
+    function test_identity_updateIdentity_RevertWhen_WalletIsBound() public {
         vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, bob, address(bobIdentity))
+        );
         registry.updateIdentity(bob, charlieIdentity);
 
-        assertEq(address(registry.identity(bob)), address(charlieIdentity));
+        assertEq(address(registry.identity(bob)), address(bobIdentity));
     }
 
     /// @notice `setIdentityRegistryStorage` is OWNER-only — non-owner callers are rejected by the

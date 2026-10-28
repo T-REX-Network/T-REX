@@ -3,6 +3,9 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
+
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
 import { Utils } from "../helpers/Utils.sol";
@@ -76,6 +79,38 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         vm.store(address(token), totalBridgedSlot, bytes32(uint256(55)));
         assertEq(token.totalBridged(), 55, "totalBridged is not at offset 2");
         assertEq(token.totalSupply(), 55, "totalSupply does not count the bridged total");
+    }
+
+    /// @dev The delegation and recall fields were appended after `reservedForValidations` (5): `recalls` at 6,
+    ///      `lastRecallId` 7, `openRecall` 8, `settledProofs` 9, `lastDelegationId` 10, `delegations` 11. Inside a
+    ///      `PendingRecall`, `amount` is the fourth slot and `gateway` and `peerKey` the fifth and sixth.
+    function testTREXTokenStoragePendingRecall() public {
+        bytes32 entry = keccak256(abi.encode(uint256(1), _treXSlot(6)));
+        vm.store(address(token), bytes32(uint256(entry) + 3), bytes32(uint256(9)));
+        vm.store(address(token), bytes32(uint256(entry) + 4), bytes32(uint256(uint160(address(0xBEEF)))));
+        vm.store(address(token), bytes32(uint256(entry) + 5), bytes32(uint256(0xCAFE)));
+
+        TokenLedgerLib.PendingRecall memory recall = token.pendingRecall(1);
+        assertEq(recall.amount, 9, "recalls is not at offset 6, or amount not at +3");
+        assertEq(recall.gateway, address(0xBEEF), "gateway is not at +4");
+        assertEq(recall.peerKey, bytes32(uint256(0xCAFE)), "peerKey is not at +5");
+    }
+
+    /// @dev An id planted in `openRecall` (8) makes the next instruction for that wallet refuse with it.
+    function testTREXTokenStorageOpenRecall() public {
+        bytes memory wallet = InteroperableAddress.formatEvmV1(8453, user1);
+        vm.store(address(token), keccak256(abi.encode(keccak256(wallet), _treXSlot(8))), bytes32(uint256(5)));
+        address identity = makeAddr("Identity");
+        vm.mockCall(identityRegistry, abi.encodeWithSignature("identity(address)", user1), abi.encode(identity));
+        vm.mockCall(identityRegistry, abi.encodeWithSignature("resolveIdentity(bytes)", wallet), abi.encode(identity));
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RecallPending.selector, keccak256(wallet), 5));
+        token.instructRecall(wallet, 1, user1);
+    }
+
+    function _treXSlot(uint256 offset) private pure returns (bytes32) {
+        return bytes32(uint256(Utils.erc7201("erc3643.storage.TREXToken")) + offset);
     }
 
 }

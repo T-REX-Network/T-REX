@@ -102,8 +102,8 @@ library TokenRecoveryLib {
     }
 
     /// @dev The new wallet is registered only when it resolves nowhere, so a wallet the global registry
-    ///  already binds keeps following that binding rather than a local copy. Only local entries can be
-    ///  deleted, so the lost wallet is reported for deletion only when it is locally registered. Country is
+    ///  already binds keeps following that binding rather than a local copy. The lost wallet is reported for deletion
+    ///  only when it is active in the local storage. Country is
     ///  passed as 0 rather than read from the lost wallet, because T-REX stores none.
     /// @return lostWalletLocal whether the token must delete the lost wallet once compliance has been told
     function registerRecoveredWallet(

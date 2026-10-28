@@ -130,7 +130,7 @@ library AccessManagerSetupLib {
     ///      an execution delay could not schedule it. To restrict a batch further, map it to a nonzero role:
     ///      `ADMIN_ROLE` is role zero, which reads as "no row" (see `_checkCanCallSelector`).
     function tokenTable() internal pure returns (SelectorRole[] memory table) {
-        table = new SelectorRole[](24);
+        table = new SelectorRole[](25);
         table[0] = SelectorRole(IERC3643.setName.selector, RolesLib.Role.TOKEN_MANAGER);
         table[1] = SelectorRole(IERC3643.setSymbol.selector, RolesLib.Role.TOKEN_MANAGER);
         table[2] = SelectorRole(IERC3643.setOnchainID.selector, RolesLib.Role.IDENTITY_MANAGER);
@@ -138,23 +138,24 @@ library AccessManagerSetupLib {
         table[4] = SelectorRole(IERC3643.setCompliance.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[5] = SelectorRole(ITREXMessaging.setRoute.selector, RolesLib.Role.IDENTITY_MANAGER);
         table[6] = SelectorRole(ITREXMessaging.setPeer.selector, RolesLib.Role.IDENTITY_MANAGER);
-        table[7] = SelectorRole(IToken.dispatchMintInstruction.selector, RolesLib.Role.AGENT);
-        table[8] = SelectorRole(IToken.dispatchRecallInstruction.selector, RolesLib.Role.AGENT);
-        table[9] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
-        table[10] = SelectorRole(IERC3643.batchMint.selector, RolesLib.Role.AGENT_MINTER);
-        table[11] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
-        table[12] = SelectorRole(IERC3643.batchBurn.selector, RolesLib.Role.AGENT_BURNER);
-        table[13] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[14] = SelectorRole(IERC3643.batchFreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[15] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[16] = SelectorRole(IERC3643.batchUnfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
-        table[17] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
-        table[18] = SelectorRole(IERC3643.batchSetAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
-        table[19] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
-        table[20] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
-        table[21] = SelectorRole(IERC3643.batchForcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
-        table[22] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
-        table[23] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[7] = SelectorRole(IToken.delegateOut.selector, RolesLib.Role.AGENT);
+        table[8] = SelectorRole(IToken.instructRecall.selector, RolesLib.Role.AGENT);
+        table[9] = SelectorRole(IToken.resend.selector, RolesLib.Role.AGENT);
+        table[10] = SelectorRole(IERC3643.mint.selector, RolesLib.Role.AGENT_MINTER);
+        table[11] = SelectorRole(IERC3643.batchMint.selector, RolesLib.Role.AGENT_MINTER);
+        table[12] = SelectorRole(IERC3643.burn.selector, RolesLib.Role.AGENT_BURNER);
+        table[13] = SelectorRole(IERC3643.batchBurn.selector, RolesLib.Role.AGENT_BURNER);
+        table[14] = SelectorRole(IERC3643.freezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[15] = SelectorRole(IERC3643.batchFreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[16] = SelectorRole(IERC3643.unfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[17] = SelectorRole(IERC3643.batchUnfreezePartialTokens.selector, RolesLib.Role.AGENT_PARTIAL_FREEZER);
+        table[18] = SelectorRole(IERC3643.setAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[19] = SelectorRole(IERC3643.batchSetAddressFrozen.selector, RolesLib.Role.AGENT_ADDRESS_FREEZER);
+        table[20] = SelectorRole(IERC3643.recoveryAddress.selector, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
+        table[21] = SelectorRole(IERC3643.forcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[22] = SelectorRole(IERC3643.batchForcedTransfer.selector, RolesLib.Role.AGENT_FORCED_TRANSFER);
+        table[23] = SelectorRole(IERC3643.pause.selector, RolesLib.Role.AGENT_PAUSER);
+        table[24] = SelectorRole(IERC3643.unpause.selector, RolesLib.Role.AGENT_PAUSER);
     }
 
     function registryTable() internal pure returns (SelectorRole[] memory table) {
@@ -182,7 +183,7 @@ library AccessManagerSetupLib {
         table[1] = SelectorRole(IdentityRegistryStorage.unbindIdentityRegistry.selector, RolesLib.Role.OWNER);
         // {_requireFreshOrInDomain} reads this row to tell which domain a storage is in.
         table[2] = SelectorRole(IERC3643IdentityRegistryStorage.addIdentityToStorage.selector, RolesLib.Role.IRS_WRITER);
-        table[3] = SelectorRole(IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.IRS_WRITER);
+        table[3] = SelectorRole(IERC3643IdentityRegistryStorage.modifyStoredIdentity.selector, RolesLib.Role.IRS_WRITER);
         table[4] =
             SelectorRole(IERC3643IdentityRegistryStorage.removeIdentityFromStorage.selector, RolesLib.Role.IRS_WRITER);
     }
