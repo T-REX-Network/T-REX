@@ -550,11 +550,10 @@ All notable changes to this project will be documented in this file.
 - **`UtilityChecker` predictions follow the registry and the compliance** (audit L-32). `getVerifiedDetails` let
   the last trusted issuer holding a claim for a topic overwrite the row, so a valid claim from a first issuer was
   reported as failing when a later issuer's claim did not validate, while `isVerified` accepts the first valid
-  one. The row now keeps the first valid claim. It also asked the issuer the identity named for a trusted issuer's
-  claim id, while `isVerified` only counts a claim that names the trusted issuer itself; such a claim is now
-  reported as not found. `getTransferDetails` asked every rule even when the sender or the
+  one. The row now keeps the first valid claim. `getTransferDetails` asked every rule even when the sender or the
   recipient resolves to no identity, which the compliance refuses outright while a rule is bound; every row now
-  reports `allowedAmount` zero and `pass` false in that case, for any amount, zero included, so `getTransferStatus` agrees with `canTransfer`.
+  reports `allowedAmount` zero and `pass` false in that case, for any amount, zero included, so
+  `getTransferStatus` agrees with `canTransfer`.
 - **`UtilityChecker.getVerifiedDetails` answers for a wallet with no identity** (audit L-09). It asked the zero
   identity for its claims, and a call to an address with no code reverts, so the diagnostic for the one wallet
   most likely to need it failed outright. A wallet with no identity now gets one unmatched row per required topic

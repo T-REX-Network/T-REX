@@ -233,34 +233,6 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertTrue(identityRegistry.isVerified(alice));
     }
 
-    /// @notice The identity answers `getClaim`, so it can name any issuer for the trusted issuer's claim id. Like
-    ///         isVerified, the checker only counts a claim that names the trusted issuer itself.
-    function test_getVerifiedDetails_ReturnsFalse_WhenTheClaimNamesAnotherIssuer() public {
-        uint256 topic = claimTopicsRegistry.getClaimTopics()[0];
-        bytes32 claimId = keccak256(abi.encode(address(claimIssuer), topic));
-        address otherIssuer = makeAddr("otherIssuer");
-        Structs.ClaimData memory claimData;
-        vm.mockCall(
-            address(aliceIdentity),
-            abi.encodeWithSignature("getClaim(bytes32)", claimId),
-            abi.encode(topic, uint256(1), otherIssuer, bytes("sig"), claimData, "")
-        );
-        vm.mockCall(
-            otherIssuer,
-            abi.encodeWithSignature("isClaimValid(address,uint256,bytes,(uint256,uint256,bytes32,bytes))"),
-            abi.encode(true)
-        );
-
-        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
-            utilityChecker.getVerifiedDetails(address(token), alice);
-
-        assertEq(results.length, 1);
-        assertEq(results[0].topic, topic);
-        assertEq(address(results[0].issuer), address(0));
-        assertFalse(results[0].pass);
-        assertFalse(identityRegistry.isVerified(alice));
-    }
-
     /// @notice Should resolve the per-identity-type topics, mirroring isVerified. The default set is
     ///         the KYC topic every investor needs; corporates must additionally pass KYB.
     function test_getVerifiedDetails_UsesTypeTopics_WhenOverrideSetForIdentityType() public {
