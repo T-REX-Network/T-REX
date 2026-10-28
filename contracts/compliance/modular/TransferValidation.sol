@@ -506,7 +506,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         uint256 returnedAmount = 0;
         if (_burnArrived(validation.status)) {
             returnedAmount = validation.executedAmount;
-            _returnHeldOnToken(validation.legWallet, validationId);
+            // A validation issued with a zero minimum may burn nothing, and a burn of nothing held nothing in
+            // transit: there is nothing to give back, and the token refuses to return an empty hold.
+            if (returnedAmount != 0) _returnHeldOnToken(validation.legWallet, validationId);
         } else {
             _setIssuancePaused(validation.fromChainKey, true);
         }

@@ -126,7 +126,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         return TREXMessagingLib.isChainOpen(chainKey);
     }
 
-    /// @dev Whether `gateway` has already delivered `receiveId` to this token.
+    /// @dev Whether `gateway` has already delivered `receiveId` to this token. Always false for a zero id, which
+    ///  names no delivery and is never recorded.
     function messageReceived(address gateway, bytes32 receiveId) public view returns (bool) {
         return TREXMessagingLib.layout().received[gateway][receiveId];
     }

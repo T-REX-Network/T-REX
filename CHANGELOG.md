@@ -562,6 +562,22 @@ All notable changes to this project will be documented in this file.
   it, and a registry that already holds a codeless issuer keeps working, with that issuer validating nothing.
   `UtilityChecker.getVerifiedDetails` applies the same rule and asks the trusted issuer itself, ignoring a
   claim that names another issuer as the registry already did, so the two report the same result.
+- **A stuck pair whose burn leg moved nothing resolves** (OZ N-10, #170): a validation issued with a zero minimum
+  may burn 0, which holds nothing in transit, and `resolveStuckValidation` then reverted `NothingInTransit`, leaving
+  the validation and both identities' pending amounts in place for good. Resolution now skips the hold return when
+  the executed amount is 0. Issuance still accepts a zero minimum.
+- **A zero receive id is not recorded** (OZ L-19, #158): ERC-7786 lets a gateway pass `bytes32(0)`, and recording
+  `(gateway, 0)` refused every later message from that gateway with `MessageAlreadyReceived`. A zero id now skips
+  the transport record. Every inbound type keeps its own replay protection: a settlement or a leg delivered again
+  finds its validation already past that leg and halts the token (`ReplayedSettlement`); the proof that settled a
+  recall delivered again changes nothing (`BurnProofDuplicate`), and any other proof for it halts the token
+  (`ReplayedBurnProof`). Nonzero ids are recorded and refused on repeat as before.
+- **A late report for a discarded validation is documented** (OZ L-06, #151): a keeper discard cannot know whether
+  the satellite already executed, so it may release a reservation whose settlement is still in flight. When that
+  report lands, its debit is applied, and a newer validation that reserved the same balance can see its own
+  settlement wait with `InsufficientBridgedBalance` until an inbound credit lands; it stays deliverable. No code
+  changes: `discardExpiredValidations` states the limit, and each chain's reconciliation window should be set above
+  the longest delivery delay of its gateway.
 - **`discardExpiredValidations` opens to anyone after the second reconciliation window.** It was keeper-only, so
   a keeper that stopped running left every expired reservation locked until an admin found a new one. From
   `releaseAt` the keeper discards as before; from `releaseAt + reconciliationWindow`, the point where
