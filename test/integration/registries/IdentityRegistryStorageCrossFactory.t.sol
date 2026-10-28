@@ -99,4 +99,66 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
         irs.bindIdentityRegistry(address(otherRegistry));
     }
 
+    /// @notice A storage binds its first registry at init without asking its factory, so the registry checks each
+    ///         registration against its own IdentityFactory too: a registry agent cannot bind a wallet that this
+    ///         factory links to another identity, even when the storage is pinned to a factory that does not know it.
+    function test_registerIdentity_RevertWhen_TheStorageIsPinnedToAnotherFactory_AndTheWalletIsLinkedElsewhere()
+        public
+    {
+        TREXRegistry registryOnSuiteFactory = _deployRegistryOnAStoragePinnedTo(otherFactory);
+        address registryAgent = makeAddr("registryAgent");
+        _grantAgentRole(registryAgent);
+        IIdentity agentIdentity = _deployIdentity(registryAgent, "registryAgent");
+        address victim = makeAddr("victim");
+        IIdentity victimIdentity = _deployIdentity(victim, "victim");
+
+        vm.prank(registryAgent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, victim, address(victimIdentity))
+        );
+        registryOnSuiteFactory.registerIdentity(victim, agentIdentity, 0);
+
+        assertEq(address(registryOnSuiteFactory.identity(victim)), address(victimIdentity));
+    }
+
+    /// @dev A registry on the suite's IdentityFactory, bound at init to a fresh storage pinned to `pinnedFactory`.
+    function _deployRegistryOnAStoragePinnedTo(IdentityFactory pinnedFactory) private returns (TREXRegistry) {
+        address registryImplementation = address(new TREXRegistry(address(idFactory)));
+        IdentityRegistryStorage storageImplementation = new IdentityRegistryStorage();
+        address predictedRegistry = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        IdentityRegistryStorage pinnedStorage = IdentityRegistryStorage(
+            address(
+                new ERC1967Proxy(
+                    address(storageImplementation),
+                    abi.encodeCall(
+                        IdentityRegistryStorage.init,
+                        (address(accessManager), predictedRegistry, address(pinnedFactory))
+                    )
+                )
+            )
+        );
+        TREXRegistry registry = TREXRegistry(
+            address(
+                new ERC1967Proxy(
+                    registryImplementation,
+                    abi.encodeCall(
+                        TREXRegistry.init,
+                        (
+                            address(pinnedStorage),
+                            address(accessManager),
+                            new uint256[](0),
+                            new address[](0),
+                            new uint256[][](0)
+                        )
+                    )
+                )
+            )
+        );
+        assertEq(address(registry), predictedRegistry, "the storage bound the registry it was told about");
+        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
+        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(pinnedStorage), DOMAIN);
+        _grantStorageWriterRole(address(registry));
+        return registry;
+    }
+
 }
