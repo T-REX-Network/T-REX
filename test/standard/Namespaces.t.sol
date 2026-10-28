@@ -77,6 +77,13 @@ contract DomainsTest is Test {
         );
     }
 
+    function test_trexIdentityRegistryStorageDomain() public pure {
+        assertEq(
+            Utils.erc7201("erc3643.storage.TREXIdentityRegistryStorage"),
+            0xcb64a18d0bc273a26dd2f33432c876864881ae0a84f136720d41c3286c288f00
+        );
+    }
+
     /// @dev The namespaces the cross-chain layer adds on top of the suite. Both follow the same
     ///  lowercase `erc3643.storage.` rule as everything above.
     function test_transferValidationNamespace() public pure {

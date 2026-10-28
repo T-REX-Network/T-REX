@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
@@ -109,10 +110,76 @@ contract TokenIdentityTransferTest is TREXSuiteTest {
         assertEq(token.balanceOf(bob), 100);
     }
 
+    /// @dev The identity commands its own address like any of its wallets: the position there is attributed
+    ///      to the identity by the factory's self-resolution, and the caller is the identity itself.
+    function test_identityTransfer_Success_FromTheIdentityItself() public {
+        address self = address(aliceIdentity);
+        vm.prank(agent);
+        token.mint(self, 500);
+
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.IdentityTransfer(self, self, alice, 200);
+        vm.prank(self);
+        token.identityTransfer(self, alice, 200);
+
+        assertEq(token.balanceOf(self), 300);
+        assertEq(token.balanceOf(alice), 1200);
+    }
+
     function test_identityTransfer_RevertWhen_DestinationIsNotRegistered() public {
         vm.expectRevert(ErrorsLib.UnverifiedIdentity.selector);
         vm.prank(address(aliceIdentity));
         token.identityTransfer(alice, david, 100);
+    }
+
+    /* ----- A registry agent cannot take command of a wallet ----- */
+
+    /// @dev The registry AGENT role writes bindings but holds no forced-transfer power. If it could move a funded
+    ///      wallet to an identity it controls, that identity could spend the wallet through {identityTransfer}.
+    ///      Bindings are sticky, so each way of moving the wallet reverts and the wallet keeps its identity.
+    function test_identityTransfer_RevertWhen_RegistryAgentUpdatesTheWalletsIdentity() public {
+        (address registryAgent, IIdentity agentIdentity) = _registryAgentWithItsOwnIdentity();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
+        );
+        vm.prank(registryAgent);
+        identityRegistry.updateIdentity(alice, agentIdentity);
+
+        _assertIdentityCannotSpend(agentIdentity, alice);
+    }
+
+    function test_identityTransfer_RevertWhen_RegistryAgentDeletesAndRegistersTheWalletAgain() public {
+        (address registryAgent, IIdentity agentIdentity) = _registryAgentWithItsOwnIdentity();
+
+        vm.prank(registryAgent);
+        identityRegistry.deleteIdentity(alice);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletAlreadyRevoked.selector, alice));
+        vm.prank(registryAgent);
+        identityRegistry.registerIdentity(alice, agentIdentity, Countries.FRANCE);
+
+        assertEq(address(identityRegistry.identity(alice)), address(aliceIdentity), "the wallet kept its identity");
+        _assertIdentityCannotSpend(agentIdentity, alice);
+    }
+
+    /// @dev A wallet the IdentityFactory links and the local storage does not know: a local binding would take
+    ///      precedence over the factory, so registering one to another identity must be refused.
+    function test_identityTransfer_RevertWhen_RegistryAgentRegistersOverAFactoryLink() public {
+        (address registryAgent, IIdentity agentIdentity) = _registryAgentWithItsOwnIdentity();
+        address factoryLinkedWallet = makeAddr("factoryLinkedWallet");
+        IIdentity factoryIdentity = _deployIdentity(factoryLinkedWallet, "factoryLinkedWallet");
+        vm.prank(agent);
+        token.mint(factoryLinkedWallet, 1000);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.WalletBoundToAnotherIdentity.selector, factoryLinkedWallet, address(factoryIdentity)
+            )
+        );
+        vm.prank(registryAgent);
+        identityRegistry.registerIdentity(factoryLinkedWallet, agentIdentity, Countries.FRANCE);
+
+        _assertIdentityCannotSpend(agentIdentity, factoryLinkedWallet);
     }
 
     /* ----- ERC-20 stays untouched ----- */
@@ -163,6 +230,21 @@ contract TokenIdentityTransferTest is TREXSuiteTest {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vm.prank(address(aliceIdentity));
         token.identityTransfer(alice, bob, 100);
+    }
+
+    /// @dev An account holding only the registry AGENT role, with an identity of its own.
+    function _registryAgentWithItsOwnIdentity() private returns (address registryAgent, IIdentity agentIdentity) {
+        registryAgent = makeAddr("registryAgent");
+        _grantAgentRole(registryAgent);
+        agentIdentity = _deployIdentity(registryAgent, "registryAgent");
+    }
+
+    function _assertIdentityCannotSpend(IIdentity spender, address wallet) private {
+        uint256 balanceBefore = token.balanceOf(wallet);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotLinkedIdentity.selector, wallet, address(spender)));
+        vm.prank(address(spender));
+        token.identityTransfer(wallet, bob, balanceBefore);
+        assertEq(token.balanceOf(wallet), balanceBefore, "the balance did not move");
     }
 
 }

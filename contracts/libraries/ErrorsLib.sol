@@ -159,8 +159,10 @@ library ErrorsLib {
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    /// @dev The IdentityFactory already binds the predicted token address to a different identity.
-    error TokenIdentityAlreadyBound(address token, address boundIdentity);
+    /// @dev A supplied ONCHAINID must already be actively bound to the predicted token address in the IdentityFactory.
+    error TokenIdentityNotBound(address token, address suppliedIdentity);
+    /// @dev Only a MANAGEMENT key of a supplied ONCHAINID may deploy a suite with it.
+    error TokenIdentityNotManagedByCaller(address suppliedIdentity, address caller);
     error TokenAlreadyDeployed();
     error IsolatedSuiteCannotReuseIRS();
 
@@ -180,12 +182,23 @@ library ErrorsLib {
     error AddressNotYetStored();
     error IdentityRegistryNotStored();
     error MaxIRByIRSReached(uint256 max);
+    // Same names as the ONCHAINID IdentityFactory errors, but keyed by address.
+    /// @dev The wallet is bound to another identity.
+    error WalletBoundToAnotherIdentity(address wallet, address boundIdentity);
+    /// @dev The wallet is already bound to this identity.
+    error WalletAlreadyLinkedToIdentity(address wallet);
+    /// @dev The wallet was revoked and can never be bound again.
+    error WalletAlreadyRevoked(address wallet);
+    /// @dev The wallet is not active.
+    error WalletNotActive(address wallet);
 
     // AccessManagerSetupLib Errors
     error NotAssigned(address target);
-    error PendingDelayChange(address account, uint64 role);
-    error PendingRoleGrant(address account, uint64 role);
-    error RoleNotHeld(address account, uint64 role);
+    error SuiteDeployerCannotConfigureFactory();
+    error PlatformRoleCannotBePublic();
+    /// @dev `target`, a storage, a registry or a compliance, is already set up in `domainId`, so a suite of
+    ///      another domain cannot use it.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();

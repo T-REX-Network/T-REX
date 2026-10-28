@@ -39,10 +39,11 @@ pragma solidity 0.8.30;
 ///
 /// The positions are exact while every wallet that holds tokens resolves, through the token's identity
 /// registry, to the identity that owns it. A wallet keeps resolving after its investor revokes it, so no investor
-/// can break this on their own, and a token that circulates may not change its registry or its compliance. A
-/// registry agent still can, by deleting or relinking the local entry of a wallet that holds tokens. The ledger
-/// keeps up on its own: it remembers which identity it credited each native wallet to (`ownerOf`), and the next
-/// movement through a relinked wallet moves its balance to the new owner before applying the movement. A wallet
+/// can break this on their own, and a token that circulates may not change its registry or its compliance. Registry
+/// writes never relink a wallet, but the owner can still change who a wallet resolves to by swapping the
+/// registry's storage or unbinding a registry from it. The ledger keeps up on its own: it remembers which
+/// identity it credited each native wallet to (`ownerOf`), and the next movement through a wallet whose owner
+/// changed moves its balance to the new owner before applying the movement. A wallet
 /// the registry no longer names keeps its remembered owner. Only a wallet the ledger never credited and the
 /// registry does not know leaves a trace: that amount is counted in `positionGap`, signed, so that
 /// `sum(positions) + positionGap == totalSupply` holds regardless, and the owner moves it with `fixPosition`.

@@ -367,7 +367,7 @@ contract ModularCompliance is
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
+    ///  the token's forced, recovery and delegation paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         require(amount > 0, ErrorsLib.ZeroValue());
@@ -379,7 +379,7 @@ contract ModularCompliance is
     ///
     ///  The hooks run after the token moved the balances, so each side's owner is settled with that already
     ///  applied: the sender's balance is what it holds now plus what just left, the recipient's what it holds now
-    ///  minus what just arrived. A wallet the registry relinked since it was last credited has its balance moved
+    ///  minus what just arrived. A wallet whose owner changed since it was last credited has its balance moved
     ///  to the new owner here, before the movement itself is counted.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
         ITREXRegistry registry = _boundRegistry();

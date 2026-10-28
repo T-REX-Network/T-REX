@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
@@ -75,7 +77,25 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         return _liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, wallet, amount)));
     }
 
-    /// @dev Makes the global registry forget `wallet`, so the local `updateIdentity` below is what resolves it.
+    /// @dev Registry writes never relink a wallet, so a relink is simulated as the owner swapping the registry's
+    ///  storage for one that binds `wallet` to `identity`, and the factory not knowing the wallet.
+    function _swapStorageAnswer(address wallet, IIdentity identity) private {
+        _unbindGlobally(wallet);
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(
+                idFactory.getIdentityIncludingRevoked.selector, InteroperableAddress.formatEvmV1(block.chainid, wallet)
+            ),
+            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
+        );
+        vm.mockCall(
+            address(registry.identityStorage()),
+            abi.encodeCall(registry.identityStorage().storedIdentity, (wallet)),
+            abi.encode(address(identity))
+        );
+    }
+
+    /// @dev Makes the global registry forget `wallet`.
     function _unbindGlobally(address wallet) private {
         vm.mockCall(
             address(idFactory),
@@ -142,12 +162,10 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.bridgedBalanceOf(aliceSat), 100);
     }
 
-    /// @notice A registry relink of the holder is followed by the delegation hook, which adds the burned amount
+    /// @notice A change of the holder's owner is followed by the delegation hook, which adds the burned amount
     ///         back when it migrates the balance: the whole pre-delegation balance lands on the new owner.
     function test_delegateOut_Success_WhenTheHolderWasRelinkedToAnotherIdentity() public {
-        _unbindGlobally(alice);
-        vm.prank(agent);
-        registry.updateIdentity(alice, charlieIdentity);
+        _swapStorageAnswer(alice, charlieIdentity);
         bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
 
         vm.prank(alice);
@@ -529,15 +547,12 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     function test_handleBurnProof_RevertWhen_TheLinkWasBroken_ThenAppliesOnceRepaired() public {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId, aliceSat, 200);
-        _unbindGlobally(alice);
-        vm.prank(agent);
-        registry.updateIdentity(alice, charlieIdentity);
+        _swapStorageAnswer(alice, charlieIdentity);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WalletsNotLinked.selector, alice, aliceSat));
         polygonGateway.relay(index);
 
-        vm.prank(agent);
-        registry.updateIdentity(alice, aliceIdentity);
+        _swapStorageAnswer(alice, aliceIdentity);
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 200);
@@ -688,9 +703,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.prank(bob);
         token.delegateOut(bob, bobSat, 100);
 
-        _unbindGlobally(alice);
-        vm.prank(agent);
-        registry.updateIdentity(alice, bobIdentity);
+        _swapStorageAnswer(alice, bobIdentity);
 
         vm.prank(agent);
         recallId = token.instructRecall(bobSat, 100, alice);

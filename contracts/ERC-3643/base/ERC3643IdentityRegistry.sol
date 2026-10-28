@@ -73,6 +73,37 @@ import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "../IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../IERC3643TrustedIssuersRegistry.sol";
 
+/// @dev Gas given to each trusted issuer's `isClaimValid`. Without a cap an issuer that burns its gas leaves the
+///  loop 1/64 of what remained, too little to ask the next issuer or topic. The heaviest honest check measured
+///  is an ONCHAINID issuer whose claim signer is a WebAuthn (P-256) key verified in Solidity, on a chain without
+///  the P-256 precompile: 314,207 gas, cold, for a claim with a 2,048-byte payload (an ECDSA signer needs
+///  39,999). The cap leaves room above that for longer client data and gas repricing, and one issuer that burns
+///  it on all 15 topics a registry allows costs 7.5M gas, under half a 16,777,216-gas transaction.
+uint256 constant IS_CLAIM_VALID_GAS = 500_000;
+
+/// @dev Asks `trustedIssuer` the encoded `isClaimValid` call with at most `IS_CLAIM_VALID_GAS`, and counts only an
+///  answer of exactly one word equal to true. An issuer that reverts, runs out of its gas, answers nothing or
+///  answers something else reads as an invalid claim, so one broken issuer never halts verification.
+///  Assembly because only it can both cap the gas and copy back just the first word of the answer: a Solidity
+///  call returning `bytes memory` copies the whole answer, so an issuer could make the caller pay for megabytes
+///  of memory, and a typed call in a `try` reverts outside the `catch` when the answer does not decode.
+function issuerConfirmsClaim(address trustedIssuer, bytes memory isClaimValidCall) view returns (bool) {
+    bool success;
+    bytes32 answer;
+    assembly ("memory-safe") {
+        success := staticcall(
+            IS_CLAIM_VALID_GAS,
+            trustedIssuer,
+            add(isClaimValidCall, 0x20),
+            mload(isClaimValidCall),
+            0x00,
+            0x20
+        )
+        answer := mload(0x00)
+    }
+    return success && LowLevelCall.returnDataSize() == 32 && answer == bytes32(uint256(1));
+}
+
 /// @title ERC3643IdentityRegistry
 /// @dev The ERC-3643 Identity Registry surface and nothing else, over its own ERC-7201 namespace.
 /// Collaborators are reached through `_identityStorage`, `_issuersRegistry` and `_topicsRegistry`, so a
@@ -245,7 +276,8 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     ///  An identity answers `getClaim`, so the issuer it returns is untrusted input: only a claim from
     ///  `trustedIssuer` hashes to `claimId`. Validity is therefore asked of the configured issuer, never
     ///  of the address the identity supplied. The call is made with a bounded low-level staticcall so a
-    ///  hostile or broken issuer cannot halt verification by reverting or returning oversized data.
+    ///  hostile or broken issuer cannot halt verification by reverting, burning its gas or returning
+    ///  oversized data.
     function _isVerified(address userAddress) internal view virtual returns (bool) {
         IIdentity userIdentity = _activeIdentityOf(userAddress);
         if (address(userIdentity) == address(0)) return false;
@@ -260,6 +292,12 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
     }
 
     /// @dev Whether `userIdentity` holds a valid claim for `claimTopic` from any issuer trusted for it.
+    ///
+    ///  Each claim is read whole through `getClaim`, the only claim getter ONCHAINID exposes, so the identity loads
+    ///  the signature, payload and uri (up to 2,048 bytes each) before the issuer can say the claim has expired. No
+    ///  change here can skip that load: an expired claim of that size costs about 450,000 gas inside `getClaim`
+    ///  alone, so about 30 of them from issuers trusted ahead of the valid one exceed a 16,777,216-gas transaction
+    ///  and transfers to the holder revert. The holder recovers by removing the stale claims.
     function _hasValidClaimForTopic(IIdentity userIdentity, uint256 claimTopic) internal view virtual returns (bool) {
         address[] memory trustedIssuersForTopic = _trustedIssuersForTopic(claimTopic);
         if (trustedIssuersForTopic.length == 0) return false;
@@ -272,10 +310,9 @@ abstract contract ERC3643IdentityRegistry is IERC3643IdentityRegistry {
 
             if (foundClaimTopic != claimTopic || issuer != trustedIssuer) continue;
 
-            (bool success, bytes32 result,) = LowLevelCall.staticcallReturn64Bytes(
-                trustedIssuer, abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data))
-            );
-            if (success && result != bytes32(0)) return true;
+            bytes memory isClaimValidCall =
+                abi.encodeCall(IClaimIssuer.isClaimValid, (userIdentity, claimTopic, sig, data));
+            if (issuerConfirmsClaim(trustedIssuer, isClaimValidCall)) return true;
         }
         return false;
     }
