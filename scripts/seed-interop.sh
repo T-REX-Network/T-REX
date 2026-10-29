@@ -8,7 +8,7 @@
 #   NETWORK_NAME  record file name, e.g. baseSepolia | trexTestnet   (default baseSepolia)
 #   RPC_URL       URL or foundry.toml alias passed to --rpc-url       (default baseSepolia)
 #   FORGE_SCRIPT_ARGS  more forge-script flags
-#   SATELLITE_CHAIN_ID chain id the loopback gateway attributes messages to (default 936486)
+#   SATELLITE_CHAIN_ID chain id the loopback gateway attributes messages to (default 31338)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export FOUNDRY_DISABLE_NIGHTLY_WARNING=1

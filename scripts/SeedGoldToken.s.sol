@@ -102,6 +102,10 @@ contract SeedGoldToken is Script {
     uint256 internal claimIssuer0SignerKey;
 
     function run() external {
+        require(
+            block.chainid == 31337 || block.chainid == 84532 || block.chainid == 936486,
+            "seed scripts run on test chains only: anvil, Base Sepolia or the T-REX Testnet"
+        );
         deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         deployer = vm.addr(deployerKey);
         idFactory = IdentityFactory(vm.envAddress("ONCHAINID_IDENTITY_FACTORY"));

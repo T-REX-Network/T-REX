@@ -54,8 +54,9 @@ import { TREXAccessManager } from "contracts/utils/TREXAccessManager.sol";
  *                                INDIVIDUAL and every createIdentityFor-based type.
  *
  * ===== Idempotency =====
- * Every write checks on-chain state first (getIdentity / getToken / getKey / getClaim already
- * non-zero -> skip) so the script can be re-run against the same deployment. Role gates that
+ * The setup checks on-chain state first (getIdentity / getToken / getKey / getClaim already
+ * non-zero -> skip), so it is idempotent; the activity (key add/remove, link/revoke, forced
+ * transfer, freezes, burn, issuer and topic add/remove) is added again on each run. Role gates that
  * the deployer might not hold (ROLE_CLAIM_ISSUER_ADMIN survives an admin rotation, etc.) are
  * checked with `hasRole` before the call, not try/catch: a call made under vm.startBroadcast is
  * still queued for broadcast by forge even when its revert is caught in Solidity, and later
@@ -122,6 +123,10 @@ contract SeedActivity is Script {
     address internal aiAgent0Wallet;
 
     function run() external {
+        require(
+            block.chainid == 31337 || block.chainid == 84532 || block.chainid == 936486,
+            "seed scripts run on test chains only: anvil, Base Sepolia or the T-REX Testnet"
+        );
         deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         deployer = vm.addr(deployerKey);
         idFactory = IdentityFactory(vm.envAddress("ONCHAINID_IDENTITY_FACTORY"));
@@ -408,17 +413,6 @@ contract SeedActivity is Script {
             Identity(payable(individual0Identity))
                 .addKeyWithData(secondKeyHash, KeyPurposes.ACTION, KeyTypes.ECDSA, abi.encodePacked(secondKey), "");
             console.log("Added ACTION key", secondKey, "to individual0 identity");
-        }
-
-        if (corporate0Identity != address(0)) {
-            address thirdKey = _derive("seed-third-key-0");
-            bytes32 thirdKeyHash = keccak256(abi.encodePacked(thirdKey));
-            // corporate0's MANAGEMENT key is the synthetic wallet address, which this script
-            // does not hold a signer for; key adds on that identity would need its own
-            // broadcast segment with a real key, so this is deliberately skipped. Key
-            // add/remove is instead demonstrated end-to-end on individual0, which the
-            // deployer's own key manages.
-            thirdKeyHash; // silence unused-var warning if the branch above is ever extended
         }
 
         // Remove the second key again, right after adding it, so KeyRemoved is also emitted.

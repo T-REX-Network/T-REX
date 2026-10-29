@@ -20,7 +20,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  * @notice Seeds every cross-chain flow of the Gold Token on one chain, so a subgraph and an SDK
  *         see real routes, validations, a delegation and a recall without a second chain.
  *
- * The "satellite" is chain SATELLITE_CHAIN_ID (default 936486, the T-REX Testnet id), reached
+ * The "satellite" is chain SATELLITE_CHAIN_ID (default 31338, a local id no public network uses), reached
  * through a loopback ERC-7786 gateway (test/integration/mocks/ERC7786GatewayMock.sol) that
  * attributes everything it delivers to that chain. The deployer plays the satellite's Lite: it
  * is registered as the token's peer there, so the settlements and burn proofs it authors through
@@ -40,7 +40,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  *   ONCHAINID_IDENTITY_FACTORY  the ONCHAINID IdentityFactory
  *   TREX_FACTORY                the TREXFactory; the Gold Token is read from it
  *   TRUSTED_GATEWAY_REGISTRY    the platform TrustedGatewayRegistry
- *   SATELLITE_CHAIN_ID          optional, default 936486
+ *   SATELLITE_CHAIN_ID          optional, default 31338; never a real chain, the gateway is a mock
  *   NETWORK_NAME                selects deployments/interop.<net>.json
  *
  * ===== Idempotency =====
@@ -117,12 +117,16 @@ contract SeedInterop is Script {
     // ============ Setup ============
 
     function _load() internal {
+        require(
+            block.chainid == 31337 || block.chainid == 84532 || block.chainid == 936486,
+            "seed scripts run on test chains only: anvil, Base Sepolia or the T-REX Testnet"
+        );
         deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         deployer = vm.addr(deployerKey);
         idFactory = IIdentityFactory(vm.envAddress("ONCHAINID_IDENTITY_FACTORY"));
         TREXFactory trexFactory = TREXFactory(vm.envAddress("TREX_FACTORY"));
         registry = TrustedGatewayRegistry(vm.envAddress("TRUSTED_GATEWAY_REGISTRY"));
-        satelliteChainId = vm.envOr("SATELLITE_CHAIN_ID", uint256(936486));
+        satelliteChainId = vm.envOr("SATELLITE_CHAIN_ID", uint256(31338));
         require(satelliteChainId != block.chainid, "SATELLITE_CHAIN_ID must differ from this chain");
 
         address gold = trexFactory.getToken(GOLD_SALT);

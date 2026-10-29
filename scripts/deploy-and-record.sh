@@ -6,7 +6,7 @@
 #
 # Network selection (all optional; defaults reproduce the Base Sepolia deploy):
 #   NETWORK_NAME  record file name, e.g. baseSepolia | trexTestnet      (default baseSepolia)
-#   CHAIN_ID      chain id, used to locate the Foundry broadcast file   (default 84532)
+#   CHAIN_ID      chain id, used to locate the Foundry broadcast file   (default: read from RPC_URL)
 #   RPC_URL       URL or foundry.toml alias passed to --rpc-url          (default baseSepolia,
 #                 which needs ALCHEMY_KEY)
 #   VERIFY_ARGS   extra forge-script flags, e.g. "--verify"              (default --verify on
@@ -19,8 +19,8 @@ export FOUNDRY_DISABLE_NIGHTLY_WARNING=1
 : "${DEPLOYER_PRIVATE_KEY:?set in .env}"
 
 NETWORK_NAME="${NETWORK_NAME:-baseSepolia}"
-CHAIN_ID="${CHAIN_ID:-84532}"
 RPC_URL="${RPC_URL:-baseSepolia}"
+CHAIN_ID="${CHAIN_ID:-$(cast chain-id --rpc-url "$RPC_URL")}"
 if [ "$RPC_URL" = "baseSepolia" ]; then
     : "${ALCHEMY_KEY:?set in .env (backs the baseSepolia alias in foundry.toml)}"
 fi
