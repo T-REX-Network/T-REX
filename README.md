@@ -122,7 +122,9 @@ We welcome contributions from the community. Please refer to the [CONTRIBUTING](
 
 ## License
 
-This project is licensed under the [GNU General Public License v3.0](./LICENSE.md).
+Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network").
+
+This project is licensed under the GNU General Public License v3.0. See [LICENSE.md](./LICENSE.md) for the full license text and [NOTICE.md](./NOTICE.md) for copyright, provenance, and trademark information.
 
 ---
 

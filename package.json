@@ -16,7 +16,8 @@
     "!out/**/*.t.sol",
     "!out/Test.sol",
     "!out/MockContract.sol",
-    "!out/TREXSuiteTest.sol"
+    "!out/TREXSuiteTest.sol",
+    "NOTICE.md"
   ],
   "scripts": {
     "prepare": "husky || true && forge soldeer install",
@@ -36,8 +37,8 @@
     "type": "git",
     "url": "git+https://github.com/T-REX-Network/T-REX.git"
   },
-  "author": "ERC-3643 Association",
-  "license": "SEE LICENSE IN LICENSE.md",
+  "author": "Digital Asset Operational Services ISAC Ltd. (https://www.trex.network)",
+  "license": "GPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/T-REX-Network/T-REX/issues"
   },
