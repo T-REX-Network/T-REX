@@ -1,4 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0
+//
+//                                             :+#####%%%%%%%%%%%%%%+
+//                                         .-*@@@%+.:+%@@@@@%%#***%@@%=
+//                                     :=*%@@@#=.      :#@@%       *@@@%=
+//                       .-+*%@%*-.:+%@@@@@@+.     -*+:  .=#.       :%@@@%-
+//                   :=*@@@@%%@@@@@@@@@%@@@-   .=#@@@%@%=             =@@@@#.
+//             -=+#%@@%#*=:.  :%@@@@%.   -*@@#*@@@@@@@#=:-              *@@@@+
+//            =@@%=:.     :=:   *@@@@@%#-   =%*%@@@@#+-.        =+       :%@@@%-
+//           -@@%.     .+@@@     =+=-.         @@#-           +@@@%-       =@@@@%:
+//          :@@@.    .+@@#%:                   :    .=*=-::.-%@@@+*@@=       +@@@@#.
+//          %@@:    +@%%*                         =%@@@@@@@@@@@#.  .*@%-       +@@@@*.
+//         #@@=                                .+@@@@%:=*@@@@@-      :%@%:      .*@@@@+
+//        *@@*                                +@@@#-@@%-:%@@*          +@@#.      :%@@@@-
+//       -@@%           .:-=++*##%%%@@@@@@@@@@@@*. :@+.@@@%:            .#@@+       =@@@@#:
+//      .@@@*-+*#%%%@@@@@@@@@@@@@@@@%%#**@@%@@@.   *@=*@@#                :#@%=      .#@@@@#-
+//      -%@@@@@@@@@@@@@@@*+==-:-@@@=    *@# .#@*-=*@@@@%=                 -%@@@*       =@@@@@%-
+//         -+%@@@#.   %@%%=   -@@:+@: -@@*    *@@*-::                   -%@@%=.         .*@@@@@#
+//            *@@@*  +@* *@@##@@-  #@*@@+    -@@=          .         :+@@@#:           .-+@@@%+-
+//             +@@@%*@@:..=@@@@*   .@@@*   .#@#.       .=+-       .=%@@@*.         :+#@@@@*=:
+//              =@@@@%@@@@@@@@@@@@@@@@@@@@@@%-      :+#*.       :*@@@%=.       .=#@@@@%+:
+//               .%@@=                 .....    .=#@@+.       .#@@@*:       -*%@@@@%+.
+//                 +@@#+===---:::...         .=%@@*-         +@@@+.      -*@@@@@%+.
+//                  -@@@@@@@@@@@@@@@@@@@@@@%@@@@=          -@@@+      -#@@@@@#=.
+//                    ..:::---===+++***###%%%@@@#-       .#@@+     -*@@@@@#=.
+//                                           @@@@@@+.   +@@*.   .+@@@@@%=.
+//                                          -@@@@@=   =@@%:   -#@@@@%+.
+//                                          +@@@@@. =@@@=  .+@@@@@*:
+//                                          #@@@@#:%@@#. :*@@@@#-
+//                                          @@@@@%@@@= :#@@@@+.
+//                                         :@@@@@@@#.:#@@@%-
+//                                         +@@@@@@-.*@@@*:
+//                                         #@@@@#.=@@@+.
+//                                         @@@@+-%@%=
+//                                        :@@@#%@%=
+//                                        +@@@@%-
+//                                        :#%%=
+//
+
 pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
@@ -164,16 +202,21 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
     /// @notice A change of the holder's owner is followed by the delegation hook, which adds the burned amount
     ///         back when it migrates the balance: the whole pre-delegation balance lands on the new owner.
-    function test_delegateOut_Success_WhenTheHolderWasRelinkedToAnotherIdentity() public {
+    /// @notice A funded wallet the registry now names for another identity cannot move: its balance would change
+    ///         identity without any rule seeing it. It stays counted where it was until the registry agrees again.
+    function test_delegateOut_RevertWhen_TheFundedHolderResolvesToAnotherIdentity() public {
         _swapStorageAnswer(alice, charlieIdentity);
         bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
 
         vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
+        );
         token.delegateOut(alice, charlieSat, 400);
 
-        assertEq(ledger.positionOf(address(charlieIdentity)), MINTED, "the new owner holds the whole position");
-        assertEq(ledger.positionOf(address(aliceIdentity)), 0, "nothing stays on the old owner");
-        assertEq(token.bridgedBalanceOf(charlieSat), 400);
+        assertEq(ledger.positionOf(address(aliceIdentity)), MINTED, "the position stays with the credited owner");
+        assertEq(ledger.positionOf(address(charlieIdentity)), 0);
+        assertEq(ledger.ownerOf(alice), address(aliceIdentity));
     }
 
     function test_delegateOut_RevertWhen_AStrangerDelegatesForAnotherWallet() public {
@@ -500,6 +543,27 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
 
+    /// @notice Closing the chain stops the proof of an open recall too, not only settlements. It lands again
+    ///         once the route is set back.
+    function test_handleBurnProof_RevertWhen_TheChainWasClosedAfterTheRecallWasInstructed() public {
+        uint256 recallId = _instructed();
+        uint256 index = _proof(polygonGateway, recallId, aliceSat, 200);
+        _openEvmChain(token, POLYGON, address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        polygonGateway.relay(index);
+
+        assertEq(token.balanceOf(alice), MINTED - 500, "nothing credited while the chain is closed");
+        assertEq(token.pendingRecall(recallId).amount, 200, "the recall stays open");
+        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
+
+        _openEvmChain(token, POLYGON, address(polygonGateway));
+        polygonGateway.relay(index);
+
+        assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once the route is back");
+        assertEq(token.pendingRecall(recallId).amount, 0, "the instruction is consumed");
+    }
+
     function test_handleBurnProof_RevertWhen_TheProofNamesAnotherWallet() public {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId, bobSat, 200);
@@ -709,36 +773,22 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         recallId = token.instructRecall(bobSat, 100, alice);
     }
 
-    /// @notice The compliance follows the relink before the credit lands: Alice's 1000 moves to Bob's identity, the
-    ///         100 coming home stays counted where it already was, and Alice's other 300 stay hers. Positions are
-    ///         right now and after the wallet's next movement.
-    function test_handleBurnProof_Success_WhenTheNativeWalletWasRelinked() public {
+    /// @notice The credit cannot land on a funded wallet the registry relinked: the owner sync refuses, so the
+    ///         proof stays deliverable and the recall open, and nothing moves on either identity.
+    function test_handleBurnProof_RevertWhen_TheFundedNativeWalletResolvesToAnotherIdentity() public {
         uint256 recallId = _relinkedRecall();
+        uint256 index = _proof(polygonGateway, recallId, bobSat, 100);
 
-        polygonGateway.relay(_proof(polygonGateway, recallId, bobSat, 100));
-
-        assertEq(ledger.positionOf(address(aliceIdentity)), 300, "the old owner keeps only its other wallet");
-        assertEq(ledger.positionOf(address(bobIdentity)), 900 + 1000 + 100, "the new owner holds everything else");
-        assertEq(token.balanceOf(alice), 1100);
-        assertEq(
-            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
-                + ledger.positionOf(address(charlieIdentity)),
-            token.totalSupply(),
-            "positions != supply"
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.WalletBoundToAnotherIdentity.selector, alice, address(aliceIdentity))
         );
+        polygonGateway.relay(index);
 
-        vm.prank(alice);
-        token.transfer(charlie, 100);
-
-        assertEq(ledger.positionOf(address(aliceIdentity)), 300);
-        assertEq(ledger.positionOf(address(bobIdentity)), 1900);
-        assertEq(ledger.positionOf(address(charlieIdentity)), 100);
-        assertEq(
-            ledger.positionOf(address(aliceIdentity)) + ledger.positionOf(address(bobIdentity))
-                + ledger.positionOf(address(charlieIdentity)),
-            token.totalSupply(),
-            "positions != supply"
-        );
+        assertEq(token.pendingRecall(recallId).amount, 100, "the recall stays open");
+        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
+        assertEq(ledger.positionOf(address(aliceIdentity)), 1000 + 300);
+        assertEq(ledger.positionOf(address(bobIdentity)), 1000);
+        assertEq(token.balanceOf(alice), 1000, "nothing credited");
     }
 
     /// @notice A relink of a wallet the old owner held nothing in: the sync moves nothing and the credit lands.
@@ -760,13 +810,16 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         );
     }
 
-    /// @notice The sync is the owner change alone: no movement is counted, so no tracker module is told.
+    /// @notice The sync is the owner change alone: no movement is counted, so no tracker module is told. The
+    ///         wallet is empty, since a funded one would be refused.
     function test_syncOwner_Success_WithoutCallingAnyModule() public {
         TrackerOnlyModule tracker = TrackerOnlyModule(
             address(new ModuleProxy(address(new TrackerOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
         );
         vm.prank(deployer);
         boundCompliance.addModule(address(tracker));
+        vm.prank(alice);
+        token.transfer(charlie, MINTED);
         uint256 recallId = _relinkedRecall();
         uint256 callsBefore = tracker.totalHookCalls();
 

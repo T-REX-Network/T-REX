@@ -36,29 +36,26 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-/**
- *     NOTICE
- *
- *     The T-REX software is licensed under a proprietary license or the GPL v.3.
- *     If you choose to receive it under the GPL v.3 license, the following applies:
- *     T-REX is a suite of smart contracts implementing the ERC-3643 standard and
- *     developed by Tokeny to manage and transfer financial assets on EVM blockchains
- *
- *     Copyright (C) 2025, Tokeny sàrl.
- *
- *     This program is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 pragma solidity 0.8.30;
 
@@ -400,7 +397,8 @@ library TREXMessagingLib {
     }
 
     /// @dev The peer and gateway the recall was dispatched to while it is open; the current ones once it is not,
-    ///  so a settled or never-issued id still reaches the token's duplicate and replay handling.
+    ///  so a settled or never-issued id still reaches the token's duplicate and replay handling. A closed chain is
+    ///  refused first, as for a settlement: closing it stops every proof from it until a route is set again.
     function _requireRecallOrigin(
         MessagingStorage storage s,
         address gateway,
@@ -408,6 +406,8 @@ library TREXMessagingLib {
         bytes calldata sender,
         uint256 recallId
     ) private view {
+        require(s.routes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+
         TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[recallId];
         if (recall.amount == 0) {
             _requireCurrentPeer(chainKey, sender);

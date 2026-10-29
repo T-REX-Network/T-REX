@@ -1,27 +1,61 @@
 // SPDX-License-Identifier: GPL-3.0
-/**
- *     NOTICE
- *
- *     The T-REX software is licensed under a proprietary license or the GPL v.3.
- *     If you choose to receive it under the GPL v.3 license, the following applies:
- *     T-REX is a suite of smart contracts implementing the ERC-3643 standard and
- *     developed by Tokeny to manage and transfer financial assets on EVM blockchains
- *
- *     Copyright (C) 2025, Tokeny sàrl.
- *
- *     This program is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+//
+//                                             :+#####%%%%%%%%%%%%%%+
+//                                         .-*@@@%+.:+%@@@@@%%#***%@@%=
+//                                     :=*%@@@#=.      :#@@%       *@@@%=
+//                       .-+*%@%*-.:+%@@@@@@+.     -*+:  .=#.       :%@@@%-
+//                   :=*@@@@%%@@@@@@@@@%@@@-   .=#@@@%@%=             =@@@@#.
+//             -=+#%@@%#*=:.  :%@@@@%.   -*@@#*@@@@@@@#=:-              *@@@@+
+//            =@@%=:.     :=:   *@@@@@%#-   =%*%@@@@#+-.        =+       :%@@@%-
+//           -@@%.     .+@@@     =+=-.         @@#-           +@@@%-       =@@@@%:
+//          :@@@.    .+@@#%:                   :    .=*=-::.-%@@@+*@@=       +@@@@#.
+//          %@@:    +@%%*                         =%@@@@@@@@@@@#.  .*@%-       +@@@@*.
+//         #@@=                                .+@@@@%:=*@@@@@-      :%@%:      .*@@@@+
+//        *@@*                                +@@@#-@@%-:%@@*          +@@#.      :%@@@@-
+//       -@@%           .:-=++*##%%%@@@@@@@@@@@@*. :@+.@@@%:            .#@@+       =@@@@#:
+//      .@@@*-+*#%%%@@@@@@@@@@@@@@@@%%#**@@%@@@.   *@=*@@#                :#@%=      .#@@@@#-
+//      -%@@@@@@@@@@@@@@@*+==-:-@@@=    *@# .#@*-=*@@@@%=                 -%@@@*       =@@@@@%-
+//         -+%@@@#.   %@%%=   -@@:+@: -@@*    *@@*-::                   -%@@%=.         .*@@@@@#
+//            *@@@*  +@* *@@##@@-  #@*@@+    -@@=          .         :+@@@#:           .-+@@@%+-
+//             +@@@%*@@:..=@@@@*   .@@@*   .#@#.       .=+-       .=%@@@*.         :+#@@@@*=:
+//              =@@@@%@@@@@@@@@@@@@@@@@@@@@@%-      :+#*.       :*@@@%=.       .=#@@@@%+:
+//               .%@@=                 .....    .=#@@+.       .#@@@*:       -*%@@@@%+.
+//                 +@@#+===---:::...         .=%@@*-         +@@@+.      -*@@@@@%+.
+//                  -@@@@@@@@@@@@@@@@@@@@@@%@@@@=          -@@@+      -#@@@@@#=.
+//                    ..:::---===+++***###%%%@@@#-       .#@@+     -*@@@@@#=.
+//                                           @@@@@@+.   +@@*.   .+@@@@@%=.
+//                                          -@@@@@=   =@@%:   -#@@@@%+.
+//                                          +@@@@@. =@@@=  .+@@@@@*:
+//                                          #@@@@#:%@@#. :*@@@@#-
+//                                          @@@@@%@@@= :#@@@@+.
+//                                         :@@@@@@@#.:#@@@%-
+//                                         +@@@@@@-.*@@@*:
+//                                         #@@@@#.=@@@+.
+//                                         @@@@+-%@%=
+//                                        :@@@#%@%=
+//                                        +@@@@%-
+//                                        :#%%=
+//
+
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 pragma solidity 0.8.30;
 
@@ -81,8 +115,8 @@ abstract contract ComplianceLedger is IComplianceLedger {
     /// @dev Who a native wallet's tokens belong to now, given who the registry names. Records the first owner
     ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody.
     /// @return owner the identity to debit or credit for this wallet
-    /// @return previous the identity that was credited before, when the owner just changed and the wallet's
-    ///  balance has to follow; zero otherwise
+    /// @return previous the identity that was credited before, when the owner just changed; zero otherwise. The
+    ///  caller decides whether the wallet may change owner: only an empty one may.
     function _followOwner(address wallet, address resolved) internal returns (address owner, address previous) {
         mapping(address => address) storage ownerOf = _ledger().ownerOf;
         address recorded = ownerOf[wallet];
@@ -92,14 +126,10 @@ abstract contract ComplianceLedger is IComplianceLedger {
         return (resolved, recorded);
     }
 
-    /// @dev Moves what `wallet` held from the identity it was credited to onto the one the registry names now.
-    function _moveWalletBalance(address wallet, address previous, address owner, uint256 balance) internal {
-        if (balance != 0) {
-            mapping(address identity => uint256 amount) storage position = _ledger().position;
-            position[previous] -= balance;
-            position[owner] += balance;
-        }
-        emit EventsLib.WalletOwnerChanged(wallet, previous, owner, balance);
+    /// @dev Says that `wallet` now belongs to `owner`. Only an empty wallet gets here, so no position moves; the
+    ///  event keeps its amount field, always zero, so indexers built on it need no change.
+    function _recordOwnerChange(address wallet, address previous, address owner) internal {
+        emit EventsLib.WalletOwnerChanged(wallet, previous, owner, 0);
     }
 
     /// @dev Moves `amount` of position from one identity to the other: one side loses it, the other gains it.

@@ -36,6 +36,7 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
+
 pragma solidity 0.8.30;
 
 interface IERC3643ClaimTopicsRegistry {

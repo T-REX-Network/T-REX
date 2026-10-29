@@ -80,15 +80,13 @@ asked about those two, so a `RULE` only ever sees `TRANSFER`, `MINT` and `CROSS_
 
 `DELEGATION` is a holder moving native balance onto a satellite wallet of the same identity, reported with
 `fromWallet == toWallet`, both the native wallet, and no rule asked: location changes, ownership does not, and the
-position does not move. Like every hook it runs after the move, so when the registry relinked the holder, the
-migration counts the delegated amount back in and the whole pre-delegation balance lands on the new owner. A tracker
-of the investor's own activity leaves it out like `FORCED_TRANSFER` and `RECOVERY`; a holder count sees no change of
-ownership.
+position does not move. A tracker of the investor's own activity leaves it out like `FORCED_TRANSFER` and
+`RECOVERY`; a holder count sees no change of ownership.
 
 The way back, a recall answered by a satellite's burn proof, is not a movement and no module is told. Before the
-credit lands the token calls `syncOwner(nativeWallet)`, which follows a registry relink of that wallet at adjustment
-zero: the wallet's existing balance moves to the identity the registry names now, and nothing else. The credit is
-already counted in that identity's position as a bridged one, so it must not be migrated with it.
+credit lands the token calls `syncOwner(nativeWallet)`, which settles who owns that wallet: an empty wallet the
+registry relinked takes its new owner, a funded one is refused until the registry names the owner the ledger
+credited. The credit is already counted in that identity's position as a bridged one, so nothing else moves.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
@@ -177,12 +175,13 @@ cannot relink a wallet to another identity, and deleting an entry revokes it: th
 identity but may no longer act, and it can never be registered again. Moving an investor to a new
 identity is a forced transfer to a wallet of that identity.
 
-Who a wallet resolves to can still change when the owner swaps the registry's storage, or unbinds a
-registry from it. The ledger follows that on its own, so rules and positions always judge the same
-identity. It remembers which identity it credited each native wallet to (`ownerOf(wallet)`). When the
-registry names another identity, the next movement through the wallet moves its balance to the new
-owner first, then counts the movement; `WalletOwnerChanged` says so. When the registry names nobody,
-the remembered owner still answers. Nobody calls anything.
+Who a wallet resolves to can still change through an admin action, a registry upgrade to an implementation
+on another IdentityFactory. The ledger remembers which identity it credited each native wallet to
+(`ownerOf(wallet)`). When the registry names another identity for an empty wallet, the next movement
+takes the new owner; `WalletOwnerChanged` says so. When it names another identity for a wallet that
+holds tokens, every movement through that wallet reverts with `WalletBoundToAnotherIdentity` until the
+registry names the credited owner again: a balance never changes identity without the rules seeing it,
+and the rules only see movements. When the registry names nobody, the remembered owner still answers.
 
 Every token has an owner. The registry admits no wallet without an active identity, even with its
 eligibility checks disabled, which skip the claims only. So `sum(positions) == totalSupply` always

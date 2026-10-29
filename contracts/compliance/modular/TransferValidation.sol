@@ -36,29 +36,26 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-/**
- *     NOTICE
- *
- *     The T-REX software is licensed under a proprietary license or the GPL v.3.
- *     If you choose to receive it under the GPL v.3 license, the following applies:
- *     T-REX is a suite of smart contracts implementing the ERC-3643 standard and
- *     developed by Tokeny to manage and transfer financial assets on EVM blockchains
- *
- *     Copyright (C) 2025, Tokeny sàrl.
- *
- *     This program is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 pragma solidity 0.8.30;
 
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
@@ -776,16 +773,21 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         validation.status = next;
     }
 
-    /// @dev Who a native wallet's tokens belong to now, with its balance moved over when the registry changed its
-    ///  mind. `adjustment` is what this very movement already did to the wallet's balance on the token, so that
-    ///  what moves is what the wallet held before it: `+amount` for a sender the token already debited,
-    ///  `-amount` for a recipient it already credited, zero when the token has not moved yet.
+    /// @dev Who a native wallet's tokens belong to now. An empty wallet follows the registry; a funded one is
+    ///  refused until the registry names the identity the ledger credited again, since a balance changing identity
+    ///  outside a movement is a position no rule ever checked. `adjustment` is what this very movement already did
+    ///  to the wallet's balance on the token, so that what is judged is what the wallet held before it: `+amount`
+    ///  for a sender the token already debited, `-amount` for a recipient it already credited, zero otherwise.
     function _currentOwner(address wallet, address resolved, int256 adjustment) internal returns (address owner) {
         address previous;
         (owner, previous) = _followOwner(wallet, resolved);
         if (previous == address(0)) return owner;
         uint256 balance = uint256(int256(_boundToken().balanceOf(wallet)) + adjustment);
-        _moveWalletBalance(wallet, previous, owner, balance);
+        // A balance never changes identity without the rules seeing it, and the rules only see movements. So a
+        // funded wallet keeps the owner the ledger credited until that owner is named again or the wallet is empty.
+        bool walletIsEmpty = balance == 0;
+        require(walletIsEmpty, ErrorsLib.WalletBoundToAnotherIdentity(wallet, previous));
+        _recordOwnerChange(wallet, previous, owner);
     }
 
     /// @dev The reconciliation window of a chain that is open and configured.
