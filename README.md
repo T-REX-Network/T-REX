@@ -11,7 +11,7 @@
 <br><br>
 
 <p align="center">
-  <a href="https://tokeny.com/erc3643-whitepaper/">
+  <a href="./docs/TREX-WhitePaper.pdf">
   <img src="./docs/img/T-REX.png" width="150" title="t-rex">
   </a>
 </p>
@@ -120,18 +120,15 @@ All functions of T-REX smart contracts are described in the [T-REX documentation
 
 We welcome contributions from the community. Please refer to the [CONTRIBUTING](./CONTRIBUTING.md) guide for more details.
 
+## Security and audits
+
+T-REX v5 has been audited by OpenZeppelin. The audit report will be linked here once published.
+
+Please report security vulnerabilities responsibly to security@trex.network rather than opening a public issue.
+
 ## License
 
 Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network").
 
 This project is licensed under the GNU General Public License v3.0. See [LICENSE.md](./LICENSE.md) for the full license text and [NOTICE.md](./NOTICE.md) for copyright, provenance, and trademark information.
 
----
-
-<div style="padding: 16px;">
-   <a href="https://tokeny.com/wp-content/uploads/2023/04/Tokeny_TREX-v4_SC_Audit_Report.pdf" target="_blank">
-       <img src="https://hacken.io/wp-content/uploads/2023/02/ColorWBTypeSmartContractAuditBackFilled.png" alt="Proofed by Hacken - Smart contract audit" style="width: 258px; height: 100px;">
-   </a>
-</div>
-
----
