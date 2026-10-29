@@ -66,8 +66,14 @@ contract TrustedGatewayRegistryUnitTest is AccessManagerHelper {
     }
 
     function testConstructorRevertsOnZeroAccessManager() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, address(0)));
         new TrustedGatewayRegistry(address(0));
+    }
+
+    function testConstructorRevertsOnAnAccessManagerWithNoCode() public {
+        address eoa = makeAddr("NotAManager");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, eoa));
+        new TrustedGatewayRegistry(eoa);
     }
 
     function testGatewayIsNotTrustedByDefault() public view {

@@ -1122,10 +1122,16 @@ contract TREXFactoryTest is TREXSuiteTest {
     // ============ constructor() Tests ============
 
     function test_constructor_RevertWhen_AccessManagerZeroAddress() public {
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, address(0)));
         new TREXFactory(
             address(trexImplementationAuthority), address(idFactory), address(trustedGatewayRegistry), address(0)
         );
+    }
+
+    function test_constructor_RevertWhen_AccessManagerHasNoCode() public {
+        address eoa = makeAddr("NotAManager");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AccessManagerNotAContract.selector, eoa));
+        new TREXFactory(address(trexImplementationAuthority), address(idFactory), address(trustedGatewayRegistry), eoa);
     }
 
     function test_constructor_RevertWhen_TrustedGatewayRegistryZeroAddress() public {

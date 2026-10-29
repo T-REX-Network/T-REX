@@ -80,7 +80,9 @@ interface ITREXFactory {
         // ONCHAINID of the token
         // set it to ZERO address to have the factory create it in the IdentityFactory
         // if an address is provided, the IdentityFactory must already bind the predicted token address to it
-        // and the caller must be one of its MANAGEMENT keys
+        // and the caller must be one of its MANAGEMENT keys. Give it a key you control (your EOA, or a deployed
+        // manager): an identity whose only MANAGEMENT key is the predicted suite AccessManager, which has no
+        // code yet, can never be supplied, and the salt is lost
         address ONCHAINID;
         // modules to bind to the compliance, indexes are corresponding to the settings callData indexes
         // if a module doesn't require settings, it can be added at the end of the array, at index > settings.length
