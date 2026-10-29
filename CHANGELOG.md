@@ -78,8 +78,8 @@ All notable changes to this project will be documented in this file.
   - `UtilityChecker.getVerifiedDetails` also returns the wallet's `IIdentityFactory.AccountStatus`, so a
     revoked wallet whose identity passes every claim reads `Revoked` instead of looking verified. A
     registry without an IdentityFactory reports `None`. Callers decode a second return value.
-  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
-    refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
+  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity: a zero sender
+    would read as a mint and escape every rule about leaving.
   - The ledger follows the registry on its own. It remembers which identity it credited each native
     wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
     balance to the new owner before counting the movement (`WalletOwnerChanged`), and a wallet the
@@ -127,9 +127,6 @@ All notable changes to this project will be documented in this file.
   - `TransferContext.data`, empty today, is room for a later compliance to pass a fact this struct does
     not carry, decoded by the modules that know it and ignored by the rest, so the struct keeps its shape
     and no deployed module needs an upgrade for it.
-  - A recipient that resolves to no identity is refused while a `RULE` is bound: a distribution rule keys
-    on the identity and would read a zero one as a burn, letting tokens land beyond every cap. Only a
-    registry with eligibility checks disabled reaches that path.
   - `resyncModuleTypes(address)` re-reads a bound module's declaration after an implementation
     upgrade, OWNER. `getModulesByType(ModuleType)` lists the modules of one kind.
     `ModuleTypesRecorded(module, moduleTypes)` on bind and resync. `ModuleHasNoType` and
@@ -577,6 +574,13 @@ All notable changes to this project will be documented in this file.
   already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
   set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
   pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **`getVerifiedDetails` reads a revoked wallet as `isVerified` does.** The checker took the wallet status from
+  the IdentityFactory alone and evaluated the claims of whichever identity the registry still names, so after
+  `deleteIdentity`, which revokes the wallet in the registry's own storage, it reported `Active` and every topic
+  passing while `isVerified` was false; a wallet revoked in the factory read `Revoked` with passing rows. The
+  checker now makes the three reads `isVerified` makes, the local revocation, the factory's status and whether the
+  factory links the wallet to the identity the storage binds it to, and a wallet that may not act has no identity
+  for its rows: no issuer, `pass` false, whoever revoked it or wherever the factory linked it.
 - **Closing a chain stops its burn proofs too.** The proof of an open recall was checked against the gateway and
   peer the recall was dispatched to, so it still landed and credited the native wallet after the chain's route was
   set to zero. A burn proof from a closed chain now reverts with `ChainNotOpen`, like a settlement, and can be
@@ -613,8 +617,8 @@ All notable changes to this project will be documented in this file.
 - **`UtilityChecker` predictions follow the registry and the compliance** (audit L-32). `getVerifiedDetails` let
   the last trusted issuer holding a claim for a topic overwrite the row, so a valid claim from a first issuer was
   reported as failing when a later issuer's claim did not validate, while `isVerified` accepts the first valid
-  one. The row now keeps the first valid claim. `getTransferDetails` asked every rule even when the sender or the
-  recipient resolves to no identity, which the compliance refuses outright while a rule is bound; every row now
+  one. The row now keeps the first valid claim. `getTransferDetails` asked every rule even when the sender
+  resolves to no identity, which the compliance refuses outright while a rule is bound; every row now
   reports `allowedAmount` zero and `pass` false in that case, for any amount, zero included, so
   `getTransferStatus` agrees with `canTransfer`.
 - **`UtilityChecker.getVerifiedDetails` answers for a wallet with no identity** (audit L-09). It asked the zero
