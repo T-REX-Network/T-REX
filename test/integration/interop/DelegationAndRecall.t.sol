@@ -538,6 +538,27 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
 
+    /// @notice Closing the chain stops the proof of an open recall too, not only settlements. It lands again
+    ///         once the route is set back.
+    function test_handleBurnProof_RevertWhen_TheChainWasClosedAfterTheRecallWasInstructed() public {
+        uint256 recallId = _instructed();
+        uint256 index = _proof(polygonGateway, recallId, aliceSat, 200);
+        _openEvmChain(token, POLYGON, address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        polygonGateway.relay(index);
+
+        assertEq(token.balanceOf(alice), MINTED - 500, "nothing credited while the chain is closed");
+        assertEq(token.pendingRecall(recallId).amount, 200, "the recall stays open");
+        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
+
+        _openEvmChain(token, POLYGON, address(polygonGateway));
+        polygonGateway.relay(index);
+
+        assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once the route is back");
+        assertEq(token.pendingRecall(recallId).amount, 0, "the instruction is consumed");
+    }
+
     function test_handleBurnProof_RevertWhen_TheProofNamesAnotherWallet() public {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId, bobSat, 200);

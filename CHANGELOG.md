@@ -577,6 +577,10 @@ All notable changes to this project will be documented in this file.
   already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
   set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
   pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **Closing a chain stops its burn proofs too.** The proof of an open recall was checked against the gateway and
+  peer the recall was dispatched to, so it still landed and credited the native wallet after the chain's route was
+  set to zero. A burn proof from a closed chain now reverts with `ChainNotOpen`, like a settlement, and can be
+  delivered again once a route is set.
 - **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
   pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
   peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed

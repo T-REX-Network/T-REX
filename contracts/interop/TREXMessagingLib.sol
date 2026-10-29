@@ -397,7 +397,8 @@ library TREXMessagingLib {
     }
 
     /// @dev The peer and gateway the recall was dispatched to while it is open; the current ones once it is not,
-    ///  so a settled or never-issued id still reaches the token's duplicate and replay handling.
+    ///  so a settled or never-issued id still reaches the token's duplicate and replay handling. A closed chain is
+    ///  refused first, as for a settlement: closing it stops every proof from it until a route is set again.
     function _requireRecallOrigin(
         MessagingStorage storage s,
         address gateway,
@@ -405,6 +406,8 @@ library TREXMessagingLib {
         bytes calldata sender,
         uint256 recallId
     ) private view {
+        require(s.routes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+
         TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[recallId];
         if (recall.amount == 0) {
             _requireCurrentPeer(chainKey, sender);
