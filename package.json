@@ -37,7 +37,7 @@
     "type": "git",
     "url": "git+https://github.com/T-REX-Network/T-REX.git"
   },
-  "author": "Digital Asset Operational Services ISAC Ltd. (https://www.trex.network)",
+  "author": "Digital Asset Operational Services ISAC Ltd. (https://www.t-rex.network)",
   "license": "GPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/T-REX-Network/T-REX/issues"

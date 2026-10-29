@@ -10,8 +10,8 @@ whose holders are verified through ONCHAINID identities and whose transfers
 are checked by a modular compliance contract, with a factory, a version
 registry and cross-chain messaging around it.
 
-Website: https://www.trex.network
-Contact: legal@trex.network
+Website: https://www.t-rex.network
+Contact: legal@t-rex.network
 
 ## License
 
@@ -69,8 +69,10 @@ Digital Asset Operational Services ISAC Ltd. or any other rights holder.
 ## Third-party components
 
 This software depends on third-party components, including OpenZeppelin
-Contracts and OpenZeppelin Contracts Upgradeable (MIT License) and ONCHAINID
-(GPL-3.0). The ERC-3643 interfaces under `contracts/ERC-3643` are published
-under CC0-1.0, and `contracts/vendor/IERC173.sol` under the MIT License.
-Third-party components remain subject to their own license terms, which are
-unaffected by this NOTICE.
+Contracts and OpenZeppelin Contracts Upgradeable (MIT License), and on the
+ONCHAINID contracts (GPL-3.0), also published by Digital Asset Operational
+Services ISAC Ltd. The six `IERC3643*.sol` interface files directly under
+`contracts/ERC-3643` are published under CC0-1.0, and
+`contracts/vendor/IERC173.sol` under the MIT License. Third-party components
+remain subject to their own license terms, which are unaffected by this
+NOTICE.

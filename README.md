@@ -114,7 +114,7 @@ forge flatten <contract-path>  # Flatten a contract
 ## Documentation
 
 For a detailed understanding of the T-REX protocol, please refer to the [whitepaper](./docs/TREX-WhitePaper.pdf).
-All functions of T-REX smart contracts are described in the [T-REX documentation](https://docs.tokeny.com/docs/smart-contracts)
+All functions of T-REX smart contracts are described in the [T-REX documentation](https://docs.t-rex.network)
 
 ## Contributing
 
@@ -124,7 +124,7 @@ We welcome contributions from the community. Please refer to the [CONTRIBUTING](
 
 T-REX v5 has been audited by OpenZeppelin. The audit report will be linked here once published.
 
-Please report security vulnerabilities responsibly to security@trex.network rather than opening a public issue.
+Please report security vulnerabilities responsibly to security@t-rex.network rather than opening a public issue.
 
 ## License
 
