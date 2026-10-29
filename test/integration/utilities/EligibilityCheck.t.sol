@@ -335,6 +335,26 @@ contract EligibilityCheckTest is TREXSuiteTest {
         assertFalse(identityRegistry.isVerified(alice));
     }
 
+    /// @notice The agent binds a wallet locally to alice, then the wallet links itself to another identity in the
+    ///         factory. The registry keeps alice as the owner but `isVerified` says no; the checker says the same.
+    function test_getVerifiedDetails_ReportsFailing_WhenTheFactoryLinksTheWalletToAnotherIdentity() public {
+        address wallet = makeAddr("mismatchedWallet");
+        vm.prank(agent);
+        identityRegistry.registerIdentity(wallet, aliceIdentity, Countries.FRANCE);
+        assertTrue(identityRegistry.isVerified(wallet), "verified while only the storage knows it");
+
+        _deployIdentity(wallet, "mismatchedWallet");
+
+        (UtilityChecker.EligibilityCheckDetails[] memory results,) =
+            utilityChecker.getVerifiedDetails(address(token), wallet);
+
+        assertEq(results.length, 1);
+        assertEq(address(results[0].issuer), address(0));
+        assertFalse(results[0].pass);
+        assertFalse(identityRegistry.isVerified(wallet));
+        assertEq(address(identityRegistry.identity(wallet)), address(aliceIdentity), "the local owner stays");
+    }
+
     /// @notice The identity answers `getClaim`, so it can name any issuer for the trusted issuer's claim id. Like
     ///         `isVerified`, the checker only counts a claim that names the trusted issuer itself, even when the
     ///         named issuer would confirm it.

@@ -129,11 +129,13 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         IERC3643IdentityRegistry identityRegistry = IERC3643(_token).identityRegistry();
         _walletStatus = _walletStatusOf(identityRegistry, _userAddress);
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
-        // The registry keeps naming the identity a revoked wallet belonged to, for attribution, but `isVerified`
-        // reads a revoked wallet as having no identity. The rows follow `isVerified`, so the two never disagree.
+        // The registry keeps naming who owns a wallet, for attribution, but `isVerified` reads a wallet that may
+        // not act as having no identity: one revoked anywhere, or one the IdentityFactory links elsewhere than the
+        // storage does. The rows follow `isVerified`, through the same three reads, so the two never disagree.
         IIdentity identity;
         bool walletMayAct = _walletStatus != IIdentityFactory.AccountStatus.Revoked;
-        if (walletMayAct) identity = identityRegistry.identity(_userAddress);
+        bool factoryAgreesWithTheStorage = _factoryAgreesWithTheStorage(identityRegistry, _userAddress);
+        if (walletMayAct && factoryAgreesWithTheStorage) identity = identityRegistry.identity(_userAddress);
 
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
@@ -184,23 +186,49 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         return topicsRegistry.getClaimTopics();
     }
 
-    /// @dev The same two reads as `TREXRegistry.isVerified`: a wallet the registry agent revoked locally is
-    ///  `Revoked` whatever the IdentityFactory says, then the factory's own status. A plain ERC-3643 registry
-    ///  has neither read and reports `None`.
+    /// @dev The first two of the three reads of `TREXRegistry._activeIdentityOf`: a wallet the registry agent
+    ///  revoked locally is `Revoked` whatever the IdentityFactory says, then the factory's own status. The third
+    ///  read is `_factoryAgreesWithTheStorage`. A plain ERC-3643 registry has none of them and reports `None`.
     function _walletStatusOf(IERC3643IdentityRegistry identityRegistry, address userAddress)
         internal
         view
         returns (IIdentityFactory.AccountStatus)
     {
-        IIdentityRegistryStorage identityStorage = IIdentityRegistryStorage(address(identityRegistry.identityStorage()));
-        try identityStorage.localAccountStatus(userAddress) returns (IIdentityFactory.AccountStatus localStatus) {
-            if (localStatus == IIdentityFactory.AccountStatus.Revoked) return localStatus;
-        } catch { }
+        address identityStorage = address(identityRegistry.identityStorage());
+        // A call to an address with no code is not caught by `try`, so a storage that is not a contract is skipped.
+        bool storageIsAContract = identityStorage.code.length != 0;
+        if (storageIsAContract) {
+            try IIdentityRegistryStorage(identityStorage).localAccountStatus(userAddress) returns (
+                IIdentityFactory.AccountStatus localStatus
+            ) {
+                if (localStatus == IIdentityFactory.AccountStatus.Revoked) return localStatus;
+            } catch { }
+        }
 
         try ITREXRegistry(address(identityRegistry)).identityFactory() returns (IIdentityFactory factory) {
             return factory.getAccountStatus(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
         } catch {
             return IIdentityFactory.AccountStatus.None;
+        }
+    }
+
+    /// @dev The third read of `TREXRegistry._activeIdentityOf`: a wallet the IdentityFactory links to another
+    ///  identity than the storage binds it to may not act, since the wallet's own signature and the agent's binding
+    ///  disagree. True when either side names nobody, and for a plain ERC-3643 registry, which has nothing to compare.
+    function _factoryAgreesWithTheStorage(IERC3643IdentityRegistry identityRegistry, address userAddress)
+        internal
+        view
+        returns (bool)
+    {
+        try ITREXRegistry(address(identityRegistry)).identityFactory() returns (IIdentityFactory factory) {
+            (address factoryIdentity,) =
+                factory.getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
+            if (factoryIdentity == address(0)) return true;
+            IIdentity localIdentity = identityRegistry.identityStorage().storedIdentity(userAddress);
+            if (address(localIdentity) == address(0)) return true;
+            return factoryIdentity == address(localIdentity);
+        } catch {
+            return true;
         }
     }
 

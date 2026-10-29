@@ -78,8 +78,8 @@ All notable changes to this project will be documented in this file.
   - `UtilityChecker.getVerifiedDetails` also returns the wallet's `IIdentityFactory.AccountStatus`, so a
     revoked wallet whose identity passes every claim reads `Revoked` instead of looking verified. A
     registry without an IdentityFactory reports `None`. Callers decode a second return value.
-  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
-    refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
+  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity: a zero sender
+    would read as a mint and escape every rule about leaving.
   - The ledger follows the registry on its own. It remembers which identity it credited each native
     wallet to (`ownerOf`); the next movement through a wallet an agent relinked moves the wallet's
     balance to the new owner before counting the movement (`WalletOwnerChanged`), and a wallet the
@@ -570,8 +570,9 @@ All notable changes to this project will be documented in this file.
   the IdentityFactory alone and evaluated the claims of whichever identity the registry still names, so after
   `deleteIdentity`, which revokes the wallet in the registry's own storage, it reported `Active` and every topic
   passing while `isVerified` was false; a wallet revoked in the factory read `Revoked` with passing rows. The
-  checker now reads the local revocation first, and a revoked wallet has no identity for its rows: `Revoked`,
-  no issuer, `pass` false, whoever revoked it.
+  checker now makes the three reads `isVerified` makes, the local revocation, the factory's status and whether the
+  factory links the wallet to the identity the storage binds it to, and a wallet that may not act has no identity
+  for its rows: no issuer, `pass` false, whoever revoked it or wherever the factory linked it.
 - **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
   pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
   peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed
