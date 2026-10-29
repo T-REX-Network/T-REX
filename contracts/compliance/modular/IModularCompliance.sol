@@ -216,10 +216,10 @@ interface IModularCompliance is IERC3643Compliance {
     function getModulesByType(IModule.ModuleType moduleType) external view returns (address[] memory);
 
     /**
-     *  @dev follows a registry relink of a native wallet before tokens land on it outside a movement the
-     *  compliance hears of, a recall's credit: the wallet's current balance moves from the identity it was last
-     *  credited to onto the one the registry names now, and nothing else. No movement is counted and no module is
-     *  called. A no-op when the owner has not changed.
+     *  @dev settles who owns a native wallet before tokens land on it outside a movement the compliance hears
+     *  of, a recall's credit: an empty wallet the registry relinked takes its new owner, a funded one reverts
+     *  with `WalletBoundToAnotherIdentity` until the registry names the owner the ledger credited. No movement
+     *  is counted and no module is called. A no-op when the owner has not changed.
      *  This function can be called ONLY by the token bound to the compliance
      *  @param _wallet the native wallet about to be credited
      */

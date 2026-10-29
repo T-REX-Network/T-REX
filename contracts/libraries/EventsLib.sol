@@ -223,8 +223,8 @@ library EventsLib {
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
 
-    /// The registry now names another identity for a wallet that holds tokens, so its balance followed it: what
-    /// the previous identity's position counted for this wallet is now the new one's.
+    /// The registry now names another identity for an empty wallet, and the ledger took note. `amount` is what
+    /// moved between the two positions, zero: a wallet that holds tokens never changes identity in the ledger.
     event WalletOwnerChanged(
         address indexed wallet, address indexed previousIdentity, address indexed identity, uint256 amount
     );

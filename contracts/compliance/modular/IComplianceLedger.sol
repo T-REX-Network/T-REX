@@ -96,8 +96,9 @@ interface IComplianceLedger {
     /// @param identity the ONCHAINID to look up
     function pendingOutOf(address identity) external view returns (uint256);
 
-    /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to, which
-    ///  follows the registry on the wallet's next movement. Zero for a wallet the ledger has never credited.
+    /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to. An empty
+    ///  wallet follows the registry on its next movement; a funded one keeps this owner until the registry names
+    ///  it again. Zero for a wallet the ledger has never credited.
     function ownerOf(address wallet) external view returns (address);
 
 }

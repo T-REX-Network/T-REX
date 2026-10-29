@@ -78,6 +78,26 @@ All notable changes to this project will be documented in this file.
   - `UtilityChecker.getVerifiedDetails` also returns the wallet's `IIdentityFactory.AccountStatus`, so a
     revoked wallet whose identity passes every claim reads `Revoked` instead of looking verified. A
     registry without an IdentityFactory reports `None`. Callers decode a second return value.
+  - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity, as it already
+    refused such a recipient: a zero sender would read as a mint and escape every rule about leaving.
+  - The ledger remembers which identity it credited each native wallet to (`ownerOf`). An empty wallet the
+    registry relinked takes its new owner on its next movement (`WalletOwnerChanged`), a wallet the registry
+    no longer names keeps its remembered owner, and a funded wallet never changes owner (see the entry on
+    relinked wallets below). No owner call, no underflow, no stale position.
+  - What no lookup can place is counted, not floored away. `positionGap()` is signed: a
+    credit that lands on no identity adds to it, a debit that finds no identity or too small a position
+    subtracts from it, so `sum(positions) + positionGap == totalSupply` holds through any registry
+    change. `PositionUnresolved(wallet, amount)` and `PositionUnderflow(identity, missing)` name the
+    amount, and `fixPosition(from, to, amount)`, owner only, moves it, a zero side being the pool.
+    The ledger invariant harness holds the pool to zero under every transition that is not an agent
+    action. One rule now governs the ledger's writes: the compliance's own bookkeeping reverts, a write
+    the registry made impossible is counted for repair.
+  - `refundValidation(validationId)`, keeper only, is the way out of a two-leg validation of which one
+    leg never came, a second reconciliation window past `releaseAt`. Burn leg in: the held amount goes
+    back to the wallet it left through `Token.returnInTransit`, the reservation is released, the status is
+    `Refunded`, and a mint leg arriving afterwards halts the token as a replay would. Mint leg in: the
+    chain that owes the burn is paused for issuance and `ValidationStuck` is emitted, since nothing on
+    this chain can be returned.
   - While a `RULE` is bound, `canTransfer` refuses a sender that resolves to no identity: a zero sender
     would read as a mint and escape every rule about leaving.
   - The ledger follows the registry on its own. It remembers which identity it credited each native
@@ -560,6 +580,14 @@ All notable changes to this project will be documented in this file.
   already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
   set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
   pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **A wallet that holds tokens never changes identity in the ledger** (audit L-27). No suite role can relink a
+  funded wallet any more, but an admin upgrading the registry beacon to an implementation on another
+  IdentityFactory still can, and the ledger then moved the wallet's balance to the new identity on its next
+  movement, a position no rule had checked: a holder could stand at 160 against a cap of 100. The ledger now
+  refuses every movement through such a wallet, transfers, burns, forced transfers, recoveries, delegations and
+  the credit of a recall alike, with `WalletBoundToAnotherIdentity(wallet, creditedIdentity)`, until the registry
+  names the credited identity again. An empty wallet still follows the registry. `WalletOwnerChanged` keeps its
+  shape and always carries a zero amount.
 - **`TREXFactory` and `TrustedGatewayRegistry` refuse an access manager with no code**, as the implementation
   authority already did: an address with no code answers no to every `restricted` call, so the contract would
   deploy dead. Both constructors revert with `AccessManagerNotAContract` instead of `ZeroAddress`.

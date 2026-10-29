@@ -46,10 +46,55 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
+import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
+
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
+
+/// @dev Stands in for another IdentityFactory after an admin upgrades the registry beacon: it answers the views
+///      `TREXRegistry` reads and links exactly one wallet to one identity.
+contract OtherIdentityFactoryStub {
+
+    bytes32 private immutable _LINKED_WALLET_KEY;
+    address private immutable _LINKED_IDENTITY;
+
+    constructor(bytes memory linkedWallet, address linkedIdentity) {
+        _LINKED_WALLET_KEY = keccak256(linkedWallet);
+        _LINKED_IDENTITY = linkedIdentity;
+    }
+
+    function getIdentityIncludingRevoked(bytes calldata account)
+        external
+        view
+        returns (address, IIdentityFactory.AccountStatus)
+    {
+        if (keccak256(account) == _LINKED_WALLET_KEY) {
+            return (_LINKED_IDENTITY, IIdentityFactory.AccountStatus.Active);
+        }
+        return (address(0), IIdentityFactory.AccountStatus.None);
+    }
+
+    function getIdentity(bytes calldata account) external view returns (address) {
+        if (keccak256(account) == _LINKED_WALLET_KEY) return _LINKED_IDENTITY;
+        return address(0);
+    }
+
+    function getAccountStatus(bytes calldata account) external view returns (IIdentityFactory.AccountStatus) {
+        if (keccak256(account) == _LINKED_WALLET_KEY) return IIdentityFactory.AccountStatus.Active;
+        return IIdentityFactory.AccountStatus.None;
+    }
+
+    function identityTypeOf(address) external pure returns (uint256) {
+        return 0;
+    }
+
+}
 
 /// @dev The shipped rule, end to end. It is the reference every module author will copy, so it is exercised
 ///      through the whole lifecycle: a native transfer, a mint, a burn, an issuance, two validations racing
@@ -192,6 +237,41 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(address(registry.identity(bob)), address(bobIdentity));
         assertEq(_position(address(bobIdentity)), sixtyPercentOfCap);
         assertEq(_position(address(charlieIdentity)), sixtyPercentOfCap);
+    }
+
+    /// @notice The one path left that can relink a funded wallet is an admin upgrading the registry beacon to an
+    ///         implementation on another IdentityFactory. The cap would then be priced against the new identity's
+    ///         empty position while the wallet's balance followed unchecked. The ledger refuses instead: the wallet
+    ///         cannot move until the registry names the owner the ledger credited.
+    function test_registryUpgradeToAnotherFactory_RevertWhen_AFundedWalletWouldChangeIdentity() public {
+        address walletViaFactory = makeAddr("walletViaFactory");
+        IIdentity identityA = _deployIdentity(walletViaFactory, "walletViaFactory");
+        uint256 sixtyPercentOfCap = CAP * 6 / 10;
+        vm.prank(agent);
+        token.mint(walletViaFactory, sixtyPercentOfCap);
+        address identityB = makeAddr("identityB");
+        OtherIdentityFactoryStub otherFactory = new OtherIdentityFactoryStub(
+            InteroperableAddress.formatEvmV1(block.chainid, walletViaFactory), identityB
+        );
+        ITREXImplementationAuthority.SuiteImplementations memory implementations = _suiteImplementations();
+        implementations.trexRegistryImplementation = address(new TREXRegistry(address(otherFactory)));
+        Version next = VersionLib.pack(5, 0, 1);
+        vm.prank(deployer);
+        trexImplementationAuthority.publishAndUpgrade(next, implementations);
+        TREXRegistry registry = TREXRegistry(address(token.identityRegistry()));
+        assertEq(address(registry.identity(walletViaFactory)), identityB, "the wallet now resolves to B");
+
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.WalletBoundToAnotherIdentity.selector, walletViaFactory, address(identityA)
+            )
+        );
+        token.mint(walletViaFactory, sixtyPercentOfCap);
+
+        assertEq(_position(address(identityA)), sixtyPercentOfCap, "the position stays with the credited owner");
+        assertEq(_position(identityB), 0, "nothing landed on B");
+        assertEq(token.balanceOf(walletViaFactory), sixtyPercentOfCap);
     }
 
     /// @notice A burn is never limited: it lowers a position, so no cap can be breached by one.
