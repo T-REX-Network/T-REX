@@ -36,29 +36,26 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-/**
- *     NOTICE
- *
- *     The T-REX software is licensed under a proprietary license or the GPL v.3.
- *     If you choose to receive it under the GPL v.3 license, the following applies:
- *     T-REX is a suite of smart contracts implementing the ERC-3643 standard and
- *     developed by Tokeny to manage and transfer financial assets on EVM blockchains
- *
- *     Copyright (C) 2025, Tokeny sàrl.
- *
- *     This program is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 pragma solidity 0.8.30;
 
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
@@ -97,7 +94,9 @@ import { ITREXFactory } from "./ITREXFactory.sol";
 ///      its new identity to any account set as its only MANAGEMENT key, without a signature from that account,
 ///      so anyone could bind a predicted token address first. The binding is permanent: the auto-created token
 ///      identity and a supplied ONCHAINID both revert on the occupied address, and that salt is lost on the
-///      chain. Self-deploy (`createIdentity`) binds the caller only and may stay open.
+///      chain. Self-deploy (`createIdentity`) binds the caller only and may stay open. The same loss happens to a
+///      deployer who pre-binds the predicted token with the predicted suite AccessManager as the only MANAGEMENT
+///      key: that address has no code before the deploy, so nothing can hold the key and nothing can add one.
 contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /// the address of the implementation authority contract used in the tokens deployed by the factory
@@ -125,7 +124,8 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address trustedGatewayRegistry,
         address accessManager
     ) AccessManagedOwnable(accessManager) {
-        require(accessManager != address(0), ErrorsLib.ZeroAddress());
+        // The same line `setAuthority` holds later: an address with no code answers no to every `restricted` call.
+        require(accessManager.code.length != 0, ErrorsLib.AccessManagerNotAContract(accessManager));
 
         _setImplementationAuthority(implementationAuthority);
         _setIdFactory(idFactory);

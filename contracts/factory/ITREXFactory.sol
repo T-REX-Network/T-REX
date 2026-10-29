@@ -36,29 +36,30 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
-/**
- *     NOTICE
- *
- *     The T-REX software is licensed under a proprietary license or the GPL v.3.
- *     If you choose to receive it under the GPL v.3 license, the following applies:
- *     T-REX is a suite of smart contracts implementing the ERC-3643 standard and
- *     developed by Tokeny to manage and transfer financial assets on EVM blockchains
- *
- *     Copyright (C) 2025, Tokeny sàrl.
- *
- *     This program is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2023, Tokeny sàrl.
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite. It derives from the
+// T-REX v4 smart contracts developed by Tokeny sàrl and released under the
+// GNU General Public License v3. All modifications made since then are the
+// work of Digital Asset Operational Services ISAC Ltd. ("T-REX Network").
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 pragma solidity 0.8.30;
 
 interface ITREXFactory {
@@ -79,7 +80,9 @@ interface ITREXFactory {
         // ONCHAINID of the token
         // set it to ZERO address to have the factory create it in the IdentityFactory
         // if an address is provided, the IdentityFactory must already bind the predicted token address to it
-        // and the caller must be one of its MANAGEMENT keys
+        // and the caller must be one of its MANAGEMENT keys. Give it a key you control (your EOA, or a deployed
+        // manager): an identity whose only MANAGEMENT key is the predicted suite AccessManager, which has no
+        // code yet, can never be supplied, and the salt is lost
         address ONCHAINID;
         // modules to bind to the compliance, indexes are corresponding to the settings callData indexes
         // if a module doesn't require settings, it can be added at the end of the array, at index > settings.length

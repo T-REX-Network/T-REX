@@ -45,6 +45,12 @@ jobs:
         run: forge build --sizes contracts
         id: build
 
+      # ONCHAINID deploys IdentityFactory with via-IR; under T-REX's profile it is over EIP-170 and the
+      # step above never lists it. Build it the way it ships so the gate sees it.
+      - name: Check IdentityFactory size under its own profile
+        run: forge build --sizes --via-ir dependencies/onchain-id-develop/contracts/factory/IdentityFactory.sol
+        id: identity-factory-size
+
       - name: Run tests
         run: forge test
         id: test
