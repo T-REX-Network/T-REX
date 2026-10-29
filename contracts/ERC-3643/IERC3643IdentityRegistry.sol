@@ -36,6 +36,7 @@
 //                                        +@@@@%-
 //                                        :#%%=
 //
+
 pragma solidity 0.8.30;
 
 import { IERC3643ClaimTopicsRegistry } from "./IERC3643ClaimTopicsRegistry.sol";
