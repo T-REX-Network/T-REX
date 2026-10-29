@@ -192,11 +192,10 @@ library TokenDelegationLib {
     ///  fault. A proof for a recall never issued is `HaltToken`, see {ISettlementHandler-Verdict}.
     /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the pause.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
-    /// @return burnedWallet The satellite wallet the proof names, for the token to report the recall as leaving it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.
     function consumeBurnProof(bytes32 originChainKey, bytes memory body)
         external
-        returns (ISettlementHandler.Verdict verdict, address nativeWallet, bytes memory burnedWallet, uint256 amount)
+        returns (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount)
     {
         MessageTypesLib.BurnProof memory proof = MessageTypesLib.decodeBurnProof(body);
         bytes32 proofHash = keccak256(abi.encode(originChainKey, body));
@@ -208,13 +207,12 @@ library TokenDelegationLib {
         if (recall.amount == 0) {
             if (s.settledProofs[proof.recallId] == proofHash) {
                 emit EventsLib.BurnProofDuplicate(proof.recallId, originChainKey);
-                return (ISettlementHandler.Verdict.None, address(0), "", 0);
+                return (ISettlementHandler.Verdict.None, address(0), 0);
             }
             emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
             bool issued = proof.recallId != 0 && proof.recallId <= s.lastRecallId;
-            return (
-                issued ? ISettlementHandler.Verdict.PauseChain : ISettlementHandler.Verdict.HaltToken, address(0), "", 0
-            );
+            return
+                (issued ? ISettlementHandler.Verdict.PauseChain : ISettlementHandler.Verdict.HaltToken, address(0), 0);
         }
 
         require(
@@ -226,10 +224,9 @@ library TokenDelegationLib {
         );
 
         nativeWallet = recall.nativeWallet;
-        burnedWallet = proof.burnedWallet;
         amount = proof.amount;
         bytes32 walletKey = recall.walletKey;
-        _requireLinked(nativeWallet, burnedWallet);
+        _requireLinked(nativeWallet, proof.burnedWallet);
         _compliance().syncOwner(nativeWallet);
 
         delete s.openRecall[walletKey];
@@ -239,8 +236,8 @@ library TokenDelegationLib {
         emit EventsLib.RecallSettled(proof.recallId, originChainKey, amount);
 
         if (amount != 0) {
-            TokenLedgerLib.debitToNative(burnedWallet, nativeWallet, amount);
-            emit EventsLib.Recalled(walletKey, nativeWallet, burnedWallet, amount);
+            TokenLedgerLib.debitToNative(proof.burnedWallet, nativeWallet, amount);
+            emit EventsLib.Recalled(walletKey, nativeWallet, proof.burnedWallet, amount);
         }
     }
 

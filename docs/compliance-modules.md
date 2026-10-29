@@ -111,14 +111,13 @@ migration counts the delegated amount back in and the whole pre-delegation balan
 of the investor's own activity leaves it out like `FORCED_TRANSFER` and `RECOVERY`; a holder count sees no change of
 ownership.
 
-`RECALL` is the way back, a recall answered by a satellite's burn proof: the inverse of a `DELEGATION`, so a module that
-debited the out-leg has the in-leg to credit. `fromWallet` is the satellite wallet that burned, as on a settlement, and
-`toWallet` the native wallet the credit landed on; both sit on one identity, the position does not move, and no rule is
-asked. Before the credit lands the token calls `syncOwner(nativeWallet)`, which follows a registry relink of that wallet
+`RECALL` is the way back, a recall answered by a remote wallet's burn proof: the exact inverse of a `DELEGATION`, so a
+module that debited the out-leg has the in-leg to credit. `fromWallet` and `toWallet` are both the native wallet the
+credit landed on, as on the way out; the position does not move, and no rule is asked. Before the credit lands the token calls `syncOwner(nativeWallet)`, which follows a registry relink of that wallet
 at adjustment zero: the wallet's existing balance moves to the identity the registry names now, and nothing else. The
 credit is already counted in that identity's position as a bridged one, so it must not be migrated with it. The
-`RECALL` is reported after the mint, through `recalled`, with `toIdentity` the owner that sync settled on, which may not
-be the identity that delegated out. The mint itself goes through no hook, so a module never sees a plain `MINT` of
+`RECALL` is reported after the mint, through `agentTransferred` like the `DELEGATION`, with both identities the owner
+that sync settled on. The mint itself goes through no hook, so a module never sees a plain `MINT` of
 tokens it saw leave as a `DELEGATION`. A tracker of the investor's own activity leaves it out; a module keeping its own
 record of native balances credits it, and needs no reseed after a round trip.
 

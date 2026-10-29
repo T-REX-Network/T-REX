@@ -610,8 +610,10 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev The recall path: the proof is judged against the instruction it answers and the bridged position
     ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
     ///      minted to: together, the transition {_recall} describes. The mint stays on the raw `_update`, so the
-    ///      modules do not see a plain mint they never saw leave; the compliance is told a `RECALL` instead, once
-    ///      the credit landed, the one notification of the in-leg. Same pause policy as {_handleSettlement}: a
+    ///      modules do not see a plain mint they never saw leave; the compliance is told a `RECALL` instead, native
+    ///      wallet to the same native wallet, the exact inverse of the `DELEGATION`. `consumeBurnProof` runs
+    ///      `syncOwner` before the mint, so the owner follow inside `agentTransferred` finds nothing left to move:
+    ///      it is the after-burn report of a mint. Same pause policy as {_handleSettlement}: a
     ///      paused token leaves the proof deliverable, a proof for a recall already settled pauses the chain's
     ///      inbound, a proof for a recall never issued pauses the token. A duplicate of a settled proof changes
     ///      nothing.
@@ -622,7 +624,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
         nonReentrant
     {
-        (ISettlementHandler.Verdict verdict, address nativeWallet, bytes memory burnedWallet, uint256 amount) =
+        (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount) =
             TokenDelegationLib.consumeBurnProof(chainKey, body);
         if (verdict != ISettlementHandler.Verdict.None) {
             _applyVerdict(chainKey, verdict);
@@ -630,7 +632,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         }
         if (amount == 0) return;
         ERC20Upgradeable._update(address(0), nativeWallet, amount);
-        IModularCompliance(address(_getCompliance())).recalled(burnedWallet, nativeWallet, amount);
+        IModularCompliance(address(_getCompliance()))
+            .agentTransferred(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
     }
 
     /// @dev The two brakes a handler can ask for, see {ISettlementHandler-Verdict}.

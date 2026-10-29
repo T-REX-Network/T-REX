@@ -156,24 +156,6 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.stopPrank();
     }
 
-    /// @notice Nobody but the bound token may report a recall.
-    function test_recalled_RevertWhen_CallerIsNotTheBoundToken() public {
-        bytes memory satellite = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("satellite"));
-        vm.expectRevert(ERC3643ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
-        mc.recalled(satellite, alice, 100);
-    }
-
-    /// @notice A recall is guarded like an agent's movement: no zero recipient, no zero amount.
-    function test_recalled_RevertWhen_TheRecipientOrTheAmountIsZero() public {
-        bytes memory satellite = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("satellite"));
-        vm.startPrank(address(token));
-        vm.expectRevert(ERC3643ErrorsLib.ZeroAddress.selector);
-        mc.recalled(satellite, address(0), 100);
-        vm.expectRevert(ERC3643ErrorsLib.ZeroValue.selector);
-        mc.recalled(satellite, alice, 0);
-        vm.stopPrank();
-    }
-
     // ==== A refusing AFTER ====
 
     /// @notice A post-state veto is an `AFTER` module that reverts: the movement is undone with the module's own

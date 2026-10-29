@@ -343,29 +343,11 @@ contract ModularCompliance is
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced and recovery paths so that the trackers learn an agent moved the tokens.
+    ///  the token's forced, recovery, delegation and recall paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         require(amount > 0, ErrorsLib.ZeroValue());
         _applyMovement(from, to, amount, kind);
-    }
-
-    /// @dev See {IModularCompliance-recalled}. The owner was settled by `syncOwner` before the credit, and the
-    ///  position did not move, so nothing is adjusted here: the movement is built and the trackers told.
-    function recalled(bytes calldata fromWallet, address to, uint256 amount) external onlyBoundToken {
-        require(to != address(0), ErrorsLib.ZeroAddress());
-        require(amount > 0, ErrorsLib.ZeroValue());
-        ITREXRegistry registry = _boundRegistry();
-        _callAfterTransfer(
-            TransferContextLib.recall(
-                address(this),
-                address(registry.resolveIdentity(fromWallet)),
-                address(registry.identity(to)),
-                WalletKeyLib.walletId(fromWallet),
-                WalletKeyLib.walletId(to),
-                amount
-            )
-        );
     }
 
     /// @dev Moves the positions, then tells the `AFTER` modules. One function serves all three hooks: the absent

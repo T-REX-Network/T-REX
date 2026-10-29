@@ -418,7 +418,7 @@ contract UndeclaredRuleModule is RecordingModule {
 
 /// @dev A tracker that keeps its own record of native balances, the shape of a snapshot or a max-balance module
 ///      that cannot read the token: a native wallet (a key below 2^160) is debited on every departure and credited
-///      on every arrival, a `DELEGATION` debits its native side alone, a `RECALL` credits its native side alone, and
+///      on every arrival, a `DELEGATION` debits its native wallet alone, a `RECALL` credits it alone, and
 ///      an optional cap refuses a `TRANSFER` or a `MINT` that leaves the recipient's record above it.
 contract NativeLedgerModule is RecordingModule {
 

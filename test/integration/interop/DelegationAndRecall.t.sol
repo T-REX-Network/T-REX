@@ -788,14 +788,18 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         uint256 callsBefore = tracker.totalHookCalls();
 
         vm.expectCall(address(boundCompliance), abi.encodeCall(IModularCompliance.syncOwner, (alice)), 1);
-        vm.expectCall(address(boundCompliance), abi.encodeCall(IModularCompliance.recalled, (bobSat, alice, 100)), 1);
+        vm.expectCall(
+            address(boundCompliance),
+            abi.encodeCall(IModularCompliance.agentTransferred, (alice, alice, 100, MovementKindLib.RECALL)),
+            1
+        );
         polygonGateway.relay(_proof(polygonGateway, recallId, bobSat, 100));
 
         assertEq(tracker.totalHookCalls(), callsBefore + 1, "the recall is the only movement reported");
         (, address fromIdentity, address toIdentity,, bytes32 toWallet) = _lastParties(tracker);
         (, uint256 amount, uint8 kind,,) = _lastMovement(tracker);
         assertEq(kind, MovementKindLib.RECALL);
-        assertEq(fromIdentity, address(bobIdentity), "the burned wallet is Bob's");
+        assertEq(fromIdentity, address(bobIdentity), "the sender is the owner after the sync, not Alice");
         assertEq(toIdentity, address(bobIdentity), "the recipient is the owner after the sync, not Alice");
         assertEq(toWallet, bytes32(uint256(uint160(alice))));
         assertEq(amount, 100);
@@ -809,14 +813,18 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
     /* ----- The recall as a movement the modules see ----- */
 
-    /// @notice The way back is reported as the inverse of a `DELEGATION`: the satellite wallet is the sender, the
-    ///         native wallet the recipient, both on one identity, and the hook runs once the native half landed.
+    /// @notice The way back is reported as the exact inverse of a `DELEGATION`: the native wallet is both the sender
+    ///         and the recipient, on one identity, and the hook runs once the native half landed.
     function test_handleBurnProof_Success_ReportsARecallToTheModules() public {
         TrackerOnlyModule tracker = _tracker();
         uint256 recallId = _instructed();
         uint256 callsBefore = tracker.totalHookCalls();
 
-        vm.expectCall(address(boundCompliance), abi.encodeCall(IModularCompliance.recalled, (aliceSat, alice, 200)), 1);
+        vm.expectCall(
+            address(boundCompliance),
+            abi.encodeCall(IModularCompliance.agentTransferred, (alice, alice, 200, MovementKindLib.RECALL)),
+            1
+        );
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 200));
 
         assertEq(tracker.totalHookCalls(), callsBefore + 1);
@@ -828,7 +836,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(kind, MovementKindLib.RECALL);
         assertEq(fromIdentity, address(aliceIdentity));
         assertEq(toIdentity, address(aliceIdentity));
-        assertEq(fromWallet, keccak256(aliceSat), "the sender is the satellite wallet, as on a settlement");
+        assertEq(fromWallet, bytes32(uint256(uint160(alice))), "the sender is the native wallet, as on a delegation");
         assertEq(toWallet, bytes32(uint256(uint160(alice))));
         assertEq(amountMin, 200);
         assertEq(amountMax, 200);
@@ -843,7 +851,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         uint256 recallId = _instructed();
         uint256 callsBefore = tracker.totalHookCalls();
 
-        vm.expectCall(address(boundCompliance), abi.encodeWithSelector(IModularCompliance.recalled.selector), 0);
+        vm.expectCall(address(boundCompliance), abi.encodeWithSelector(IModularCompliance.agentTransferred.selector), 0);
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 0));
 
         assertEq(tracker.totalHookCalls(), callsBefore);
