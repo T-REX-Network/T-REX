@@ -37,29 +37,29 @@
 //                                        :#%%=
 //
 
-/**
- *     NOTICE
- *
- *     The T-REX software is licensed under a proprietary license or the GPL v.3.
- *     If you choose to receive it under the GPL v.3 license, the following applies:
- *     T-REX is a suite of smart contracts implementing the ERC-3643 standard and
- *     developed by Tokeny to manage and transfer financial assets on EVM blockchains
- *
- *     Copyright (C) 2025, Tokeny sàrl.
- *
- *     This program is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2023, Tokeny sàrl.
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite. It derives from the
+// T-REX v4 smart contracts developed by Tokeny sàrl and released under the
+// GNU General Public License v3. All modifications made since then are the
+// work of Digital Asset Operational Services ISAC Ltd. ("T-REX Network").
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 pragma solidity 0.8.30;
 
@@ -79,6 +79,7 @@ import { issuerConfirmsClaim } from "../ERC-3643/base/ERC3643IdentityRegistry.so
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
+import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import { IUtilityChecker } from "./IUtilityChecker.sol";
 
@@ -128,7 +129,13 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         IERC3643IdentityRegistry identityRegistry = IERC3643(_token).identityRegistry();
         _walletStatus = _walletStatusOf(identityRegistry, _userAddress);
         IERC3643TrustedIssuersRegistry tokenIssuersRegistry = identityRegistry.issuersRegistry();
-        IIdentity identity = identityRegistry.identity(_userAddress);
+        // The registry keeps naming who owns a wallet, for attribution, but `isVerified` reads a wallet that may
+        // not act as having no identity: one revoked anywhere, or one the IdentityFactory links elsewhere than the
+        // storage does. The rows follow `isVerified`, through the same three reads, so the two never disagree.
+        IIdentity identity;
+        bool walletMayAct = _walletStatus != IIdentityFactory.AccountStatus.Revoked;
+        bool factoryAgreesWithTheStorage = _factoryAgreesWithTheStorage(identityRegistry, _userAddress);
+        if (walletMayAct && factoryAgreesWithTheStorage) identity = identityRegistry.identity(_userAddress);
 
         uint256[] memory requiredClaimTopics = _requiredClaimTopics(identityRegistry, identity);
         uint256 topicsCount = requiredClaimTopics.length;
@@ -179,15 +186,49 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         return topicsRegistry.getClaimTopics();
     }
 
+    /// @dev The first two of the three reads of `TREXRegistry._activeIdentityOf`: a wallet the registry agent
+    ///  revoked locally is `Revoked` whatever the IdentityFactory says, then the factory's own status. The third
+    ///  read is `_factoryAgreesWithTheStorage`. A plain ERC-3643 registry has none of them and reports `None`.
     function _walletStatusOf(IERC3643IdentityRegistry identityRegistry, address userAddress)
         internal
         view
         returns (IIdentityFactory.AccountStatus)
     {
+        address identityStorage = address(identityRegistry.identityStorage());
+        // A call to an address with no code is not caught by `try`, so a storage that is not a contract is skipped.
+        bool storageIsAContract = identityStorage.code.length != 0;
+        if (storageIsAContract) {
+            try IIdentityRegistryStorage(identityStorage).localAccountStatus(userAddress) returns (
+                IIdentityFactory.AccountStatus localStatus
+            ) {
+                if (localStatus == IIdentityFactory.AccountStatus.Revoked) return localStatus;
+            } catch { }
+        }
+
         try ITREXRegistry(address(identityRegistry)).identityFactory() returns (IIdentityFactory factory) {
             return factory.getAccountStatus(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
         } catch {
             return IIdentityFactory.AccountStatus.None;
+        }
+    }
+
+    /// @dev The third read of `TREXRegistry._activeIdentityOf`: a wallet the IdentityFactory links to another
+    ///  identity than the storage binds it to may not act, since the wallet's own signature and the agent's binding
+    ///  disagree. True when either side names nobody, and for a plain ERC-3643 registry, which has nothing to compare.
+    function _factoryAgreesWithTheStorage(IERC3643IdentityRegistry identityRegistry, address userAddress)
+        internal
+        view
+        returns (bool)
+    {
+        try ITREXRegistry(address(identityRegistry)).identityFactory() returns (IIdentityFactory factory) {
+            (address factoryIdentity,) =
+                factory.getIdentityIncludingRevoked(InteroperableAddress.formatEvmV1(block.chainid, userAddress));
+            if (factoryIdentity == address(0)) return true;
+            IIdentity localIdentity = identityRegistry.identityStorage().storedIdentity(userAddress);
+            if (address(localIdentity) == address(0)) return true;
+            return factoryIdentity == address(localIdentity);
+        } catch {
+            return true;
         }
     }
 
