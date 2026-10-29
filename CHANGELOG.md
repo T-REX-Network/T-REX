@@ -515,6 +515,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **License headers and copyright.** Every GPL-3.0 Solidity file carries the T-REX Network header, in the
+  form used by the ONCHAINID repository, with the copyright held by Digital Asset Operational Services ISAC
+  Ltd. ("T-REX Network"). The dual proprietary or GPL v3 notice of the Tokeny era is gone. Files that still
+  derive from the Tokeny v4 contracts keep the line `Copyright (C) 2023, Tokeny sàrl.` next to the T-REX
+  Network line. `NOTICE.md` states the copyright, the provenance and the GPL v3 section 5(a) modification
+  notice, and ships in the npm package. `package.json` declares `GPL-3.0-or-later` and names the company as
+  author. The ASCII T-REX logo heads every Solidity file.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced
