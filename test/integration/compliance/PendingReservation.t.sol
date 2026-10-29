@@ -250,6 +250,40 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(_pendingIn(), 60, "and its validation can still be settled or discarded");
     }
 
+    /// @notice A relocation between two wallets of one identity promises nothing to the identities, but the token
+    ///         still holds the sending wallet's reservation for it. It keeps the compliance bound like any other
+    ///         open validation, else that reservation could never be released.
+    function test_setCompliance_RevertWhen_ARelocationValidationIsPending() public {
+        bytes memory aliceOtherSat = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygonToo"));
+        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
+        assertTrue(boundCompliance.validationOf(id).relocation);
+        assertEq(_pendingIn(address(aliceIdentity)), 0, "nothing promised to the identity");
+        _recallAndBurnTheWholeSupply();
+        ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
+        token.setCompliance(address(fresh));
+
+        assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
+        assertEq(token.reservedOf(aliceSat), 60, "and the wallet's reservation can still be released");
+    }
+
+    /// @notice Once the relocation is discarded, nothing is promised any more and the token may leave.
+    function test_setCompliance_Success_WhenThePendingRelocationWasDiscarded() public {
+        bytes memory aliceOtherSat = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygonToo"));
+        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
+        _recallAndBurnTheWholeSupply();
+        _discard(id);
+        ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
+
+        vm.prank(deployer);
+        token.setCompliance(address(fresh));
+
+        assertEq(address(token.compliance()), address(fresh));
+        assertEq(token.reservedOf(aliceSat), 0, "the discard released the wallet before the token left");
+    }
+
     /// @notice The owner cannot bind another token over one whose validation is still open: the next token's
     ///         holders would see that pending amount, and the validation would release on the wrong token.
     function test_bindToken_RevertWhen_TheOwnerBindsAnotherTokenOverAPendingValidation() public {

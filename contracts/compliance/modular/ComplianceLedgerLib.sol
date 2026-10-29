@@ -77,8 +77,9 @@ library ComplianceLedgerLib {
         int256 __deprecatedGap;
         /// The identity each native wallet was last credited to, so a change of owner is noticed and followed.
         mapping(address wallet => address identity) ownerOf;
-        /// What all open validations promise, the sum of every `pendingOut` and of every `pendingIn`. Zero is
-        /// what lets the compliance be bound to another token without carrying a previous token's promises.
+        /// What all open validations promise, relocations included: every validation the bound token still holds
+        /// a reservation for. Zero is what lets the compliance leave a token or be bound to another one without
+        /// carrying a promise it could no longer release.
         uint256 pendingTotal;
     }
 
@@ -86,19 +87,21 @@ library ComplianceLedgerLib {
     bytes32 private constant LEDGER_STORAGE_LOCATION =
         0x37065f79446a9096383af794d27f19e665b7dd5afcf9e812ca702bcc08bee600;
 
-    /// @dev Counts an issued validation as pending at `amountMax`, the worst case for any additive rule. Only
-    ///  when ownership really moves: relocating tokens between two wallets of one identity never eats that
-    ///  identity's own room.
-    /// @return identitiesReserved whether anything was written, which the caller records on the validation
+    /// @dev Counts an issued validation as pending at `amountMax`, the worst case for any additive rule. The
+    ///  total counts every validation, since the token holds a reservation for each until the compliance closes
+    ///  it. The identities' rows count only when ownership really moves: relocating tokens between two wallets of
+    ///  one identity never eats that identity's own room.
+    /// @return identitiesReserved whether the identities' rows were written, which the caller records on the
+    ///  validation
     function reservePending(address fromIdentity, address toIdentity, uint256 amountMax)
         internal
         returns (bool identitiesReserved)
     {
-        if (isRelocation(fromIdentity, toIdentity)) return false;
         Ledger storage ledger = layout();
+        ledger.pendingTotal += amountMax;
+        if (isRelocation(fromIdentity, toIdentity)) return false;
         ledger.pendingOut[fromIdentity] += amountMax;
         ledger.pendingIn[toIdentity] += amountMax;
-        ledger.pendingTotal += amountMax;
         return true;
     }
 

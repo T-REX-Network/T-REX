@@ -149,13 +149,18 @@ abstract contract ComplianceLedger is IComplianceLedger {
         if (toWallet != bytes32(0)) position[toIdentity] += amount;
     }
 
-    /// @dev Undoes the identities' half of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation
-    ///  settled, or the keeper discarded it.
+    /// @dev Undoes the total of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation
+    ///  settled, or the keeper discarded it. Every validation gets here, a relocation included.
+    function _releasePendingTotal(uint256 amountMax) internal {
+        _ledger().pendingTotal -= amountMax;
+    }
+
+    /// @dev Undoes the identities' rows of {ComplianceLedgerLib-reservePending}. Only a validation that wrote
+    ///  them gets here, so never a relocation.
     function _releasePendingOfIdentities(address fromIdentity, address toIdentity, uint256 amountMax) internal {
         ComplianceLedgerLib.Ledger storage ledger = _ledger();
         ledger.pendingOut[fromIdentity] -= amountMax;
         ledger.pendingIn[toIdentity] -= amountMax;
-        ledger.pendingTotal -= amountMax;
     }
 
     /// @dev See {ComplianceLedgerLib-isRelocation}.

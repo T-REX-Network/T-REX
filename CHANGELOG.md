@@ -580,6 +580,12 @@ All notable changes to this project will be documented in this file.
   already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
   set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
   pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **A relocation validation keeps the compliance bound too.** `pendingTotal`, which must be zero before a
+  compliance leaves a token or takes another, counted only the validations that promise something to the
+  identities. A relocation between two wallets of one identity promises nothing there, so with the supply at
+  zero the compliance could leave with one open: the sending wallet's reservation stayed on the token for good,
+  the discard reverted, and the Lite's leg reached the new compliance as never issued and halted the token. The
+  total now counts every open validation; the identities' rows still skip relocations.
 - **A wallet that holds tokens never changes identity in the ledger** (audit L-27). No suite role can relink a
   funded wallet any more, but an admin upgrading the registry beacon to an implementation on another
   IdentityFactory still can, and the ledger then moved the wallet's balance to the new identity on its next
