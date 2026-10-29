@@ -708,10 +708,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             || status == ValidationStatus.DiscardedAwaitingMint || status == ValidationStatus.DiscardedAwaitingBurn;
     }
 
-    /// @dev Whether the identities' pending amounts are still reserved in this state. A relocation never
-    ///  reserved them, which is the one thing the status cannot answer by itself.
-    function _stillReservesIdentities(ValidationStatus status, bool relocation) internal pure returns (bool) {
-        if (relocation) return false;
+    /// @dev Whether the validation still counts in the ledger's pending amounts in this state: the total for
+    ///  every validation, the identities' rows for every one that is not a relocation.
+    function _stillReservesPending(ValidationStatus status) internal pure returns (bool) {
         return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingMint
             || status == ValidationStatus.AwaitingBurn;
     }
@@ -761,10 +760,14 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  reservation back itself; this function then leaves that half alone rather than releasing it twice.
     function _moveTo(Validation storage validation, ValidationStatus next, bool heldByTheHold) private {
         ValidationStatus current = validation.status;
-        bool relocation = validation.relocation;
 
-        if (_stillReservesIdentities(current, relocation) && !_stillReservesIdentities(next, relocation)) {
-            _releasePendingOfIdentities(validation.fromIdentity, validation.toIdentity, validation.amountMax);
+        if (_stillReservesPending(current) && !_stillReservesPending(next)) {
+            _releasePendingTotal(validation.amountMax);
+            // A relocation never wrote the identities' rows, so there is nothing to give back there.
+            bool identitiesWereReserved = !validation.relocation;
+            if (identitiesWereReserved) {
+                _releasePendingOfIdentities(validation.fromIdentity, validation.toIdentity, validation.amountMax);
+            }
         }
         if (_stillReservesWallet(current) && !_stillReservesWallet(next) && !heldByTheHold) {
             _releaseOnToken(validation.fromWallet, validation.amountMax);

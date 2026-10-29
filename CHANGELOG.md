@@ -569,6 +569,12 @@ All notable changes to this project will be documented in this file.
   already dispatched was checked against its pinned gateway only, so it still landed after the chain's route was
   set to zero, although `isChainOpen` said no message could be accepted. Every settlement from a closed chain,
   pinned or not, now reverts with `ChainNotOpen`; it can be delivered again once a route is set.
+- **A relocation validation keeps the compliance bound too.** `pendingTotal`, which must be zero before a
+  compliance leaves a token or takes another, counted only the validations that promise something to the
+  identities. A relocation between two wallets of one identity promises nothing there, so with the supply at
+  zero the compliance could leave with one open: the sending wallet's reservation stayed on the token for good,
+  the discard reverted, and the Lite's leg reached the new compliance as never issued and halted the token. The
+  total now counts every open validation; the identities' rows still skip relocations.
 - **A peer change no longer strands the validations sent to the previous peer** (audit L-18). A validation leg
   pinned its gateway at dispatch but not its peer, and every settlement was checked against the chain's current
   peer, so after `setPeer` the previous Lite's settlements reverted with `SenderNotPeer` and the ledger stayed
