@@ -331,6 +331,7 @@ contract NamespaceFieldsTest is Test {
         validation.executedAmount = 30;
         validation.legWallet = hex"02";
         validation.spender = hex"03";
+        validation.salt = bytes32(uint256(33));
         validationStorage.awaitedTerms[bytes32(NUMBER)] =
             TransferValidationLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
         ITransferValidation.ParkedLeg storage parked = validationStorage.parkedLegs[bytes32(NUMBER)][KEY];
@@ -377,6 +378,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_field(entry, 11)), 30, "validations.executedAmount");
         assertEq(_slot(_field(entry, 12)), _shortBytes(0x02), "validations.legWallet");
         assertEq(_slot(_field(entry, 13)), _shortBytes(0x03), "validations.spender");
+        assertEq(_word(_field(entry, 14)), 33, "validations.salt");
     }
 
     function test_AbstractModuleUpgradeable() public {

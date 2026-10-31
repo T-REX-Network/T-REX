@@ -150,6 +150,7 @@ library TransferValidationLib {
         validationId = keccak256(abi.encode(draft.fromKey, salt));
         require(!isRecorded(layout(), validationId), ErrorsLib.ValidationAlreadyRequested(validationId));
         _record(validationId, from, to, spender, draft, token);
+        layout().validations[validationId].salt = salt;
 
         address approvalModule = _approvalModule();
         if (approvalModule != address(0)) {
@@ -161,6 +162,7 @@ library TransferValidationLib {
             validationId,
             MessageTypesLib.ComplianceValidation({
                 validationId: validationId,
+                salt: salt,
                 from: from,
                 to: to,
                 spender: spender,
@@ -213,6 +215,7 @@ library TransferValidationLib {
             validationId,
             MessageTypesLib.ComplianceValidation({
                 validationId: validationId,
+                salt: validation.salt,
                 from: validation.fromWallet,
                 to: store.awaitedTerms[validationId].to,
                 spender: store.awaitedTerms[validationId].spender,
@@ -272,6 +275,7 @@ library TransferValidationLib {
 
         MessageTypesLib.ComplianceValidation memory rebuilt = MessageTypesLib.ComplianceValidation({
             validationId: validationId,
+            salt: validation.salt,
             from: validation.fromWallet,
             to: to,
             spender: spender,
@@ -434,7 +438,8 @@ library TransferValidationLib {
             issued.amountMin,
             issued.amountMax,
             issued.expiry,
-            issued.reconciliationWindow
+            issued.reconciliationWindow,
+            issued.salt
         );
 
         body = abi.encode(issued);
