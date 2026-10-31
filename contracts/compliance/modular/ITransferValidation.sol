@@ -430,6 +430,9 @@ interface ITransferValidation {
     ///   otherwise reverts with `ParkedLegNotSettleable`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered leg waits under the pause
     ///   the same way.
+    /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `ChainInboundPaused`. The
+    ///   leg was parked under that very pause: lifting it is the pauser's word that the chain's reports may be
+    ///   taken again, for a parked leg as for one waiting at the gateway.
     ///
     /// Emits `ParkedLegSettled`, or the event of the verdict reached.
     /// @param validationId The validation the parked leg belongs to.

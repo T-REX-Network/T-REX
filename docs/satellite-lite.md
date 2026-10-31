@@ -78,7 +78,8 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
 
 - **Re-included in another order.** The id is the same, since it never depended on the order. Nothing to do.
 - **Dropped.** The leg reaches the reference chain under an id nothing is issued under: the leg is parked
-  (`SettlementParked`, `parkedLegOf`) and the chain's inbound is paused. Once the pause is lifted, the request
+  (`SettlementParked`, `parkedLegOf`) and the chain's inbound is paused. Neither the request sent again nor
+  `settleParkedLeg` goes through while that pause stands. Once the pause is lifted, the request
   sent again with the same `salt` issues the same id and sends no leg to the chain that already executed; the body
   carries the `salt`, so an agent can send it on the requester's behalf from the Lite's copy. Anyone then calls
   `settleParkedLeg(validationId, chainKey)`, which judges the leg as a delivery would (`ParkedLegSettled`, or one
@@ -145,9 +146,12 @@ answering a recall lands once the pause is lifted. To abandon a chain for good: 
 route, then lift the pause so its validations can be discarded and resolved.
 
 Threat model, stated plainly. A trusted gateway, or the registered peer behind it, can stop its own chain's inbound
-with one message, and that is all a settlement can do: a validation id is a function of the request, so a leg for
+with one message, and a settlement can do little more: a validation id is a function of the request, so a leg for
 an id the token never issued is the leg's chain's problem, a reorg's or the peer's, and is parked under the chain
-pause rather than halting the token. A burn proof naming a recall never issued still pauses the whole token, with
+pause rather than halting the token. The one reach beyond its own chain: on a two-leg validation, a peer that
+names a foreign hash on a leg outside the terms ends the pair `Orphaned`, so the honest leg from the other chain
+then lands as a replay and pauses that chain too. That peer is involved in the validation and hostile, and is
+answered as any hostile peer is. A burn proof naming a recall never issued still pauses the whole token, with
 its price: recall ids are counters and wait for finality, so an unknown one has two readings the token cannot tell
 apart, the peer invented it, or the token's own records are out of step with what it dispatched, which is local
 and must not keep running. The remedy against a peer abusing either is to distrust its gateway.

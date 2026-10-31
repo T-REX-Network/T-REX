@@ -718,6 +718,27 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         mc.settleParkedLeg(id, optimism);
     }
 
+    /// @notice The pause the parking set is the pauser's to lift: under it the parked leg waits, as a leg at the
+    ///         gateway does.
+    function test_settleParkedLeg_RevertWhen_TheChainsInboundIsPaused() public {
+        _track();
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
+        vm.prank(token);
+        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+
+        vm.mockCall(token, abi.encodeCall(ITREXMessaging.isInboundPaused, (polygon)), abi.encode(true));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        mc.settleParkedLeg(id, polygon);
+        assertTrue(mc.parkedLegOf(id, polygon).exists);
+
+        vm.mockCall(token, abi.encodeCall(ITREXMessaging.isInboundPaused, (polygon)), abi.encode(false));
+        mc.settleParkedLeg(id, polygon);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+    }
+
     function test_settleParkedLeg_RevertWhen_TheTokenIsPaused() public {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);

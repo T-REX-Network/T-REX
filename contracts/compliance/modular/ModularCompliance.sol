@@ -84,6 +84,7 @@ import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
+import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
@@ -179,9 +180,7 @@ contract ModularCompliance is
         onlyBoundToken
         returns (ISettlementHandler.Verdict verdict)
     {
-        emit EventsLib.SettlementNotified(
-            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
-        );
+        TransferValidationLib.announce(originChainKey, notification);
         return _handleSettlement(originChainKey, notification);
     }
 
@@ -468,16 +467,6 @@ contract ModularCompliance is
     /// @inheritdoc TransferValidation
     function _releaseOnToken(bytes memory wallet, uint256 amount) internal override {
         _boundToken().releaseFromValidation(wallet, amount);
-    }
-
-    /// @inheritdoc TransferValidation
-    function _returnHeldOnToken(bytes memory to, bytes32 validationId) internal override {
-        _boundToken().returnHeldInTransit(to, validationId);
-    }
-
-    /// @inheritdoc TransferValidation
-    function _applyVerdictOnToken(bytes32 chainKey, ISettlementHandler.Verdict verdict) internal override {
-        _boundToken().applyVerdict(chainKey, verdict);
     }
 
     /* ----- Module lifecycle ----- */
