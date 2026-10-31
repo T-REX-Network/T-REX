@@ -128,31 +128,32 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     // ==== authorization Tests ====
 
     function test_requestTransferValidation_Success_WhenCalledByTheIdentity() public configured {
+        bytes32 salt = _salt();
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
 
-        assertEq(id, 1);
-        assertEq(mc.lastValidationId(), 1);
+        assertEq(id, _validationId(fromSat, salt));
+        assertEq(mc.validationOf(id).fromIdentity, aliceIdentity);
     }
 
     function test_requestTransferValidation_Success_WhenCalledByAnAgent() public configured {
         vm.prank(agentAccount);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
-        assertEq(id, 1);
+        assertEq(mc.validationOf(id).fromIdentity, aliceIdentity);
     }
 
     function test_requestTransferValidation_RevertWhen_CallerIsAStranger() public configured {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, stranger, fromSat));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
     /// @notice A satellite wallet's own address proves nothing on this chain.
     function test_requestTransferValidation_RevertWhen_SatelliteWalletCallsForItself() public configured {
         vm.prank(satelliteAlice);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, satelliteAlice, fromSat));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
     // ==== preconditions Tests ====
@@ -160,7 +161,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_RevertWhen_RangeIsInverted() public configured {
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidRequestedRange.selector, 20, 10));
-        mc.requestTransferValidation(fromSat, toSat, 20, 10, "");
+        mc.requestTransferValidation(fromSat, toSat, 20, 10, "", _salt());
     }
 
     /// @notice A native position is free to leave between issuance and settlement, so no satellite can be
@@ -168,45 +169,45 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_RevertWhen_TheSenderIsNative() public configured {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
-        mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "");
+        mc.requestTransferValidation(nativeAlice, toSat, 10, 40, "", _salt());
 
-        assertEq(mc.lastValidationId(), 0);
+        _assertNothingRecorded(nativeAlice);
     }
 
     function test_requestTransferValidation_RevertWhen_BothWalletsAreNative() public configured {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
-        mc.requestTransferValidation(nativeAlice, nativeBob, 10, 40, "");
+        mc.requestTransferValidation(nativeAlice, nativeBob, 10, 40, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_SpenderIsNotCanonical() public configured {
         bytes memory padded = abi.encodePacked(toSat, hex"00");
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, padded);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, padded, _salt());
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, hex"deadbeef"));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, hex"deadbeef");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, hex"deadbeef", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_EnvelopeIsNotCanonical() public configured {
         bytes memory padded = abi.encodePacked(toSat, hex"00");
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
-        mc.requestTransferValidation(fromSat, padded, 10, 90, "");
+        mc.requestTransferValidation(fromSat, padded, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_ValidityWindowIsNotSet() public {
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ValidityWindowNotSet.selector);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_ReconciliationWindowIsNotSet() public configured {
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ReconciliationWindowNotSet.selector, arbitrum));
-        mc.requestTransferValidation(fromSat, toArbitrum, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toArbitrum, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_FromChainIsPaused() public configured {
@@ -214,7 +215,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
-        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_ToChainIsPaused() public configured {
@@ -222,15 +223,16 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, optimism));
-        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_Success_AfterTheChainIsUnpaused() public configured {
         mc.setIssuancePaused(polygon, true);
         mc.setIssuancePaused(polygon, false);
 
+        bytes32 salt = _salt();
         vm.prank(aliceIdentity);
-        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, ""), 1);
+        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt), _validationId(fromSat, salt));
     }
 
     // ==== eligibility Tests ====
@@ -240,7 +242,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(agentAccount);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, fromSat));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_ToIsNotVerified() public configured {
@@ -248,14 +250,14 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, toSat));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
     // ==== bounds Tests ====
 
     function test_requestTransferValidation_Success_WhenCappingAtTheBridgedBalance() public configured {
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 90, 110, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 90, 110, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 90);
@@ -264,7 +266,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     function test_requestTransferValidation_Success_WhenTheRequestIsInsideTheBalance() public configured {
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 9, 11, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 9, 11, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 9);
@@ -274,23 +276,23 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_RevertWhen_RequestedMinIsAboveTheBalance() public configured {
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 150, BRIDGED_BALANCE));
-        mc.requestTransferValidation(fromSat, toSat, 150, 200, "");
+        mc.requestTransferValidation(fromSat, toSat, 150, 200, "", _salt());
 
-        assertEq(mc.lastValidationId(), 0);
+        _assertNothingRecorded(fromSat);
     }
 
     /// @notice A validation authorizing nothing is never issued, whichever step made the maximum zero.
     function test_requestTransferValidation_RevertWhen_TheMaximumIsZero() public configured {
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
-        mc.requestTransferValidation(fromSat, toSat, 0, 0, "");
+        mc.requestTransferValidation(fromSat, toSat, 0, 0, "", _salt());
 
         TokenReservationStub(token).setBridgedBalance(fromSat, 0);
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
-        mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 0, 90, "", _salt());
 
-        assertEq(mc.lastValidationId(), 0);
+        _assertNothingRecorded(fromSat);
     }
 
     /// @notice Two wallets of one identity: issued, recorded, but no module consulted.
@@ -300,7 +302,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _bind(toSat, aliceIdentity);
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 10);
@@ -314,7 +316,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         RecordingModule(module).setAllowedAmount(60);
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.amountMin, 10);
@@ -329,7 +331,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         RecordingModule(_bindAllowedAmountModule()).setAllowedAmount(80);
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         assertEq(mc.validationOf(id).amountMax, 30);
     }
@@ -338,7 +340,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _bindAllowedAmountModule();
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         assertEq(mc.validationOf(id).amountMax, 90);
     }
@@ -349,7 +351,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 5));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_AModuleRefuses() public configured {
@@ -357,11 +359,11 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 0));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
-        mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 0, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_AModuleWritesInAllowedAmount() public configured {
@@ -370,10 +372,10 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert();
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         assertEq(WritingRuleModule(module).writes(), 0);
-        assertEq(mc.lastValidationId(), 0);
+        _assertNothingRecorded(fromSat);
     }
 
     /// @notice A named spender is carried on the wire for the satellite to enforce, not resolved here: a
@@ -385,7 +387,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _bindAllowedAmountModule();
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, spender, _salt());
 
         assertEq(mc.validationOf(id).amountMax, 90);
     }
@@ -395,8 +397,9 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _bind(spender, makeAddr("SpenderIdentity"));
         _bindAllowedAmountModule();
 
+        bytes32 salt = _salt();
         vm.prank(aliceIdentity);
-        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, spender), 1);
+        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, spender, salt), _validationId(fromSat, salt));
     }
 
     /// @notice A rule capping the range sees who will execute it, as the spender modules do.
@@ -419,7 +422,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectCall(module, abi.encodeCall(IModule.checkTransfer, (expected)));
 
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, spender, _salt());
     }
 
     /* ----- The reservation ----- */
@@ -428,7 +431,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _track();
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         assertFalse(mc.validationOf(id).relocation, "reserved against the identities");
         assertEq(mc.pendingOutOf(aliceIdentity), 90);
@@ -442,8 +445,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _track();
 
         vm.startPrank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 30, "");
-        mc.requestTransferValidation(fromSat, toOptimism, 10, 40, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 30, "", _salt());
+        mc.requestTransferValidation(fromSat, toOptimism, 10, 40, "", _salt());
         vm.stopPrank();
 
         assertEq(mc.pendingOutOf(aliceIdentity), 70);
@@ -455,8 +458,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _track();
 
         vm.startPrank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
-        uint256 second = mc.requestTransferValidation(fromSat, toSat, 5, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
+        bytes32 second = mc.requestTransferValidation(fromSat, toSat, 5, 90, "", _salt());
         vm.stopPrank();
 
         assertEq(mc.validationOf(second).amountMax, BRIDGED_BALANCE - 90);
@@ -464,7 +467,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
-        mc.requestTransferValidation(fromSat, toSat, 0, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 0, 90, "", _salt());
     }
 
     function test_requestTransferValidation_Success_WhenOneIdentityReservesNothing() public configured {
@@ -472,7 +475,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _bind(toSat, aliceIdentity);
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         // Nothing is reserved against the identity: relocating your own tokens changes no position, so it
         // must not eat your own room. The wallet's share is still written, because the wallet can only ever
@@ -489,7 +492,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _track();
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
         assertEq(TokenReservationStub(token).reservedOf(fromSat), 90);
@@ -500,8 +503,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         address capped = _bindCappedModule(50);
 
         vm.startPrank(aliceIdentity);
-        uint256 first = mc.requestTransferValidation(fromSat, toSat, 10, 30, "");
-        uint256 second = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        bytes32 first = mc.requestTransferValidation(fromSat, toSat, 10, 30, "", _salt());
+        bytes32 second = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
         vm.stopPrank();
 
         assertEq(mc.validationOf(first).amountMax, 30);
@@ -510,7 +513,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
-        mc.requestTransferValidation(fromSat, toSat, 1, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 1, 90, "", _salt());
     }
 
     /// @notice A rule that decides from positions binds anywhere, with nothing to set up first: the
@@ -526,15 +529,48 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     // ==== record, event and dispatch Tests ====
 
-    function test_requestTransferValidation_Success_WhenIdsIncreaseAndNeverRepeat() public configured {
+    /// @notice The id is a function of the request alone: the same request lands under the same id whatever
+    ///         was issued before it, and the same wallet cannot take a salt twice.
+    function test_requestTransferValidation_Success_WhenTheIdDependsOnTheRequestAlone() public configured {
+        bytes32 salt = _salt();
+        bytes32 expected = _validationId(fromSat, salt);
+        assertTrue(expected != _validationId(toSat, salt), "another wallet, another id");
+
         vm.startPrank(aliceIdentity);
-        uint256 first = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
-        uint256 second = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 1, 5, "", _salt());
+        mc.requestTransferValidation(fromSat, toSat, 1, 5, "", _salt());
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 30, "", salt);
         vm.stopPrank();
 
-        assertEq(first, 1);
-        assertEq(second, 2);
-        assertEq(mc.lastValidationId(), 2);
+        assertEq(id, expected, "independent of the number of earlier issuances");
+    }
+
+    function test_requestTransferValidation_RevertWhen_TheSaltWasAlreadyUsedForTheWallet() public configured {
+        bytes32 salt = _salt();
+        vm.startPrank(aliceIdentity);
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 30, "", salt);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRequested.selector, id));
+        mc.requestTransferValidation(fromSat, toSat, 10, 30, "", salt);
+        // Other terms under the same salt are refused all the same: the id is taken.
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRequested.selector, id));
+        mc.requestTransferValidation(fromSat, toOptimism, 1, 5, "", salt);
+        vm.stopPrank();
+
+        assertEq(mc.validationOf(id).amountMax, 30, "the first request stands");
+    }
+
+    function test_requestTransferValidation_Success_WhenIdsFollowTheSaltAndNeverRepeat() public configured {
+        bytes32 saltA = _salt();
+        bytes32 saltB = _salt();
+        vm.startPrank(aliceIdentity);
+        bytes32 first = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", saltA);
+        bytes32 second = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", saltB);
+        vm.stopPrank();
+
+        assertEq(first, _validationId(fromSat, saltA));
+        assertEq(second, _validationId(fromSat, saltB));
+        assertTrue(first != second);
         assertTrue(mc.validationOf(first).hash != mc.validationOf(second).hash);
     }
 
@@ -542,7 +578,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.warp(1_700_000_000);
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.expiry, 1_700_000_000 + VALIDITY_WINDOW);
@@ -559,7 +595,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.warp(1_700_000_000);
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.releaseAt, 1_700_000_000 + VALIDITY_WINDOW + OPTIMISM_WINDOW);
@@ -569,7 +605,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     function test_requestTransferValidation_Success_WhenTheNativeRecipientKeepsTheReferenceKey() public configured {
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
+        bytes32 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "", _salt());
 
         ITransferValidation.Validation memory record = mc.validationOf(id);
         assertEq(record.fromChainKey, polygon);
@@ -581,8 +617,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     function test_requestTransferValidation_Success_WhenRecordingTheWalletKeysAndTheLegCount() public configured {
         vm.startPrank(aliceIdentity);
-        uint256 sameChain = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
-        uint256 crossChain = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        bytes32 sameChain = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
+        bytes32 crossChain = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
         vm.stopPrank();
 
         ITransferValidation.Validation memory record = mc.validationOf(sameChain);
@@ -600,44 +636,52 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.warp(1_700_000_000);
         bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
         _bind(spender, makeAddr("SpenderIdentity"));
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
         MessageTypesLib.ComplianceValidation memory expected =
-            _expected(1, fromSat, toSat, spender, 10, 90, POLYGON_WINDOW);
+            _expected(id, fromSat, toSat, spender, 10, 90, POLYGON_WINDOW);
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.TransferValidationIssued(1, fromSat, toSat, spender, 10, 90, expected.expiry, POLYGON_WINDOW);
+        emit EventsLib.TransferValidationIssued(id, fromSat, toSat, spender, 10, 90, expected.expiry, POLYGON_WINDOW);
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, spender, salt);
 
-        assertEq(mc.validationOf(1).hash, MessageTypesLib.hashValidation(expected));
+        assertEq(mc.validationOf(id).hash, MessageTypesLib.hashValidation(expected));
     }
 
     function test_requestTransferValidation_Success_WhenDispatchingOneLegForASameChainMovement() public configured {
         vm.warp(1_700_000_000);
-        MessageTypesLib.ComplianceValidation memory expected = _expected(1, fromSat, toSat, "", 10, 90, POLYGON_WINDOW);
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
+        MessageTypesLib.ComplianceValidation memory expected = _expected(id, fromSat, toSat, "", 10, 90, POLYGON_WINDOW);
 
-        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, 1, abi.encode(expected))), 1);
+        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, abi.encode(expected))), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
     }
 
     function test_requestTransferValidation_Success_WhenDispatchingTwoLegsForACrossChainMovement() public configured {
         vm.warp(1_700_000_000);
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
         MessageTypesLib.ComplianceValidation memory expected =
-            _expected(1, fromSat, toOptimism, "", 10, 90, OPTIMISM_WINDOW);
+            _expected(id, fromSat, toOptimism, "", 10, 90, OPTIMISM_WINDOW);
         bytes memory body = abi.encode(expected);
 
-        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, 1, body)), 1);
-        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (optimism, 1, body)), 1);
+        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, body)), 1);
+        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (optimism, id, body)), 1);
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", salt);
     }
 
     function test_requestTransferValidation_Success_WhenDispatchingToTheSatelliteSideOnly() public configured {
-        vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, polygon, 1), 1);
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
+        vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, polygon, id), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "");
+        mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "", salt);
     }
 
     /// @notice A dispatch the token refuses reverts the whole request, nothing recorded.
@@ -650,14 +694,13 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
 
-        assertEq(mc.lastValidationId(), 0);
-        assertEq(mc.validationOf(1).hash, bytes32(0));
+        _assertNothingRecorded(fromSat);
     }
 
     function _expected(
-        uint256 id,
+        bytes32 id,
         bytes memory from,
         bytes memory to,
         bytes memory spender,
