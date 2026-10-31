@@ -190,26 +190,26 @@ interface IModularCompliance is IERC3643Compliance {
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external view returns (bool);
 
     /**
-     *  @dev function called whenever an agent moves tokens: a forced transfer or a recovery
-     *  the standard `transferred` cannot say who moved the tokens, and a module counting an investor's own
-     *  activity must leave an agent's intervention out, so the token reports an agent's movement here with
-     *  the kind it was, `FORCED_TRANSFER` or `RECOVERY` from `MovementKindLib`, and the trackers see it under
-     *  that kind
+     *  @dev function called whenever the token moves tokens outside a plain transfer: a forced transfer or a
+     *  recovery by an agent, a delegation out to a remote wallet, or the recall that brings it back
+     *  the standard `transferred` cannot say what moved the tokens, and a module counting an investor's own
+     *  activity must leave these out, so the token reports them here with the kind it was, `FORCED_TRANSFER`,
+     *  `RECOVERY`, `DELEGATION` or `RECALL` from `MovementKindLib`, and the trackers see it under that kind
      *  no rule is asked: an agent's movement is privileged, see the token
      *  the token is trusted with `_kind`: it is the only caller and the kind is its own operation
      *  This function can be called ONLY by the token bound to the compliance
      *  @param _from address of the wallet the tokens left
      *  @param _to address of the wallet the tokens landed on
      *  @param _amount amount of tokens moved
-     *  @param _kind which agent operation moved them, a `MovementKindLib` constant
+     *  @param _kind which operation moved them, a `MovementKindLib` constant
      */
     function agentTransferred(address _from, address _to, uint256 _amount, uint8 _kind) external;
 
     /**
      *  @dev follows a registry relink of a native wallet before tokens land on it outside a movement the
-     *  compliance hears of, a recall's credit: the wallet's current balance moves from the identity it was last
+     *  compliance counts, a recall's credit: the wallet's current balance moves from the identity it was last
      *  credited to onto the one the registry names now, and nothing else. No movement is counted and no module is
-     *  called. A no-op when the owner has not changed.
+     *  called; the credit itself is reported afterwards through `agentTransferred` as a `RECALL`. A no-op when the owner has not changed.
      *  This function can be called ONLY by the token bound to the compliance
      *  @param _wallet the native wallet about to be credited
      */

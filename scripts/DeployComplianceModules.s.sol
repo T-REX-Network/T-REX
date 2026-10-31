@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { Script, console } from "@forge-std/Script.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { SpenderVerificationModule } from "contracts/compliance/modular/modules/SpenderVerificationModule.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
@@ -15,8 +16,8 @@ interface ITokenCompliance {
 }
 
 /// @title DeployComplianceModules
-/// @notice Deploys the two standard compliance modules (spender verification + whitelist)
-///         and binds them to every supplied token's ModularCompliance.
+/// @notice Deploys the three standard compliance modules (spender verification, spender whitelist,
+///         max balance per identity) and binds them to every supplied token's ModularCompliance.
 ///
 /// Each module is deployed once behind a `ModuleProxy` and shared across all the tokens:
 /// the modules key their state per-compliance by bind nonce, so a single instance serves
@@ -31,6 +32,10 @@ interface ITokenCompliance {
 /// Usage:
 ///   forge script scripts/DeployComplianceModules.s.sol --rpc-url baseSepolia --broadcast
 contract DeployComplianceModules is Script {
+
+    /// @dev The cap the max-balance module is bound with: one million whole tokens at 18 decimals, so no
+    ///      seeded position ever meets it.
+    uint256 internal constant MAX_BALANCE = 1_000_000 * 10 ** 18;
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -60,11 +65,24 @@ contract DeployComplianceModules is Script {
             )
         );
 
+        MaxBalancePerIdentityModule maxBalanceImpl = new MaxBalancePerIdentityModule();
+        MaxBalancePerIdentityModule maxBalance = MaxBalancePerIdentityModule(
+            address(
+                new ModuleProxy(
+                    address(maxBalanceImpl), abi.encodeCall(MaxBalancePerIdentityModule.initialize, (accessManager))
+                )
+            )
+        );
+
+        bytes[] memory maxBalanceSettings = new bytes[](1);
+        maxBalanceSettings[0] = abi.encodeCall(MaxBalancePerIdentityModule.setMaxBalance, (MAX_BALANCE));
+
         for (uint256 i = 0; i < tokens.length; i++) {
             address compliance = ITokenCompliance(tokens[i]).compliance();
             require(compliance != address(0), "token has no compliance");
             IModularCompliance(compliance).addModule(address(verification));
             IModularCompliance(compliance).addModule(address(whitelist));
+            IModularCompliance(compliance).addAndSetModule(address(maxBalance), maxBalanceSettings);
             console.log("Bound modules to token:", tokens[i], "compliance:", compliance);
         }
 
@@ -74,6 +92,8 @@ contract DeployComplianceModules is Script {
         console.log("SpenderVerificationModule proxy:", address(verification));
         console.log("SpenderWhitelistModule impl:    ", address(whitelistImpl));
         console.log("SpenderWhitelistModule proxy:   ", address(whitelist));
+        console.log("MaxBalancePerIdentityModule impl: ", address(maxBalanceImpl));
+        console.log("MaxBalancePerIdentityModule proxy:", address(maxBalance));
     }
 
 }
