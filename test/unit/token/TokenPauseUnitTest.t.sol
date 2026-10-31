@@ -91,10 +91,10 @@ contract TokenPauseUnitTest is TokenBaseUnitTest {
         token.recoveryAddress(holder, other, investorOnchainId);
         vm.prank(compliance);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        token.settleValidation("", "", 1, 1);
+        token.settleValidation("", "", 1, bytes32(uint256(1)));
         vm.prank(compliance);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        token.holdInTransit("", 1, 1, 0);
+        token.holdInTransit("", 1, bytes32(uint256(1)), 0);
 
         vm.startPrank(agent);
         token.mint(holder, 5);

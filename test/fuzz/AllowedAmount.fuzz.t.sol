@@ -93,17 +93,17 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
                 expectedMin > expectedMax ? ErrorsLib.EmptyValidationRange.selector : ErrorsLib.ZeroValue.selector;
             vm.prank(aliceIdentity);
             vm.expectPartialRevert(expected);
-            mc.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+            mc.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
             vm.prank(aliceIdentity);
             vm.expectPartialRevert(expected);
-            reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+            reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
             return;
         }
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+        bytes32 id = mc.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
         vm.prank(aliceIdentity);
-        uint256 reversedId = reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+        bytes32 reversedId = reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
         ITransferValidation.Validation memory validation = mc.validationOf(id);
         ITransferValidation.Validation memory reversedValidation = reversed.validationOf(reversedId);
 

@@ -15,8 +15,9 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /// @dev Routes are snapshot at dispatch. An issuer switching a chain's gateway affects new validations
 ///      only; the legs of one already in flight are matched against the gateway that carried it out.
 ///      The validations here are dispatched by the token alone, never issued by the compliance, so every leg
-///      that passes the transport raises the compliance's never-issued emergency and halts the token: the
-///      transport verdict is what these tests read, and the halt is asserted where a leg gets through.
+///      that passes the transport is parked by the compliance under its id and pauses the satellite's inbound,
+///      the token itself staying open: the transport verdict is what these tests read, and the parking is
+///      asserted where a leg gets through.
 contract RouteSwitchTest is InteropSuiteTest {
 
     ERC7786GatewayMock oldGateway;
@@ -26,9 +27,9 @@ contract RouteSwitchTest is InteropSuiteTest {
 
     bytes32 satellite = polygon;
 
-    uint256 inFlight = 1;
-    uint256 issuedAfterSwitch = 2;
-    uint256 neverDispatched = 99;
+    bytes32 inFlight = bytes32(uint256(1));
+    bytes32 issuedAfterSwitch = bytes32(uint256(2));
+    bytes32 neverDispatched = bytes32(uint256(99));
     uint256 amount = 100;
 
     bytes validationBody = abi.encode("validation");
@@ -50,18 +51,18 @@ contract RouteSwitchTest is InteropSuiteTest {
         token.unpause();
     }
 
-    function _dispatch(uint256 validationId) private {
+    function _dispatch(bytes32 validationId) private {
         vm.prank(compliance);
         token.dispatchComplianceValidation(satellite, validationId, validationBody);
     }
 
-    function _settlementFrom(ERC7786GatewayMock gateway, uint256 validationId) private returns (uint256) {
+    function _settlementFrom(ERC7786GatewayMock gateway, bytes32 validationId) private returns (uint256) {
         return _liteSends(
             gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount))
         );
     }
 
-    function _expectHandled(uint256 validationId) private {
+    function _expectHandled(bytes32 validationId) private {
         vm.expectCall(
             compliance,
             abi.encodeCall(
@@ -69,10 +70,20 @@ contract RouteSwitchTest is InteropSuiteTest {
             )
         );
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReplayedSettlement(validationId, satellite);
+        emit EventsLib.SettlementParked(validationId, satellite, amount, bytes32(0));
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(satellite);
     }
 
-    function _expectNotPinned(ERC7786GatewayMock gateway, uint256 validationId) private {
+    /// @dev A leg that got through: parked under its id, its chain's inbound paused, the token itself open.
+    function _assertParked(ERC7786GatewayMock gateway, uint256 index, bytes32 validationId) private view {
+        assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "consumed");
+        assertTrue(boundCompliance.parkedLegOf(validationId, satellite).exists, "parked");
+        assertTrue(token.isInboundPaused(satellite), "never issued by the compliance: the chain's inbound pauses");
+        assertFalse(token.paused(), "the token itself stays open");
+    }
+
+    function _expectNotPinned(ERC7786GatewayMock gateway, bytes32 validationId) private {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.GatewayNotPinned.selector, address(gateway), validationId, satellite)
         );
@@ -91,7 +102,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         _expectHandled(inFlight);
         oldGateway.relay(index);
 
-        assertTrue(token.paused(), "never issued by the compliance: the emergency halts the token");
+        _assertParked(oldGateway, index, inFlight);
     }
 
     function testOldLegIsRefusedFromTheNewRoute() public {
@@ -103,7 +114,8 @@ contract RouteSwitchTest is InteropSuiteTest {
         assertFalse(token.messageReceived(address(newGateway), newGateway.receiveIdFor(index)));
     }
 
-    /// @dev Cross-chain: the second leg of the same validation, from the same chain, keeps the same pin.
+    /// @dev Cross-chain: the second leg of the same validation, from the same chain, keeps the same pin. The pin
+    ///      is checked at admission, ahead of the inbound pause the first leg's parking raised.
     function testEveryLegOfTheOldValidationHonoursThePin() public {
         uint256 burnLeg = _liteSends(
             oldGateway,
@@ -116,6 +128,7 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 1);
         oldGateway.relay(burnLeg);
+        _assertParked(oldGateway, burnLeg, inFlight);
 
         _expectNotPinned(newGateway, inFlight);
         newGateway.relay(replayOnNewRoute);
@@ -142,12 +155,13 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         _expectHandled(issuedAfterSwitch);
         newGateway.relay(viaNew);
+        _assertParked(newGateway, viaNew, issuedAfterSwitch);
     }
 
     /* ----- What was never pinned follows the current route ----- */
 
-    /// @dev An id this token never dispatched is not refused by transport: the compliance must see it to
-    ///      raise its never-issued emergency. It follows the current route, like any unpinned message.
+    /// @dev An id this token never dispatched is not refused by transport: the compliance must see it to park
+    ///      the leg and pause the chain. It follows the current route, like any unpinned message.
     function testUnpinnedSettlementFollowsTheCurrentRoute() public {
         uint256 viaOld = _settlementFrom(oldGateway, neverDispatched);
         uint256 viaNew = _settlementFrom(newGateway, neverDispatched);
@@ -157,6 +171,7 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         _expectHandled(neverDispatched);
         newGateway.relay(viaNew);
+        _assertParked(newGateway, viaNew, neverDispatched);
     }
 
     /// @dev A recall carries no validation, so it checks against the current route: old gateway refused.

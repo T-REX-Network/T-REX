@@ -26,7 +26,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
     bytes internal aliceSat;
     bytes internal bobOptimism;
     uint256 internal issuedAt;
-    uint256 internal id;
+    bytes32 internal id;
 
     function setUp() public override {
         super.setUp();
@@ -122,7 +122,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         vm.warp(issuedAt + VALIDITY_WINDOW + OPTIMISM_WINDOW + 365 days);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         vm.expectRevert(
@@ -149,7 +149,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
     function test_holdInTransit_Success_WhenTheHeldAmountIsOutOfTheSendersReach() public {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
 
-        uint256 next = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 1, BALANCE);
+        bytes32 next = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 1, BALANCE);
         assertEq(boundCompliance.validationOf(next).amountMax, BALANCE - 95, "capped at what the wallet holds");
 
         vm.prank(agent);
@@ -203,38 +203,57 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         assertEq(token.bridgedBalanceOf(bobOptimism), 0);
     }
 
-    /// @notice A burn leg can only come from the sender's chain, a mint leg only from the recipient's.
-    function test_handleSettlement_RevertWhen_ALegComesFromTheWrongChain() public {
+    /// @notice A burn leg can only come from the sender's chain, a mint leg only from the recipient's: each
+    ///         misplaced leg is rejected, consumed, and pauses the inbound of the chain that executed it.
+    function test_handleSettlement_Success_WhenALegComesFromTheWrongChainItIsRejected() public {
         uint256 burnFromOptimism = _liteSettles(optimismGateway, token, _burnLeg(id, token, aliceSat, 95));
         uint256 mintFromPolygon = _liteSettles(polygonGateway, token, _mintLeg(id, token, bobOptimism, 95));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
-        optimismGateway.relay(burnFromOptimism);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
-        polygonGateway.relay(mintFromPolygon);
+        _relayRejected(optimismGateway, optimism, burnFromOptimism, 95);
+        _relayRejected(polygonGateway, polygon, mintFromPolygon, 95);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
+        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
+        assertEq(token.inTransitOf(id), 0);
     }
 
-    /// @notice A notification carrying both wallets is no leg of a two-leg validation.
-    function test_handleSettlement_RevertWhen_BothWalletsAreFilledOnATwoLegValidation() public {
+    /// @notice A notification carrying both wallets is no leg of a two-leg validation: it is rejected and the
+    ///         chain that sent it is paused.
+    function test_handleSettlement_Success_WhenBothWalletsAreFilledOnATwoLegValidationTheLegIsRejected() public {
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobOptimism, 95));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementLegMismatch.selector, id));
-        polygonGateway.relay(index);
+        _relayRejected(polygonGateway, polygon, index, 95);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
+        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
     }
 
-    /// @notice The first leg is bounds-checked like any other.
-    function test_handleSettlement_RevertWhen_TheFirstLegIsOutOfBounds() public {
+    /// @notice The first leg is bounds-checked like any other: out of bounds it is rejected, holds nothing in
+    ///         transit, and pauses the chain that executed it.
+    function test_handleSettlement_Success_WhenTheFirstLegIsOutOfBoundsItIsRejected() public {
         uint256 burn = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 101));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementOutOfBounds.selector, id, 101));
-        polygonGateway.relay(burn);
+        _relayRejected(polygonGateway, polygon, burn, 101);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
+        assertEq(token.inTransitOf(id), 0);
+    }
+
+    /// @dev Relays a leg carrying the issued hash that fails the substantive gate: it is rejected, consumed, and
+    ///  pauses the inbound of `chainKey` while the token keeps running.
+    function _relayRejected(ERC7786GatewayMock gateway, bytes32 chainKey, uint256 index, uint256 amount) private {
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.SettlementRejected(id, chainKey, amount, boundCompliance.validationOf(id).hash);
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(chainKey);
+        gateway.relay(index);
+
+        assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "the leg is consumed");
+        assertTrue(token.isInboundPaused(chainKey), "the chain that executed it is paused");
+        assertFalse(token.paused(), "the token keeps running");
     }
 
     function _assertSettledAt(uint256 amount) private view {

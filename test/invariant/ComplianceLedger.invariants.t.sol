@@ -47,7 +47,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     address[] internal actors;
     IIdentity[] internal identities;
     bytes[][] internal satellites;
-    uint256[] internal issued;
+    bytes32[] internal issued;
 
     ERC7786GatewayMock internal gateway;
     IComplianceLedger internal ledger;
@@ -189,7 +189,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         }
 
         vm.prank(address(identities[fromActor]));
-        try boundCompliance.requestTransferValidation(from, to, min, max, "") returns (uint256 id) {
+        try boundCompliance.requestTransferValidation(from, to, min, max, "", _salt()) returns (bytes32 id) {
             issued.push(id);
         } catch { }
     }
@@ -199,7 +199,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     function settle(uint256 idSeed, uint256 amountSeed) external {
         callsSettle++;
         if (issued.length == 0) return;
-        uint256 id = issued[idSeed % issued.length];
+        bytes32 id = issued[idSeed % issued.length];
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
         if (_burnLegArrived(validation.status)) return;
         uint256 amount = bound(amountSeed, validation.amountMin, validation.amountMax);
@@ -214,14 +214,14 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     function discard(uint256 idSeed, bool asKeeper) external {
         callsDiscard++;
         if (issued.length == 0) return;
-        uint256 id = issued[idSeed % issued.length];
+        bytes32 id = issued[idSeed % issued.length];
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
         if (validation.status != ITransferValidation.ValidationStatus.Pending) return;
 
         uint64 openAt =
             asKeeper ? validation.releaseAt : validation.releaseAt + (validation.releaseAt - validation.expiry);
         if (block.timestamp <= openAt) vm.warp(openAt + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         if (asKeeper) vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);

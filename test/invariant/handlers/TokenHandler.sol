@@ -47,7 +47,7 @@ contract TokenHandler is Test {
     uint256 public callsSettleHeld;
 
     struct Hold {
-        uint256 validationId;
+        bytes32 validationId;
         bytes from;
         uint256 amount;
     }
@@ -192,7 +192,7 @@ contract TokenHandler is Test {
         uint256 toActorSeed,
         uint256 toWalletSeed,
         uint256 amount,
-        uint256 validationId
+        bytes32 validationId
     ) external {
         callsBridgedTransfer++;
         bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
@@ -213,7 +213,7 @@ contract TokenHandler is Test {
         address to = actors[_actor(nativeSeed)];
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
         vm.prank(agent);
-        try token.settleToNative(from, to, amount, nativeSeed) {
+        try token.settleToNative(from, to, amount, bytes32(nativeSeed)) {
             ghostBridgedTotal -= amount;
         } catch { }
     }
@@ -223,7 +223,7 @@ contract TokenHandler is Test {
         callsHoldInTransit++;
         bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
-        uint256 validationId = nextValidationId++;
+        bytes32 validationId = bytes32(nextValidationId++);
         vm.prank(compliance);
         try token.holdInTransit(from, amount, validationId, 0) {
             holds.push(Hold({ validationId: validationId, from: from, amount: amount }));
@@ -246,7 +246,7 @@ contract TokenHandler is Test {
     }
 
     /// @dev A hold left the token: the model lets go of it too.
-    function _settledHold(uint256 validationId, uint256 amount) internal {
+    function _settledHold(bytes32 validationId, uint256 amount) internal {
         ghostInTransit -= amount;
         for (uint256 i = 0; i < holds.length; i++) {
             if (holds[i].validationId != validationId) continue;

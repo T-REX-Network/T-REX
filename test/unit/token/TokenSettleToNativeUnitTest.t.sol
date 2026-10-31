@@ -15,7 +15,7 @@ import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 ///         recall, but ownership moves: the position leaves `user1`'s satellite wallet and lands on `user2`.
 contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
 
-    uint256 internal constant VALIDATION_ID = 13;
+    bytes32 internal constant VALIDATION_ID = bytes32(uint256(13));
 
     function setUp() public override {
         super.setUp();

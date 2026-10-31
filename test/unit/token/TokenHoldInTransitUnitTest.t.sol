@@ -9,7 +9,7 @@ import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 /// @dev The in-transit hold: who may take it, what it moves, and how a settlement under the same id releases it.
 contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
 
-    uint256 internal constant VALIDATION_ID = 7;
+    bytes32 internal constant VALIDATION_ID = bytes32(uint256(7));
 
     function setUp() public override {
         super.setUp();
@@ -120,7 +120,7 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
     function test_settleValidation_Success_WhenAnotherValidationSettlesBesideTheHold() public {
         vm.startPrank(compliance);
         token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
-        token.settleValidation(satellite1, satellite2, 20, VALIDATION_ID + 1);
+        token.settleValidation(satellite1, satellite2, 20, bytes32(uint256(VALIDATION_ID) + 1));
         vm.stopPrank();
 
         assertEq(token.bridgedBalanceOf(satellite1), 10, "the other one debits the wallet as usual");

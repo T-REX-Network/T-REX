@@ -101,13 +101,14 @@ library TransferValidationLib {
         /// Per-chain issuance pause, set by the manager or a breaching late reconciliation, lifted by the manager
         /// only.
         mapping(bytes32 chainKey => bool paused) issuancePaused;
-        /// The last id issued. Ids start at 1.
-        uint256 lastValidationId;
-        /// Every issued validation, kept forever.
-        mapping(uint256 validationId => ITransferValidation.Validation validation) validations;
+        /// Every requested validation, kept forever, under `keccak256(abi.encode(fromKey, salt))`.
+        mapping(bytes32 validationId => ITransferValidation.Validation validation) validations;
         /// The two envelopes the record does not keep, for a validation `AwaitingApproval` alone: what it is
         /// issued with once approved. Deleted by the answer.
-        mapping(uint256 validationId => AwaitedTerms terms) awaitedTerms;
+        mapping(bytes32 validationId => AwaitedTerms terms) awaitedTerms;
+        /// Legs reported for an id with no issued body, per origin chain, see {ITransferValidation-ParkedLeg}.
+        /// Written by the settlement path, consumed by the issuance of that id.
+        mapping(bytes32 validationId => mapping(bytes32 chainKey => ITransferValidation.ParkedLeg leg)) parkedLegs;
     }
 
     /// @dev The recipient's and the spender's envelopes of a validation awaiting approval.
@@ -134,17 +135,23 @@ library TransferValidationLib {
         uint64 reconciliationWindow;
     }
 
-    /// @dev Turns a settled draft into a validation: take the next id, keep its terms and reserve the amount.
-    ///  With no `APPROVAL` module bound, issue it at once: build the object the satellite will execute against,
-    ///  announce it and send one leg per satellite chain involved. With one bound, keep it `AwaitingApproval`
-    ///  instead, sent nowhere until {answerApproval}.
+    /// @dev Turns a settled draft into a validation: derive its id from the sender and the salt, refuse an id
+    ///  already taken, keep its terms and reserve the amount. With no `APPROVAL` module bound, issue it at once:
+    ///  build the object the satellite will execute against, announce it and send one leg per satellite chain
+    ///  involved. With one bound, keep it `AwaitingApproval` instead, sent nowhere until {answerApproval}.
+    /// @param salt the requester's nonce, see {ITransferValidation-requestTransferValidation}
     /// @param token the token the compliance is bound to
-    /// @return validationId the id taken
-    function issue(bytes calldata from, bytes calldata to, bytes calldata spender, Draft memory draft, address token)
-        external
-        returns (uint256 validationId)
-    {
-        validationId = ++layout().lastValidationId;
+    /// @return validationId `keccak256(abi.encode(draft.fromKey, salt))`
+    function issue(
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender,
+        bytes32 salt,
+        Draft memory draft,
+        address token
+    ) external returns (bytes32 validationId) {
+        validationId = keccak256(abi.encode(draft.fromKey, salt));
+        require(!isRecorded(layout(), validationId), ErrorsLib.ValidationAlreadyRequested(validationId));
         _record(validationId, from, to, draft, token);
 
         address approvalModule = _approvalModule();
@@ -175,9 +182,9 @@ library TransferValidationLib {
     ///  checks the chains are still open and sends the legs. The legs go through the token, which as the
     ///  compliance's DELEGATECALL target sees the compliance as its caller.
     /// @param token the token the compliance is bound to
-    function answerApproval(uint256 validationId, uint256 approvedMax, address token) external {
+    function answerApproval(bytes32 validationId, uint256 approvedMax, address token) external {
         ValidationStorage storage store = layout();
-        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        require(isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage validation = store.validations[validationId];
         require(
             validation.status == ITransferValidation.ValidationStatus.AwaitingApproval,
@@ -247,7 +254,7 @@ library TransferValidationLib {
     /// @param token the token the compliance is bound to
     /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
     function resend(
-        uint256 validationId,
+        bytes32 validationId,
         bytes32 chainKey,
         bytes calldata to,
         bytes calldata spender,
@@ -255,7 +262,7 @@ library TransferValidationLib {
         bool authorised
     ) external {
         ValidationStorage storage store = layout();
-        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        require(isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage validation = store.validations[validationId];
         _requireResendable(validation, validationId, chainKey);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
@@ -289,7 +296,7 @@ library TransferValidationLib {
     /// @dev Whether the leg toward `chainKey` may go again: see {resend}.
     function _requireResendable(
         ITransferValidation.Validation storage validation,
-        uint256 validationId,
+        bytes32 validationId,
         bytes32 chainKey
     ) private view {
         require(
@@ -364,11 +371,17 @@ library TransferValidationLib {
         }
     }
 
+    /// @dev Whether the id was taken: issued, or recorded awaiting approval. Every record names the identity the
+    ///  sender resolved to, which is never zero, so that field says whether the slot was written.
+    function isRecorded(ValidationStorage storage store, bytes32 validationId) internal view returns (bool) {
+        return store.validations[validationId].fromIdentity != address(0);
+    }
+
     /// @dev Discards a validation still `AwaitingApproval` once its deadline passed, for anyone, see
     ///  {ITransferValidation-discardExpiredValidations}: nothing was sent for it, so no leg can be in flight.
     ///  The reservation comes back and the envelopes kept for the answer are deleted.
     /// @param token the token the compliance is bound to
-    function discardUnanswered(uint256 validationId, address token) external {
+    function discardUnanswered(bytes32 validationId, address token) external {
         ValidationStorage storage store = layout();
         ITransferValidation.Validation storage validation = store.validations[validationId];
         require(
@@ -382,7 +395,7 @@ library TransferValidationLib {
 
     /// @dev Keeps the validation forever and reserves its amount. Everything written here is the issuance half
     ///  of the lifecycle; the hash is written once the validation is issued, see {_issueRecorded}.
-    function _record(uint256 validationId, bytes calldata from, bytes calldata to, Draft memory draft, address token)
+    function _record(bytes32 validationId, bytes calldata from, bytes calldata to, Draft memory draft, address token)
         private
     {
         ITransferValidation.Validation storage stored = layout().validations[validationId];
@@ -404,7 +417,7 @@ library TransferValidationLib {
     }
 
     /// @dev Writes the hash of what the satellite will execute against, announces it, and encodes it.
-    function _issueRecorded(uint256 validationId, MessageTypesLib.ComplianceValidation memory issued)
+    function _issueRecorded(bytes32 validationId, MessageTypesLib.ComplianceValidation memory issued)
         private
         returns (bytes memory body)
     {
@@ -424,25 +437,30 @@ library TransferValidationLib {
         body = abi.encode(issued);
     }
 
-    /// @dev Sends one leg of an issued validation to each satellite chain involved. The token is the wire's only
-    ///  author: it pins the route per leg and refuses a closed chain. As the compliance's DELEGATECALL target,
-    ///  this library reaches the token with the compliance as the caller.
+    /// @dev Sends one leg of an issued validation to each satellite chain involved, except a chain that already
+    ///  reported a leg for this id while nothing was issued under it: that Lite executed it already, the leg is
+    ///  parked, and the issuance settles it instead. The token is the wire's only author: it pins the route per
+    ///  leg and refuses a closed chain. As the compliance's DELEGATECALL target, this library reaches the token
+    ///  with the compliance as the caller.
     function _dispatch(
         address token,
-        uint256 validationId,
+        bytes32 validationId,
         bytes32 fromChainKey,
         bytes32 toChainKey,
         bool twoLegs,
         bytes memory body
     ) private {
-        IToken(token).dispatchComplianceValidation(fromChainKey, validationId, body);
-        if (twoLegs) IToken(token).dispatchComplianceValidation(toChainKey, validationId, body);
+        mapping(bytes32 chainKey => ITransferValidation.ParkedLeg) storage parked = layout().parkedLegs[validationId];
+        if (!parked[fromChainKey].exists) IToken(token).dispatchComplianceValidation(fromChainKey, validationId, body);
+        if (twoLegs && !parked[toChainKey].exists) {
+            IToken(token).dispatchComplianceValidation(toChainKey, validationId, body);
+        }
     }
 
     /// @dev Keeps a recorded validation waiting for the approval module, with the two envelopes the record does
     ///  not keep otherwise, and tells the module. The validity window from now is the deadline for the answer.
     function _awaitApproval(
-        uint256 validationId,
+        bytes32 validationId,
         bytes calldata from,
         bytes calldata to,
         bytes calldata spender,

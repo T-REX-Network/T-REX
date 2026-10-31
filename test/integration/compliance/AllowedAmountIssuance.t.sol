@@ -76,7 +76,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
             _fundSatelliteWallet(charlieIdentity, charlie, POLYGON, makeAccount("carolOnPolygon"), BALANCE);
         _bindAllowing(second, 80);
         _bindAllowing(first, 90);
-        uint256 id = _requestValidation(address(charlieIdentity), carolSat, bobSat, 10, 200);
+        bytes32 id = _requestValidation(address(charlieIdentity), carolSat, bobSat, 10, 200);
         uint256 tighterFirst = boundCompliance.validationOf(id).amountMax;
 
         assertEq(looserFirst, 80, "the smallest answer wins");
@@ -89,7 +89,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 0));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "");
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "", _salt());
     }
 
     /// @notice Rules that between them allow less than the caller's minimum empty the range.
@@ -99,7 +99,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 50, 40));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 50, 200, "");
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 50, 200, "", _salt());
     }
 
     /// @notice A rule answering more than the wallet holds changes nothing: the balance already capped it.
@@ -138,9 +138,9 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, spender));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender);
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender, _salt());
 
-        assertEq(boundCompliance.lastValidationId(), 0, "nothing was issued");
+        _assertNothingRecorded(aliceSat);
     }
 
     /// @notice The same policy lets the issuance through once it accepts the named spender.
@@ -151,7 +151,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         bytes memory spender = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("spenderOnPolygon"));
 
         vm.prank(address(aliceIdentity));
-        uint256 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender);
+        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, spender, _salt());
 
         assertEq(boundCompliance.validationOf(id).amountMax, BALANCE);
     }
@@ -166,7 +166,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
         vm.expectCall(address(policy), abi.encodeWithSelector(IModule.checkSpender.selector), 0);
         vm.prank(address(aliceIdentity));
-        uint256 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "");
+        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 200, "", _salt());
 
         assertEq(boundCompliance.validationOf(id).amountMax, BALANCE);
     }
@@ -180,7 +180,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
         vm.expectCall(address(first), abi.encodeWithSelector(IModule.checkTransfer.selector), 0);
         vm.prank(address(aliceIdentity));
-        uint256 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, 200, "");
+        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, 200, "", _salt());
 
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
         assertEq(validation.amountMin, 10);
@@ -188,7 +188,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
     }
 
     function _issue(uint256 requestedMin, uint256 requestedMax) private returns (uint256 min, uint256 max) {
-        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, requestedMin, requestedMax);
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, requestedMin, requestedMax);
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
         return (validation.amountMin, validation.amountMax);
     }

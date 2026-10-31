@@ -6,6 +6,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
@@ -66,10 +67,32 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
 
     function _requestValidation(address caller, bytes memory from, bytes memory to, uint256 min, uint256 max)
         internal
-        returns (uint256)
+        returns (bytes32)
     {
         vm.prank(caller);
-        return boundCompliance.requestTransferValidation(from, to, min, max, "");
+        return boundCompliance.requestTransferValidation(from, to, min, max, "", _salt());
+    }
+
+    uint256 private _saltNonce;
+    /// @dev The salt the last `_salt()` returned, so a test can name the id a refused request would have taken.
+    bytes32 internal lastSalt;
+
+    /// @dev A fresh salt per request, as a requester's backend would supply one.
+    function _salt() internal returns (bytes32) {
+        lastSalt = keccak256(abi.encode(address(this), ++_saltNonce));
+        return lastSalt;
+    }
+
+    /// @dev The id a request from `from` with `salt` gets, as the compliance derives it.
+    function _validationId(bytes memory from, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encode(WalletKeyLib.canonicalKey(from), salt));
+    }
+
+    /// @dev The request `from` sent with the last salt was refused: nothing was recorded under its id.
+    function _assertNothingRecorded(bytes memory from) internal view {
+        assertEq(
+            boundCompliance.validationOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded"
+        );
     }
 
     /// @dev The validation a queued message carries, as the Lite would decode it.
@@ -122,16 +145,28 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return _queue(gateway, address(_token), _token, payload);
     }
 
-    function _settlement(uint256 validationId, bytes memory from, bytes memory to, uint256 amount)
+    /// @dev A leg carrying the issued hash, as a Lite that executed the issued body reports it; zero when the
+    ///  id was never issued here.
+    function _settlement(bytes32 validationId, bytes memory from, bytes memory to, uint256 amount)
+        internal
+        view
+        returns (MessageTypesLib.SettlementNotification memory)
+    {
+        return _settlementUnder(validationId, from, to, amount, boundCompliance.validationOf(validationId).hash);
+    }
+
+    /// @dev A leg carrying `hash`: what a Lite that executed another body than the issued one reports.
+    function _settlementUnder(bytes32 validationId, bytes memory from, bytes memory to, uint256 amount, bytes32 hash)
         internal
         pure
         returns (MessageTypesLib.SettlementNotification memory)
     {
-        return
-            MessageTypesLib.SettlementNotification({ validationId: validationId, from: from, to: to, amount: amount });
+        return MessageTypesLib.SettlementNotification({
+            validationId: validationId, from: from, to: to, amount: amount, hash: hash
+        });
     }
 
-    function _sameChainSettlement(uint256 validationId, uint256 chainId, uint256 amount)
+    function _sameChainSettlement(bytes32 validationId, uint256 chainId, uint256 amount)
         internal
         returns (MessageTypesLib.SettlementNotification memory)
     {
@@ -153,18 +188,18 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
     }
 
     /// @dev The burn leg of a cross-chain validation: `to` is empty, by convention.
-    function _burnLeg(uint256 validationId, Token _token, bytes memory from, uint256 amount)
+    function _burnLeg(bytes32 validationId, Token _token, bytes memory from, uint256 amount)
         internal
-        pure
+        view
         returns (MessageTypesLib.SettlementNotification memory)
     {
         return _settlement(validationId, from, "", amount);
     }
 
     /// @dev The mint leg of a cross-chain validation: `from` is empty, by convention.
-    function _mintLeg(uint256 validationId, Token _token, bytes memory to, uint256 amount)
+    function _mintLeg(bytes32 validationId, Token _token, bytes memory to, uint256 amount)
         internal
-        pure
+        view
         returns (MessageTypesLib.SettlementNotification memory)
     {
         return _settlement(validationId, "", to, amount);

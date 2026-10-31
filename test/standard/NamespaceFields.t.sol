@@ -156,7 +156,7 @@ contract NamespaceFieldsTest is Test {
         ledgerStorage.decimals = 18;
         ledgerStorage.bridgedBalance[KEY] = 11;
         ledgerStorage.totalBridged = 12;
-        ledgerStorage.inTransit[NUMBER] = 13;
+        ledgerStorage.inTransit[bytes32(NUMBER)] = 13;
         ledgerStorage.totalInTransit = 14;
         ledgerStorage.reservedForValidations[KEY] = 15;
 
@@ -181,7 +181,7 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.received[ALICE][KEY] = true;
         messagingStorage.chains[KEY].chainType = 0xabcd;
         messagingStorage.chains[KEY].chainReference = hex"02";
-        messagingStorage.pinnedRoutes[NUMBER][KEY] = address(0x3);
+        messagingStorage.pinnedRoutes[bytes32(NUMBER)][KEY] = address(0x3);
         messagingStorage.inboundPaused[KEY] = true;
 
         assertEq(_word(_field(base, 0)), 0x1, "registry");
@@ -270,8 +270,7 @@ contract NamespaceFieldsTest is Test {
         validationStorage.defaultValidityWindow = 11;
         validationStorage.reconciliationWindows[KEY] = 12;
         validationStorage.issuancePaused[KEY] = true;
-        validationStorage.lastValidationId = 13;
-        ITransferValidation.Validation storage validation = validationStorage.validations[NUMBER];
+        ITransferValidation.Validation storage validation = validationStorage.validations[bytes32(NUMBER)];
         validation.hash = bytes32(uint256(21));
         validation.amountMin = 22;
         validation.amountMax = 23;
@@ -289,13 +288,31 @@ contract NamespaceFieldsTest is Test {
         validation.status = ITransferValidation.ValidationStatus.AwaitingMint;
         validation.executedAmount = 30;
         validation.legWallet = hex"02";
+        validationStorage.awaitedTerms[bytes32(NUMBER)] =
+            TransferValidationLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
+        ITransferValidation.ParkedLeg storage parked = validationStorage.parkedLegs[bytes32(NUMBER)][KEY];
+        parked.from = hex"05";
+        parked.to = hex"06";
+        parked.amount = 31;
+        parked.hash = bytes32(uint256(32));
+        parked.exists = true;
 
         assertEq(_word(_field(base, 0)), 11, "defaultValidityWindow");
         assertEq(_word(_entry(_field(base, 1), KEY)), 12, "reconciliationWindows");
         assertEq(_word(_entry(_field(base, 2), KEY)), 1, "issuancePaused");
-        assertEq(_word(_field(base, 3)), 13, "lastValidationId");
 
-        bytes32 entry = _entry(_field(base, 4), bytes32(NUMBER));
+        bytes32 terms = _entry(_field(base, 4), bytes32(NUMBER));
+        assertEq(_slot(_field(terms, 0)), _shortBytes(0x03), "awaitedTerms.to");
+        assertEq(_slot(_field(terms, 1)), _shortBytes(0x04), "awaitedTerms.spender");
+
+        bytes32 leg = _entry(_entry(_field(base, 5), bytes32(NUMBER)), KEY);
+        assertEq(_slot(_field(leg, 0)), _shortBytes(0x05), "parkedLegs.from");
+        assertEq(_slot(_field(leg, 1)), _shortBytes(0x06), "parkedLegs.to");
+        assertEq(_word(_field(leg, 2)), 31, "parkedLegs.amount");
+        assertEq(_word(_field(leg, 3)), 32, "parkedLegs.hash");
+        assertEq(_word(_field(leg, 4)), 1, "parkedLegs.exists");
+
+        bytes32 entry = _entry(_field(base, 3), bytes32(NUMBER));
         assertEq(_word(_field(entry, 0)), 21, "validations.hash");
         assertEq(_word(_field(entry, 1)), 22, "validations.amountMin");
         assertEq(_word(_field(entry, 2)), 23, "validations.amountMax");
@@ -352,7 +369,7 @@ contract NamespaceFieldsTest is Test {
         }
 
         approvalStorage.approvers[ALICE][NUMBER].push(ALICE);
-        approvalStorage.requests[ALICE][NUMBER].approved = 11;
+        approvalStorage.requests[ALICE][bytes32(NUMBER)].approved = 11;
         approvalStorage.approvals[ALICE][NUMBER][KEY] = AsyncApprovalModule.Approval({ count: 22, expiry: 33 });
         approvalStorage.usedApprovalIds[ALICE][ALICE][KEY] = true;
 

@@ -153,7 +153,11 @@ contract MessageTypesLibUnitTest is Test {
 
     function testSettlementRoundTrip() public view {
         MessageTypesLib.SettlementNotification memory n = MessageTypesLib.SettlementNotification({
-            validationId: 7, from: hex"0001000001890114", to: "", amount: 42
+            validationId: bytes32(uint256(7)),
+            from: hex"0001000001890114",
+            to: "",
+            amount: 42,
+            hash: bytes32(uint256(99))
         });
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
@@ -244,13 +248,14 @@ contract MessageTypesLibUnitTest is Test {
         assertEq(
             MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
             keccak256(
-                "ComplianceValidation(uint256 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,uint256 amountMax,address token,uint64 expiry,uint64 reconciliationWindow)"
+                "ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,uint256 amountMax,address token)"
             )
         );
     }
 
-    /// @dev EIP-712 hashStruct: dynamic members hash to their keccak256, static members encode in place.
-    function testHashValidationIsTheEip712StructHash() public pure {
+    /// @dev EIP-712 hashStruct of the terms: dynamic members hash to their keccak256, static members encode in
+    ///  place, and the two clock-derived fields are not part of it.
+    function testHashValidationIsTheEip712StructHashOfTheTerms() public pure {
         MessageTypesLib.ComplianceValidation memory v = _validation(hex"0001000001890114");
         bytes32 expected = keccak256(
             abi.encode(
@@ -261,24 +266,50 @@ contract MessageTypesLibUnitTest is Test {
                 keccak256(v.spender),
                 v.amountMin,
                 v.amountMax,
-                v.token,
-                v.expiry,
-                v.reconciliationWindow
+                v.token
             )
         );
 
         assertEq(MessageTypesLib.hashValidation(v), expected);
     }
 
-    function testHashValidationChangesWithEveryField() public pure {
+    function testHashValidationChangesWithEveryTerm() public pure {
         MessageTypesLib.ComplianceValidation memory v = _validation("");
         bytes32 base = MessageTypesLib.hashValidation(v);
 
+        v.validationId = bytes32(uint256(8));
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+        v.validationId = bytes32(uint256(7));
+        v.from = hex"00010000010a0114";
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+        v.from = hex"0001000001890114";
+        v.to = hex"0001000001890114";
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+        v.to = hex"00010000010a0114";
+        v.amountMin -= 1;
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+        v.amountMin += 1;
         v.amountMax += 1;
         assertTrue(MessageTypesLib.hashValidation(v) != base);
         v.amountMax -= 1;
+        v.token = address(0xCAFE);
+        assertTrue(MessageTypesLib.hashValidation(v) != base);
+        v.token = address(0xBEEF);
         v.spender = hex"0001000001890114";
         assertTrue(MessageTypesLib.hashValidation(v) != base);
+    }
+
+    /// @dev A body re-issued after a reorg dropped the first issuance carries a later `expiry`; the terms it
+    ///  commits to are the same, so it must hash the same, or the hash could not tell an orphaned body from a
+    ///  re-issued one.
+    function testHashValidationIgnoresExpiryAndReconciliationWindow() public pure {
+        MessageTypesLib.ComplianceValidation memory v = _validation("");
+        bytes32 base = MessageTypesLib.hashValidation(v);
+
+        v.expiry += 1 days;
+        assertEq(MessageTypesLib.hashValidation(v), base);
+        v.reconciliationWindow += 1 hours;
+        assertEq(MessageTypesLib.hashValidation(v), base);
     }
 
     function testTypedDecodeRevertsOnAForeignBody() public {
@@ -300,7 +331,7 @@ contract MessageTypesLibUnitTest is Test {
 
     function _validation(bytes memory spender) private pure returns (MessageTypesLib.ComplianceValidation memory) {
         return MessageTypesLib.ComplianceValidation({
-            validationId: 7,
+            validationId: bytes32(uint256(7)),
             from: hex"0001000001890114",
             to: hex"00010000010a0114",
             spender: spender,
@@ -313,8 +344,13 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function _settlement() private pure returns (MessageTypesLib.SettlementNotification memory) {
-        return
-            MessageTypesLib.SettlementNotification({ validationId: 7, from: hex"0001000001890114", to: "", amount: 42 });
+        return MessageTypesLib.SettlementNotification({
+            validationId: bytes32(uint256(7)),
+            from: hex"0001000001890114",
+            to: "",
+            amount: 42,
+            hash: bytes32(uint256(99))
+        });
     }
 
     /* ----- chainKey ----- */

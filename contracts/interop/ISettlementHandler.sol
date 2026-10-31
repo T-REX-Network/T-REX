@@ -81,11 +81,13 @@ interface ISettlementHandler {
         /// The message names something the token issued but already accounted for, so that chain's reports can no
         /// longer be trusted: the token pauses its inbound from that chain only.
         PauseChain,
-        /// The message names something the token never issued. The transport says which chain sent it, but not why
+        /// The message names a recall the token never issued. The transport says which chain sent it, but not why
         /// the id is unknown: a peer inventing ids, or the token's own records no longer matching what it dispatched
-        /// (a compliance replaced or reset with legs in flight). The second is local and taints what every chain
-        /// reports, and the message cannot tell the two apart, so the token pauses itself. The price, accepted: a
-        /// trusted peer can halt the token with one such message; the remedy is to distrust its gateway.
+        /// (a token reset with instructions in flight). The second is local and taints what every chain reports,
+        /// and the message cannot tell the two apart, so the token pauses itself. The price, accepted: a trusted
+        /// peer can halt the token with one such proof; the remedy is to distrust its gateway. A settlement never
+        /// returns this: a validation id is a function of the request, so an unknown one is the leg's chain's
+        /// problem, see {handleSettlement}.
         HaltToken
     }
 
@@ -98,23 +100,34 @@ interface ISettlementHandler {
     /// - the message's author is the token's peer on that chain.
     ///
     /// The notification is decoded and passed on as is; classifying it is this handler's job, against the
-    /// validation it issued: the token and the wallets must be the issued ones, the leg must come from the chain
-    /// recorded for its side, and the amount must sit inside the issued bounds. A leg that fails any of these
-    /// reverts, which leaves the message deliverable again. A leg for a `Pending` validation settles it, whatever
-    /// the clock says; one for a `Discarded` validation reconciles it late: applied anyway, since the satellite
-    /// execution is final, the modules caught up with no live reservation, `LateReconciliation` emitted and the
-    /// leg's chain paused for issuance until the manager unpauses it.
-    /// A silent failure would instead leave the message marked as received and unretryable.
+    /// validation it issued. The gate is substantive: the wallets must be the issued ones, the leg must come from
+    /// the chain recorded for its side, and the amount must sit inside the issued bounds. A leg that passes it for
+    /// a `Pending` validation settles it, whatever the clock says; one for a `Discarded` validation reconciles it
+    /// late: applied anyway, since the satellite execution is final, the modules caught up with no live
+    /// reservation, `LateReconciliation` emitted and the leg's chain paused for issuance until the manager
+    /// unpauses it. The hash the leg carries is evidence, never the gate: a leg inside the terms settles whatever
+    /// hash it names (`SettlementBodyDiverged` when it is not the issued one).
     ///
-    /// Two emergencies never revert and return a verdict instead, both meaning a trusted gateway delivered
-    /// something the protocol cannot account for. A leg already consumed, including one arriving after the keeper
-    /// resolved the pair, is `PauseChain`: the validation is known, so the fault is pinned to the chain that sent
-    /// it, and the token stops taking that chain's messages until an agent has investigated. An id that was never
-    /// issued is `HaltToken`: it may be the peer's invention or the token's own records out of step with what it
-    /// dispatched, and only the first could be contained to a chain, so the token pauses itself.
+    /// Nothing on this path reverts for good. A validation may travel to a satellite before this chain's finality,
+    /// so a leg the token cannot account for has a reorg as a possible cause as well as a Lite breaking a rule,
+    /// and the two are given the same outcome: nothing applied, the delivery consumed, and `PauseChain`, so the
+    /// token stops taking that chain's messages until an agent has investigated. The burden is the Lite's: one
+    /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. Four cases:
+    /// - An id with no issued body: the leg is parked under its id and origin chain (`SettlementParked`), so the
+    ///   request, sent again with the same salt, issues the same id and settles it. A second leg from the same
+    ///   chain for a parked id is a replay.
+    /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
+    ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
+    /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
+    ///   issued (`SettlementRejected`); the validation stands, the discard and resolution paths still apply.
+    /// - A leg outside the issued terms carrying another hash: the satellite executed a body this chain never
+    ///   canonically issued (`ValidationOrphaned`). While no leg had landed the validation ends `Orphaned` and its
+    ///   reservation is released; otherwise it stands and the keeper resolves the pair after the second window.
+    /// A revert, from a tracker module for instance, leaves the message deliverable again; a silent failure would
+    /// instead leave it marked as received and unretryable.
     /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
-    /// @return verdict `None`, `PauseChain` on a replayed leg, `HaltToken` on a never-issued id.
+    /// @return verdict `None` when applied, `PauseChain` on every leg the token could not account for.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
         returns (Verdict verdict);

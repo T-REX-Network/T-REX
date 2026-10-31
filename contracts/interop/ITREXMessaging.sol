@@ -70,7 +70,7 @@ interface ITREXMessaging {
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
     event RouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
-    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
+    event ValidationRoutePinned(bytes32 indexed validationId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event InboundPaused(bytes32 indexed chainKey);
     event InboundUnpaused(bytes32 indexed chainKey);
@@ -82,7 +82,7 @@ interface ITREXMessaging {
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
+    error GatewayNotPinned(address gateway, bytes32 validationId, bytes32 chainKey);
     error GatewayNotTrusted(address gateway);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
@@ -90,7 +90,7 @@ interface ITREXMessaging {
     error MessageTypeNotInbound(MessageTypesLib.Message messageType);
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
+    error ValidationAlreadyRouted(bytes32 validationId, bytes32 chainKey, address gateway);
     error UnsupportedMessageVersion(uint8 messageVersion);
 
     error InteroperableAddressParsingError(bytes);
@@ -183,7 +183,7 @@ interface ITREXMessaging {
     /// @param validationId The validation to look up.
     /// @param chainKey The chain the leg was dispatched toward.
     /// @return The pinned gateway, or zero when the leg never went out.
-    function pinnedRouteFor(uint256 validationId, bytes32 chainKey) external view returns (address);
+    function pinnedRouteFor(bytes32 validationId, bytes32 chainKey) external view returns (address);
 
     /// @dev Whether `chainKey` is routed right now: a route, a peer, and a still-trusted gateway. Re-reads the
     /// registry, so an emergency gateway removal closes every chain routed through it. The inbound pause is a

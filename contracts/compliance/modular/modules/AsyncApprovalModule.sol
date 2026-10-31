@@ -81,7 +81,7 @@ interface IAsyncApprover {
 
     /// @dev `validationId`, requested on `compliance`, now waits for the caller's approver. An FHE rule starts
     ///  its computation here and answers from its decryption callback.
-    function approvalAsked(address compliance, uint256 validationId) external;
+    function approvalAsked(address compliance, bytes32 validationId) external;
 
 }
 
@@ -137,7 +137,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         /// The approvers per compliance, in the order they answer, scoped by the bind nonce.
         mapping(address compliance => mapping(uint256 nonce => address[])) approvers;
         /// The requests awaiting approval per compliance, by validation id. Deleted once answered.
-        mapping(address compliance => mapping(uint256 validationId => Request)) requests;
+        mapping(address compliance => mapping(bytes32 validationId => Request)) requests;
         /// Native-transfer approvals per compliance, scoped by the bind nonce, keyed by
         /// `keccak256(abi.encode(fromWallet, toWallet, amount))` with the wallet keys the compliance builds.
         mapping(address compliance => mapping(uint256 nonce => mapping(bytes32 transferKey => Approval))) approvals;
@@ -154,12 +154,12 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         0x8e132769c339aa4b7063edecd97a34a6fcabe204f7e6adaf81c9a125d1e53f00;
 
     event ApproversSet(address indexed compliance, address[] approvers);
-    event ApprovalRequested(address indexed compliance, uint256 indexed validationId, address indexed approver);
+    event ApprovalRequested(address indexed compliance, bytes32 indexed validationId, address indexed approver);
     event ValidationApproved(
-        address indexed compliance, uint256 indexed validationId, address indexed approver, uint256 amountMax
+        address indexed compliance, bytes32 indexed validationId, address indexed approver, uint256 amountMax
     );
-    event ValidationRefused(address indexed compliance, uint256 indexed validationId, address indexed approver);
-    event ValidationFullyApproved(address indexed compliance, uint256 indexed validationId, uint256 amountMax);
+    event ValidationRefused(address indexed compliance, bytes32 indexed validationId, address indexed approver);
+    event ValidationFullyApproved(address indexed compliance, bytes32 indexed validationId, uint256 amountMax);
     event TransferApproved(
         address indexed compliance,
         address indexed from,
@@ -217,7 +217,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /// @dev Approves a relocation at once, since it changes no position. Otherwise keeps the request and tells
     ///  the first approver. Reverts with no approver set, which refuses the request: a request nobody could
     ///  approve would only hold its reservation until the deadline.
-    function approvalRequested(uint256 validationId, IModule.TransferContext calldata ctx, uint64)
+    function approvalRequested(bytes32 validationId, IModule.TransferContext calldata ctx, uint64)
         external
         onlyComplianceCall
     {
@@ -245,7 +245,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     ///  may answer. A maximum below the requested minimum refuses. The last approval only records the request
     ///  as fully approved, so an approver answering from a callback never pays for, nor reverts on, the
     ///  issuance; {finalize} issues it. Emits `ValidationApproved`, and `ValidationFullyApproved` on the last.
-    function approveValidation(address compliance, uint256 validationId, uint256 amountMax)
+    function approveValidation(address compliance, bytes32 validationId, uint256 amountMax)
         external
         onlyBoundCompliance(compliance)
     {
@@ -269,7 +269,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /// @dev Issues a request every approver approved, at the lowest maximum approved, by answering the
     ///  compliance. Anyone may call it. A failure, a chain paused since the request for instance, reverts and
     ///  leaves the request fully approved, so it can be tried again before the deadline.
-    function finalize(address compliance, uint256 validationId) external {
+    function finalize(address compliance, bytes32 validationId) external {
         Request storage request = _getAsyncApprovalStorage().requests[compliance][validationId];
         require(request.fullyApproved, ErrorsLib.NotFullyApproved(validationId));
         uint256 approvedMax = request.amountMax;
@@ -279,7 +279,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
 
     /// @dev Refuses a request awaiting approval. Only the approver whose turn it is may answer. Emits
     ///  `ValidationRefused`.
-    function refuseValidation(address compliance, uint256 validationId) external onlyBoundCompliance(compliance) {
+    function refuseValidation(address compliance, bytes32 validationId) external onlyBoundCompliance(compliance) {
         _requestForCaller(compliance, validationId);
         _refuse(compliance, validationId);
     }
@@ -328,7 +328,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     }
 
     /// @dev Where a request awaiting approval stands in this module; all zeros once answered.
-    function requestOf(address compliance, uint256 validationId) external view returns (Request memory) {
+    function requestOf(address compliance, bytes32 validationId) external view returns (Request memory) {
         return _getAsyncApprovalStorage().requests[compliance][validationId];
     }
 
@@ -420,7 +420,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
 
     /// @dev The waiting request, and the approvers of `compliance`, once checked that the caller is the
     ///  approver whose turn it is.
-    function _requestForCaller(address compliance, uint256 validationId)
+    function _requestForCaller(address compliance, bytes32 validationId)
         private
         view
         returns (Request storage request, address[] storage approvers)
@@ -441,7 +441,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     }
 
     /// @dev Forgets the request and refuses it on the compliance, which releases its reservation.
-    function _refuse(address compliance, uint256 validationId) private {
+    function _refuse(address compliance, bytes32 validationId) private {
         delete _getAsyncApprovalStorage().requests[compliance][validationId];
         emit ValidationRefused(compliance, validationId, _msgSender());
         ITransferValidation(compliance).answerApproval(validationId, 0);
@@ -450,7 +450,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /// @dev Announces whose turn it is, and tells that approver when it is a contract. Telling is best
     ///  effort: an approver that does not implement {IAsyncApprover} reads the event instead, and its failure
     ///  never refuses the request.
-    function _ask(address compliance, uint256 validationId, address approver) private {
+    function _ask(address compliance, bytes32 validationId, address approver) private {
         emit ApprovalRequested(compliance, validationId, approver);
         if (approver.code.length == 0) return;
         try IAsyncApprover(approver).approvalAsked(compliance, validationId) { } catch { }

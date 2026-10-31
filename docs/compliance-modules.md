@@ -167,7 +167,7 @@ resolving the route, narrowing the range by every rule and reserving it, but rec
 and, once issued, the satellite's deadline: the time spent waiting comes out of the time to execute, so the
 rules are never older than one validity window when the satellite executes.
 
-Only the module answers, with `answerApproval(validationId, approvedMax)`, before the deadline. An approval
+Only the module answers, with `answerApproval(bytes32 validationId, approvedMax)`, before the deadline. An approval
 lowers the maximum when the answer is lower, releases the difference and sends the legs; no rule runs again,
 since every rule ran and the room was reserved at the request, but the chains are checked again, as one may
 have been paused while the request waited. An answer below the requested minimum is a refusal, which releases

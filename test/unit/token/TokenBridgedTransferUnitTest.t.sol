@@ -11,7 +11,7 @@ import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 
 contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
 
-    uint256 internal constant VALIDATION_ID = 7;
+    bytes32 internal constant VALIDATION_ID = bytes32(uint256(7));
 
     function setUp() public override {
         super.setUp();
@@ -66,7 +66,7 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
     function test_bridgedTransfer_ChainsThroughAnIntermediateSatellite() public {
         vm.startPrank(agent);
         ledger.bridgedTransfer(satellite1, satellite2, 30, VALIDATION_ID);
-        ledger.bridgedTransfer(satellite2, satellite3, 10, VALIDATION_ID + 1);
+        ledger.bridgedTransfer(satellite2, satellite3, 10, bytes32(uint256(VALIDATION_ID) + 1));
         vm.stopPrank();
 
         assertEq(token.bridgedBalanceOf(satellite1), 30);
