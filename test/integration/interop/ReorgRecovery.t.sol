@@ -155,6 +155,37 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(token.isInboundPaused(polygon));
     }
 
+    /// @notice The pause the parking set gates both steps of the recovery: the request sent again and the settling
+    ///         of the parked leg wait for the pauser, as a leg at the gateway does.
+    function test_reorg_RevertWhen_TheChainIsStillPausedForEitherStep() public {
+        bytes32 salt = _salt();
+        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;
+        _execute(id, 95);
+        polygonGateway.relay(_last(polygonGateway));
+        assertTrue(token.isInboundPaused(polygon));
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
+        vm.prank(address(aliceIdentity));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+
+        // The pauser looks again before the parked leg is taken: it waits under the pause like any delivery.
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        boundCompliance.settleParkedLeg(id, polygon);
+        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists);
+
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
+        boundCompliance.settleParkedLeg(id, polygon);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+    }
+
     /// @notice The other way out of a drop. The Lite executed the dropped body above what the request, sent
     ///         again, is issued at: the parked leg fits no issued terms and its hash is not the issued one, so
     ///         the validation ends `Orphaned` at issuance, nothing moves, and the chain is paused again.
