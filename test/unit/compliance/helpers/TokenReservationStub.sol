@@ -42,7 +42,7 @@ contract TokenReservationStub {
         reserved[key] = held < amount ? 0 : held - amount;
     }
 
-    function holdInTransit(bytes calldata wallet, uint256, uint256, uint256 amountReserved) external {
+    function holdInTransit(bytes calldata wallet, uint256, bytes32, uint256 amountReserved) external {
         bytes32 key = keccak256(wallet);
         uint256 held = reserved[key];
         reserved[key] = held < amountReserved ? 0 : held - amountReserved;

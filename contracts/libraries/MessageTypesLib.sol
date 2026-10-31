@@ -90,25 +90,33 @@ library MessageTypesLib {
     }
 
     /// @dev The envelope version this library serves. A payload carrying any other version is refused. The body
-    ///  shapes changed while no token or Lite was live, so the version stayed 1. Once anything is live, a change to
-    ///  a body's shape bumps it, so a peer on the old shape refuses the new one instead of decoding it wrong.
+    ///  shapes changed while no token or Lite was live (the id became salt-derived and the settlement gained the
+    ///  hash of the body executed), so the version stayed 1. Once anything is live, a change to a body's shape bumps
+    ///  it, so a peer on the old shape refuses the new one instead of decoding it wrong.
     uint8 internal constant VERSION = 1;
 
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
     bytes2 internal constant EVM_CHAIN_TYPE = 0x0000;
 
-    /// @dev EIP-712 type hash of `ComplianceValidation`:
-    ///  keccak256("ComplianceValidation(uint256 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,
-    ///  uint256 amountMax,address token,uint64 expiry,uint64 reconciliationWindow)")
+    /// @dev EIP-712 type hash of the terms of a `ComplianceValidation`, see {hashValidation}:
+    ///  keccak256("ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,
+    ///  uint256 amountMax,address token)")
     bytes32 internal constant COMPLIANCE_VALIDATION_TYPEHASH =
-        0x0b9e295f943ccd7dad6f3ca3f907365ba5866f07431e165136759414e1e5f9f6;
+        0xafd18733126d2336f2b9ca999b9c8ad036ae2ed6021708f89e163f1c7fdce926;
 
     /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, the only thing
     /// a satellite executes a transfer against.
     /// Validations expire; settlements never do.
     struct ComplianceValidation {
-        /// Unique per compliance contract, single-use: consumed on the satellite, keys the slot on T-REX.
-        uint256 validationId;
+        /// `keccak256(abi.encode(canonicalKey(from), salt))`, the salt supplied by the requester: a function of the
+        /// request and never of the reference chain's ordering or clock, so a reorg that re-includes or drops the
+        /// issuance leaves the id the satellite executed under unchanged. Single-use: consumed on the satellite, keys
+        /// the record on T-REX.
+        bytes32 validationId;
+        /// The requester's nonce the id was derived from. Carried so that the satellite chain, where the body is
+        /// final, holds what it takes to send the request again should a reorg drop its issuance: an agent reads
+        /// it off the Lite and re-issues the same id. Not part of {hashValidation}: the id commits to it.
+        bytes32 salt;
         /// ERC-7930 sender. Its chain reference against `to`'s decides same-chain transfer or burn-and-mint.
         bytes from;
         /// ERC-7930 recipient.
@@ -132,12 +140,16 @@ library MessageTypesLib {
 
     /// @dev Body of a `SETTLEMENT_NOTIFICATION`: a satellite reporting that one leg of a validation executed.
     struct SettlementNotification {
-        uint256 validationId;
+        bytes32 validationId;
         /// ERC-7930; empty on the mint leg.
         bytes from;
         /// ERC-7930; empty on the burn leg.
         bytes to;
         uint256 amount;
+        /// {hashValidation} of the body the Lite executed under. Evidence, not a gate: the reference chain judges the
+        /// leg on its wallets and amount, and reads the hash to tell a body it never canonically issued (a reorg
+        /// orphaned it) from a Lite that broke a rule on the body it did issue.
+        bytes32 hash;
     }
 
     /// @dev Body of a `MINT_INSTRUCTION`: the reference chain already burned `amount` of `holder`'s native balance
@@ -193,7 +205,11 @@ library MessageTypesLib {
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
     }
 
-    /// @dev EIP-712 `hashStruct` of a validation, without a domain: an identifier, not something to sign.
+    /// @dev EIP-712 `hashStruct` of a validation's terms, without a domain: a commitment, not something to sign.
+    ///  The terms are the id, the wallets, the spender, the range and the token. `expiry` and `reconciliationWindow`
+    ///  are left out on purpose: both are read off the issuing block's clock, so a body re-issued after a reorg
+    ///  dropped the first issuance would otherwise hash differently for the same movement, and the hash could no
+    ///  longer say whether the satellite executed the terms this chain issued.
     function hashValidation(ComplianceValidation memory validation) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -204,9 +220,7 @@ library MessageTypesLib {
                 keccak256(validation.spender),
                 validation.amountMin,
                 validation.amountMax,
-                validation.token,
-                validation.expiry,
-                validation.reconciliationWindow
+                validation.token
             )
         );
     }

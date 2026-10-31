@@ -84,6 +84,7 @@ import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
+import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
@@ -179,9 +180,7 @@ contract ModularCompliance is
         onlyBoundToken
         returns (ISettlementHandler.Verdict verdict)
     {
-        emit EventsLib.SettlementNotified(
-            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
-        );
+        TransferValidationLib.announce(originChainKey, notification);
         return _handleSettlement(originChainKey, notification);
     }
 
@@ -263,14 +262,21 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function resolveStuckValidation(uint256 validationId) external restricted {
+    function resolveStuckValidation(bytes32 validationId) external restricted {
         _resolveStuckValidation(validationId);
+    }
+
+    /// @inheritdoc ITransferValidation
+    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, so
+    ///  settling it decides nothing a caller could abuse, as relaying a delivery decides nothing.
+    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external {
+        _settleParkedLeg(validationId, chainKey);
     }
 
     /// @inheritdoc ITransferValidation
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
-    function discardExpiredValidations(uint256[] calldata validationIds) external {
+    function discardExpiredValidations(bytes32[] calldata validationIds) external {
         _discardExpiredValidations(validationIds);
     }
 
@@ -446,7 +452,7 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId)
+    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, bytes32 validationId)
         internal
         override
     {
@@ -454,18 +460,13 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId, uint256 reserved) internal override {
+    function _holdOnToken(bytes memory from, uint256 amount, bytes32 validationId, uint256 reserved) internal override {
         _boundToken().holdInTransit(from, amount, validationId, reserved);
     }
 
     /// @inheritdoc TransferValidation
     function _releaseOnToken(bytes memory wallet, uint256 amount) internal override {
         _boundToken().releaseFromValidation(wallet, amount);
-    }
-
-    /// @inheritdoc TransferValidation
-    function _returnHeldOnToken(bytes memory to, uint256 validationId) internal override {
-        _boundToken().returnHeldInTransit(to, validationId);
     }
 
     /* ----- Module lifecycle ----- */

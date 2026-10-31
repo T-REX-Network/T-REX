@@ -343,7 +343,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     ///         then exceeds the position until the validation is discarded, and every read of the gap floors at zero.
     function test_instructRecall_Success_WhenPartOfThePositionIsReserved() public {
         _delegate(alice, 500);
-        uint256 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 1, 300);
+        bytes32 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 1, 300);
         assertEq(token.availableOf(aliceSat), 200);
         uint256 recallId = _instruct(500);
         assertEq(recallId, 1);
@@ -593,7 +593,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     ///         for what is actually left applies.
     function test_handleBurnProof_RevertWhen_TheBridgedPositionNoLongerCovers_ThenAppliesForWhatIsLeft() public {
         uint256 recallId = _instructed();
-        uint256 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
+        bytes32 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, aliceSat, bobSat, 400)));
         assertEq(token.bridgedBalanceOf(aliceSat), 100);
         uint256 tooMuch = _proof(polygonGateway, recallId, aliceSat, 200);
@@ -890,7 +890,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         token.mint(charlie, 100);
         vm.prank(charlie);
         token.delegateOut(charlie, charlieSat, 100);
-        uint256 validationId = _requestValidation(address(charlieIdentity), charlieSat, bobSat, 100, 100);
+        bytes32 validationId = _requestValidation(address(charlieIdentity), charlieSat, bobSat, 100, 100);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, charlieSat, bobSat, 100)));
         vm.prank(agent);
         uint256 recallId = token.instructRecall(bobSat, 100, bob);

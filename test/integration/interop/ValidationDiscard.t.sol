@@ -24,7 +24,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
     bytes internal bobSat;
     CappedRecipientModule internal cappedRule;
     uint256 internal issuedAt;
-    uint256 internal id;
+    bytes32 internal id;
 
     function setUp() public override {
         super.setUp();
@@ -80,7 +80,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 0);
 
-        uint256 next = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, CAP);
+        bytes32 next = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, CAP);
         assertEq(boundCompliance.validationOf(next).amountMax, CAP);
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
@@ -125,11 +125,11 @@ contract ValidationDiscardTest is InteropSuiteTest {
     function test_discardExpiredValidations_RevertWhen_NonKeeperBatchHasOneIdInsideTheKeeperWindow() public {
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
-        uint256 later = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 10, CAP);
+        bytes32 later = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 10, CAP);
         uint64 laterPublicAt = uint64(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
         vm.warp(laterPublicAt);
 
-        uint256[] memory ids = new uint256[](2);
+        bytes32[] memory ids = new bytes32[](2);
         ids[0] = id;
         ids[1] = later;
         vm.prank(makeAddr("stranger"));
@@ -180,10 +180,10 @@ contract ValidationDiscardTest is InteropSuiteTest {
         // A second validation toward bob is impossible while the first holds his whole cap, so this one goes
         // to another identity with a cap of its own.
         bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
-        uint256 pending = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 10, CAP);
+        bytes32 pending = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 10, CAP);
         uint64 pendingReleaseAt = uint64(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW);
 
-        uint256[] memory ids = new uint256[](2);
+        bytes32[] memory ids = new bytes32[](2);
         ids[0] = id;
         ids[1] = pending;
         vm.prank(keeper);
@@ -209,8 +209,8 @@ contract ValidationDiscardTest is InteropSuiteTest {
         boundCompliance.discardExpiredValidations(_ids(id));
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, 999));
-        boundCompliance.discardExpiredValidations(_ids(999));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, bytes32(uint256(999))));
+        boundCompliance.discardExpiredValidations(_ids(bytes32(uint256(999))));
     }
 
     /// @notice A consumed leg pins the validation: no clock makes it discardable.
@@ -222,7 +222,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         // wallet. Raise it so this second one can be issued at all.
         vm.prank(deployer);
         boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (2 * CAP)), address(cappedRule));
-        uint256 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, CAP);
+        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, CAP);
         vm.prank(agent);
         token.unpause();
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
@@ -246,8 +246,8 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(token.inTransitOf(crossChain), CAP, "the burned amount stays in transit");
     }
 
-    function _ids(uint256 one) private pure returns (uint256[] memory ids) {
-        ids = new uint256[](1);
+    function _ids(bytes32 one) private pure returns (bytes32[] memory ids) {
+        ids = new bytes32[](1);
         ids[0] = one;
     }
 

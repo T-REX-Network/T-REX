@@ -155,7 +155,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         vm.prank(agent);
         token.mint(bob, CAP - 300);
 
-        uint256 id = _issue(10, CAP);
+        bytes32 id = _issue(10, CAP);
 
         assertEq(boundCompliance.validationOf(id).amountMax, 300, "narrowed to what is left under the cap");
     }
@@ -163,10 +163,10 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
     /// @notice Two validations racing for one cap: the second sees the first one's reservation, which is the
     ///         case a module keeping its own counter used to get wrong.
     function test_requestTransferValidation_Success_WhenTwoValidationsRaceForTheCap() public {
-        uint256 first = _issue(10, 600);
+        bytes32 first = _issue(10, 600);
         assertEq(boundCompliance.validationOf(first).amountMax, 600);
 
-        uint256 second = _issue(10, 600);
+        bytes32 second = _issue(10, 600);
 
         assertEq(boundCompliance.validationOf(second).amountMax, 400, "the cap is shared, not doubled");
         assertEq(_ledger().pendingInOf(address(bobIdentity)), CAP);
@@ -174,9 +174,9 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
     /// @notice A discard gives the room back, so the next validation gets the whole cap again.
     function test_discardExpiredValidations_Success_WhenTheRoomComesBack() public {
-        uint256 id = _issue(10, CAP);
+        bytes32 id = _issue(10, CAP);
         vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);
@@ -187,7 +187,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
     /// @notice A settlement turns the reservation into a position, and the rule narrows against it afterwards.
     function test_handleSettlement_Success_WhenTheExecutedAmountBecomesAPosition() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        uint256 id = _issue(10, 600);
+        bytes32 id = _issue(10, 600);
 
         gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 400)));
 
@@ -199,9 +199,9 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
     /// @notice A late settlement above what the rule allows now is applied and reported, pausing that chain.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        uint256 late = _issue(10, CAP);
+        bytes32 late = _issue(10, CAP);
         vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = late;
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);
@@ -217,7 +217,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
     // ==== Helpers ====
 
-    function _issue(uint256 min, uint256 max) private returns (uint256) {
+    function _issue(uint256 min, uint256 max) private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, min, max);
     }
 

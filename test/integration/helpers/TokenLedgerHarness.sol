@@ -33,14 +33,14 @@ contract TokenLedgerHarness is Token {
         _recall(fromWallet, holder, amount);
     }
 
-    function bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId)
+    function bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId)
         external
         restrictedFor(this.mint.selector)
     {
         _settle(from, to, amount, validationId);
     }
 
-    function settleToNative(bytes calldata fromWallet, address to, uint256 amount, uint256 validationId)
+    function settleToNative(bytes calldata fromWallet, address to, uint256 amount, bytes32 validationId)
         external
         restrictedFor(this.mint.selector)
     {
@@ -49,7 +49,7 @@ contract TokenLedgerHarness is Token {
     }
 
     /// @dev The second hop of {settleToNative}. Reachable from this contract only.
-    function settleSelf(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external {
+    function settleSelf(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) external {
         require(msg.sender == address(this), "TokenLedgerHarness: self-call only");
         _settle(from, to, amount, validationId);
     }

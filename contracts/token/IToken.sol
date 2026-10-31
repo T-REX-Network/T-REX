@@ -64,6 +64,7 @@
 pragma solidity 0.8.30;
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
+import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 
 /// @title IToken
@@ -76,12 +77,12 @@ interface IToken is IERC3643 {
 
     event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
     event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
-    event ReturnedInTransit(bytes32 indexed walletKey, uint256 indexed validationId, bytes wallet, uint256 amount);
-    event HeldInTransit(bytes32 indexed fromKey, uint256 indexed validationId, bytes fromWallet, uint256 amount);
+    event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed validationId, bytes wallet, uint256 amount);
+    event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed validationId, bytes fromWallet, uint256 amount);
     event BridgedTransfer(
         bytes32 indexed fromKey,
         bytes32 indexed toKey,
-        uint256 indexed validationId,
+        bytes32 indexed validationId,
         bytes from,
         bytes to,
         uint256 amount
@@ -110,9 +111,9 @@ interface IToken is IERC3643 {
     error UnverifiedWallet(bytes wallet);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error NotASatelliteWallet(bytes wallet);
-    error NothingInTransit(uint256 validationId);
-    error TransitAlreadyHeld(uint256 validationId);
-    error TransitAmountMismatch(uint256 validationId, uint256 held, uint256 amount);
+    error NothingInTransit(bytes32 validationId);
+    error TransitAlreadyHeld(bytes32 validationId);
+    error TransitAmountMismatch(bytes32 validationId, uint256 held, uint256 amount);
     error NoTokenToRecover();
     error RecoveryNotPossible();
     error SameWalletRecovery();
@@ -138,7 +139,7 @@ interface IToken is IERC3643 {
     /// @notice Returns the amount held in transit against a cross-chain validation: its burn leg landed, its mint
     ///  leg has not. Zero once settled, or for a validation that never held anything.
     /// @param validationId the validation the burn leg consumed
-    function inTransitOf(uint256 validationId) external view returns (uint256);
+    function inTransitOf(bytes32 validationId) external view returns (uint256);
 
     /// @notice Returns the sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
     function totalInTransit() external view returns (uint256);
@@ -156,7 +157,7 @@ interface IToken is IERC3643 {
     /// @param to the ERC-7930 envelope of the recipient
     /// @param amount the exact amount the satellite executed
     /// @param validationId the validation the settlement consumed
-    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) external;
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) external;
 
     /// @notice Debits `amount` from `from`'s bridged position and holds it in transit against `validationId`:
     ///  the burn leg of a cross-chain validation landed and proves the satellite burned it, so the wallet must
@@ -170,12 +171,12 @@ interface IToken is IERC3643 {
     /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param amount the exact amount the satellite burned
     /// @param validationId the validation the burn leg consumed
-    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId, uint256 reserved) external;
+    function holdInTransit(bytes calldata from, uint256 amount, bytes32 validationId, uint256 reserved) external;
 
     /// @dev Puts the amount held for `validationId` back on `to`, the satellite wallet it was burned from,
     ///  because the other leg never arrived and the compliance gave up on the pair. Callable by the bound
     ///  compliance alone.
-    function returnHeldInTransit(bytes calldata to, uint256 validationId) external;
+    function returnHeldInTransit(bytes calldata to, bytes32 validationId) external;
 
     /// @dev What open validations may still draw from `wallet`. The compliance reserves this at issuance and
     ///  gives it back when the validation settles or is discarded.
@@ -206,7 +207,14 @@ interface IToken is IERC3643 {
     ) external;
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
-    function dispatchComplianceValidation(bytes32 chainKey, uint256 validationId, bytes calldata body)
+    /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled by
+    ///  `settleParkedLeg` once that id is issued, gets the same brake it would have got at delivery, see
+    ///  {ISettlementHandler-Verdict}. Callable by the bound compliance alone.
+    /// @param chainKey the chain the judged leg came from
+    /// @param verdict what to apply; `None` applies nothing
+    function applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) external;
+
+    function dispatchComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes calldata body)
         external
         returns (bytes32);
 

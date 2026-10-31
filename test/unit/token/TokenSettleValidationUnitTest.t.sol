@@ -11,7 +11,7 @@ import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 /// @dev The compliance-only ledger entry: who may call it, and which transition each wallet shape resolves to.
 contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
 
-    uint256 internal constant VALIDATION_ID = 7;
+    bytes32 internal constant VALIDATION_ID = bytes32(uint256(7));
 
     bytes internal nativeUser1;
     bytes internal nativeUser2;

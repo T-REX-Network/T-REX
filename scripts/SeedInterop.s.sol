@@ -81,9 +81,9 @@ contract SeedInterop is Script {
     string internal recordPath;
     bool internal movementsSeeded;
 
-    uint256 internal settledValidation;
-    uint256 internal pendingValidation;
-    uint256 internal resentValidation;
+    bytes32 internal settledValidation;
+    bytes32 internal pendingValidation;
+    bytes32 internal resentValidation;
     uint256 internal recallId;
 
     function run() external {
@@ -153,9 +153,9 @@ contract SeedInterop is Script {
             string memory json = vm.readFile(recordPath);
             gateway = ERC7786GatewayMock(vm.parseJsonAddress(json, ".gatewayMock"));
             movementsSeeded = vm.parseJsonBool(json, ".movementsSeeded");
-            settledValidation = vm.parseJsonUint(json, ".settledValidation");
-            pendingValidation = vm.parseJsonUint(json, ".pendingValidation");
-            resentValidation = vm.parseJsonUint(json, ".resentValidation");
+            settledValidation = vm.parseJsonBytes32(json, ".settledValidation");
+            pendingValidation = vm.parseJsonBytes32(json, ".pendingValidation");
+            resentValidation = vm.parseJsonBytes32(json, ".resentValidation");
             recallId = vm.parseJsonUint(json, ".recallId");
         }
 
@@ -251,23 +251,42 @@ contract SeedInterop is Script {
     }
 
     function _seedValidations() internal {
-        settledValidation = compliance.requestTransferValidation(satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "");
+        // The salt is the requester's nonce: the id is `keccak256(canonicalKey(from), salt)`, so a seed run
+        // that is replayed takes a fresh one.
+        settledValidation = compliance.requestTransferValidation(
+            satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "", _salt("settled")
+        );
         _liteSends(
             MessageTypesLib.encodeSettlement(
                 MessageTypesLib.SettlementNotification({
-                    validationId: settledValidation, from: satellites[0], to: satellites[1], amount: 30 * UNIT
+                    validationId: settledValidation,
+                    from: satellites[0],
+                    to: satellites[1],
+                    amount: 30 * UNIT,
+                    hash: compliance.validationOf(settledValidation).hash
                 })
             )
         );
-        console.log("Validation settled for 30 GOLD, id", settledValidation);
+        console.log("Validation settled for 30 GOLD, id", vm.toString(settledValidation));
 
-        pendingValidation = compliance.requestTransferValidation(satellites[0], satellites[1], 5 * UNIT, 20 * UNIT, "");
-        console.log("Validation left pending, id", pendingValidation);
+        pendingValidation = compliance.requestTransferValidation(
+            satellites[0], satellites[1], 5 * UNIT, 20 * UNIT, "", _salt("pending")
+        );
+        console.log("Validation left pending, id", vm.toString(pendingValidation));
 
         bytes memory nativeInvestor1 = InteroperableAddress.formatEvmV1(block.chainid, wallets[1]);
-        resentValidation = compliance.requestTransferValidation(satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "");
+        resentValidation = compliance.requestTransferValidation(
+            satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "", _salt("resent")
+        );
         compliance.resendValidation(resentValidation, chainKey, nativeInvestor1, "");
-        console.log("Validation issued toward investor1's native wallet and resent once, id", resentValidation);
+        console.log(
+            "Validation issued toward investor1's native wallet and resent once, id", vm.toString(resentValidation)
+        );
+    }
+
+    /// @dev A salt per seeded validation, distinct per run so a replayed seed never reuses an id.
+    function _salt(string memory label) internal view returns (bytes32) {
+        return keccak256(abi.encode(label, block.timestamp, block.chainid));
     }
 
     function _seedRecall() internal {
@@ -297,9 +316,9 @@ contract SeedInterop is Script {
         vm.serializeBytes(JSON, "satelliteWallet1", satellites[1]);
         vm.serializeAddress(JSON, "investor0", wallets[0]);
         vm.serializeAddress(JSON, "investor1", wallets[1]);
-        vm.serializeUint(JSON, "settledValidation", settledValidation);
-        vm.serializeUint(JSON, "pendingValidation", pendingValidation);
-        vm.serializeUint(JSON, "resentValidation", resentValidation);
+        vm.serializeBytes32(JSON, "settledValidation", settledValidation);
+        vm.serializeBytes32(JSON, "pendingValidation", pendingValidation);
+        vm.serializeBytes32(JSON, "resentValidation", resentValidation);
         vm.serializeUint(JSON, "recallId", recallId);
         string memory json = vm.serializeBool(JSON, "movementsSeeded", movementsSeeded);
         vm.writeJson(json, recordPath);
@@ -314,7 +333,9 @@ contract SeedInterop is Script {
         console.log("investor0 bridged:       ", token.bridgedBalanceOf(satellites[0]));
         console.log("investor1 bridged:       ", token.bridgedBalanceOf(satellites[1]));
         console.log("investor1 native:        ", token.balanceOf(wallets[1]));
-        console.log("validations issued:      ", compliance.lastValidationId());
+        console.log("settled validation:      ", vm.toString(settledValidation));
+        console.log("pending validation:      ", vm.toString(pendingValidation));
+        console.log("resent validation:       ", vm.toString(resentValidation));
         console.log("=============================================");
     }
 

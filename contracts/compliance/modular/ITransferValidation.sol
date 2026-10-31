@@ -72,14 +72,15 @@ pragma solidity 0.8.30;
 interface ITransferValidation {
 
     event TransferValidationIssued(
-        uint256 indexed validationId,
+        bytes32 indexed validationId,
         bytes from,
         bytes to,
         bytes spender,
         uint256 amountMin,
         uint256 amountMax,
         uint64 expiry,
-        uint64 reconciliationWindow
+        uint64 reconciliationWindow,
+        bytes32 salt
     );
 
     /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
@@ -122,7 +123,12 @@ interface ITransferValidation {
         /// Requested while an `APPROVAL` module is bound: narrowed and reserved like an issued validation, but
         /// not issued yet and sent nowhere. `answerApproval` issues it (`Pending`) or refuses it (`Discarded`);
         /// past `expiry`, the deadline for the answer, `discardExpiredValidations` discards it.
-        AwaitingApproval
+        AwaitingApproval,
+        /// A leg arrived whose wallets or amount fail the issued terms and whose hash is not the issued one: the
+        /// satellite executed a body this chain never canonically issued, one a reorg orphaned. Reached only while
+        /// no leg had landed; nothing was applied, the reservation was released, and the leg's chain was paused
+        /// for inbound. Terminal: any leg arriving now is a replay.
+        Orphaned
     }
 
     /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
@@ -135,7 +141,8 @@ interface ITransferValidation {
     struct Validation {
         /* ----- Written once, at issuance ----- */
 
-        /// EIP-712 struct hash of the issued `ComplianceValidation`, the identifier the satellite consumes.
+        /// `MessageTypesLib.hashValidation` of the issued `ComplianceValidation`: the terms the satellite executes
+        /// under. Zero until the validation is issued and sent.
         bytes32 hash;
         /// Final inclusive lower bound, so a settlement's executed amount can be classified.
         uint256 amountMin;
@@ -176,6 +183,27 @@ interface ITransferValidation {
         uint256 executedAmount;
         /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
         bytes legWallet;
+
+        /* ----- Written once, at issuance; last for the layout's sake ----- */
+
+        /// The requester's nonce the id was derived from, carried in the issued body and kept for a resend.
+        bytes32 salt;
+    }
+
+    /// @dev A settlement leg that arrived for an id with no issued body, kept so that once the request is sent
+    /// again with the same salt after a reorg dropped its issuance, `settleParkedLeg` can settle it. One per origin
+    /// chain, so a pair can park both its legs. The delivery that carried it is consumed; this is all that is left
+    /// of it.
+    struct ParkedLeg {
+        /// ERC-7930; empty on the mint leg.
+        bytes from;
+        /// ERC-7930; empty on the burn leg.
+        bytes to;
+        uint256 amount;
+        /// The hash of the body the Lite executed under, as it reported it.
+        bytes32 hash;
+        /// Whether a leg is parked here, since every other field may legitimately be zero or empty.
+        bool exists;
     }
 
     /// @dev Issues a `ComplianceValidation` for a movement out of a satellite wallet, toward another satellite
@@ -186,8 +214,18 @@ interface ITransferValidation {
     /// bridged position less what is already pending out of it, then at the smallest `checkTransfer` answer any module
     /// answers (skipped when both wallets belong to one identity).
     ///
+    /// The id is `keccak256(abi.encode(canonicalKey(from), salt))`, a function of the request and never of this
+    /// chain's ordering or clock: the same request lands under the same id in whatever block and whatever order,
+    /// so a validation attested to a satellite before this chain's finality keeps its id through a reorg. The
+    /// requester chooses the salt; a salt reused for the same wallet is refused, which also refuses a replayed
+    /// request instead of reserving twice. A request a reorg dropped is sent again with the same salt, by the
+    /// requester or by an agent reading the salt off the body the Lite holds: it issues the same id, sends nothing
+    /// to a chain that already reported a leg for it, and `settleParkedLeg` settles that leg, see `parkedLegOf`.
+    ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
+    /// - `keccak256(abi.encode(canonicalKey(from), salt))` not yet recorded; otherwise reverts with
+    ///   `ValidationAlreadyRequested`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
@@ -199,7 +237,9 @@ interface ITransferValidation {
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
-    /// Emits `TransferValidationIssued`, then the token's `ValidationRoutePinned` and `ProtocolMessageSent` per leg.
+    /// Emits `TransferValidationIssued`, then the token's `ValidationRoutePinned` and `ProtocolMessageSent` per leg
+    /// not already parked. No leg is sent to a chain that reported one for this id while nothing was issued: that
+    /// Lite executed it already, and the parked leg is settled by `settleParkedLeg` once this request issued it.
     ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
     /// reserved as `AwaitingApproval`, `TransferValidationAwaitingApproval` is emitted, the module is told, and
@@ -210,14 +250,16 @@ interface ITransferValidation {
     /// @param requestedMin Inclusive lower bound the caller proposes.
     /// @param requestedMax Inclusive upper bound the caller proposes.
     /// @param spender ERC-7930 address allowed to execute through `transferFrom`, or empty for `from` alone.
-    /// @return validationId The single-use id of the issued validation.
+    /// @param salt The requester's nonce for this movement; with `from`, it is the id.
+    /// @return validationId `keccak256(abi.encode(canonicalKey(from), salt))`, the single-use id of the validation.
     function requestTransferValidation(
         bytes calldata from,
         bytes calldata to,
         uint256 requestedMin,
         uint256 requestedMax,
-        bytes calldata spender
-    ) external returns (uint256 validationId);
+        bytes calldata spender,
+        bytes32 salt
+    ) external returns (bytes32 validationId);
 
     /// @dev Answers a validation `AwaitingApproval`: issues it, at most at `approvedMax`, or refuses it. Only the
     /// bound `APPROVAL` module answers, before the deadline. A request nobody answered is discarded with
@@ -236,10 +278,11 @@ interface ITransferValidation {
     /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
     /// - On an approval, every involved chain still open, configured and not paused, as at a request.
     ///
-    /// Emits `TransferValidationIssued` and sends the legs, or emits `ValidationApprovalRefused`.
+    /// Emits `TransferValidationIssued` and sends the legs not already parked, as `requestTransferValidation`
+    /// does, or emits `ValidationApprovalRefused`.
     /// @param validationId The validation awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
-    function answerApproval(uint256 validationId, uint256 approvedMax) external;
+    function answerApproval(bytes32 validationId, uint256 approvedMax) external;
 
     /// @dev Sets how long a validation stays executable on the satellite: `expiry` is issuance time plus this.
     ///
@@ -297,7 +340,7 @@ interface ITransferValidation {
     ///
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.
-    function discardExpiredValidations(uint256[] calldata validationIds) external;
+    function discardExpiredValidations(bytes32[] calldata validationIds) external;
 
     /// @dev Gives up on a pair of which exactly one leg ever arrived, a second reconciliation window past
     /// `releaseAt` so a merely slow leg still reconciles late instead. The burned amount goes back to the wallet
@@ -314,7 +357,7 @@ interface ITransferValidation {
     ///   the ledger crediting the sender for what the receiving chain minted.
     ///
     /// Emits `ValidationResolved`.
-    function resolveStuckValidation(uint256 validationId) external;
+    function resolveStuckValidation(bytes32 validationId) external;
 
     /// @dev Sends the leg of an issued validation toward `chainKey` again, byte for byte, through the gateway the
     /// issuance pinned. The way to recover a leg the transport lost before the satellite's deadline, instead of
@@ -360,7 +403,7 @@ interface ITransferValidation {
     /// @param chainKey The chain the leg goes to, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param to ERC-7930 interoperable address of the recipient, as issued.
     /// @param spender ERC-7930 address of the spender, as issued, or empty.
-    function resendValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+    function resendValidation(bytes32 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
         external;
 
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
@@ -374,12 +417,40 @@ interface ITransferValidation {
     /// @param chainKey The chain to look up.
     function isIssuancePaused(bytes32 chainKey) external view returns (bool);
 
-    /// @dev The last validation id issued; ids start at 1 and increase by one, so zero is never a valid id.
-    function lastValidationId() external view returns (uint256);
+    /// @dev Settles the leg `chainKey` parked under `validationId`, once a body is issued under the id. The leg is
+    /// judged exactly as it would have been at delivery, see {ISettlementHandler-handleSettlement}: applied and
+    /// `ParkedLegSettled` emitted, or refused with its verdict applied on the token through `IToken.applyVerdict`.
+    /// Its own call, for anyone, rather than a step of the issuance: a leg that reverts here, the second leg of a
+    /// pair parked at another amount (`SettlementAmountMismatch`) or a tracker module that refuses it, stays
+    /// parked and can be tried again, where a revert inside the request would have kept the id from ever being
+    /// issued. Once the keeper resolved the pair after the second window, the parked leg ends as a replay.
+    ///
+    /// Requirements:
+    /// - A leg must be parked under `(validationId, chainKey)` and the validation issued (its hash written);
+    ///   otherwise reverts with `ParkedLegNotSettleable`.
+    /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered leg waits under the pause
+    ///   the same way.
+    /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `ChainInboundPaused`. The
+    ///   leg was parked under that very pause: lifting it is the pauser's word that the chain's reports may be
+    ///   taken again, for a parked leg as for one waiting at the gateway.
+    ///
+    /// Emits `ParkedLegSettled`, or the event of the verdict reached.
+    /// @param validationId The validation the parked leg belongs to.
+    /// @param chainKey The chain the leg came from, keyed as `MessageTypesLib.chainKey` computes it.
+    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external;
+
+    /// @dev The leg `chainKey` reported for `validationId` while no body was issued under it, `exists` false
+    /// when none is parked. Parked by a settlement for an id never issued, or recorded but not sent (awaiting
+    /// approval, refused, or unanswered); settled by `settleParkedLeg` once the id is issued; left parked for good
+    /// when the id is refused or never requested again. The body the Lite holds carries the `salt`, so an agent
+    /// can send the request again on the requester's behalf.
+    /// @param validationId The validation to look up.
+    /// @param chainKey The chain the leg came from, keyed as `MessageTypesLib.chainKey` computes it.
+    function parkedLegOf(bytes32 validationId, bytes32 chainKey) external view returns (ParkedLeg memory);
 
     /// @dev Everything kept for `validationId`, all zeros when the id was never issued.
     /// @param validationId The validation to look up.
-    function validationOf(uint256 validationId) external view returns (Validation memory);
+    function validationOf(bytes32 validationId) external view returns (Validation memory);
 
     /// @dev Where `validationId` stands: the stored status, or `Expired` for a stored `Pending` past `releaseAt`
     /// and for a stored `AwaitingApproval` at or past `expiry`.
@@ -387,6 +458,6 @@ interface ITransferValidation {
     /// Requirements:
     /// - `validationId` must have been taken; otherwise reverts with `UnknownValidation`.
     /// @param validationId The validation to look up.
-    function statusOf(uint256 validationId) external view returns (ValidationStatus);
+    function statusOf(bytes32 validationId) external view returns (ValidationStatus);
 
 }

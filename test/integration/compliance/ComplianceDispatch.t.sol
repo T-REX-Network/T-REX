@@ -386,7 +386,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         vm.prank(deployer);
         mc.addModule(address(narrowing));
 
-        uint256 id = _requestValidation(address(aliceIdentity), from, to, 10, 100);
+        bytes32 id = _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
         assertEq(mc.validationOf(id).amountMax, 40, "narrowed to what the rule allows");
         assertEq(tracker.totalHookCalls(), 0);

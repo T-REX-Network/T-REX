@@ -19,9 +19,9 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 contract CallbackApprover is IAsyncApprover {
 
     address public askedCompliance;
-    uint256 public askedValidationId;
+    bytes32 public askedValidationId;
 
-    function approvalAsked(address compliance, uint256 validationId) external {
+    function approvalAsked(address compliance, bytes32 validationId) external {
         askedCompliance = compliance;
         askedValidationId = validationId;
     }
@@ -100,7 +100,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(ErrorsLib.ApproversNotSet.selector);
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 150, "");
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 150, "", _salt());
     }
 
     // ==== The waiting state ====
@@ -108,12 +108,15 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice A request is narrowed and reserved as always, but recorded as waiting: nothing is signed or sent.
     function test_requestTransferValidation_Success_WhenItWaitsForApproval() public {
         uint256 freeBefore = token.availableOf(aliceSat);
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(aliceSat, salt);
 
         vm.expectEmit(address(boundCompliance));
         emit EventsLib.TransferValidationAwaitingApproval(
-            1, aliceSat, bobSat, "", 10, 150, uint64(block.timestamp + VALIDITY_WINDOW)
+            id, aliceSat, bobSat, "", 10, 150, uint64(block.timestamp + VALIDITY_WINDOW)
         );
-        uint256 id = _request(10, 150);
+        vm.prank(address(aliceIdentity));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 150, "", salt);
 
         ITransferValidation.Validation memory waiting = boundCompliance.validationOf(id);
         assertEq(uint8(waiting.status), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
@@ -126,7 +129,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice One entry point: an agent's request waits as the identity's does.
     function test_requestTransferValidation_Success_WhenAnAgentRequestsItWaitsToo() public {
-        uint256 id = _requestValidation(agent, aliceSat, bobSat, 10, 150);
+        bytes32 id = _requestValidation(agent, aliceSat, bobSat, 10, 150);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
     }
@@ -135,7 +138,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     ///         and sends the legs. The satellite's deadline stays the request's: the wait comes out of it.
     function test_finalize_Success_WhenTheApproverApproved() public {
         uint256 requestedAt = block.timestamp;
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         vm.warp(block.timestamp + 10 minutes);
 
         vm.expectEmit(address(module));
@@ -158,7 +161,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice An approver can lower the maximum; the difference goes back at once.
     function test_approveValidation_Success_WhenTheApproverNarrows() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         uint256 freeWhileWaiting = token.availableOf(aliceSat);
 
         _approve(backend, id, 60);
@@ -172,7 +175,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice An approver can only narrow: a larger answer keeps the requested maximum.
     function test_approveValidation_Success_WhenTheAnswerIsAboveTheRequest() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         _approve(backend, id, 1000);
         _finalize(id);
@@ -183,7 +186,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice A refusal releases everything and sends nothing.
     function test_refuseValidation_Success_WhenTheApproverRefuses() public {
         uint256 freeBefore = token.availableOf(aliceSat);
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         vm.expectEmit(address(boundCompliance));
         emit EventsLib.ValidationApprovalRefused(id);
@@ -198,7 +201,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice A maximum below the requested minimum is a refusal.
     function test_approveValidation_Success_WhenTheAnswerIsBelowTheMinimumItRefuses() public {
-        uint256 id = _request(50, 150);
+        bytes32 id = _request(50, 150);
 
         _approve(backend, id, 40);
 
@@ -206,7 +209,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     }
 
     function test_approveValidation_RevertWhen_TheCallerIsNotTheApprover() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         vm.prank(riskDesk);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotTheNextApprover.selector, riskDesk, backend));
@@ -216,7 +219,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice Once every approver approved, nobody is left to answer and the caller is told to finalize; once
     ///         issued, the request is forgotten.
     function test_approveValidation_RevertWhen_TheRequestWasAlreadyAnswered() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
 
         vm.prank(backend);
@@ -234,7 +237,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     function test_finalize_RevertWhen_NotEveryApproverApproved() public {
         _setApprovers(backend, riskDesk);
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotFullyApproved.selector, id));
@@ -244,7 +247,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice A chain paused while the request waited makes `finalize` revert, never an approver. The request
     ///         stays fully approved, and `finalize` goes through once the chain is open again.
     function test_finalize_Success_WhenRetriedAfterAPausedChainReopens() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
         vm.prank(deployer);
         boundCompliance.setIssuancePaused(polygon, true);
@@ -265,7 +268,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice Approvers answer in order, and the lowest maximum wins.
     function test_approveValidation_Success_WhenTwoApproversAnswerInOrder() public {
         _setApprovers(backend, riskDesk);
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         vm.prank(riskDesk);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotTheNextApprover.selector, riskDesk, backend));
@@ -283,7 +286,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice The first refusal refuses: a later approver is never asked.
     function test_refuseValidation_Success_WhenTheSecondApproverRefuses() public {
         _setApprovers(backend, riskDesk);
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
 
         vm.prank(riskDesk);
@@ -299,7 +302,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     function test_approveValidation_Success_WhenAContractApproverAnswersFromItsCallback() public {
         CallbackApprover approver = new CallbackApprover();
         _setApprovers(address(approver), address(0));
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         assertEq(approver.askedValidationId(), id, "told in the request's transaction");
         assertEq(approver.askedCompliance(), address(boundCompliance));
 
@@ -316,7 +319,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     function test_requestTransferValidation_Success_WhenTheApproverContractDoesNotListen() public {
         _setApprovers(address(token), address(0));
 
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
     }
@@ -327,7 +330,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     ///         reservation comes back.
     function test_discardExpiredValidations_Success_WhenAnUnansweredRequestPassedItsDeadline() public {
         uint256 freeBefore = token.availableOf(aliceSat);
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         vm.warp(block.timestamp + VALIDITY_WINDOW);
 
         vm.prank(makeAddr("anyone"));
@@ -341,7 +344,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice A request nobody answered by its deadline reads `Expired`, as a `Pending` validation past its
     ///         release does: either can now be discarded.
     function test_statusOf_Success_WhenAnUnansweredRequestPassedItsDeadline() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         vm.warp(block.timestamp + VALIDITY_WINDOW - 1);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
 
@@ -355,7 +358,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     }
 
     function test_discardExpiredValidations_RevertWhen_TheRequestIsBeforeItsDeadline() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         uint64 deadline = uint64(block.timestamp + VALIDITY_WINDOW);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotReleasable.selector, id, deadline));
@@ -364,7 +367,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice Only the approval module answers, an approver calling the compliance directly included.
     function test_answerApproval_RevertWhen_TheCallerIsNotTheApprovalModule() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         vm.prank(backend);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotTheApprovalModule.selector, backend));
@@ -372,7 +375,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     }
 
     function test_finalize_RevertWhen_TheDeadlinePassed() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         uint64 deadline = uint64(block.timestamp + VALIDITY_WINDOW);
         _approve(backend, id, 150);
         vm.warp(deadline);
@@ -382,7 +385,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     }
 
     function test_answerApproval_RevertWhen_TheValidationIsNotWaiting() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
         _finalize(id);
 
@@ -398,7 +401,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice While waiting nothing was sent, so there is no leg to resend and nothing for the keeper.
     function test_resendValidation_RevertWhen_TheValidationIsWaiting() public {
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -417,7 +420,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     function test_requestTransferValidation_Success_WhenAnotherRuleNarrowsBeforeTheApprovers() public {
         _bindCap(60);
 
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         assertEq(module.requestOf(address(boundCompliance), id).amountMax, 60, "the approver sees the cap");
         _approve(backend, id, 150);
@@ -429,8 +432,8 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     function test_requestTransferValidation_Success_WhenTwoWaitingRequestsShareACap() public {
         _bindCap(200);
 
-        uint256 first = _request(10, 150);
-        uint256 second = _request(10, 150);
+        bytes32 first = _request(10, 150);
+        bytes32 second = _request(10, 150);
 
         assertEq(module.requestOf(address(boundCompliance), first).amountMax, 150);
         assertEq(module.requestOf(address(boundCompliance), second).amountMax, 50, "sees the first one waiting");
@@ -438,7 +441,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice A validation approved later settles on what the satellite reports, as any other.
     function test_handleSettlement_Success_WhenAnApprovedValidationSettles() public {
-        uint256 id = _request(0, 100);
+        bytes32 id = _request(0, 100);
         _approve(backend, id, 100);
         _finalize(id);
 
@@ -448,31 +451,36 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(_ledger().positionOf(address(bobIdentity)), 80);
     }
 
-    /// @notice Nothing was sent for a request still waiting, so a settlement for it can only come from a faulty
-    ///         or compromised satellite: the token halts and nothing is applied.
-    function test_handleSettlement_HaltsTheToken_WhenTheValidationIsStillWaiting() public {
-        uint256 id = _request(10, 150);
+    /// @notice Nothing was sent for a request still waiting, so a leg for it is one the satellite executed
+    ///         under a body this chain never issued: parked under the id, the chain paused, the request
+    ///         untouched. Issued, `settleParkedLeg` settles it; see `ReorgRecovery.t.sol`.
+    function test_handleSettlement_ParksTheLeg_WhenTheValidationIsStillWaiting() public {
+        bytes32 id = _request(10, 150);
 
-        uint256 index = _liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 100));
+        uint256 index = _liteSettles(gateway, token, _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body")));
         vm.expectEmit(address(boundCompliance));
-        emit EventsLib.ReplayedSettlement(id, polygon);
+        emit EventsLib.SettlementParked(id, polygon, 100, keccak256("body"));
         gateway.relay(index);
 
-        assertTrue(token.paused(), "halted");
+        assertFalse(token.paused(), "the token keeps running");
+        assertTrue(token.isInboundPaused(polygon), "the chain that executed what was never sent is paused");
+        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
     }
 
-    /// @notice A refusal is final: a settlement for the refused movement halts the token rather than being
-    ///         reconciled late, since it was never sent.
-    function test_handleSettlement_HaltsTheToken_WhenTheValidationWasRefused() public {
-        uint256 id = _request(10, 150);
+    /// @notice A refusal is final: a leg for the refused movement is parked for the operator rather than
+    ///         reconciled late, since it was never sent, and stays parked once refused.
+    function test_handleSettlement_ParksTheLeg_WhenTheValidationWasRefused() public {
+        bytes32 id = _request(10, 150);
         vm.prank(backend);
         module.refuseValidation(address(boundCompliance), id);
 
-        gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 100)));
+        gateway.relay(_liteSettles(gateway, token, _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body"))));
 
-        assertTrue(token.paused(), "halted");
+        assertFalse(token.paused());
+        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists, "left for the operator");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
     }
@@ -483,7 +491,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         bytes memory aliceOther = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOtherOnPolygon"));
 
         vm.prank(address(aliceIdentity));
-        uint256 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, 150, "");
+        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, 150, "", _salt());
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
         assertEq(gateway.queueLength(), 1, "sent in the request's own transaction");
@@ -494,7 +502,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     ///         under the old list. They are discarded at their deadline.
     function test_approveValidation_RevertWhen_TheApproversChanged() public {
         _setApprovers(backend, riskDesk);
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
 
         _setApprovers(riskDesk, address(0));
@@ -511,7 +519,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice Unbinding the module turns new requests back into immediate issuances, but a request already
     ///         waiting keeps waiting until its deadline, then is discarded.
     function test_removeModule_Success_WhenARequestIsAlreadyWaiting() public {
-        uint256 waiting = _request(10, 150);
+        bytes32 waiting = _request(10, 150);
         vm.prank(deployer);
         boundCompliance.removeModule(address(module));
 
@@ -526,7 +534,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         vm.prank(deployer);
         boundCompliance.removeModule(address(module));
 
-        uint256 id = _request(10, 150);
+        bytes32 id = _request(10, 150);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
         assertEq(gateway.queueLength(), 1);
@@ -694,21 +702,21 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         );
     }
 
-    function _request(uint256 min, uint256 max) private returns (uint256) {
+    function _request(uint256 min, uint256 max) private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, min, max);
     }
 
-    function _approve(address approver, uint256 validationId, uint256 amountMax) private {
+    function _approve(address approver, bytes32 validationId, uint256 amountMax) private {
         vm.prank(approver);
         module.approveValidation(address(boundCompliance), validationId, amountMax);
     }
 
-    function _finalize(uint256 validationId) private {
+    function _finalize(bytes32 validationId) private {
         module.finalize(address(boundCompliance), validationId);
     }
 
-    function _ids(uint256 validationId) private pure returns (uint256[] memory ids) {
-        ids = new uint256[](1);
+    function _ids(bytes32 validationId) private pure returns (bytes32[] memory ids) {
+        ids = new bytes32[](1);
         ids[0] = validationId;
     }
 

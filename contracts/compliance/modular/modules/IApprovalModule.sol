@@ -42,6 +42,6 @@ interface IApprovalModule {
     /// @param validationId the validation awaiting approval
     /// @param ctx the movement, as the rules saw it at the request, with the narrowed range
     /// @param deadline the last moment, exclusive, an answer from this module is taken
-    function approvalRequested(uint256 validationId, IModule.TransferContext calldata ctx, uint64 deadline) external;
+    function approvalRequested(bytes32 validationId, IModule.TransferContext calldata ctx, uint64 deadline) external;
 
 }

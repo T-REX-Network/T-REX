@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Reorg-stable validation ids, parked legs, and the hash in the settlement.** A validation may now be
+  attested to a satellite before the reference chain's finality. `validationId` is `bytes32`,
+  `keccak256(abi.encode(canonicalKey(from), salt))` for a `salt` the requester supplies to
+  `requestTransferValidation`, so the same request lands under the same id whatever block or order it lands in;
+  a salt reused for the same wallet, a replayed request included, reverts `ValidationAlreadyRequested`.
+  `lastValidationId` is gone. `SettlementNotification` carries `hash`, the `hashValidation` of the body the Lite
+  executed under, and `hashValidation` commits to the terms alone (id, wallets, spender, range, token), leaving
+  `expiry` and `reconciliationWindow` out so a body re-issued after a reorg dropped the first issuance hashes
+  the same. The body carries the `salt`, as does `TransferValidationIssued`, so an agent can send a dropped
+  request again from the Lite's copy. The settlement path never reverts on the leg itself and never halts the
+  token any more: a leg for an id nothing is issued under is parked (`SettlementParked`, `parkedLegOf`) and the
+  chain's inbound paused; the request sent again with the same salt issues the same id and sends no leg to the
+  chain that already executed, and `settleParkedLeg(validationId, chainKey)`, for anyone, then judges the leg as
+  a delivery would (`ParkedLegSettled`, or its verdict through `IToken.applyVerdict`); a leg that reverts there
+  stays parked and is tried again. A leg outside the issued terms is consumed with the chain paused: under the
+  issued hash, or from a chain the validation does not involve, the Lite broke a rule (`SettlementRejected`, the
+  validation stands); under another hash from an involved chain the satellite executed a body this chain never
+  canonically issued (`ValidationOrphaned`), and a `Pending` validation ends in the new terminal status
+  `Orphaned` with its reservation released. A leg inside the terms settles whatever hash
+  it carries, `SettlementBodyDiverged` on record when it is not the issued one. `SettlementLegMismatch` and
+  `SettlementOutOfBounds` are removed. `docs/satellite-lite.md` gains the "Lanes" section: which types may ride
+  before finality, and what a Lite does with a second body under a known id.
+
 - **Cross-chain requests can wait for an approval** (#127). A new module type, `APPROVAL`, one at most per
   compliance. While one is bound, `requestTransferValidation` narrows and reserves as before but records the
   validation as `AwaitingApproval` (`TransferValidationAwaitingApproval`) instead of issuing it, and tells the
@@ -13,7 +36,7 @@ All notable changes to this project will be documented in this file.
   executes. `answerApproval(validationId, approvedMax)`, from the module alone, issues it, narrowed when
   lower, or refuses it (`ValidationApprovalRefused`); `discardExpiredValidations` discards an unanswered one
   past its deadline, for anyone, and `statusOf` reads it `Expired` from then on. A settlement for a validation
-  never sent (waiting, refused or unanswered) halts the token, as one for an id never taken does. Errors
+  never sent (waiting, refused or unanswered) is parked, as one for an id never taken is. Errors
   `ValidationNotAwaitingApproval`, `NotTheApprovalModule`,
   `OneApprovalModuleOnly`. `AsyncApprovalModule` is the `APPROVAL` module: approvers set per compliance answer
   in order on the validation id and can only approve, narrow or refuse (`approveValidation`,
@@ -482,14 +505,15 @@ All notable changes to this project will be documented in this file.
 - **Compliance validation object and its issuance.** A satellite executes a transfer only against a
   `ComplianceValidation` the reference chain issued for that exact transfer; `ModularCompliance` now
   issues them.
-  - `MessageTypesLib.ComplianceValidation`: single-use `validationId`, ERC-7930 `from` / `to` (equal
+  - `MessageTypesLib.ComplianceValidation`: single-use `validationId`, `keccak256(canonicalKey(from), salt)`
+    for the salt the requester supplies, ERC-7930 `from` / `to` (equal
     chains mean a same-chain transfer, different chains a burn on `from`'s and a mint on `to`'s),
     `spender` (empty means only `from` executes), inclusive `amountMin` / `amountMax`, the
     reference-chain `token` address as canonical identifier, `expiry` (the satellite's hard deadline)
     and `reconciliationWindow` (how long T-REX keeps the slot past `expiry`). With its EIP-712
     `COMPLIANCE_VALIDATION_TYPEHASH`, `hashValidation` and the `encodeValidation` / `decodeValidation`
     codec.
-  - `ITransferValidation.requestTransferValidation(from, to, requestedMin, requestedMax, spender)`.
+  - `ITransferValidation.requestTransferValidation(from, to, requestedMin, requestedMax, spender, salt)`.
     Callable by the identity `from` is linked to, or by an `AGENT`. `from` must be a satellite wallet
     (`SenderNotOnSatellite`): the Lite executing a validation has to physically hold the position it
     moves, where a native balance stays free to leave between issuance and settlement; a native
@@ -537,8 +561,8 @@ All notable changes to this project will be documented in this file.
     `ValidationRecord` gained `fromKey`, `toKey` and `twoLegs`.
   - Settlement classification in `handleSettlement`: the token and the wallets must be the issued ones,
     the leg must come from the chain recorded for its side, and the amount must sit inside the issued
-    bounds; any mismatch reverts (`SettlementTokenMismatch`, `SettlementLegMismatch`,
-    `SettlementOutOfBounds`) and leaves the message deliverable. A same-chain movement, or one with a
+    bounds; a leg outside them is consumed with the chain's inbound paused (`SettlementRejected`,
+    `ValidationOrphaned`, see the first entry of this section). A same-chain movement, or one with a
     native side, settles on one leg carrying both wallets. A cross-chain movement takes two legs under
     one id, the burn leg with `to` empty from the sender's chain and the mint leg with `from` empty from
     the recipient's chain: the first to arrive, whichever it is, pins the validation as `LegConfirmed`
@@ -577,8 +601,8 @@ All notable changes to this project will be documented in this file.
     settlement delivery reverts with `EnforcedPause` and stays deliverable.
   - Events: `ValidationLegConfirmed`, `ValidationSettled`, `ValidationDiscarded`, `ReplayedSettlement`,
     `HeldInTransit`. Errors: `OnlyBoundCompliance`, `UnknownValidation`, `ValidationNotDiscardable`,
-    `ValidationNotReleasable`, `SettlementTokenMismatch`, `SettlementLegMismatch`,
-    `SettlementOutOfBounds`, `SettlementAmountMismatch`, `TransitAlreadyHeld`, `TransitAmountMismatch`.
+    `ValidationNotReleasable`, `SettlementTokenMismatch`, `SettlementAmountMismatch`, `TransitAlreadyHeld`,
+    `TransitAmountMismatch`.
   - Test assets: `CappedRecipientModule` (a cap over the ledger), the settlement-leg builders on
     `InteropSuiteTest`, and `ComplianceLedger.invariants.t.sol`, which holds the four ledger numbers
     to a recount of the token's buckets under fuzzed mints, burns, transfers, issuances, settlements

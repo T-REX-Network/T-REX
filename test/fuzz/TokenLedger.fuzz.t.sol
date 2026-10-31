@@ -81,12 +81,18 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
                 catch { }
         } else if (kind == 7) {
             try ledger.bridgedTransfer(
-                satellites[from], satellites[to], amount % (token.bridgedBalanceOf(satellites[from]) + 1), op
+                satellites[from],
+                satellites[to],
+                amount % (token.bridgedBalanceOf(satellites[from]) + 1),
+                bytes32(uint256(op))
             ) { }
                 catch { }
         } else {
             try ledger.settleToNative(
-                satellites[from], actors[to], amount % (token.bridgedBalanceOf(satellites[from]) + 1), op
+                satellites[from],
+                actors[to],
+                amount % (token.bridgedBalanceOf(satellites[from]) + 1),
+                bytes32(uint256(op))
             ) { }
                 catch { }
         }
@@ -159,7 +165,7 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         vm.startPrank(agent);
         token.mint(alice, mintAmount);
         ledger.ledgerDelegateOut(alice, satellites[0], delegated);
-        ledger.bridgedTransfer(satellites[0], satellites[2], settled, 1);
+        ledger.bridgedTransfer(satellites[0], satellites[2], settled, bytes32(uint256(1)));
         vm.stopPrank();
 
         assertEq(token.bridgedBalanceOf(satellites[0]), delegated - settled);
@@ -187,7 +193,7 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         assertEq(token.bridgedBalanceOf(satellites[1]), settled, "bridged after delegating out");
         assertEq(token.totalSupply(), mintAmount, "supply after delegating out");
 
-        ledger.settleToNative(satellites[1], alice, settled, 2);
+        ledger.settleToNative(satellites[1], alice, settled, bytes32(uint256(2)));
         vm.stopPrank();
 
         assertEq(token.balanceOf(alice), mintAmount, "balance after settling back");
@@ -211,11 +217,11 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         vm.expectRevert(expected);
         ledger.ledgerRecall(padded, alice, amount % 500);
         vm.expectRevert(expected);
-        ledger.bridgedTransfer(padded, satellites[1], amount % 500, 1);
+        ledger.bridgedTransfer(padded, satellites[1], amount % 500, bytes32(uint256(1)));
         vm.expectRevert(expected);
-        ledger.bridgedTransfer(satellites[0], padded, amount % 500, 1);
+        ledger.bridgedTransfer(satellites[0], padded, amount % 500, bytes32(uint256(1)));
         vm.expectRevert(expected);
-        ledger.settleToNative(padded, alice, amount % 500, 1);
+        ledger.settleToNative(padded, alice, amount % 500, bytes32(uint256(1)));
         vm.stopPrank();
 
         assertEq(token.bridgedBalanceOf(satellites[0]), 500);

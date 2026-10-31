@@ -24,7 +24,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
     /// @dev A non-EVM chain: CREATE3 gives no address there, so a peer must be registered explicitly.
     bytes32 solana = MessageTypesLib.chainKey(bytes2(0x0002), hex"01");
 
-    uint256 validationId = 1;
+    bytes32 validationId = bytes32(uint256(1));
     bytes validationBody = abi.encode(uint256(1), "validation");
 
     bytes aliceSat;
@@ -56,7 +56,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         return token.instructRecall(aliceSat, amount, alice);
     }
 
-    function _dispatch(uint256 id, bytes32 chainKey) private returns (bytes32) {
+    function _dispatch(bytes32 id, bytes32 chainKey) private returns (bytes32) {
         vm.prank(compliance);
         return token.dispatchComplianceValidation(chainKey, id, validationBody);
     }
@@ -176,8 +176,8 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _delegate(10);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(token.pinnedRouteFor(1, satellite), address(0));
-        assertEq(token.pinnedRouteFor(2, satellite), address(0));
+        assertEq(token.pinnedRouteFor(bytes32(uint256(1)), satellite), address(0));
+        assertEq(token.pinnedRouteFor(bytes32(uint256(2)), satellite), address(0));
     }
 
     /* ----- Recall instruction: an order out, a proof back ----- */
@@ -286,7 +286,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         trustedGatewayRegistry.setTrustedGateway(address(gateway), false);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
-        _dispatch(2, satellite);
+        _dispatch(bytes32(uint256(2)), satellite);
 
         assertEq(gateway.queueLength(), 1, "nothing new was queued");
         assertEq(token.routeFor(satellite), address(gateway), "the route is untouched, trust is what moved");

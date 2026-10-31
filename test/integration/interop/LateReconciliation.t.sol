@@ -54,9 +54,9 @@ contract LateReconciliationTest is InteropSuiteTest {
 
     /// @notice The full journey: discard, re-issue, then the old settlement lands and is applied regardless.
     function test_handleSettlement_Success_WhenASameChainSettlementLandsAfterTheDiscard() public {
-        uint256 late = _issue(aliceSat, bobSat, 10, CAP);
+        bytes32 late = _issue(aliceSat, bobSat, 10, CAP);
         _discard(late);
-        uint256 fresh = _issue(aliceSat, bobSat, 10, CAP);
+        bytes32 fresh = _issue(aliceSat, bobSat, 10, CAP);
         assertEq(
             IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
             CAP,
@@ -89,7 +89,7 @@ contract LateReconciliationTest is InteropSuiteTest {
         // Issuance toward polygon is stopped until the manager resumes it.
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
-        boundCompliance.requestTransferValidation(aliceSat, carolSat, 10, 50, "");
+        boundCompliance.requestTransferValidation(aliceSat, carolSat, 10, 50, "", _salt());
 
         vm.prank(deployer);
         boundCompliance.setIssuancePaused(polygon, false);
@@ -100,7 +100,7 @@ contract LateReconciliationTest is InteropSuiteTest {
     /// @notice A late burn leg records itself and warns; the late mint leg completes the pair and warns again.
     ///         Neither pauses: a first leg commits no module, and the pair leaves the cap intact.
     function test_handleSettlement_Success_WhenACrossChainSettlementLandsAfterTheDiscard() public {
-        uint256 late = _issue(aliceSat, bobOptimism, 90, 100);
+        bytes32 late = _issue(aliceSat, bobOptimism, 90, 100);
         _discard(late);
         uint256 burn = _liteSettles(polygonGateway, token, _burnLeg(late, token, aliceSat, 95));
         uint256 mint = _liteSettles(optimismGateway, token, _mintLeg(late, token, bobOptimism, 95));
@@ -137,7 +137,7 @@ contract LateReconciliationTest is InteropSuiteTest {
 
     /// @notice A late leg delivered twice is a replay like any other: its chain's inbound pauses.
     function test_handleSettlement_Success_WhenALateLegIsReplayed() public {
-        uint256 late = _issue(aliceSat, bobSat, 10, CAP);
+        bytes32 late = _issue(aliceSat, bobSat, 10, CAP);
         _discard(late);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP)));
         uint256 replay = _liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP));
@@ -154,7 +154,7 @@ contract LateReconciliationTest is InteropSuiteTest {
 
     /// @notice The warning never reverts: a chain the manager already paused stays paused, the leg settles.
     function test_handleSettlement_Success_WhenTheChainWasAlreadyPaused() public {
-        uint256 late = _issue(aliceSat, bobSat, 10, CAP);
+        bytes32 late = _issue(aliceSat, bobSat, 10, CAP);
         _discard(late);
         vm.prank(deployer);
         boundCompliance.setIssuancePaused(polygon, true);
@@ -169,13 +169,13 @@ contract LateReconciliationTest is InteropSuiteTest {
         assertEq(token.bridgedBalanceOf(bobSat), CAP);
     }
 
-    function _issue(bytes memory from, bytes memory to, uint256 min, uint256 max) private returns (uint256) {
+    function _issue(bytes memory from, bytes memory to, uint256 min, uint256 max) private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), from, to, min, max);
     }
 
-    function _discard(uint256 id) private {
+    function _discard(bytes32 id) private {
         vm.warp(block.timestamp + VALIDITY_WINDOW + OPTIMISM_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);

@@ -76,18 +76,18 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         return gateway.queueLength() - 1;
     }
 
-    function _issueAndDeliver(bytes memory to, uint256 min, uint256 max) private returns (uint256 id) {
+    function _issueAndDeliver(bytes memory to, uint256 min, uint256 max) private returns (bytes32 id) {
         id = _requestValidation(address(aliceIdentity), aliceSat, to, min, max);
         _relayAll(polygonGateway);
         _relayAll(optimismGateway);
     }
 
-    function _execute(uint256 id, uint256 amount) private {
+    function _execute(bytes32 id, uint256 amount) private {
         vm.prank(aliceOnPolygon.addr);
         polygonLite.execute(id, amount);
     }
 
-    function _status(uint256 id) private view returns (ITransferValidation.ValidationStatus) {
+    function _status(bytes32 id) private view returns (ITransferValidation.ValidationStatus) {
         return boundCompliance.statusOf(id);
     }
 
@@ -96,7 +96,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     /// @notice The sending Lite burns and tells both the reference chain and the receiving Lite; the receiving Lite
     ///         mints on that word and tells the reference chain; the pair settles at the amount the sender chose.
     function test_twoLegs_Success_WhenTheLitesDriveBothLegs() public {
-        uint256 id = _issueAndDeliver(bobOptimism, 90, 100);
+        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
         assertTrue(polygonLite.known(id));
         assertTrue(optimismLite.known(id));
 
@@ -122,7 +122,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     /// @notice The receiving Lite's copy of the validation was lost. The sender burns anyway; the burn message is
     ///         refused for want of the terms to check it against, the leg is sent again, and the pair settles.
     function test_twoLegs_Success_WhenTheReceivingLegIsLostAndResentAfterTheBurn() public {
-        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 90, 100);
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 90, 100);
         optimismGateway.drop(_last(optimismGateway));
         _relayAll(polygonGateway);
         assertTrue(polygonLite.known(id));
@@ -148,7 +148,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     }
 
     function test_twoLegs_RevertWhen_TheReceivingLiteMintsBeforeTheBurnMessage() public {
-        uint256 id = _issueAndDeliver(bobOptimism, 90, 100);
+        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
 
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.BurnNotReceived.selector, id));
         optimismLite.mintWithoutBurn(id);
@@ -160,7 +160,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     /// @notice A lost burn message leaves the pair waiting; after the second window the keeper returns the hold.
     function test_twoLegs_Resolved_WhenTheBurnMessageIsLost() public {
         uint256 issuedAt = block.timestamp;
-        uint256 id = _issueAndDeliver(bobOptimism, 90, 100);
+        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
         _execute(id, 95);
         optimismGateway.drop(_last(optimismGateway));
         _relayAll(polygonGateway);
@@ -179,7 +179,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     ///         settles: the ledger never credits the sender for what the receiving chain minted.
     function test_twoLegs_Success_WhenTheReceivingChainIsPausedAcrossTheSecondWindow() public {
         uint256 issuedAt = block.timestamp;
-        uint256 id = _issueAndDeliver(bobOptimism, 90, 100);
+        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
         _execute(id, 95);
         _relayAll(polygonGateway);
         assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
@@ -210,7 +210,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     /* ----- One leg ----- */
 
     function test_oneLeg_Success_WhenTheLiteSettlesToTheReferenceChain() public {
-        uint256 id = _issueAndDeliver(nativeBob, 100, 100);
+        bytes32 id = _issueAndDeliver(nativeBob, 100, 100);
 
         _execute(id, 100);
         _relayAll(polygonGateway);
@@ -223,7 +223,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     }
 
     function test_oneLeg_Success_WhenTheLiteSettlesOnItsOwnChain() public {
-        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
 
         _execute(id, 50);
         _relayAll(polygonGateway);
@@ -237,7 +237,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     ///         the Lite executed; the Lite holds the id already and ignores the copy, so nothing executes twice and
     ///         the settlement lands as it would have.
     function test_oneLeg_Success_WhenTheLegIsResentAfterTheLiteConsumedIt() public {
-        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
         _execute(id, 50);
         uint256 settlement = _last(polygonGateway);
         assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Pending));
@@ -260,7 +260,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     /* ----- The Lite's own rules ----- */
 
     function test_execute_RevertWhen_TheCallerIsNeitherSenderNorSpender() public {
-        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
 
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NotTheExecutor.selector, id, bob));
@@ -268,7 +268,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     }
 
     function test_execute_RevertWhen_TheValidationIsConsumed() public {
-        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
         _execute(id, 50);
 
         vm.prank(aliceOnPolygon.addr);
@@ -277,7 +277,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     }
 
     function test_execute_RevertWhen_TheValidationExpired() public {
-        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
         vm.warp(block.timestamp + VALIDITY_WINDOW);
 
         vm.prank(aliceOnPolygon.addr);
@@ -286,7 +286,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     }
 
     function test_execute_RevertWhen_TheAmountIsOutsideTheRange() public {
-        uint256 id = _issueAndDeliver(bobSat, 10, 50);
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
 
         vm.prank(aliceOnPolygon.addr);
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.AmountOutOfRange.selector, id, 51));
@@ -342,7 +342,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         vm.prank(agent);
         uint256 recallId = token.instructRecall(aliceSat, 200, alice);
         uint256 instruction = _last(polygonGateway);
-        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
         polygonGateway.relay(_last(polygonGateway));
         _execute(id, 400);
         polygonGateway.relay(_last(polygonGateway));
