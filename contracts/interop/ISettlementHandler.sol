@@ -114,15 +114,16 @@ interface ISettlementHandler {
     /// token stops taking that chain's messages until an agent has investigated. The burden is the Lite's: one
     /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. Four cases:
     /// - An id with no issued body: the leg is parked under its id and origin chain (`SettlementParked`), so the
-    ///   request, sent again with the same salt, issues the same id and settles it. A second leg from the same
-    ///   chain for a parked id is a replay.
+    ///   request, sent again with the same salt, issues the same id, and `settleParkedLeg` then judges it as any
+    ///   leg. A second leg from the same chain for a parked id is a replay.
     /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
     ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
     /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
     ///   issued (`SettlementRejected`); the validation stands, the discard and resolution paths still apply.
-    /// - A leg outside the issued terms carrying another hash: the satellite executed a body this chain never
-    ///   canonically issued (`ValidationOrphaned`). While no leg had landed the validation ends `Orphaned` and its
-    ///   reservation is released; otherwise it stands and the keeper resolves the pair after the second window.
+    /// - A leg outside the issued terms carrying another hash, from a chain the validation involves: the satellite
+    ///   executed a body this chain never canonically issued (`ValidationOrphaned`). While `Pending` the validation
+    ///   ends `Orphaned` and its reservation is released; otherwise it stands. From any other chain the leg is
+    ///   rejected whatever hash it names: that chain could not have executed anything under the id.
     /// A revert, from a tracker module for instance, leaves the message deliverable again; a silent failure would
     /// instead leave it marked as received and unretryable.
     /// @param originChainKey The key of the chain the notification came from.

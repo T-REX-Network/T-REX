@@ -268,6 +268,13 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
+    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, so
+    ///  settling it decides nothing a caller could abuse, as relaying a delivery decides nothing.
+    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external {
+        _settleParkedLeg(validationId, chainKey);
+    }
+
+    /// @inheritdoc ITransferValidation
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
     function discardExpiredValidations(bytes32[] calldata validationIds) external {

@@ -310,6 +310,9 @@ contract MessageTypesLibUnitTest is Test {
         assertEq(MessageTypesLib.hashValidation(v), base);
         v.reconciliationWindow += 1 hours;
         assertEq(MessageTypesLib.hashValidation(v), base);
+        // The id commits to the salt already.
+        v.salt = bytes32(uint256(6));
+        assertEq(MessageTypesLib.hashValidation(v), base);
     }
 
     function testTypedDecodeRevertsOnAForeignBody() public {
@@ -332,6 +335,7 @@ contract MessageTypesLibUnitTest is Test {
     function _validation(bytes memory spender) private pure returns (MessageTypesLib.ComplianceValidation memory) {
         return MessageTypesLib.ComplianceValidation({
             validationId: bytes32(uint256(7)),
+            salt: bytes32(uint256(5)),
             from: hex"0001000001890114",
             to: hex"00010000010a0114",
             spender: spender,

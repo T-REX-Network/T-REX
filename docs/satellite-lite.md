@@ -11,7 +11,7 @@ reference chain against it.
 
 | Direction | Type | Body | What the Lite does |
 |---|---|---|---|
-| in | `COMPLIANCE_VALIDATION` | `ComplianceValidation` | stores it under `validationId`, with `hashValidation` of it |
+| in | `COMPLIANCE_VALIDATION` | `ComplianceValidation { validationId, salt, from, to, spender, amountMin, amountMax, token, expiry, reconciliationWindow }` | stores it under `validationId`, with `hashValidation` of it |
 | in | `MINT_INSTRUCTION` | `MintInstruction { delegationId, toWallet, amount, holder }` | mints `amount` to `toWallet`, once per `delegationId` |
 | in | `RECALL_INSTRUCTION` | `RecallInstruction { recallId, wallet, amount, nativeWallet }` | burns up to `amount` of `wallet` once, answers with a `BurnProof` |
 | out | `SETTLEMENT_NOTIFICATION` | `SettlementNotification { validationId, from, to, amount, hash }` | one per leg it executed, `hash` being the hash of the body it executed under |
@@ -78,15 +78,19 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
 
 - **Re-included in another order.** The id is the same, since it never depended on the order. Nothing to do.
 - **Dropped.** The leg reaches the reference chain under an id nothing is issued under: the leg is parked
-  (`SettlementParked`) and the chain's inbound is paused. Once the pause is lifted, the request sent again with
-  the same `salt` issues the same id, sends no leg to the chain that already executed, and settles the parked leg
-  (`ParkedLegSettled`), or judges it as below when the executed amount falls outside the re-issued terms.
+  (`SettlementParked`, `parkedLegOf`) and the chain's inbound is paused. Once the pause is lifted, the request
+  sent again with the same `salt` issues the same id and sends no leg to the chain that already executed; the body
+  carries the `salt`, so an agent can send it on the requester's behalf from the Lite's copy. Anyone then calls
+  `settleParkedLeg(validationId, chainKey)`, which judges the leg as a delivery would (`ParkedLegSettled`, or one
+  of the outcomes below); a leg that reverts there stays parked and is tried again, and once the keeper resolved
+  the pair it ends as a replay.
 - **Re-issued with another body.** The hash in the report tells the two cases apart. A leg inside the issued terms
   settles whatever hash it carries (`SettlementBodyDiverged` when it is not the issued one). A leg outside the
-  terms with the issued hash is a Lite that broke rule 5 or 6 (`SettlementRejected`); one with another hash
-  executed a body this chain never canonically issued (`ValidationOrphaned`): while no leg had landed the
-  validation ends `Orphaned` and its reservation is released, otherwise it stands for the keeper to resolve.
-  Nothing is applied either way, and the chain is paused.
+  terms with the issued hash is a Lite that broke rule 5 or 6 (`SettlementRejected`); one with another hash, from
+  a chain the validation involves, executed a body this chain never canonically issued (`ValidationOrphaned`):
+  while `Pending` the validation ends `Orphaned` and its reservation is released, otherwise it stands. A leg from
+  any other chain is rejected whatever hash it names, since that chain could not have executed anything under the
+  id. Nothing is applied either way, and the chain is paused.
 
 The hash commits to the terms alone, the id, the wallets, the spender, the range and the token: `expiry` and
 `reconciliationWindow` are read off the issuing block's clock and are left out, so a body re-issued after a drop
@@ -118,7 +122,7 @@ peer change with validations in flight is to be avoided as a route change is.
 | Broken rule | Reference-chain reaction |
 |---|---|
 | 3, 7: a settlement leg delivered again, a leg for a pair the keeper already resolved, or a second leg from one chain for a parked id | `ReplayedSettlement`, the token stops taking that chain's messages (`setInboundPaused`) |
-| a settlement for a validation never issued, or recorded but never sent | `SettlementParked`, the leg kept under its id, the token stops taking that chain's messages; the request sent again with the same salt settles it |
+| a settlement for a validation never issued, or recorded but never sent | `SettlementParked`, the leg kept under its id, the token stops taking that chain's messages; once the request is sent again with the same salt, `settleParkedLeg` settles it |
 | 5, 6: amount outside the range, wrong wallets or chain, under the issued hash | `SettlementRejected`, consumed, the token stops taking that chain's messages; the validation stands |
 | 5, 6 under another hash: a body the reference chain never canonically issued | `ValidationOrphaned`, consumed, the token stops taking that chain's messages; `Orphaned` while no leg had landed |
 | 8: two legs with two amounts | `SettlementAmountMismatch` on the second; the keeper resolves the pair after the second window |

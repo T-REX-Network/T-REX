@@ -233,7 +233,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.TransferValidationIssued(
-            id, aliceSat, bobSat, "", 10, 90, uint64(1_700_000_000 + VALIDITY_WINDOW), POLYGON_WINDOW
+            id, aliceSat, bobSat, "", 10, 90, uint64(1_700_000_000 + VALIDITY_WINDOW), POLYGON_WINDOW, salt
         );
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ValidationRoutePinned(id, polygon, address(polygonGateway));

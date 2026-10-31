@@ -453,7 +453,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     /// @notice Nothing was sent for a request still waiting, so a leg for it is one the satellite executed
     ///         under a body this chain never issued: parked under the id, the chain paused, the request
-    ///         untouched. Issued, the request settles the parked leg; see `ReorgRecovery.t.sol`.
+    ///         untouched. Issued, `settleParkedLeg` settles it; see `ReorgRecovery.t.sol`.
     function test_handleSettlement_ParksTheLeg_WhenTheValidationIsStillWaiting() public {
         bytes32 id = _request(10, 150);
 

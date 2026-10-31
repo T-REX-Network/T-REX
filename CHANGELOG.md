@@ -13,14 +13,17 @@ All notable changes to this project will be documented in this file.
   `lastValidationId` is gone. `SettlementNotification` carries `hash`, the `hashValidation` of the body the Lite
   executed under, and `hashValidation` commits to the terms alone (id, wallets, spender, range, token), leaving
   `expiry` and `reconciliationWindow` out so a body re-issued after a reorg dropped the first issuance hashes
-  the same. The settlement path never reverts on the leg itself and never halts the token any more: a leg for an
-  id nothing is issued under is parked (`SettlementParked`, `parkedLegOf`) and the chain's inbound paused; the
-  request sent again with the same salt issues the same id, sends no leg to the chain that already executed,
-  and settles the parked leg (`ParkedLegSettled`) through `IToken.applyVerdict` when a verdict applies. A leg
-  outside the issued terms is consumed with the chain paused: under the issued hash the Lite broke a rule
-  (`SettlementRejected`, the validation stands); under another hash the satellite executed a body this chain
-  never canonically issued (`ValidationOrphaned`), and the validation ends in the new terminal status
-  `Orphaned` with its reservation released while no leg had landed. A leg inside the terms settles whatever hash
+  the same. The body carries the `salt`, as does `TransferValidationIssued`, so an agent can send a dropped
+  request again from the Lite's copy. The settlement path never reverts on the leg itself and never halts the
+  token any more: a leg for an id nothing is issued under is parked (`SettlementParked`, `parkedLegOf`) and the
+  chain's inbound paused; the request sent again with the same salt issues the same id and sends no leg to the
+  chain that already executed, and `settleParkedLeg(validationId, chainKey)`, for anyone, then judges the leg as
+  a delivery would (`ParkedLegSettled`, or its verdict through `IToken.applyVerdict`); a leg that reverts there
+  stays parked and is tried again. A leg outside the issued terms is consumed with the chain paused: under the
+  issued hash, or from a chain the validation does not involve, the Lite broke a rule (`SettlementRejected`, the
+  validation stands); under another hash from an involved chain the satellite executed a body this chain never
+  canonically issued (`ValidationOrphaned`), and a `Pending` validation ends in the new terminal status
+  `Orphaned` with its reservation released. A leg inside the terms settles whatever hash
   it carries, `SettlementBodyDiverged` on record when it is not the issued one. `SettlementLegMismatch` and
   `SettlementOutOfBounds` are removed. `docs/satellite-lite.md` gains the "Lanes" section: which types may ride
   before finality, and what a Lite does with a second body under a known id.

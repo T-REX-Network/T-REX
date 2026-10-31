@@ -116,8 +116,10 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @inheritdoc ITransferValidation
     /// @dev Five questions, in order: where is this going, may the caller ask for it, by when must it happen,
-    ///  how much may actually move, and may the named spender execute it. Only then is anything written. A leg a
-    ///  satellite already reported under this id, parked while nothing was issued, is settled last.
+    ///  how much may actually move, and may the named spender execute it. Only then is anything written. A chain
+    ///  that already reported a leg under this id, parked while nothing was issued, is not sent to; the parked
+    ///  leg is settled by {settleParkedLeg}, its own call, so nothing it may revert on can keep the request from
+    ///  issuing.
     function requestTransferValidation(
         bytes calldata from,
         bytes calldata to,
@@ -139,7 +141,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
         // Issued and sent at once, or kept awaiting approval while an `APPROVAL` module is bound.
         validationId = TransferValidationLib.issue(from, to, spender, salt, draft, address(_boundToken()));
-        _settleParkedLegs(validationId);
     }
 
     /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
@@ -246,10 +247,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @inheritdoc ITransferValidation
     /// @dev The answer, the narrowing and the legs live in {TransferValidationLib-answerApproval}; a leg parked
-    ///  under the id is settled once it is issued, and left parked when it is refused.
+    ///  under the id waits for {settleParkedLeg} once it is issued, and stays parked when it is refused.
     function answerApproval(bytes32 validationId, uint256 approvedMax) external {
         TransferValidationLib.answerApproval(validationId, approvedMax, address(_boundToken()));
-        _settleParkedLegs(validationId);
     }
 
     /// @inheritdoc ITransferValidation
@@ -324,9 +324,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         return ISettlementHandler.Verdict.None;
     }
 
-    /// @dev Keeps a leg reported for an id nothing was issued under, one per origin chain, so that the request
-    ///  sent again with the same salt can settle it, see {_settleParkedLegs}. A second leg from the same chain is
-    ///  a replay. Either way the chain is paused: it executed what this chain never sent.
+    /// @dev Keeps a leg reported for an id nothing was issued under, one per origin chain, so that once the request
+    ///  is sent again with the same salt it can be settled, see {_settleParkedLeg}. A second leg from the same
+    ///  chain is a replay. Either way the chain is paused: it executed what this chain never sent.
     function _park(
         TransferValidationLib.ValidationStorage storage store,
         bytes32 originChainKey,
@@ -348,52 +348,51 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         return ISettlementHandler.Verdict.PauseChain;
     }
 
-    /// @dev A leg outside the issued terms. The hash it carries says which of two things happened. The issued
-    ///  hash: the Lite broke rule 5 or 6 on the body this chain issued; the validation stands, so the discard and
-    ///  the resolution still have their say. Another hash: the Lite executed a body this chain never canonically
-    ///  issued, which a reorg orphaned; while no leg had landed the validation ends `Orphaned` and whatever it
-    ///  reserved comes back, since the tokens moved under terms this chain never reserved for and the ledger
-    ///  cannot absorb an amount outside them; once a leg had landed it stands, and the keeper resolves the pair
-    ///  after the second window. Nothing is applied either way, and the chain that executed is paused.
+    /// @dev A leg outside the issued terms. Nothing is applied, and the chain that sent it is paused. Which
+    ///  event records it depends on who could have executed it and on the hash it carries. A chain the validation
+    ///  does not involve could not have executed anything under it, whatever hash it names: rejected. The issued
+    ///  hash from an involved chain: the Lite broke rule 5 or 6 on the body this chain issued; rejected, and the
+    ///  validation stands, so the discard and the resolution still have their say. Another hash from an involved
+    ///  chain: the Lite executed a body this chain never canonically issued, which a reorg orphaned. While the
+    ///  validation is `Pending` it ends `Orphaned` and what it reserved comes back, since the tokens moved under
+    ///  terms this chain never reserved for and the ledger cannot absorb an amount outside them. In any other
+    ///  state it stands: a leg already landed and the keeper resolves the pair after the second window, or the
+    ///  discard already gave the reservation back.
+    ///
+    ///  The hash is the Lite's word, which is why the orphaned reading is confined to the chains the validation
+    ///  names: the most a Lite gains by naming another hash is to end its own validation early, on its own chain,
+    ///  which is paused for it.
     function _refuse(
         Validation storage validation,
         bytes32 originChainKey,
         MessageTypesLib.SettlementNotification memory notification
     ) private returns (ISettlementHandler.Verdict) {
-        if (notification.hash == validation.hash) {
+        bool involved =
+            originChainKey == validation.fromChainKey || (validation.twoLegs && originChainKey == validation.toChainKey);
+        if (!involved || notification.hash == validation.hash) {
             emit EventsLib.SettlementRejected(
                 notification.validationId, originChainKey, notification.amount, notification.hash
             );
             return ISettlementHandler.Verdict.PauseChain;
         }
-        ValidationStatus status = validation.status;
-        if (status == ValidationStatus.Pending || status == ValidationStatus.Discarded) {
-            _moveTo(validation, ValidationStatus.Orphaned, false);
-        }
+        if (validation.status == ValidationStatus.Pending) _moveTo(validation, ValidationStatus.Orphaned, false);
         emit EventsLib.ValidationOrphaned(
             notification.validationId, originChainKey, notification.amount, notification.hash
         );
         return ISettlementHandler.Verdict.PauseChain;
     }
 
-    /// @dev Settles the legs parked under `validationId` once a body is issued under it: each is judged as it
-    ///  would have been at delivery, and its verdict applied on the token as it would have been then. Nothing to
-    ///  do while nothing is issued, which is a request kept `AwaitingApproval` or refused.
-    function _settleParkedLegs(bytes32 validationId) private {
+    /// @dev See {ITransferValidation-settleParkedLeg}. The leg is judged as it would have been at delivery, and its
+    ///  verdict applied on the token as it would have been then. A revert anywhere below leaves the leg parked, as
+    ///  a revert at delivery leaves the message deliverable; the next call tries again.
+    function _settleParkedLeg(bytes32 validationId, bytes32 chainKey) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        Validation storage validation = store.validations[validationId];
-        if (validation.hash == bytes32(0)) return;
-        _settleParkedLeg(store, validationId, validation.fromChainKey);
-        if (validation.twoLegs) _settleParkedLeg(store, validationId, validation.toChainKey);
-    }
-
-    function _settleParkedLeg(
-        TransferValidationLib.ValidationStorage storage store,
-        bytes32 validationId,
-        bytes32 chainKey
-    ) private {
         ParkedLeg memory parked = store.parkedLegs[validationId][chainKey];
-        if (!parked.exists) return;
+        require(
+            parked.exists && store.validations[validationId].hash != bytes32(0),
+            ErrorsLib.ParkedLegNotSettleable(validationId, chainKey)
+        );
+        require(!_boundToken().paused(), ErrorsLib.TokenPaused());
         delete store.parkedLegs[validationId][chainKey];
 
         ISettlementHandler.Verdict verdict = _classify(
@@ -776,8 +775,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Puts the amount held for `validationId` back on the wallet it was burned from, on the token.
     function _returnHeldOnToken(bytes memory to, bytes32 validationId) internal virtual;
 
-    /// @dev Applies, on the token, the verdict a parked leg got when the issuance of its id settled it: the brake
-    ///  it would have got at delivery, see {IToken-applyVerdict}.
+    /// @dev Applies, on the token, the verdict a parked leg got when it was settled: the brake it would have got
+    ///  at delivery, see {IToken-applyVerdict}.
     function _applyVerdictOnToken(bytes32 chainKey, ISettlementHandler.Verdict verdict) internal virtual;
 
     /* ----- Shared by the three flows ----- */

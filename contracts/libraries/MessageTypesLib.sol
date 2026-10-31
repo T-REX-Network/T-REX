@@ -113,6 +113,10 @@ library MessageTypesLib {
         /// issuance leaves the id the satellite executed under unchanged. Single-use: consumed on the satellite, keys
         /// the record on T-REX.
         bytes32 validationId;
+        /// The requester's nonce the id was derived from. Carried so that the satellite chain, where the body is
+        /// final, holds what it takes to send the request again should a reorg drop its issuance: an agent reads
+        /// it off the Lite and re-issues the same id. Not part of {hashValidation}: the id commits to it.
+        bytes32 salt;
         /// ERC-7930 sender. Its chain reference against `to`'s decides same-chain transfer or burn-and-mint.
         bytes from;
         /// ERC-7930 recipient.

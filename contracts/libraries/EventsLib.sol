@@ -222,7 +222,8 @@ library EventsLib {
         uint256 amountMin,
         uint256 amountMax,
         uint64 expiry,
-        uint64 reconciliationWindow
+        uint64 reconciliationWindow,
+        bytes32 salt
     );
     /// @notice Warning: a reconciliation of `validationId` arrived from `chainKey` after its release deadline.
     ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
@@ -264,10 +265,10 @@ library EventsLib {
     event ReplayedSettlement(bytes32 indexed validationId, bytes32 indexed chainKey);
     /// @notice A leg arrived from `chainKey` for an id with no issued body: the satellite executed a validation
     ///         this chain never sent, which a reorg that dropped the issuance explains as well as a hostile Lite.
-    ///         The leg is kept under its id and the token pauses its inbound from `chainKey`. The request, sent
-    ///         again with the same salt, settles the parked leg.
+    ///         The leg is kept under its id and the token pauses its inbound from `chainKey`. Once the request is
+    ///         sent again with the same salt, `settleParkedLeg` settles it.
     event SettlementParked(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
-    /// @notice A parked leg from `chainKey` was settled by the issuance of its validation.
+    /// @notice A parked leg from `chainKey` was settled, once its validation was issued.
     event ParkedLegSettled(bytes32 indexed validationId, bytes32 indexed chainKey);
     /// @notice A leg from `chainKey` carries the issued hash but wallets or an amount outside the issued terms:
     ///         the Lite broke a rule on the body this chain issued. Nothing is applied, the validation stands,

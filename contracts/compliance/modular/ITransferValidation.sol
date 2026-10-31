@@ -79,7 +79,8 @@ interface ITransferValidation {
         uint256 amountMin,
         uint256 amountMax,
         uint64 expiry,
-        uint64 reconciliationWindow
+        uint64 reconciliationWindow,
+        bytes32 salt
     );
 
     /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
@@ -182,11 +183,17 @@ interface ITransferValidation {
         uint256 executedAmount;
         /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
         bytes legWallet;
+
+        /* ----- Written once, at issuance; last for the layout's sake ----- */
+
+        /// The requester's nonce the id was derived from, carried in the issued body and kept for a resend.
+        bytes32 salt;
     }
 
-    /// @dev A settlement leg that arrived for an id with no issued body, kept so the request, sent again with the
-    /// same salt after a reorg dropped its issuance, can settle it. One per origin chain, so a pair can park both
-    /// its legs. The delivery that carried it is consumed; this is all that is left of it.
+    /// @dev A settlement leg that arrived for an id with no issued body, kept so that once the request is sent
+    /// again with the same salt after a reorg dropped its issuance, `settleParkedLeg` can settle it. One per origin
+    /// chain, so a pair can park both its legs. The delivery that carried it is consumed; this is all that is left
+    /// of it.
     struct ParkedLeg {
         /// ERC-7930; empty on the mint leg.
         bytes from;
@@ -211,8 +218,9 @@ interface ITransferValidation {
     /// chain's ordering or clock: the same request lands under the same id in whatever block and whatever order,
     /// so a validation attested to a satellite before this chain's finality keeps its id through a reorg. The
     /// requester chooses the salt; a salt reused for the same wallet is refused, which also refuses a replayed
-    /// request instead of reserving twice. A request a reorg dropped is sent again with the same salt: it issues
-    /// the same id and settles the leg the satellite may already have reported for it, see `parkedLegOf`.
+    /// request instead of reserving twice. A request a reorg dropped is sent again with the same salt, by the
+    /// requester or by an agent reading the salt off the body the Lite holds: it issues the same id, sends nothing
+    /// to a chain that already reported a leg for it, and `settleParkedLeg` settles that leg, see `parkedLegOf`.
     ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
@@ -230,8 +238,8 @@ interface ITransferValidation {
     /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
     /// Emits `TransferValidationIssued`, then the token's `ValidationRoutePinned` and `ProtocolMessageSent` per leg
-    /// not already parked. A leg parked under the id is settled instead of sent, emitting `ParkedLegSettled`, or
-    /// judged as any leg is, see {ISettlementHandler-handleSettlement}, with its verdict applied on the token.
+    /// not already parked. No leg is sent to a chain that reported one for this id while nothing was issued: that
+    /// Lite executed it already, and the parked leg is settled by `settleParkedLeg` once this request issued it.
     ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
     /// reserved as `AwaitingApproval`, `TransferValidationAwaitingApproval` is emitted, the module is told, and
@@ -270,8 +278,8 @@ interface ITransferValidation {
     /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
     /// - On an approval, every involved chain still open, configured and not paused, as at a request.
     ///
-    /// Emits `TransferValidationIssued` and sends the legs not already parked, settling or judging a parked one as
-    /// `requestTransferValidation` does, or emits `ValidationApprovalRefused`.
+    /// Emits `TransferValidationIssued` and sends the legs not already parked, as `requestTransferValidation`
+    /// does, or emits `ValidationApprovalRefused`.
     /// @param validationId The validation awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
     function answerApproval(bytes32 validationId, uint256 approvedMax) external;
@@ -409,10 +417,30 @@ interface ITransferValidation {
     /// @param chainKey The chain to look up.
     function isIssuancePaused(bytes32 chainKey) external view returns (bool);
 
+    /// @dev Settles the leg `chainKey` parked under `validationId`, once a body is issued under the id. The leg is
+    /// judged exactly as it would have been at delivery, see {ISettlementHandler-handleSettlement}: applied and
+    /// `ParkedLegSettled` emitted, or refused with its verdict applied on the token through `IToken.applyVerdict`.
+    /// Its own call, for anyone, rather than a step of the issuance: a leg that reverts here, the second leg of a
+    /// pair parked at another amount (`SettlementAmountMismatch`) or a tracker module that refuses it, stays
+    /// parked and can be tried again, where a revert inside the request would have kept the id from ever being
+    /// issued. Once the keeper resolved the pair after the second window, the parked leg ends as a replay.
+    ///
+    /// Requirements:
+    /// - A leg must be parked under `(validationId, chainKey)` and the validation issued (its hash written);
+    ///   otherwise reverts with `ParkedLegNotSettleable`.
+    /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered leg waits under the pause
+    ///   the same way.
+    ///
+    /// Emits `ParkedLegSettled`, or the event of the verdict reached.
+    /// @param validationId The validation the parked leg belongs to.
+    /// @param chainKey The chain the leg came from, keyed as `MessageTypesLib.chainKey` computes it.
+    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external;
+
     /// @dev The leg `chainKey` reported for `validationId` while no body was issued under it, `exists` false
     /// when none is parked. Parked by a settlement for an id never issued, or recorded but not sent (awaiting
-    /// approval, refused, or unanswered); settled or judged by the issuance of that id; left parked for good when
-    /// the id is refused or never requested again.
+    /// approval, refused, or unanswered); settled by `settleParkedLeg` once the id is issued; left parked for good
+    /// when the id is refused or never requested again. The body the Lite holds carries the `salt`, so an agent
+    /// can send the request again on the requester's behalf.
     /// @param validationId The validation to look up.
     /// @param chainKey The chain the leg came from, keyed as `MessageTypesLib.chainKey` computes it.
     function parkedLegOf(bytes32 validationId, bytes32 chainKey) external view returns (ParkedLeg memory);

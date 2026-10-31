@@ -72,6 +72,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.mockCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), "");
         vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
         vm.mockCall(token, abi.encodeWithSelector(IToken.applyVerdict.selector), "");
+        vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(false));
         _bind(fromSat, aliceIdentity);
         _bind(nativeBob, bobIdentity);
         _bind(toSat, bobIdentity);
@@ -157,6 +158,40 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
             uint8(mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50))),
             uint8(ISettlementHandler.Verdict.PauseChain)
         );
+    }
+
+    /// @notice A chain the validation does not involve could not have executed anything under it: whatever hash
+    ///         it names, its leg is rejected, never orphaned, so no peer can end another chain's validation.
+    function test_handleSettlement_Success_WhenAnUninvolvedChainNamesAnotherHash() public {
+        bytes32 id = _issue();
+
+        vm.prank(token);
+        _assertRejected(id, optimism, _legUnder(id, fromSat, toSat, 95, keccak256("not the issued body")));
+        vm.prank(token);
+        _assertRejected(id, _evmChainKey(block.chainid), _legUnder(id, fromSat, toSat, 50, keccak256("another")));
+
+        _assertUntouched(id);
+        assertEq(mc.pendingInOf(bobId), 90, "still reserved");
+    }
+
+    /// @notice An orphaned leg for a validation already discarded: the discard gave the reservation back, so
+    ///         nothing moves and the validation stands; only the record and the pause.
+    function test_handleSettlement_Success_WhenAnOrphanedBodyWasExecutedAfterTheDiscard() public {
+        bytes32 id = _issue();
+        _discardAt(id);
+        assertEq(mc.pendingInOf(bobId), 0);
+
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ValidationOrphaned(id, polygon, 95, keccak256("orphaned"));
+        vm.prank(token);
+        assertEq(
+            uint8(mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 95, keccak256("orphaned")))),
+            uint8(ISettlementHandler.Verdict.PauseChain)
+        );
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(mc.pendingInOf(bobId), 0, "nothing released twice");
+        assertEq(TokenReservationStub(token).reservedOf(fromSat), 0);
     }
 
     /// @notice The same orphaned leg once a leg had already landed: nothing can be released, the pair stands
@@ -571,9 +606,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         );
     }
 
-    /// @notice The request sent again with the same salt issues the same id and settles the parked leg instead
-    ///         of sending the leg to a chain that already executed it.
-    function test_requestTransferValidation_Success_WhenItSettlesTheLegParkedUnderItsId() public {
+    /// @notice Once the request is sent again with the same salt, the parked leg is settled by its own call: the
+    ///         issuance sent nothing to the chain that already executed.
+    function test_settleParkedLeg_Success_WhenTheRequestWasIssuedAgain() public {
         _track();
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
@@ -582,13 +617,18 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, executedUnder));
 
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 0);
+        vm.prank(aliceIdentity);
+        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt), id);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertTrue(mc.parkedLegOf(id, polygon).exists, "still parked: the issuance settles nothing");
+
         vm.expectCall(token, abi.encodeWithSelector(IToken.applyVerdict.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.SettlementBodyDiverged(id, polygon, executedUnder);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ParkedLegSettled(id, polygon);
-        vm.prank(aliceIdentity);
-        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt), id);
+        vm.prank(stranger);
+        mc.settleParkedLeg(id, polygon);
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
         assertEq(mc.validationOf(id).executedAmount, 50);
@@ -597,21 +637,21 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingInOf(bobId), 0);
     }
 
-    /// @notice A parked leg outside the re-issued terms gets, at issuance, the verdict it would have got at
-    ///         delivery: the body it executed was orphaned, the validation ends there, and the token is told to
-    ///         pause the chain.
-    function test_requestTransferValidation_Success_WhenTheParkedLegFallsOutsideTheReissuedTerms() public {
+    /// @notice A parked leg outside the re-issued terms gets the verdict it would have got at delivery: the body
+    ///         it executed was orphaned, the validation ends there, and the token is told to pause the chain.
+    function test_settleParkedLeg_Success_WhenTheLegFallsOutsideTheReissuedTerms() public {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         bytes32 executedUnder = keccak256("a wider body");
         vm.prank(token);
         mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 95, executedUnder));
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
 
         vm.expectCall(token, abi.encodeCall(IToken.applyVerdict, (polygon, ISettlementHandler.Verdict.PauseChain)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationOrphaned(id, polygon, 95, executedUnder);
-        vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+        mc.settleParkedLeg(id, polygon);
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
         assertFalse(mc.parkedLegOf(id, polygon).exists);
@@ -619,8 +659,8 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(TokenReservationStub(token).reservedOf(fromSat), 0);
     }
 
-    /// @notice On a pair, the leg of the chain that reported is settled and only the other chain is sent to.
-    function test_requestTransferValidation_Success_WhenOneLegOfAPairIsParked() public {
+    /// @notice On a pair, only the chain that has not reported is sent to; the parked leg settles on its own.
+    function test_settleParkedLeg_Success_WhenOneLegOfAPairIsParked() public {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         vm.prank(token);
@@ -628,13 +668,68 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, optimism, id), 1);
-        vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ParkedLegSettled(id, polygon);
         vm.prank(aliceIdentity);
         mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", salt);
 
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ParkedLegSettled(id, polygon);
+        mc.settleParkedLeg(id, polygon);
+
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
         assertEq(mc.validationOf(id).executedAmount, 50);
+    }
+
+    /// @notice Both legs of a pair parked at different amounts: the second refuses, as it would at delivery, and
+    ///         stays parked for the keeper instead of keeping the id from ever being issued.
+    function test_settleParkedLeg_RevertWhen_TheSecondParkedLegCarriesAnotherAmount() public {
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
+        vm.startPrank(token);
+        mc.handleSettlement(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
+        mc.handleSettlement(optimism, _legUnder(id, "", toOptimism, 51, keccak256("body")));
+        vm.stopPrank();
+
+        vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 0);
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", salt);
+
+        mc.settleParkedLeg(id, polygon);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementAmountMismatch.selector, id, 50, 51));
+        mc.settleParkedLeg(id, optimism);
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertTrue(mc.parkedLegOf(id, optimism).exists, "still parked, to be tried again or resolved");
+    }
+
+    function test_settleParkedLeg_RevertWhen_NothingIsParkedOrNothingIsIssued() public {
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, polygon));
+        mc.settleParkedLeg(id, polygon);
+
+        vm.prank(token);
+        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, polygon));
+        mc.settleParkedLeg(id, polygon);
+
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, optimism));
+        mc.settleParkedLeg(id, optimism);
+    }
+
+    function test_settleParkedLeg_RevertWhen_TheTokenIsPaused() public {
+        bytes32 salt = _salt();
+        bytes32 id = _validationId(fromSat, salt);
+        vm.prank(token);
+        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
+        vm.prank(aliceIdentity);
+        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+
+        vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(true));
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
+        mc.settleParkedLeg(id, polygon);
+        assertTrue(mc.parkedLegOf(id, polygon).exists);
     }
 
     /* ----- Two legs ----- */
@@ -746,6 +841,14 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.stopPrank();
 
         _assertUntouched(id);
+    }
+
+    function _discardAt(bytes32 id) private {
+        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = id;
+        vm.prank(keeperAccount);
+        mc.discardExpiredValidations(ids);
     }
 
     function _discard(bytes32 id) private {

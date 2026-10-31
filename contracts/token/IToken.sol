@@ -207,8 +207,8 @@ interface IToken is IERC3643 {
     ) external;
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
-    /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled or
-    ///  judged by the issuance of that id, gets the same brake it would have got at delivery, see
+    /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled by
+    ///  `settleParkedLeg` once that id is issued, gets the same brake it would have got at delivery, see
     ///  {ISettlementHandler-Verdict}. Callable by the bound compliance alone.
     /// @param chainKey the chain the judged leg came from
     /// @param verdict what to apply; `None` applies nothing

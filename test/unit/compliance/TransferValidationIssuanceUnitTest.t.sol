@@ -576,10 +576,12 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         MessageTypesLib.ComplianceValidation memory expected =
-            _expected(id, fromSat, toSat, spender, 10, 90, POLYGON_WINDOW);
+            _expected(id, salt, fromSat, toSat, spender, 10, 90, POLYGON_WINDOW);
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.TransferValidationIssued(id, fromSat, toSat, spender, 10, 90, expected.expiry, POLYGON_WINDOW);
+        emit EventsLib.TransferValidationIssued(
+            id, fromSat, toSat, spender, 10, 90, expected.expiry, POLYGON_WINDOW, salt
+        );
         vm.prank(aliceIdentity);
         mc.requestTransferValidation(fromSat, toSat, 10, 90, spender, salt);
 
@@ -590,7 +592,8 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.warp(1_700_000_000);
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
-        MessageTypesLib.ComplianceValidation memory expected = _expected(id, fromSat, toSat, "", 10, 90, POLYGON_WINDOW);
+        MessageTypesLib.ComplianceValidation memory expected =
+            _expected(id, salt, fromSat, toSat, "", 10, 90, POLYGON_WINDOW);
 
         vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, abi.encode(expected))), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
@@ -603,7 +606,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         MessageTypesLib.ComplianceValidation memory expected =
-            _expected(id, fromSat, toOptimism, "", 10, 90, OPTIMISM_WINDOW);
+            _expected(id, salt, fromSat, toOptimism, "", 10, 90, OPTIMISM_WINDOW);
         bytes memory body = abi.encode(expected);
 
         vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, body)), 1);
@@ -638,6 +641,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     function _expected(
         bytes32 id,
+        bytes32 salt,
         bytes memory from,
         bytes memory to,
         bytes memory spender,
@@ -647,6 +651,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
     ) private view returns (MessageTypesLib.ComplianceValidation memory) {
         return MessageTypesLib.ComplianceValidation({
             validationId: id,
+            salt: salt,
             from: from,
             to: to,
             spender: spender,
