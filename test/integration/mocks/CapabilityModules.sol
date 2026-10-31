@@ -415,3 +415,58 @@ contract UndeclaredRuleModule is RecordingModule {
     }
 
 }
+
+/// @dev A tracker that keeps its own record of native balances, the shape of a snapshot or a max-balance module
+///      that cannot read the token: a native wallet (a key below 2^160) is debited on every departure and credited
+///      on every arrival, a `DELEGATION` debits its native wallet alone, a `RECALL` credits it alone, and
+///      an optional cap refuses a `TRANSFER` or a `MINT` that leaves the recipient's record above it.
+contract NativeLedgerModule is RecordingModule {
+
+    error CapExceeded(bytes32 wallet, uint256 recorded, uint256 cap);
+
+    mapping(bytes32 wallet => uint256 amount) public recorded;
+    uint256 public cap;
+
+    function setCap(uint256 newCap) external {
+        cap = newCap;
+    }
+
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
+        if (ctx.kind == MovementKindLib.DELEGATION) {
+            _debit(ctx.fromWallet, ctx.amountMax);
+            return;
+        }
+        if (ctx.kind == MovementKindLib.RECALL) {
+            _credit(ctx.toWallet, ctx.amountMax);
+            return;
+        }
+        _debit(ctx.fromWallet, ctx.amountMax);
+        _credit(ctx.toWallet, ctx.amountMax);
+        if (cap == 0 || (ctx.kind != MovementKindLib.TRANSFER && ctx.kind != MovementKindLib.MINT)) return;
+        uint256 held = recorded[ctx.toWallet];
+        require(held <= cap, CapExceeded(ctx.toWallet, held, cap));
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.AFTER;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "NativeLedgerModule";
+    }
+
+    function _credit(bytes32 wallet, uint256 amount) private {
+        if (_isNative(wallet)) recorded[wallet] += amount;
+    }
+
+    function _debit(bytes32 wallet, uint256 amount) private {
+        if (_isNative(wallet)) recorded[wallet] -= amount;
+    }
+
+    function _isNative(bytes32 wallet) private pure returns (bool) {
+        return wallet != bytes32(0) && uint256(wallet) < (1 << 160);
+    }
+
+}

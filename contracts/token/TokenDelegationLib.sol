@@ -85,7 +85,8 @@ import { TokenLedgerLib } from "./TokenLedgerLib.sol";
  * registry, the compliance and the gateway see the token as their caller, and every event is the token's. The
  * registry and the compliance are read from the token's own getters, so the token passes neither. The native
  * half of each movement stays in the token, since it is the ERC-20 balance this library cannot reach: the token
- * burns before {delegateOut} and mints after {consumeBurnProof}; everything bridged happens here.
+ * burns before {delegateOut} and mints after {consumeBurnProof}, then reports the recall to the compliance;
+ * everything bridged happens here.
  *
  * Both instructions are retryable, never written off: {resend} sends an instruction again byte for byte, under
  * the same id, to the same peer, and the Lite acts on each id once. Nothing here checks a caller or the pause:
@@ -181,8 +182,9 @@ library TokenDelegationLib {
     ///  reverts and stays deliverable. The identity link is checked again, then the compliance follows any relink
     ///  of the native wallet before the credit lands, so the wallet's existing balance is attributed to its current
     ///  owner and the credit, already counted in that identity's position as a bridged one, is not migrated with
-    ///  it. The proof is recorded, the bridged position debited (`Recalled`), and the token mints the native half.
-    ///  A zero proof settles the same way with nothing to move.
+    ///  it. The proof is recorded, the bridged position debited (`Recalled`), and the token mints the native half
+    ///  and reports the `RECALL` to the compliance's trackers. A zero proof settles the same way with nothing to
+    ///  move and nothing to report.
     ///
     ///  With no open recall: the very proof that settled it, from the same chain, is a duplicate and changes
     ///  nothing; anything else is a message the token cannot account for, judged as a replayed settlement is. A
