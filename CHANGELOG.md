@@ -526,6 +526,12 @@ All notable changes to this project will be documented in this file.
   notice, and ships in the npm package. `package.json` declares `GPL-3.0-or-later` and names the company as
   author. The ASCII T-REX logo heads every Solidity file.
 
+- **`setOnchainID` accepts only the token's own identity.** The setter took any address, so an issuer could
+  point its token at another token's ONCHAINID and investors would see the wrong asset behind it. The token now
+  asks the IdentityFactory of its identity registry which identity it binds to the token's address, and reverts
+  with `TokenIdentityNotBound` for any other value, the same rule `TREXFactory` applies at deploy. Zero is
+  accepted only while the factory binds no identity to the token. The check lives in `TokenGuardsLib`.
+
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another
   identity: the tokens landed in a new wallet registered to it, skipping the destination check a forced

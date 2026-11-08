@@ -442,6 +442,13 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         super._setSymbol(tokenSymbol);
     }
 
+    /// @dev Adds T-REX validation to the standard setter. Investors find the token through its ONCHAINID, so
+    ///  the token may only point at the identity the IdentityFactory binds to it, never at another token's.
+    function _setOnchainID(address onchainIdAddress) internal override {
+        TokenGuardsLib.checkOnchainID(address(_getIdentityRegistry()), onchainIdAddress);
+        super._setOnchainID(onchainIdAddress);
+    }
+
     /// @dev Adds T-REX validation to the standard setter. A wrong registry halts the token, since
     ///  `isVerified` is called on every transfer, so the target must advertise the standard interface
     ///  and share this token's authority. `onlySharedAuthority` is a misconfiguration guard only:

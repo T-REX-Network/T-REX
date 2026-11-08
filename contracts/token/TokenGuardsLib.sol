@@ -59,6 +59,8 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
@@ -92,6 +94,17 @@ library TokenGuardsLib {
             ERC165Checker.supportsAllInterfaces(identityRegistryAddress, calledInterfaces),
             ErrorsLib.InvalidIdentityRegistry()
         );
+    }
+
+    /// @dev The token's ONCHAINID must be the identity its registry's IdentityFactory binds to the token's
+    ///  address, the rule the suite factory applies at deploy. A binding is never moved to another identity,
+    ///  so no other token's identity passes, and zero passes only while no identity is bound. Reverts
+    ///  `TokenIdentityNotBound`.
+    function checkOnchainID(address identityRegistryAddress, address onchainIdAddress) external view {
+        IIdentityFactory identityFactory = ITREXRegistry(identityRegistryAddress).identityFactory();
+        bytes memory tokenAccount = InteroperableAddress.formatEvmV1(block.chainid, address(this));
+        address boundIdentity = identityFactory.getIdentity(tokenAccount);
+        require(boundIdentity == onchainIdAddress, ErrorsLib.TokenIdentityNotBound(address(this), onchainIdAddress));
     }
 
     /// @dev A token with supply keeps its compliance; the new one must advertise every interface the token

@@ -135,14 +135,44 @@ contract TokenAdminTest is TREXSuiteTest {
         token.setOnchainID(address(0));
     }
 
-    /// @notice Should set the onchainID
-    function test_setOnchainID_Success() public {
-        // create an identity using the IdentityFactory
-        IIdentity newIdentity = _deployIdentity(deployer, "deployer-salt");
-        vm.prank(deployer);
-        token.setOnchainID(address(newIdentity));
+    /// @notice The token's own factory-bound identity is accepted
+    function test_setOnchainID_SetsTheIdentityBoundToTheToken() public {
+        address boundIdentity = _identityOf(address(token));
 
-        assertEq(token.onchainID(), address(newIdentity));
+        vm.prank(deployer);
+        token.setOnchainID(boundIdentity);
+
+        assertEq(token.onchainID(), boundIdentity);
+    }
+
+    /// @notice An issuer cannot point its token at another token's identity
+    function test_setOnchainID_RevertWhen_TheIdentityIsAnotherTokens() public {
+        Token otherToken = _deployToken("other-salt", "Other Token", "OTK");
+        address otherTokenIdentity = otherToken.onchainID();
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, address(token), otherTokenIdentity)
+        );
+        token.setOnchainID(otherTokenIdentity);
+    }
+
+    /// @notice An identity the factory binds to an investor wallet is refused
+    function test_setOnchainID_RevertWhen_TheIdentityIsBoundToAnotherAccount() public {
+        IIdentity investorIdentity = _deployIdentity(deployer, "deployer-salt");
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, address(token), address(investorIdentity))
+        );
+        token.setOnchainID(address(investorIdentity));
+    }
+
+    /// @notice A token whose identity is still bound cannot drop it
+    function test_setOnchainID_RevertWhen_ClearingAnIdentityStillBoundToTheToken() public {
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, address(token), address(0)));
+        token.setOnchainID(address(0));
     }
 
     // ============ setIdentityRegistry() Tests ============
