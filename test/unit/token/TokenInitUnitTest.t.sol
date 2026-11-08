@@ -123,11 +123,31 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
         initCall();
     }
 
-    function testTokenInitWithOnchainIdZeroAddress() public {
+    function testTokenInitWithOnchainIdZeroAddressWhenNoIdentityIsBoundToTheToken() public {
+        mockIdentityBoundToToken(nextTokenAddress(), address(0));
         pOnchainId = address(0);
         Token newToken = initCall();
 
         assertEq(newToken.onchainID(), address(0));
+    }
+
+    function testTokenInitRevertsIfOnchainIdIsZeroAddressWhileAnIdentityIsBoundToTheToken() public {
+        address nextToken = nextTokenAddress();
+        pOnchainId = address(0);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, nextToken, address(0)));
+        initCall();
+    }
+
+    function testTokenInitRevertsIfOnchainIdIsAnotherTokensIdentity() public {
+        address nextToken = nextTokenAddress();
+        address anotherTokensIdentity = makeAddr("AnotherTokensIdentity");
+        pOnchainId = anotherTokensIdentity;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, nextToken, anotherTokensIdentity)
+        );
+        initCall();
     }
 
     function testTokenInitNominal() public {
@@ -147,6 +167,11 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     /// ----- Helpers -----
+
+    /// @dev The address `initCall` deploys its proxy at.
+    function nextTokenAddress() internal view returns (address) {
+        return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+    }
 
     function initCall() internal returns (Token) {
         return Token(

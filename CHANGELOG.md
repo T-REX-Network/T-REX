@@ -529,8 +529,12 @@ All notable changes to this project will be documented in this file.
 - **`setOnchainID` accepts only the token's own identity.** The setter took any address, so an issuer could
   point its token at another token's ONCHAINID and investors would see the wrong asset behind it. The token now
   asks the IdentityFactory of its identity registry which identity it binds to the token's address, and reverts
-  with `TokenIdentityNotBound` for any other value, the same rule `TREXFactory` applies at deploy. Zero is
-  accepted only while the factory binds no identity to the token. The check lives in `TokenGuardsLib`.
+  with `TokenIdentityNotBound` for any other value, the same rule `TREXFactory` applies at deploy. `init` runs
+  the same check, so a token deployed outside the factory cannot start out on another token's identity either.
+  Zero is accepted only while the factory binds no identity to the token. The check lives in `TokenGuardsLib`.
+  For factory tokens the ONCHAINID is fixed at deploy: the factory binds it before the token exists, and an
+  ASSET binding can be neither revoked nor moved, so the setter only accepts the identity the token already
+  has. Moving a token to a new identity is no longer possible.
 
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another

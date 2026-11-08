@@ -128,6 +128,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
         TokenLedgerLib.layout().decimals = tokenDecimals;
         _initERC3643(identityRegistryAddress, complianceAddress, onchainIdAddress);
+        // `_initERC3643` writes the ONCHAINID without the setter's check. A token deployed outside the factory
+        // could otherwise start out pointing at another token's identity.
+        TokenGuardsLib.checkOnchainID(identityRegistryAddress, onchainIdAddress);
 
         // The network's registry, fixed for the token's lifetime: no role can move it afterwards.
         _setTrustedGatewayRegistry(trustedGatewayRegistryAddress);
