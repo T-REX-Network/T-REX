@@ -156,7 +156,8 @@ library ErrorsLib {
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    /// @dev A supplied ONCHAINID must already be actively bound to the predicted token address in the IdentityFactory.
+    /// @dev A token's ONCHAINID, supplied at deploy or set later, must be the identity the IdentityFactory binds
+    ///  to the token's address.
     error TokenIdentityNotBound(address token, address suppliedIdentity);
     /// @dev Only a MANAGEMENT key of a supplied ONCHAINID may deploy a suite with it.
     error TokenIdentityNotManagedByCaller(address suppliedIdentity, address caller);

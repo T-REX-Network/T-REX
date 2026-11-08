@@ -128,6 +128,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
         TokenLedgerLib.layout().decimals = tokenDecimals;
         _initERC3643(identityRegistryAddress, complianceAddress, onchainIdAddress);
+        // `_initERC3643` writes the ONCHAINID without the setter's check. A token deployed outside the factory
+        // could otherwise start out pointing at another token's identity.
+        TokenGuardsLib.checkOnchainID(identityRegistryAddress, onchainIdAddress);
 
         // The network's registry, fixed for the token's lifetime: no role can move it afterwards.
         _setTrustedGatewayRegistry(trustedGatewayRegistryAddress);
@@ -440,6 +443,13 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     function _setSymbol(string memory tokenSymbol) internal override {
         require(bytes(tokenSymbol).length > 0, ErrorsLib.EmptyString());
         super._setSymbol(tokenSymbol);
+    }
+
+    /// @dev Adds T-REX validation to the standard setter. Investors find the token through its ONCHAINID, so
+    ///  the token may only point at the identity the IdentityFactory binds to it, never at another token's.
+    function _setOnchainID(address onchainIdAddress) internal override {
+        TokenGuardsLib.checkOnchainID(address(_getIdentityRegistry()), onchainIdAddress);
+        super._setOnchainID(onchainIdAddress);
     }
 
     /// @dev Adds T-REX validation to the standard setter. A wrong registry halts the token, since

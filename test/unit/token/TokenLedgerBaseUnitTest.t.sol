@@ -73,6 +73,10 @@ abstract contract TokenLedgerBaseUnitTest is TokenBaseUnitTest {
 
         trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
 
+        // `init` accepts only the ONCHAINID the IdentityFactory binds to the token, so the token's address is
+        // bound to `onchainId` before the proxy is deployed there.
+        mockIdentityBoundToToken(nextDeployedAddress(), onchainId);
+
         token = Token(
             BeaconProxyDeployer.newProxy(
                 harnessBeacon,
