@@ -90,6 +90,10 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
         trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
 
+        // `init` accepts only the ONCHAINID the IdentityFactory binds to the token, so the token's address is
+        // bound to `onchainId` before the proxy is deployed there.
+        mockIdentityBoundToToken(nextDeployedAddress(), onchainId);
+
         token = Token(
             BeaconProxyDeployer.newProxy(
                 tokenBeacon,
@@ -139,15 +143,16 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
         vm.mockCall(identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.deleteIdentity.selector), "");
 
-        // Every token these tests deploy is bound to `onchainId`, unless a test binds it to another identity.
         vm.mockCall(
             identityRegistry,
             abi.encodeWithSelector(ITREXRegistry.identityFactory.selector),
             abi.encode(identityFactory)
         );
-        vm.mockCall(
-            identityFactory, abi.encodeWithSelector(IIdentityFactory.getIdentity.selector), abi.encode(onchainId)
-        );
+    }
+
+    /// @dev The address the next contract this test deploys lands at, so a token can be bound before it exists.
+    function nextDeployedAddress() internal view returns (address) {
+        return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
     }
 
     /// @dev Makes the mocked IdentityFactory answer `boundIdentity` for `tokenAddress`.

@@ -104,12 +104,14 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenInitRevertsIfTrustedGatewayRegistryIsZeroAddress() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), pOnchainId);
         pTrustedGatewayRegistry = address(0);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         initCall();
     }
 
     function testTokenInitWiresTheTrustedGatewayRegistry() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), pOnchainId);
         vm.expectEmit(false, false, false, true);
         emit EventsLib.TrustedGatewayRegistrySet(pTrustedGatewayRegistry);
         Token newToken = initCall();
@@ -124,7 +126,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenInitWithOnchainIdZeroAddressWhenNoIdentityIsBoundToTheToken() public {
-        mockIdentityBoundToToken(nextTokenAddress(), address(0));
+        mockIdentityBoundToToken(nextDeployedAddress(), address(0));
         pOnchainId = address(0);
         Token newToken = initCall();
 
@@ -132,7 +134,8 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenInitRevertsIfOnchainIdIsZeroAddressWhileAnIdentityIsBoundToTheToken() public {
-        address nextToken = nextTokenAddress();
+        address nextToken = nextDeployedAddress();
+        mockIdentityBoundToToken(nextToken, onchainId);
         pOnchainId = address(0);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, nextToken, address(0)));
@@ -140,7 +143,8 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenInitRevertsIfOnchainIdIsAnotherTokensIdentity() public {
-        address nextToken = nextTokenAddress();
+        address nextToken = nextDeployedAddress();
+        mockIdentityBoundToToken(nextToken, onchainId);
         address anotherTokensIdentity = makeAddr("AnotherTokensIdentity");
         pOnchainId = anotherTokensIdentity;
 
@@ -151,6 +155,7 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenInitNominal() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), pOnchainId);
         vm.expectEmit(true, true, true, true);
         emit IERC3643.UpdatedTokenInformation(pName, pSymbol, pTokenDecimals, "5.0.0", address(pOnchainId));
         Token newToken = initCall();
@@ -167,11 +172,6 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     /// ----- Helpers -----
-
-    /// @dev The address `initCall` deploys its proxy at.
-    function nextTokenAddress() internal view returns (address) {
-        return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
-    }
 
     function initCall() internal returns (Token) {
         return Token(
