@@ -1,0 +1,6 @@
+out/
+cfg/
+.meta/
+tla2tools.jar
+tla2tools.jar.part
+__pycache__/
