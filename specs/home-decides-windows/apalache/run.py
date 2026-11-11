@@ -35,6 +35,8 @@ SPEC = "MC_TimingHD.tla"
 # (about 22 events) is out of reach; bounded runs are violation searches, and "holds" claims are proved
 # inductively instead (Proof*.tla). Completeness is still reported when an execution ends early.
 LENGTH = int(os.environ.get("LENGTH", "10"))
+# Runs recorded at a shorter depth (the README's expected results); LENGTH in the environment overrides these too.
+RUN_LENGTH = {"F_v2_shiftWT": 8, "F_so_lagbound": 8}
 TIMEOUT = int(os.environ.get("TIMEOUT", str(2 * 3600)))   # seconds per run
 
 FIRST = ("InitFirst", "NextFirst")
@@ -106,11 +108,12 @@ BY_NAME = {r[0]: r for r in RUNS}
 
 def run_one(r):
     name, (init, nxt), cinit, inv, expected, desc = r
+    length = LENGTH if "LENGTH" in os.environ else RUN_LENGTH.get(name, LENGTH)
     run_dir = os.path.join(OUT, name)
     os.makedirs(run_dir, exist_ok=True)
     cmd = ["nice", "-n", NICE, APALACHE, "check",
            f"--init={init}", f"--next={nxt}", f"--cinit={cinit}", f"--inv={inv}",
-           f"--length={LENGTH}", "--no-deadlock", "--discard-disabled=false",
+           f"--length={length}", "--no-deadlock", "--discard-disabled=false",
            f"--out-dir={OUT}", f"--run-dir={run_dir}", SPEC]
     env = dict(os.environ, JVM_ARGS=f"-Xmx{JVM_HEAP}")
     t0 = time.time()

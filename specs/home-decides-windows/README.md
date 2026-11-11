@@ -20,10 +20,11 @@ Citations are to the design document: `r46` is rule 46 (section 4), `sc68` is sc
   - the receiving chain never mints after close by hand returned the money, and mints at most once;
   - a second half whose first send arrives without a fault executes before its valid until.
 
-  The proofs cover one ticket with one lost message, one failed delivery and one held delivery, within the clock budgets. For the ticket's own conditions, two failures and two holds are proved too. "What is proved" gives the exact scope.
-- **The design's formula needs seven corrections** (listed under "Corrections to the design's window method"). Most are small: strict inequalities, a missing clock term, and conditions the formula meets only through another term. The largest is that close by hand cannot rely on a timing gate: lost messages make a live chain look dead.
+  The proofs cover one ticket with one lost message, one failed delivery and one held delivery, within the clock budgets, with bots that make each permissionless call within `T_bot`. For the ticket's own conditions, two failures and two holds are proved too. "What is proved" gives the exact scope.
+- **The design's window method needs six corrections** (listed under "Corrections to the design's window method"). The one that changes the numbers: a chain has one waiting time, and an ask rides its ticket's route, so the waiting time must cover asks sent at full finality. For Base that gives `WT` = 95 min, not 75-80 min. The others are strict inequalities, a missing clock term, two-fault budgets, the reorg shift, and stating conditions the formula meets only through another term.
+- **Close by hand should read the away chain's stored receipt, not rely on a timing gate.** Lost messages make a live chain look dead. This is a recommendation for the runbook, separate from the window method.
 - **The proofs rest on three readings of the specification** (r46, r47, r19 with r22) that the design leaves open.
-- **Example.** For Ethereum as home and Base as an away chain, the conditions give `V` > 6.2 min and `WT[Base]` > 73 min with the assumptions listed under "Example: Ethereum and Base".
+- **Example.** For Ethereum as home and Base as an away chain, the conditions give `WT[Base]` > 91.4 min, and `V` > 6.2 min for tickets at depth k (24.6 min for tickets at full finality), with the assumptions listed under "Example: Ethereum and Base".
 
 ## Files
 
@@ -49,11 +50,11 @@ Each term is measured for chain `c`, or set by policy where marked. `A` is the c
 |---|---|---|
 | `V` | The validity window: a ticket is valid until `V` after the ask | `V` |
 | `WT[c]` | The waiting time of chain `c`: when home may ask about a ticket and, if the ask goes unanswered, cancel (r45, r46). It also paces second-half re-sends (r47) | `WTA`, `WTB` |
-| `D_ticket(c)` | Home → `c` delivery of a ticket on its route. An ask for the receipt rides the same route (r45), so `D_ask(c) = D_ticket(c)` | `DTkt`, `DAskB` |
+| `D_ticket(c)`, `D_ask(c)` | Home → `c` delivery of a ticket on its route, and of an ask for its receipt, which rides the same route (r45). A ticket rides at depth k, or at full finality (r14; "Ticket-route finality: the rollout") | `DTkt`, `DAskB` |
 | `D_final(c)` | Home → `c` delivery at full finality: the second half | `DFinalB` |
 | `L_up(c)` | `c` → home delivery of a receipt at `c`'s finality, including execution at home | `LUpA`, `LUpB` |
 | `D_min` | The shortest any delivery can take; 0 is safe | `DMin` |
-| `T_rep` | From execution, or from an ask's arrival, to the receipt's send; 0 when the away token sends it in the same transaction | `TRep` |
+| `T_rep` | From execution, or from an ask's arrival, to the receipt's send; 0 when the away token (the Lite, T-REX Lite on the away chain) sends it in the same transaction | `TRep` |
 | `T_act` (policy) | How long a holder needs to act after the ticket arrives | `TAct` |
 | `T_appr` (policy) | Approval time when an approval module is bound, up to the first send (r15, r18); 0 otherwise | `TAppr` |
 | `T_ops` (policy) | How long until a failed delivery is re-executed | `TOps` |
@@ -75,7 +76,7 @@ Each term is measured for chain `c`, or set by policy where marked. `A` is the c
 | O2 | `O2_NoUncountedMint` | Never both a mint on B and a return at home | The design accepts a violation when a human closes a live chain's route (sc68) |
 | E1 | `E1_NoWastedAsk` | No ask goes out while the executed ticket's own unfaulted receipt is on its way | Efficiency |
 | E2 | `E2_NoEarlyResend` | No half is re-sent while an earlier unfaulted copy, or its unfaulted answer, is on its way | Efficiency |
-| O1 | `O1_NoLateReceipt` | No executed receipt reaches a cancelled ticket | Observation (implied by P1 here) |
+| O1 | `O1_NoLateReceipt` | No executed receipt reaches a canceled ticket | Observation (implied by P1 here) |
 
 Probes (`R_*`) must be violated: each shows that a case is reachable, so a check is not vacuous.
 
@@ -94,24 +95,26 @@ WT[c]     ≥ max( MIN_WAITING_TIME ,  D_ask(c) + T_rep + L_up(c) + δ_lag(c) + 
 **Corrected:**
 
 ```
-V      >  T_appr + D_ticket(c) + T_act + δ_ahead(c)          for every away chain c (one V for all)
+V      >  T_appr + D_ticket(c) + T_act + δ_ahead(c)          for every away chain c and every route its tickets ride
 
 WT[c]  >  D_ask(c) + T_rep + L_up(c) + f·T_ops + h·T_hold    an ask's answer lands before the cancel
-WT[c]  ≥  δ_lag(c) − D_min                                    c's clock has passed every valid until when an ask lands
+WT[c]  ≥  δ_lag(c)                                            clocks: an ask lands after every valid until; close by hand
 WT[c]  >  D_final(c) + δ_ahead(c)                             a second half arrives before its valid until on c
 WT[c]  ≥  MIN_WAITING_TIME                                    the contract floor (1 h)
 ```
 
-Here `δ_lag(c)` includes the reorg shift; the proofs keep the two apart, as `WT[A] ≥ δ_lag(A) + shift − D_min`.
+- **`D_ask(c)` is the slowest route an ask to `c` can ride.** An ask rides its ticket's own route (r45), so `D_ask(c) = D_final(c)` as soon as any ticket to `c` can ride at full finality (correction 6). Likewise, `D_ticket(c)` in `V` is the route of the tickets `V` must serve.
+- **`δ_lag(c)` includes the reorg shift.** The proofs keep the two apart, as `WT[A] ≥ δ_lag(A) + shift − D_min`.
+- **The clock condition has two sides.** For the ticket (P1), `WT[c] ≥ δ_lag(c) − D_min` suffices. For close by hand (P3), `WT[c] ≥ δ_lag(c)` is needed, with no `D_min`.
 
 | Property | Needs | Proved |
 |---|---|---|
-| P1 | `WT[A] > D_ask + T_rep + L_up(A) + f·T_ops + h·T_hold` and `WT[A] ≥ δ_lag(A) + shift − D_min` | yes, for `f`, `h` ∈ {1, 2} |
+| P1 | `WT[A] > D_ask(A) + T_rep + L_up(A) + f·T_ops + h·T_hold` and `WT[A] ≥ δ_lag(A) + shift − D_min` | yes, for `f`, `h` ∈ {1, 2} |
 | P2 | `V > T_appr + D_ticket(A) + T_act + δ_ahead(A)` | yes |
 | P3 | `WT[B] ≥ δ_lag(B)` | yes |
 | P3b | nothing: B dedupes each half (r24), and a new half follows only a zero answer (r35) | yes |
 | P4 | `WT[B] > D_final(B) + δ_ahead(B)` | yes |
-| O2 | Not a sizing question: the timing gates for closing a route fail with lost messages or a late bot (correction 7) | only under a gate that does not open with one loss |
+| O2 | Not a sizing question: see "Close by hand: read the away chain" | only under a gate that, in bounded search, does not open with one loss |
 
 ### Corrections to the design's window method
 
@@ -123,29 +126,37 @@ Here `δ_lag(c)` includes the reorg shift; the proofs keep the two apart, as `WT
 2. **`δ_ahead(B)` in the second-half condition.** B executes a half strictly before the half's valid until on B's own clock (r23; section 2, "The object").
    - The design's second-half condition has no clock term. A `WT[B]` sized by the design's full formula still fails P4 when `δ_ahead(B) ≥ WT[B] − D_final(B)` (`wtb_v2_aheadB`, `S_v2`).
    - The effect is delay and fees, not lost money: B answers 0, the half is dead, and home sends a new one (r35, r47). With lead budgets of 15-30 s it does not bite; on a chain whose protocol allows a lead of 30 min and whose `WT` is near the 1 h floor, it could.
-   - The condition's `T_rep + L_up(B)` only avoid early re-sends (E2). For that, `2·WT[B] > D_final(B) + T_rep + L_up(B) + T_bot` suffices (TLC sweep B), under the fixed-times reading of r47 below.
+   - For P3 and P4, the condition's `T_rep + L_up(B)` are not needed (`drop_WTB2_trep`, `drop_WTB2_lup`). They avoid early re-sends (E2), for which `2·WT[B] > D_final(B) + T_rep + L_up(B) + T_bot` suffices (TLC sweep B), under the fixed-times reading of r47 below. A `WT[B]` above B's round trip also matters for the close gates ("Close by hand: read the away chain").
 3. **State `WT[B] ≥ δ_lag(B)`.** Close by hand returns the money once the half's valid until plus one `WT[B]` has passed (r50). If B's clock trails home's by more than `WT[B]`, B can still mint a re-sent copy after that (`wtb_second_only_lagB`, `S_P3_lag`). The design's `WT[B]` covers a budgeted lag only because its first-half formula adds `δ_lag(B)` (`pos_second`).
-4. **Two failures need `2·T_ops`, two holds `2·T_hold`.** With one `T_ops`, two failed deliveries while the receipt is lost let home cancel an executed ticket (`beyond_fail2`, `F_fail2_1ops`). With `2·T_ops` and `2·T_hold`, P1 is proved (`P1_f2`, `P1_h2`, `P1_f2h2`). No waiting time absorbs two lost messages on one ticket (`beyond_loss2`, and `F_loss2_huge` with `WT[A]` above 100 times every other term).
+4. **Two failures need `2·T_ops`; for two holds, `2·T_hold` suffices.** With one `T_ops`, two failed deliveries while the receipt is lost let home cancel an executed ticket (`beyond_fail2`, `F_fail2_1ops`). With `2·T_ops`, `2·T_hold`, or both, P1 is proved (`P1_f2`, `P1_h2`, `P1_f2h2`). No waiting time absorbs two lost messages on one ticket (`beyond_loss2`, and `F_loss2_huge` with `WT[A]` above 100 times every other term).
 5. **The reorg shift belongs inside `δ_lag`, or gets its own term.** A ticket copy from a home block that a reorg dropped carries a later valid until (sc30).
    - When the ask is answered still open, r30 tells home. When the ask is lost, nothing does, and the holder can execute after home's cancel. Without a shift term P1 fails (`F_P1`; TLC `drop_WTA_lag_plus1_lag2_shift14`).
    - The proofs use `WT[A] ≥ δ_lag(A) + shift − D_min`.
    - The design's formula adds `δ_lag` in full. When `δ_lag` includes the shift and its budget is at least one unit, that formula implies both P1 conditions (by algebra).
    - When `δ_lag` excludes the shift, the design's formula can fail (`F_v2`). Its counterexample has a shift above `WT[A] + D_ticket(A)`, which at real values is a home reorg of more than an hour. Up to that bound, the bounded search finds no violation to depth 8 (`F_v2_shiftWT`).
-6. **Tickets at full finality need their own `V`.** Tickets on the receipt route arrive within `D_final(A)`, not `D_ticket(A)`. These are approval-bound tickets, tickets above the exposure caps (r14), and every ticket while the ticket route runs at full finality ("Ticket-route finality: the rollout", including a health-gate trip). If they must stay executable, size `V` with `D_final(A)` in place of `D_ticket(A)`. The design does this for approval-bound tickets (a `V` floor of 40 min); the same applies to the others. Their asks ride the same route (r45), so `D_ask` is `D_final(A)` for them too.
-7. **Close by hand: read the away chain, not the clock.** Lost messages make a live chain look dead, so a gate based only on time and silence can return money B already minted once enough messages are lost, or once a re-send goes out late.
-   - **Closing once a half has gone unanswered for `WT[B]`** (what home can see of r59's "stopped speaking") double counts after one lost receipt, at any `WT[B]` (`gate_silent`, `S_O2_silent`). The first re-send is due only at the first send plus `2·WT[B]` (r47). With no lost message it still double counts when B's round trip equals `WT[B]` exactly, which the design's second-half condition allows (`S_O2_silent_noloss`).
-   - **Closing only after the third send has gone unanswered for `WT[B]` past the latest moment it can go out** is proved safe with one loss (O2), but only because with one loss that gate does not open. The design's `WT[B]` makes each send's answer land before the gate, and one loss silences at most one of the first two sends (the bounded search finds no close by hand to depth 9, `S_O2_resent`).
-     - Two losses suffice at some values (`S_O2_resent_loss2`): the third send's round trip with one failure exceeds `WT[B]`. At the Ethereum and Base values below, that round trip (`D_final + T_rep + L_up + T_ops`, about 91 min) exceeds `WT[Base]` (75 min).
-     - Three losses suffice: B mints, and its receipt and both re-sends are lost (`gate_resent_loss3`, `S_O2_resent_loss3`).
-     - A re-send that goes out late opens the gate while it is still in flight, with one loss (`S_O2_resent_latebot`). r47 lets anyone re-send; it makes no one do it.
-   - **What to do instead.** Before a human closes a half by hand, read B's stored receipt for it (`storedReceipt`, r26) directly from B, and apply a mint if one is there. This is the change D8 proposes in `specs/home-decides`. A timing gate can at most decide when that read is worth doing.
-   - Closing a live chain's route at any time is sc68, which the design accepts (`pos_second`, `pos_both`: O2).
+6. **The waiting time must cover asks sent at full finality, and `V` tickets sent at full finality.**
+   - Some tickets ride the receipt route at full finality: approval-bound tickets and tickets above the exposure caps (r14), every ticket while the ticket route runs at full finality during the rollout, and new sends during a health-gate trip ("Ticket-route finality: the rollout").
+   - An ask rides its ticket's own route (r45), and `WT[c]` is one value per chain (r45, r62). So as soon as any ticket to `c` can ride at full finality, P1 needs `D_ask(c) = D_final(c)` in `WT[c]`.
+   - The proofs cover this. P1 is proved for any `V` and any bound on the ticket route's delivery, so it holds with `D_final(A)` in that role.
+   - For Base, this gives `WT` > 91.4 min instead of 73 min ("Example: Ethereum and Base"). The design's own column for approval-bound tickets at full finality gives 95 min; its 80 min for tickets at depth k does not meet the condition once any ticket can ride at finality.
+   - Tickets at full finality also arrive within `D_final(A)`, not `D_ticket(A)`. If they must stay executable, either they get their own `V`, sized with `D_final(A)` in place of `D_ticket(A)`, or the one `V` is sized that way. The design does this for approval-bound tickets (a `V` floor of 40 min).
+
+### Close by hand: read the away chain
+
+This is a recommendation for operating r50 and r59, not a correction to the window method. r50 and r59 set no timing gate: r59 is a human step for a chain that "stopped speaking", and the design accepts the double count of a mistaken close (sc68). The models tried gates a runbook might use, to see whether timing alone can tell a dead chain from lost messages. It cannot: a gate based only on time and silence can return money B already minted once enough messages are lost, or once a re-send goes out late.
+- **Closing once a half has gone unanswered for `WT[B]`** (what home can see of "stopped speaking") double counts after one lost receipt, at any `WT[B]` (`gate_silent`, `S_O2_silent`). The first re-send is due only at the first send plus `2·WT[B]` (r47). With no lost message it still double counts when B's round trip equals `WT[B]` exactly, which the design's second-half condition allows (`S_O2_silent_noloss`).
+- **Closing only after the third send has gone unanswered for `WT[B]` past the latest moment it can go out** is proved safe with one loss (O2). In bounded search, that gate does not open with one loss: no close by hand to depth 9 (`S_O2_resent`), nor at the TLC base values (`gate_resent_loss1`). The reason: the design's `WT[B]` makes each send's answer land before the gate, and one loss silences at most one of the first two sends.
+  - Two losses suffice at some values (`S_O2_resent_loss2`): the third send's round trip with one failure exceeds `WT[B]`. At the Ethereum and Base values below, that round trip (`D_final + T_rep + L_up + T_ops`, about 91 min) is just under `WT[Base]` (95 min).
+  - Three losses suffice: B mints, and its receipt and both re-sends are lost (`gate_resent_loss3`, `S_O2_resent_loss3`).
+  - A re-send that goes out late opens the gate while it is still in flight, with one loss (`S_O2_resent_latebot`). r47 lets anyone re-send; it makes no one do it.
+- **What to do instead.** Before a human closes a half by hand, read B's stored receipt for it (`storedReceipt`, r26) directly from B, and apply a mint if one is there. This is the change D8 proposes in `specs/home-decides`. A timing gate can at most decide when that read is worth doing.
+- Closing a live chain's route at any time is sc68, which the design accepts (`pos_second`, `pos_both`: O2).
 
 ### A clock lag beyond the budget
 
 The design lists this as unproven (section 10, item 14). The models show what it costs; none of this is proved.
 - **One lost receipt is enough.** If A's clock trails home's by more than `WT[A]`, the ask can reach A before valid until on A's clock. A answers still open with home's own valid until, the holder executes, its receipt is lost, and home cancels (`drop_WTA_lag_plus1_lag14`).
-- **A prompt holder is exposed when `T_act` is close to `WT[A]`.** At the TLC grid point a holder who acts within `T_act` is safe (`drop_WTA_lag_plus1_tact`). With any lag, Apalache finds a violation with `T_act` just below `WT[A]` (`F_prompt_anylag`: 27,650 against 27,657). With `WT[A] > D_ask + T_rep + L_up(A) + T_ops + T_hold + T_act` it finds none to depth 10 (`F_prompt_anylag_tact`, bounded).
+- **A prompt holder is exposed when `T_act` is close to `WT[A]`.** At the TLC grid point a holder who acts within `T_act` is safe (`drop_WTA_lag_plus1_tact`). With an unbounded lag, Apalache finds a violation with `T_act` just below `WT[A]` (`F_prompt_anylag`: 27,650 against 27,657). With `WT[A] > D_ask + T_rep + L_up(A) + T_ops + T_hold + T_act` it finds none to depth 10 (`F_prompt_anylag_tact`, bounded).
 - **The other reading of r46 raises the bound, but keeps one.** If a still-open answer counts as an answer, the tolerated lag becomes `2·WT[A] − (T_rep + L_up(A) + T_ops + T_hold)` (TLC: holds at `drop_WTA_lag_plus1_lag15_so`, fails at `_lag16_so`; Apalache: `F_so_anylag` violated beyond the bound, `F_so_lagbound` no violation to depth 8 within it). A lost ask leaves nothing to count.
 
 ## What is proved
@@ -159,8 +170,9 @@ The Apalache inductive proofs (`apalache/prove.py`) show each property for every
 | P3 | `WT[B] ≥ δ_lag(B)`; a human may close the route at any time | one loss, one failure, one hold | `P3` |
 | P3b | no window condition | one of each | `P3b` |
 | P4 | `WT[B] > D_final(B) + δ_ahead(B)` | one of each | `P4` |
-| O2 | The design's `WT[B]`; the route closes only after the third send has gone unanswered for `WT[B]` past the latest moment it can go out | one of each. With one loss this gate does not open (correction 7) | `O2` |
+| O2 | The design's `WT[B]`; the route closes only after the third send has gone unanswered for `WT[B]` past the latest moment it can go out | one of each. In bounded search this gate does not open with one loss ("Close by hand: read the away chain") | `O2` |
 
+- **`D_ask` is whatever bound the asks' route has.** The model gives tickets and asks one delivery bound (`DTkt`), and P1 is proved for every value of it and any `V`. So P1 holds with `D_final(A)` there, for asks sent at full finality (correction 6); P2 uses the tickets' own route.
 - **The holder in the P1 and P2 proofs may execute at any moment A allows.** A prompt holder's behaviors are a subset, so both hold for it too.
 - **Every check passed:** init, step, prop and the vacuity probes, 50 checks in all, plus 7 negative controls that fail as they must (see "Expected results").
 - **Each sizing condition is used.** Dropping one makes the step check fail: the shift term, P1's strictness, `T_ops` once with two failures, `V`'s strictness, `WT[B] ≥ δ_lag(B)`, P4's strictness, and the close gate (replaced by the silence gate).
@@ -188,55 +200,63 @@ The Apalache inductive proofs (`apalache/prove.py`) show each property for every
 - the reorg shift, when the ask is lost, needs `2·WT[A] ≥ shift + δ_lag(A) + T_rep + L_up(A) + T_ops + T_hold` (`drop_WTA_lag_plus1_lag2_shift13` and `_lag6_shift9` hold; `_lag2_shift14` and `_lag6_shift10` fail). The proofs use the stronger folded form;
 - within the budget, a still-open answer never happens (`probe_first`, `probe_both`); it needs a lag or a shift beyond `WT[A]` (`probe_first_lag14`, `probe_first_shift12`);
 - P3 holds exactly when `WT[B] ≥ δ_lag(B)`, and P4 exactly when `WT[B] > D_final(B) + δ_ahead(B)` (sweep B);
-- efficiency: E1 agrees with `WT[A] ≥ δ_lag(A) + shift + T_rep + L_up(A)`, and E2 with `2·WT[B] > D_final(B) + T_rep + L_up(B) + T_bot` (sweeps A and B, `e2_tbot3_*`). All 208 predictions of these conditions in the sweeps agree with TLC;
+- efficiency: E1 agrees with `WT[A] ≥ δ_lag(A) + shift + T_rep + L_up(A)`, and E2 with `2·WT[B] > D_final(B) + T_rep + L_up(B) + T_bot` (sweeps A and B, `e2_tbot3_*`). All 208 predictions of these conditions agree with TLC: 182 in the sweeps and 26 in 13 other first-half runs, covering P1, P3, P4, E1 and E2;
 - the design's formula is not tight: P1 holds at 9 of the 21 grid points where the design's inequality fails (sweep A). Its second-half condition alone is neither sufficient (P3 fails at `δ_lag(B) = 8`, `WT[B] = 7`) nor necessary (every property holds at `WT[B] = 5` with no lead and `δ_lag(B)` up to 4).
 
-**Apalache bounded search (`apalache/run.py`).** Each run covers every value its predicate allows and every interleaving of up to 10 events. A violation is a real counterexample; "no violation" is bounded evidence only. The runs are the controls (each drops one condition and fails), the probes (each reaches its case under the proved conditions), and the searches cited above: the close gates, a lag beyond the budget, the still-open reading and the shift bound.
+**Apalache bounded search (`apalache/run.py`).** Each run covers every value its predicate allows and every interleaving of up to 10 events (8 for `F_v2_shiftWT` and `F_so_lagbound`). A violation is a real counterexample; "no violation" is bounded evidence only. The runs are the controls (each drops one condition and fails), the probes (each reaches its case under the proved conditions), and the searches cited above: the close gates, a lag beyond the budget, the still-open reading and the shift bound.
 
 ## Example: Ethereum and Base
 
-Ethereum is home and Base is an away chain, with tickets on the ticket route at k = 3.
+Ethereum is home and Base is an away chain. Tickets ride the ticket route at k = 3, except those that ride at full finality (correction 6).
 
 | Term | Value | Source |
 |---|---|---|
-| `D_ticket` | 42 s | CCIP's latency estimate at k = 3 (command below) |
-| `D_final` | 1,148 s | CCIP, realized p99, Ethereum → Base at finality, 2026-10-01 to 2026-11-04 |
-| `L_up` | 2,537 s | CCIP, Base → Ethereum: worst observed transport plus the p99 of execution, same period |
+| `D_ticket` | 42 s | CCIP's model estimate at k = 3 (`/v2/lanes/latency`, command below). An estimate, not a measured percentile: CCIP has no realized messages at k = 3 yet |
+| `D_final` | 1,148 s | p99 of 981 Ethereum → Base messages at full finality, sent 2026-10-13 to 2026-11-04: `receiptTimestamp − sendTimestamp` from CCIP's public REST API (`/v2/messages`, messages with status SUCCESS) |
+| `L_up` | 2,537 s | Base → Ethereum, 996 messages sent 2026-10-06 to 2026-11-04: the largest send-to-attestation time observed (2,499 s) plus the p99 of execution after attestation (38 s), from `/v2/messages` and `/v2/messages/{id}`. The end-to-end p99 is not used, because its tail is other applications' failed executions, not transport |
 | `D_min`, `T_rep`, `T_appr` | 0 | conservative; the away token answers in the execution transaction; no approval module |
 | `T_act` | 5 min | assumed |
-| `T_ops` | 30 min | assumed: failed deliveries are monitored and re-executed |
-| `T_hold` | 0 | assumed: in an incident the chain is blocked or the token stopped, which freezes cancels (r46) |
+| `T_ops` | 30 min | assumed: failed deliveries are monitored and re-executed within 30 min |
+| `T_hold` | 0 | assumed: in an outage, a human blocks the chain or stops the token before a waiting time has passed, which freezes cancels (r46) |
+| `T_bot` | 1 min | assumed |
 | `f`, `h` | 1, 1 | the design's budget |
-| `δ_ahead`, `δ_lag` | 30 s, 120 s | honest-sequencer budgets, including the measured skew and the reorg shift |
+| `δ_ahead`, `δ_lag` | 30 s, 120 s | assumed budgets for an honest sequencer. `δ_lag` includes the shift of a re-mined ask after an Ethereum reorg (under a minute) |
 
 ```
-V      >  0 + 42 + 300 + 30                    =   372 s   ( 6.2 min)
-WT     >  42 + 0 + 2,537 + 1,800 + 0           = 4,379 s   (73.0 min)
-WT     ≥  120 − 0                              =   120 s
+V      >  0 + 42 + 300 + 30                    =   372 s   ( 6.2 min)   tickets at depth k
+V      >  0 + 1,148 + 300 + 30                 = 1,478 s   (24.6 min)   tickets at full finality
+WT     >  1,148 + 0 + 2,537 + 1,800 + 0        = 5,485 s   (91.4 min)   asks at full finality (D_ask = D_final)
+WT     ≥  120                                  =   120 s
 WT     >  1,148 + 30                           = 1,178 s   (19.6 min)
 WT     ≥  3,600 s                                         (the floor)
 ```
 
-- **`V` = 15 min and `WT[Base]` = 75 min meet every condition.** The design's table gives 80 min for Base, which meets them too.
+- **`WT[Base]` = 95 min meets every condition.** If no ticket to Base could ever ride at full finality, `D_ask` would be `D_ticket` and 73 min would do (4,379 s). With the exposure caps and approval module of r14, the rollout and the health gate, some can. The design's table gives 95 min for approval-bound tickets at full finality, which matches; its 80 min for tickets at depth k does not meet the condition.
+- **`V` = 15 min covers tickets at depth k.** Tickets at full finality need `V` > 24.6 min: either a separate `V` for them, or `V` = 25 min for every ticket.
 - **A ticket executed normally.** The ticket reaches Base about 42 s after the ask. For a move within Base, the receiver has the tokens as soon as the holder executes (r20). Home books the move when the receipt lands, within `L_up` (about 42 min at worst) of execution.
-- **An unused ticket.** With `V` = 15 min and `WT` = 75 min, the first ask goes out at about 91 min (`V + WT` plus 1 min for the bot). Base's answer releases the holds within about 43 min of the ask. The earliest possible cancel is at 165 min (`V + 2·WT`).
-- **A receipt with no ticket**, after an Ethereum reorg dropped the ask, can be reversed `4·WT` (5 h) after home books it (r41, r49).
+- **An unused ticket**, with `V` = 15 min, `WT` = 95 min and `T_bot` = 1 min. The first ask goes out at about 111 min (`V + WT + T_bot`). When the ask travels at full finality, Base's answer releases the holds within about 61 min of the ask (1,148 + 2,537 s). The earliest possible cancel is at 205 min (`V + 2·WT`).
+- **A receipt with no ticket**, after an Ethereum reorg dropped the ask, can be reversed `4·WT` (380 min, about 6.3 h) after home books it (r41, r49).
 
 How `WT[Base]` moves with each assumption:
 
 | Assumption | Effect |
 |---|---|
-| `T_ops` | Unattended operation relies on CCIP's executor retry window (about 8 h); `WT[Base]` becomes about 8.7 h |
-| Two failures per ticket | Adds one `T_ops`: `WT[Base]` about 105 min. No `WT` covers two lost messages on one ticket |
+| `T_ops` | Unattended, `T_ops` is CCIP's automatic executor retry window. CCIP's v1 service limits give 8 h ([docs](https://docs.chain.link/ccip/v1/evm/service-limits)); the 2.0 docs give no number, and the production value is unpublished (design section 10, item 4). With 8 h, `WT[Base]` becomes about 9.0 h (1,148 + 2,537 + 28,800 s) |
+| Two failures per ticket | Adds one `T_ops`: 7,285 s (121.4 min), so 125 min. No `WT` covers two lost messages on one ticket |
 | `T_hold` | Every minute of `T_hold` adds a minute to `WT` |
 | `T_act`, `T_appr` | Each minute adds a minute to `V`. With approvers, the design suggests 45-60 min |
 | `V` above its minimum | A longer `V` keeps an unused ticket's holds longer, and lets a holder act later |
-| Clock lag beyond the budget | Base's protocol allows its clock to trail by up to about 12 h and lead by 30 min. No `WT` covers that: a lag beyond `WT` can let home cancel an executed ticket after one lost receipt ("A clock lag beyond the budget") |
+| Clock lag beyond the budget | Base runs the OP Stack. Its clock can trail by up to about 12 h (design section 10, item 14) and lead by up to 30 min (OP Stack's `max_sequencer_drift` of 1,800 s, [Fjord derivation spec](https://github.com/ethereum-optimism/specs/blob/380fb31941abdb80c814565247689de60b443155/specs/protocol/fjord/derivation.md)). No `WT` covers that lag: a lag beyond `WT` can let home cancel an executed ticket after one lost receipt ("A clock lag beyond the budget") |
 
-The latencies come from one month of CCIP data. They change with CCIP versions, Base's finality and timestamp rules, and k. `D_ticket` at k = 3:
+The latencies are one month of CCIP data. They change with CCIP versions, Base's finality and timestamp rules, and k. Ethereum's CCIP chain selector is `5009297550715157269` and Base's is `15971525489660198786`.
 
 ```sh
-curl -s "https://api.ccip.chain.link/v2/lanes/latency?sourceChainSelector=5009297550715157269&destChainSelector=15971525489660198786&numOfBlocks=3" | jq .totalMs
+API=https://api.ccip.chain.link/v2
+# D_ticket at k = 3 (model estimate)
+curl -s "$API/lanes/latency?sourceChainSelector=5009297550715157269&destChainSelector=15971525489660198786&numOfBlocks=3" | jq .totalMs
+# D_final and L_up: page through the realized messages (newest first, follow the cursor) and take
+# receiptTimestamp - sendTimestamp per SUCCESS message; /messages/{id} gives the verifiers' attestation time for the split
+curl -s "$API/messages?sourceChainSelector=5009297550715157269&destChainSelector=15971525489660198786&limit=100" | jq .
 ```
 
 ## Scope and abstractions
@@ -282,6 +302,34 @@ What is abstracted away:
     - A state view merges A's leftovers: once home has booked A's receipt, the view drops A's side, which no checked property reads after that point. A's messages still in flight are deleted in the same step; they could only land as no-ops. Distinct-state counts are counts of views.
     - Messages in flight form a set, so two identical records merge. A merge needs two identical sends in the same time unit. One loss then removes both copies, which can only add counterexamples. A duplicate delivery disappears, which hides nothing, because every handler treats a repeat as a no-op or a replay (r24, r29).
 
+## How to run
+
+Requirements: Java 17 or later (the recorded runs used Java 21), Python 3, `curl`.
+
+```sh
+./get-tla2tools.sh                     # tla2tools.jar v1.7.4, sha256 checked
+./get-apalache.sh                      # Apalache 0.62.4 into .tools/, sha256 checked
+
+cd tlc
+python3 -I runs.py pos_first           # one TLC run
+python3 -I runs.py --list              # every run name
+python3 -I runs.py tight_WTA_minus2    # a run with a counterexample
+python3 -I trace.py out/tight_WTA_minus2.P1_NoCancelAfterExec.log   # that counterexample, step by step
+
+cd ../apalache
+python3 -I run.py --list
+python3 -I run.py F_P1                 # one bounded run
+python3 -I prove.py P4                 # every check of one property
+python3 -I prove.py neg                # the negative controls
+```
+
+- **TLC.** `runs.py` writes `cfg/<run>.cfg`, one log per TLC pass in `out/`, and a row per run in `out/summary.tsv`. A run is re-checked once per violated invariant, so every run reports all its violated invariants. With no argument it runs everything, two TLC processes at a time (`-j N` changes that), each with `-Xmx2g` and `TLC_WORKERS` workers (default 4). `TLA2TOOLS_JAR` points at another copy of the jar.
+- **Apalache.** `run.py` writes `out/<run>.log`, the counterexample in `out/<run>/violation.tla` (and `.itf.json`), and `out/summary.tsv`. `prove.py` writes `proof/<check>.log` and prints one line per check. `APALACHE` points at another `apalache-mc`; `JVM_HEAP`, `LENGTH` and `TIMEOUT` are also read.
+- **Runtimes**, recorded on a shared machine; treat them as indicative.
+  - TLC: the 139 runs took 45 min of run time in all, about 25 min two at a time. The longest single run is under 7 min (`drop_WTA_lag_plus1_lag6_shift10`, 12.0 M states).
+  - Apalache proofs: the 57 checks took 2,305 s (about 38 min) on one core.
+  - Apalache bounded runs: most finish within 5 min. The long ones are `F_prompt_anylag_tact` (9 h), `F_fail2_1ops` (2.1 h), `S_O2_resent` (stopped at the 2 h timeout), and `S_O2_resent_loss2`, `S_O2_resent_loss3`, `F_v2_shiftWT` and `F_so_lagbound` (17-51 min each).
+
 ## From WindowsHD to TimingHD
 
 **Time jumps.** WindowsHD's `Tick` moves time by one unit and is refused when it would pass a deadline. TimingHD's step jumps time to any `t` that `TimeOK` allows, then takes one event at `t`.
@@ -304,7 +352,7 @@ What is abstracted away:
 
 ### Bounded search
 
-Every execution is finite: each message slot is written and consumed once, and the asks, sends, closes and faults are bounded. A complete search is possible in principle, and Apalache would report `ExecutionsTooShort` when it covered everything. In practice each step costs about 4 times the one before, and a complete search needs about 22 events. `run.py` searches 10 events (`LENGTH`) with `--discard-disabled=false`. A violation is a real counterexample; "no violation" is bounded evidence only.
+Every execution is finite: each message slot is written and consumed once, and the asks, sends, closes and faults are bounded. A complete search is possible in principle, and Apalache would report `ExecutionsTooShort` when it covered everything. In practice each step costs about 4 times the one before, and a complete search needs about 22 events. `run.py` searches 10 events with `--discard-disabled=false`; `F_v2_shiftWT` and `F_so_lagbound` search 8 (`RUN_LENGTH`), and `LENGTH` in the environment overrides both. A violation is a real counterexample; "no violation" is bounded evidence only.
 
 ### Inductive proofs
 
@@ -327,33 +375,6 @@ For each property, an invariant `Ind` with these checks:
   - **P4:** a clean first send of a half arrives before its valid until on B's clock.
   - **O2 under the "resent" gate:** re-sends land after B's valid until, so B mints only on a first send. From then on, at least `1 + lossLeft` carriers land before the gate opens. A carrier is B's receipt, a send in flight, or the second send.
 
-## How to run
-
-Requirements: Java 17 or later (the recorded runs used Java 21), Python 3, `curl`.
-
-```sh
-./get-tla2tools.sh                     # tla2tools.jar v1.7.4, sha256 checked
-./get-apalache.sh                      # Apalache 0.62.4 into .tools/, sha256 checked
-
-cd tlc
-python3 -I runs.py pos_first           # one TLC run
-python3 -I runs.py --list              # every run name
-python3 -I trace.py out/tight_WTA_minus2.P1_NoCancelAfterExec.log   # a counterexample, step by step
-
-cd ../apalache
-python3 -I run.py --list
-python3 -I run.py F_P1                 # one bounded run
-python3 -I prove.py P4                 # every check of one property
-python3 -I prove.py neg                # the negative controls
-```
-
-- **TLC.** `runs.py` writes `cfg/<run>.cfg`, one log per TLC pass in `out/`, and a row per run in `out/summary.tsv`. A run is re-checked once per violated invariant, so every run reports all its violated invariants. With no argument it runs everything, two TLC processes at a time (`-j N` changes that), each with `-Xmx2g` and `TLC_WORKERS` workers (default 4). `TLA2TOOLS_JAR` points at another copy of the jar.
-- **Apalache.** `run.py` writes `out/<run>.log`, the counterexample in `out/<run>/violation.tla` (and `.itf.json`), and `out/summary.tsv`. `prove.py` writes `proof/<check>.log` and prints one line per check. `APALACHE` points at another `apalache-mc`; `JVM_HEAP`, `LENGTH` and `TIMEOUT` are also read.
-- **Runtimes**, recorded on a shared machine; treat them as indicative.
-  - TLC: the 139 runs took 45 min of run time in all, about 25 min two at a time. The longest single run is under 7 min (`drop_WTA_lag_plus1_lag6_shift10`, 12.0 M states).
-  - Apalache proofs: the 57 checks took 2,305 s (about 38 min) on one core.
-  - Apalache bounded runs: most finish within 5 min. The long ones are `F_prompt_anylag_tact` (9 h), `F_fail2_1ops` (2.1 h), `S_O2_resent` (stopped at the 2 h timeout), and `S_O2_resent_loss2`, `S_O2_resent_loss3`, `F_v2_shiftWT` and `F_so_lagbound` (17-51 min each).
-
 ## Expected results
 
 From the last recorded run of every check.
@@ -361,108 +382,126 @@ From the last recorded run of every check.
 ### TLC (`tlc/runs.py`)
 
 Base terms as in "Scope and abstractions" item 10. With them the design's formulas give `V_min` = 6, `WT[A]` = 13 and `WT[B]` = max(12, 7) = 12; positive controls use `V = V_min + 1`.
-- "Violated" lists every violated property. Probes are left out; "not reached" lists probes that held, so their case does not happen in that run. Every run also reached its horizon.
+- "Violated" lists every violated property; "not reached" lists probes that held, so their case does not happen in that run. "Probes reached" lists the probes the run checks that were violated, as required (`R_ReachesHorizon`: the run reaches its time horizon). The sweep runs check no probe.
 - "Distinct states" is the count of the run's last TLC pass, in views ("Scope and abstractions" item 12). "Stopped at" marks a run whose last pass ended at a violation because every invariant it checked was violated; that count depends on worker timing and varies between runs.
 
-**Positive controls: the design's windows**
+<details>
+<summary>Positive controls: the design's windows (9 runs)</summary>
 
-| Run | What it checks | V / WT[A] / WT[B] | Violated | Distinct states |
-|---|---|---|---|---|
-| `pos_first` | first half, base terms, 1 loss + 1 failure + 1 hold | 7 / 13 / 12 | all hold | 282,136 |
-| `pos_first_tact` | first half, holder acts only within T_act of arrival | 7 / 13 / 12 | all hold | 266,800 |
-| `pos_first_shift` | first half, A's copy carries a valid until up to 2 later (reorg, r30) | 7 / 15 / 12 | all hold | 913,728 |
-| `pos_first_appr` | first half, approval wait T_appr = 4 | 10 / 13 / 12 | all hold | 533,110 |
-| `pos_second` | second half, base terms, route closed at any time | 7 / 13 / 12 | O2_NoUncountedMint | 443,672 |
-| `pos_both` | A -> B, ticket then MOVE OUT | 7 / 13 / 12 | O2_NoUncountedMint | 6,547,732 |
-| `pos_both_asym` | A -> B, A fast and B slow (asymmetric chains) | 6 / 10 / 16 | O2_NoUncountedMint | 11,812,536 |
-| `pos_second_asym` | second half, B slow (asymmetric terms) | 6 / 10 / 16 | O2_NoUncountedMint | 1,486,332 |
-| `pos_first_nofault` | first half, no faults | 7 / 13 / 12 | all hold | 5,792 |
+| Run | What it checks | V / WT[A] / WT[B] | Violated | Probes reached | Distinct states |
+|---|---|---|---|---|---|
+| `pos_first` | first half, base terms, 1 loss + 1 failure + 1 hold | 7 / 13 / 12 | all hold | R_ReachesHorizon | 282,136 |
+| `pos_first_tact` | first half, holder acts only within T_act of arrival | 7 / 13 / 12 | all hold | R_ReachesHorizon | 266,800 |
+| `pos_first_shift` | first half, A's copy carries a valid until up to 2 later (reorg, r30) | 7 / 15 / 12 | all hold | R_ReachesHorizon | 913,728 |
+| `pos_first_appr` | first half, approval wait T_appr = 4 | 10 / 13 / 12 | all hold | R_ReachesHorizon | 533,110 |
+| `pos_second` | second half, base terms, route closed at any time | 7 / 13 / 12 | O2_NoUncountedMint | R_ReachesHorizon | 443,672 |
+| `pos_both` | A -> B, ticket then MOVE OUT | 7 / 13 / 12 | O2_NoUncountedMint | R_ReachesHorizon | 6,547,732 |
+| `pos_both_asym` | A -> B, A fast and B slow (asymmetric chains) | 6 / 10 / 16 | O2_NoUncountedMint | R_ReachesHorizon | 11,812,536 |
+| `pos_second_asym` | second half, B slow (asymmetric terms) | 6 / 10 / 16 | O2_NoUncountedMint | R_ReachesHorizon | 1,486,332 |
+| `pos_first_nofault` | first half, no faults | 7 / 13 / 12 | all hold | R_ReachesHorizon | 5,792 |
 
-**Reachability probes (each `R_*` must be violated)**
+</details>
 
-| Run | What it checks | V / WT[A] / WT[B] | Violated | Distinct states |
-|---|---|---|---|---|
-| `probe_first` | outcomes of the first half | 7 / 13 / 12 | all hold (not reached: R_NeverStillOpen) | 282,136 |
-| `probe_first_lag14` | is a still-open answer reachable when A lags 14 against WT[A] 12? | 7 / 12 / 12 | all hold | stopped at 290,033 |
-| `probe_second` | outcomes of the second half | 7 / 13 / 12 | all hold | stopped at 431,194 |
-| `probe_both` | outcomes of A -> B | 7 / 13 / 12 | all hold (not reached: R_NeverStillOpen) | 6,547,732 |
-| `probe_first_shift12` | is a still-open answer reachable with a reorg shift of 12? | 7 / 12 / 12 | all hold | stopped at 972,754 |
+<details>
+<summary>Reachability probes (5 runs)</summary>
 
-**Tightness**
+| Run | What it checks | V / WT[A] / WT[B] | Violated | Probes reached | Distinct states |
+|---|---|---|---|---|---|
+| `probe_first` | outcomes of the first half | 7 / 13 / 12 | all hold (not reached: R_NeverStillOpen) | R_NeverExecuted, R_NeverDone, R_NeverCancelled, R_ReachesHorizon | 282,136 |
+| `probe_first_lag14` | is a still-open answer reachable when A lags 14 against WT[A] 12? | 7 / 12 / 12 | all hold | R_NeverStillOpen | stopped at 290,033 |
+| `probe_second` | outcomes of the second half | 7 / 13 / 12 | all hold | R_NeverCredited, R_NeverReturned, R_NeverResentHalf, R_NeverSecondHalf, R_ReachesHorizon | stopped at 431,194 |
+| `probe_both` | outcomes of A -> B | 7 / 13 / 12 | all hold (not reached: R_NeverStillOpen) | R_NeverExecuted, R_NeverDone, R_NeverCancelled, R_NeverCredited, R_NeverReturned, R_NeverResentHalf, R_NeverSecondHalf | 6,547,732 |
+| `probe_first_shift12` | is a still-open answer reachable with a reorg shift of 12? | 7 / 12 / 12 | all hold | R_NeverStillOpen | stopped at 972,754 |
 
-| Run | What it checks | V / WT[A] / WT[B] | Violated | Distinct states |
-|---|---|---|---|---|
-| `tight_V_eq_Vmin` | V = V_min exactly (the design's >= taken literally) | 6 / 13 / 12 | P2_HolderHasTime | 276,108 |
-| `tight_WTA_minus1` | WT[A] = formula - 1 | 7 / 12 / 12 | all hold | 276,467 |
-| `tight_WTA_minus2` | WT[A] = formula - 2 | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 287,294 |
+</details>
 
-**Term by term**
+<details>
+<summary>Tightness (3 runs)</summary>
 
-| Run | What it checks | V / WT[A] / WT[B] | Violated | Distinct states |
-|---|---|---|---|---|
-| `drop_V_appr` | V without T_appr | 6 / 13 / 12 | P2_HolderHasTime | 446,661 |
-| `drop_V_appr_x0` | same windows, with T_appr = 0 | 6 / 13 / 12 | all hold | 205,120 |
-| `drop_V_dtkt` | V without D_ticket | 5 / 13 / 12 | P2_HolderHasTime | 272,230 |
-| `drop_V_dtkt_x0` | same windows, with D_ticket = 0 | 5 / 13 / 12 | all hold | 109,964 |
-| `drop_V_act` | V without T_act | 5 / 13 / 12 | P2_HolderHasTime | 272,230 |
-| `drop_V_act_x0` | same windows, with T_act = 0 | 5 / 13 / 12 | all hold | 254,503 |
-| `drop_V_aheadA` | V without delta_ahead(A) | 6 / 13 / 12 | P2_HolderHasTime | 276,108 |
-| `drop_V_aheadA_x0` | same windows, with delta_ahead(A) = 0 | 6 / 13 / 12 | all hold | 208,273 |
-| `drop_WTA_dask` | WT[A] without D_ask | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 287,294 |
-| `drop_WTA_dask_x0` | same windows, with D_ask = 0 | 7 / 11 / 12 | all hold | 111,328 |
-| `drop_WTA_trep` | WT[A] without T_rep | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 287,294 |
-| `drop_WTA_trep_x0` | same windows, with T_rep = 0 | 7 / 11 / 12 | all hold | 209,014 |
-| `drop_WTA_lup` | WT[A] without L_up(A) | 7 / 10 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 299,673 |
-| `drop_WTA_lup_x0` | same windows, with L_up(A) = 0 | 7 / 10 / 12 | all hold | 175,165 |
-| `drop_WTA_lag` | WT[A] without delta_lag(A) | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 287,294 |
-| `drop_WTA_lag_x0` | same windows, with delta_lag(A) = 0 | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 137,534 |
-| `drop_WTA_tops` | WT[A] without T_ops | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 287,294 |
-| `drop_WTA_tops_x0` | same windows, with T_ops = 0 | 7 / 11 / 12 | all hold | 192,048 |
-| `drop_WTA_thold` | WT[A] without T_hold | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 287,294 |
-| `drop_WTA_thold_x0` | same windows, with T_hold = 0 | 7 / 11 / 12 | all hold | 196,448 |
-| `drop_WTA_lag_plus1` | WT[A] without delta_lag, + 1 unit | 7 / 12 / 12 | all hold | 276,467 |
-| `drop_WTA_lag_plus1_lag14` | same, A lags up to 14 (> that WT[A] of 12) | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec | 2,120,146 |
-| `drop_WTA_lag_plus1_shift3` | same, reorg shift up to 3 (r30's still-open answer) | 7 / 12 / 12 | all hold | 1,171,577 |
-| `drop_WTA_lag_plus1_tact` | same, A lags up to 14, holder only within T_act | 7 / 12 / 12 | all hold | 1,255,212 |
-| `drop_WTA_lag_plus1_shift12` | same, reorg shift up to 12 (= that WT[A]): only r30 protects | 7 / 12 / 12 | E1_NoWastedAsk | 6,157,548 |
-| `drop_WTA_lag_plus1_lag14_so` | same as _lag14, a still-open answer counts as an answer (r46 reading) | 7 / 12 / 12 | E1_NoWastedAsk | 2,108,122 |
-| `drop_WTA_lag_plus1_lag15_so` | same, a still-open answer counts as an answer, A lags up to 15 | 7 / 12 / 12 | E1_NoWastedAsk | 2,509,141 |
-| `drop_WTA_lag_plus1_lag16_so` | same, a still-open answer counts as an answer, A lags up to 16 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec, O1_NoLateReceipt | 2,939,237 |
-| `drop_WTA_lag_plus1_lag2_shift13` | WT[A] without delta_lag + 1 unit (12), A lags up to 2, reorg shift up to 13 | 7 / 12 / 12 | E1_NoWastedAsk | 7,339,101 |
-| `drop_WTA_lag_plus1_lag2_shift14` | WT[A] without delta_lag + 1 unit (12), A lags up to 2, reorg shift up to 14 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec, O1_NoLateReceipt | 8,722,258 |
-| `drop_WTA_lag_plus1_lag6_shift9` | WT[A] without delta_lag + 1 unit (12), A lags up to 6, reorg shift up to 9 | 7 / 12 / 12 | E1_NoWastedAsk | 9,928,859 |
-| `drop_WTA_lag_plus1_lag6_shift10` | WT[A] without delta_lag + 1 unit (12), A lags up to 6, reorg shift up to 10 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec, O1_NoLateReceipt | 12,036,072 |
-| `dmin1_lag13_wt12` | first half, D_min 1, A lags up to 13, WT[A] 12 | 7 / 12 / 12 | E1_NoWastedAsk | 978,161 |
-| `dmin1_lag14_wt12` | first half, D_min 1, A lags up to 14, WT[A] 12 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec | 1,160,025 |
-| `wtb_second_only` | WT[B] from the second-half condition only (D_final + T_rep + L_up) | 7 / 13 / 7 | O2_NoUncountedMint | 1,251,808 |
-| `wtb_second_only_lagB` | same, B lags up to 9 (> WT[B]) | 7 / 13 / 7 | O2_NoUncountedMint, P3_NoMintAfterReturn | 2,255,360 |
-| `wtb_second_only_aheadB` | same, B leads up to 5 (one half) | 7 / 13 / 7 | P4_HalfHasTime, O2_NoUncountedMint | 748,525 |
-| `drop_WTB2_dfinal` | WT[B] = second-half condition without D_final(B) (one half) | 7 / 13 / 4 | P4_HalfHasTime, O2_NoUncountedMint, E2_NoEarlyResend | 614,787 |
-| `drop_WTB2_trep` | WT[B] = second-half condition without T_rep (one half) | 7 / 13 / 5 | O2_NoUncountedMint | 303,019 |
-| `drop_WTB2_lup` | WT[B] = second-half condition without L_up(B) (one half) | 7 / 13 / 5 | O2_NoUncountedMint | 303,019 |
-| `drop_WTB2_dfinal_x0` | same WT[B] as drop_WTB2_dfinal, with D_final(B) = 0 (one half) | 7 / 13 / 4 | O2_NoUncountedMint | 109,666 |
-| `wtb_first_only_slowB` | WT[B] from the first-half condition only, D_final(B) = 13 (> it; one half) | 7 / 13 / 12 | P4_HalfHasTime, O2_NoUncountedMint | 2,187,589 |
-| `wtb_v2_aheadB` | WT[B] from the design, B leads up to WT[B] - D_final(B) (one half) | 7 / 13 / 12 | P4_HalfHasTime, O2_NoUncountedMint | 1,428,474 |
+| Run | What it checks | V / WT[A] / WT[B] | Violated | Probes reached | Distinct states |
+|---|---|---|---|---|---|
+| `tight_V_eq_Vmin` | V = V_min exactly (the design's >= taken literally) | 6 / 13 / 12 | P2_HolderHasTime | R_ReachesHorizon | 276,108 |
+| `tight_WTA_minus1` | WT[A] = formula - 1 | 7 / 12 / 12 | all hold | R_ReachesHorizon | 276,467 |
+| `tight_WTA_minus2` | WT[A] = formula - 2 | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 287,294 |
 
-**Beyond the budget**
+</details>
 
-| Run | What it checks | V / WT[A] / WT[B] | Violated | Distinct states |
-|---|---|---|---|---|
-| `beyond_loss2` | first half, two losses (budget is one) | 7 / 13 / 12 | P1_NoCancelAfterExec | 522,579 |
-| `beyond_fail2` | first half, two failures (budget is one T_ops) | 7 / 13 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | 649,519 |
-| `wtb_v2_lagB` | WT[B] = 12 (the design's for a lag budget of 2), B lags up to 13 | 7 / 13 / 12 | O2_NoUncountedMint, P3_NoMintAfterReturn | 1,812,195 |
+<details>
+<summary>Term by term (43 runs)</summary>
 
-**Route-close gates (r59)**
+| Run | What it checks | V / WT[A] / WT[B] | Violated | Probes reached | Distinct states |
+|---|---|---|---|---|---|
+| `drop_V_appr` | V without T_appr | 6 / 13 / 12 | P2_HolderHasTime | R_ReachesHorizon | 446,661 |
+| `drop_V_appr_x0` | same windows, with T_appr = 0 | 6 / 13 / 12 | all hold | R_ReachesHorizon | 205,120 |
+| `drop_V_dtkt` | V without D_ticket | 5 / 13 / 12 | P2_HolderHasTime | R_ReachesHorizon | 272,230 |
+| `drop_V_dtkt_x0` | same windows, with D_ticket = 0 | 5 / 13 / 12 | all hold | R_ReachesHorizon | 109,964 |
+| `drop_V_act` | V without T_act | 5 / 13 / 12 | P2_HolderHasTime | R_ReachesHorizon | 272,230 |
+| `drop_V_act_x0` | same windows, with T_act = 0 | 5 / 13 / 12 | all hold | R_ReachesHorizon | 254,503 |
+| `drop_V_aheadA` | V without delta_ahead(A) | 6 / 13 / 12 | P2_HolderHasTime | R_ReachesHorizon | 276,108 |
+| `drop_V_aheadA_x0` | same windows, with delta_ahead(A) = 0 | 6 / 13 / 12 | all hold | R_ReachesHorizon | 208,273 |
+| `drop_WTA_dask` | WT[A] without D_ask | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 287,294 |
+| `drop_WTA_dask_x0` | same windows, with D_ask = 0 | 7 / 11 / 12 | all hold | R_ReachesHorizon | 111,328 |
+| `drop_WTA_trep` | WT[A] without T_rep | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 287,294 |
+| `drop_WTA_trep_x0` | same windows, with T_rep = 0 | 7 / 11 / 12 | all hold | R_ReachesHorizon | 209,014 |
+| `drop_WTA_lup` | WT[A] without L_up(A) | 7 / 10 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 299,673 |
+| `drop_WTA_lup_x0` | same windows, with L_up(A) = 0 | 7 / 10 / 12 | all hold | R_ReachesHorizon | 175,165 |
+| `drop_WTA_lag` | WT[A] without delta_lag(A) | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 287,294 |
+| `drop_WTA_lag_x0` | same windows, with delta_lag(A) = 0 | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 137,534 |
+| `drop_WTA_tops` | WT[A] without T_ops | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 287,294 |
+| `drop_WTA_tops_x0` | same windows, with T_ops = 0 | 7 / 11 / 12 | all hold | R_ReachesHorizon | 192,048 |
+| `drop_WTA_thold` | WT[A] without T_hold | 7 / 11 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 287,294 |
+| `drop_WTA_thold_x0` | same windows, with T_hold = 0 | 7 / 11 / 12 | all hold | R_ReachesHorizon | 196,448 |
+| `drop_WTA_lag_plus1` | WT[A] without delta_lag, + 1 unit | 7 / 12 / 12 | all hold | R_ReachesHorizon | 276,467 |
+| `drop_WTA_lag_plus1_lag14` | same, A lags up to 14 (> that WT[A] of 12) | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec | R_ReachesHorizon | 2,120,146 |
+| `drop_WTA_lag_plus1_shift3` | same, reorg shift up to 3 (r30's still-open answer) | 7 / 12 / 12 | all hold | R_ReachesHorizon | 1,171,577 |
+| `drop_WTA_lag_plus1_tact` | same, A lags up to 14, holder only within T_act | 7 / 12 / 12 | all hold | R_ReachesHorizon | 1,255,212 |
+| `drop_WTA_lag_plus1_shift12` | same, reorg shift up to 12 (= that WT[A]): only r30 protects | 7 / 12 / 12 | E1_NoWastedAsk | R_ReachesHorizon | 6,157,548 |
+| `drop_WTA_lag_plus1_lag14_so` | same as _lag14, a still-open answer counts as an answer (r46 reading) | 7 / 12 / 12 | E1_NoWastedAsk | R_ReachesHorizon | 2,108,122 |
+| `drop_WTA_lag_plus1_lag15_so` | same, a still-open answer counts as an answer, A lags up to 15 | 7 / 12 / 12 | E1_NoWastedAsk | R_ReachesHorizon | 2,509,141 |
+| `drop_WTA_lag_plus1_lag16_so` | same, a still-open answer counts as an answer, A lags up to 16 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 2,939,237 |
+| `drop_WTA_lag_plus1_lag2_shift13` | WT[A] without delta_lag + 1 unit (12), A lags up to 2, reorg shift up to 13 | 7 / 12 / 12 | E1_NoWastedAsk | R_ReachesHorizon | 7,339,101 |
+| `drop_WTA_lag_plus1_lag2_shift14` | WT[A] without delta_lag + 1 unit (12), A lags up to 2, reorg shift up to 14 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 8,722,258 |
+| `drop_WTA_lag_plus1_lag6_shift9` | WT[A] without delta_lag + 1 unit (12), A lags up to 6, reorg shift up to 9 | 7 / 12 / 12 | E1_NoWastedAsk | R_ReachesHorizon | 9,928,859 |
+| `drop_WTA_lag_plus1_lag6_shift10` | WT[A] without delta_lag + 1 unit (12), A lags up to 6, reorg shift up to 10 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 12,036,072 |
+| `dmin1_lag13_wt12` | first half, D_min 1, A lags up to 13, WT[A] 12 | 7 / 12 / 12 | E1_NoWastedAsk | R_ReachesHorizon | 978,161 |
+| `dmin1_lag14_wt12` | first half, D_min 1, A lags up to 14, WT[A] 12 | 7 / 12 / 12 | E1_NoWastedAsk, P1_NoCancelAfterExec | R_ReachesHorizon | 1,160,025 |
+| `wtb_second_only` | WT[B] from the second-half condition only (D_final + T_rep + L_up) | 7 / 13 / 7 | O2_NoUncountedMint | R_ReachesHorizon | 1,251,808 |
+| `wtb_second_only_lagB` | same, B lags up to 9 (> WT[B]) | 7 / 13 / 7 | O2_NoUncountedMint, P3_NoMintAfterReturn | R_ReachesHorizon | 2,255,360 |
+| `wtb_second_only_aheadB` | same, B leads up to 5 (one half) | 7 / 13 / 7 | P4_HalfHasTime, O2_NoUncountedMint | R_ReachesHorizon | 748,525 |
+| `drop_WTB2_dfinal` | WT[B] = second-half condition without D_final(B) (one half) | 7 / 13 / 4 | P4_HalfHasTime, O2_NoUncountedMint, E2_NoEarlyResend | R_ReachesHorizon | 614,787 |
+| `drop_WTB2_trep` | WT[B] = second-half condition without T_rep (one half) | 7 / 13 / 5 | O2_NoUncountedMint | R_ReachesHorizon | 303,019 |
+| `drop_WTB2_lup` | WT[B] = second-half condition without L_up(B) (one half) | 7 / 13 / 5 | O2_NoUncountedMint | R_ReachesHorizon | 303,019 |
+| `drop_WTB2_dfinal_x0` | same WT[B] as drop_WTB2_dfinal, with D_final(B) = 0 (one half) | 7 / 13 / 4 | O2_NoUncountedMint | R_ReachesHorizon | 109,666 |
+| `wtb_first_only_slowB` | WT[B] from the first-half condition only, D_final(B) = 13 (> it; one half) | 7 / 13 / 12 | P4_HalfHasTime, O2_NoUncountedMint | R_ReachesHorizon | 2,187,589 |
+| `wtb_v2_aheadB` | WT[B] from the design, B leads up to WT[B] - D_final(B) (one half) | 7 / 13 / 12 | P4_HalfHasTime, O2_NoUncountedMint | R_ReachesHorizon | 1,428,474 |
 
-| Run | What it checks | V / WT[A] / WT[B] | Violated | Distinct states |
-|---|---|---|---|---|
-| `gate_silent` | second half, route closed once a half went unanswered for WT[B] (r59), the design's WT[B] | 7 / 13 / 12 | O2_NoUncountedMint | 243,136 |
-| `gate_silent_wtb_second_only` | same, WT[B] from the second-half condition only | 7 / 13 / 7 | O2_NoUncountedMint | 372,639 |
-| `gate_silent_wtb_second_only_noloss` | same, no loss (one failure, one hold) | 7 / 13 / 7 | O2_NoUncountedMint | 15,917 |
-| `gate_silent_noloss` | same as gate_silent, no loss (one failure, one hold) | 7 / 13 / 12 | all hold (not reached: R_NeverReturned) | 5,496 |
-| `gate_resent_loss1` | candidate gate: route closed only after the third send went unanswered for WT[B]; 1 loss(es) | 7 / 13 / 12 | all hold (not reached: R_NeverReturned) | 126,528 |
-| `gate_resent_loss2` | candidate gate: route closed only after the third send went unanswered for WT[B]; 2 loss(es) | 7 / 13 / 12 | all hold (not reached: R_NeverReturned) | 670,200 |
-| `gate_resent_loss3` | candidate gate: route closed only after the third send went unanswered for WT[B]; 3 loss(es) | 7 / 13 / 12 | O2_NoUncountedMint | 1,683,320 |
+</details>
+
+<details>
+<summary>Beyond the budget (3 runs)</summary>
+
+| Run | What it checks | V / WT[A] / WT[B] | Violated | Probes reached | Distinct states |
+|---|---|---|---|---|---|
+| `beyond_loss2` | first half, two losses (budget is one) | 7 / 13 / 12 | P1_NoCancelAfterExec | R_ReachesHorizon | 522,579 |
+| `beyond_fail2` | first half, two failures (budget is one T_ops) | 7 / 13 / 12 | P1_NoCancelAfterExec, O1_NoLateReceipt | R_ReachesHorizon | 649,519 |
+| `wtb_v2_lagB` | WT[B] = 12 (the design's for a lag budget of 2), B lags up to 13 | 7 / 13 / 12 | O2_NoUncountedMint, P3_NoMintAfterReturn | R_ReachesHorizon | 1,812,195 |
+
+</details>
+
+<details>
+<summary>Route-close gates (r59) (7 runs)</summary>
+
+| Run | What it checks | V / WT[A] / WT[B] | Violated | Probes reached | Distinct states |
+|---|---|---|---|---|---|
+| `gate_silent` | second half, route closed once a half went unanswered for WT[B] (r59), the design's WT[B] | 7 / 13 / 12 | O2_NoUncountedMint | R_NeverReturned, R_ReachesHorizon | 243,136 |
+| `gate_silent_wtb_second_only` | same, WT[B] from the second-half condition only | 7 / 13 / 7 | O2_NoUncountedMint | R_NeverReturned, R_ReachesHorizon | 372,639 |
+| `gate_silent_wtb_second_only_noloss` | same, no loss (one failure, one hold) | 7 / 13 / 7 | O2_NoUncountedMint | R_NeverReturned, R_ReachesHorizon | 15,917 |
+| `gate_silent_noloss` | same as gate_silent, no loss (one failure, one hold) | 7 / 13 / 12 | all hold (not reached: R_NeverReturned) | R_ReachesHorizon | 5,496 |
+| `gate_resent_loss1` | candidate gate: route closed only after the third send went unanswered for WT[B]; 1 loss(es) | 7 / 13 / 12 | all hold (not reached: R_NeverReturned) | R_ReachesHorizon | 126,528 |
+| `gate_resent_loss2` | candidate gate: route closed only after the third send went unanswered for WT[B]; 2 loss(es) | 7 / 13 / 12 | all hold (not reached: R_NeverReturned) | R_ReachesHorizon | 670,200 |
+| `gate_resent_loss3` | candidate gate: route closed only after the third send went unanswered for WT[B]; 3 loss(es) | 7 / 13 / 12 | O2_NoUncountedMint | R_NeverReturned, R_ReachesHorizon | 1,683,320 |
+
+</details>
 
 **Sweep A: first half, `WT[A]` against `δ_lag(A)`** (`D_ask + T_rep + L_up(A) + T_ops + T_hold` = 11, `D_min` = 0, no shift; P1 and E1 checked). A cell lists the violated properties ("ok": none); "(design ok)" marks points where the design's inequality holds.
 
@@ -566,25 +605,25 @@ With `T_bot` = 3 (`e2_tbot3_wt5`, `e2_tbot3_wt6`): E2 fails at `WT[B]` = 5 and h
 
 ### Apalache bounded search (`apalache/run.py`)
 
-"Expected" is what the run is for: a control must be violated, a probe must be reached (its `R_*` violated), and "open" marks a search whose answer was not known beforehand. Depth is in events (steps).
+"Expected" is what the run is for: a control must be violated, a probe must be reached (its `R_*` violated), and "open" marks a search whose answer was not known beforehand. Depth is in events (steps). In the descriptions, `XA` is `D_ask + T_rep + L_up(A)`, `lag` is `δ_lag(A)`, and `ahead(B)` and `lag(B)` are `δ_ahead(B)` and `δ_lag(B)`.
 
 | Run | What it checks | Invariant | Expected | Result | Time (s) |
 |---|---|---|---|---|---|
-| `F_P1` | WT[A] without any shift term, shift unbounded | `P1_NoCancelAfterExec` | violated | violated | 107 |
-| `F_v2` | the design's WT[A] with a lag budget that excludes the shift, shift unbounded | `FirstSafety` | violated | violated | 196 |
-| `F_v2_lag0` | the design's >= with a lag budget of 0 | `P1_NoCancelAfterExec` | violated | violated | 105 |
-| `F_v2_Veq` | V = V_min (the design's >= taken literally) | `P2_HolderHasTime` | violated | violated | 18 |
-| `F_P1_eq` | WT[A] = XA + T_ops + T_hold (strictness) | `P1_NoCancelAfterExec` | violated | violated | 148 |
-| `F_P1_lag` | WT[A] < lag - D_min | `P1_NoCancelAfterExec` | violated | violated | 152 |
+| `F_P1` | WT[A] without any shift term, shift unbounded | `P1_NoCancelAfterExec` | violated | violated | 83 |
+| `F_v2` | the design's WT[A] with a lag budget that excludes the shift, shift unbounded | `FirstSafety` | violated | violated | 142 |
+| `F_v2_lag0` | the design's >= with a lag budget of 0 | `P1_NoCancelAfterExec` | violated | violated | 78 |
+| `F_v2_Veq` | V = V_min (the design's >= taken literally) | `P2_HolderHasTime` | violated | violated | 7 |
+| `F_P1_eq` | WT[A] = XA + T_ops + T_hold (strictness) | `P1_NoCancelAfterExec` | violated | violated | 110 |
+| `F_P1_lag` | WT[A] < lag - D_min | `P1_NoCancelAfterExec` | violated | violated | 94 |
 | `F_fail2_1ops` | two failures, one T_ops | `P1_NoCancelAfterExec` | violated | violated | 7,662 |
-| `F_loss2_huge` | two losses, WT[A] above 100x every other term | `P1_NoCancelAfterExec` | violated | violated | 264 |
-| `F_probe_exec` | probe: the holder executes | `R_NeverExecuted` | violated | violated | 20 |
-| `F_probe_cancel` | probe: home cancels | `R_NeverCancelled` | violated | violated | 85 |
-| `F_probe_race` | probe: executed and asked | `R_NeverRace` | violated | violated | 28 |
-| `F_probe_stillopen` | probe: a still-open answer (reorg shift) | `R_NeverStillOpen` | violated | violated | 102 |
-| `F_prompt_anylag` | holder within T_act, any lag | `P1_NoCancelAfterExec` | open | violated | 144 |
+| `F_loss2_huge` | two losses, WT[A] above 100x every other term | `P1_NoCancelAfterExec` | violated | violated | 255 |
+| `F_probe_exec` | probe: the holder executes | `R_NeverExecuted` | violated | violated | 10 |
+| `F_probe_cancel` | probe: home cancels | `R_NeverCancelled` | violated | violated | 49 |
+| `F_probe_race` | probe: executed and asked | `R_NeverRace` | violated | violated | 16 |
+| `F_probe_stillopen` | probe: a still-open answer (reorg shift) | `R_NeverStillOpen` | violated | violated | 75 |
+| `F_prompt_anylag` | holder within T_act, any lag | `P1_NoCancelAfterExec` | open | violated | 87 |
 | `F_prompt_anylag_tact` | holder within T_act, any lag, WT[A] also above XA + T_ops + T_hold + T_act | `P1_NoCancelAfterExec` | open | no violation to depth 10 | 32,225 |
-| `F_so_anylag` | still-open answer counts for r46, any lag | `P1_NoCancelAfterExec` | open | violated | 123 |
+| `F_so_anylag` | still-open answer counts for r46, any lag | `P1_NoCancelAfterExec` | open | violated | 93 |
 | `F_v2_shiftWT` | the design's WT[A], lag budget without the shift, shift up to WT[A] + D_ticket | `P1_NoCancelAfterExec` | holds | no violation to depth 8 | 1,198 |
 | `F_so_lagbound` | still-open reading, lag within 2 WT[A] - (T_rep + L_up + T_ops + T_hold) | `P1_NoCancelAfterExec` | holds | no violation to depth 8 | 1,036 |
 | `S_v2` | the design's WT[B], which has no ahead(B) | `SecondSafety` | violated | violated | 13 |
@@ -602,11 +641,7 @@ With `T_bot` = 3 (`e2_tbot3_wt5`, `e2_tbot3_wt6`): E2 fails at `WT[B]` = 5 and h
 | `S_O2_resent_loss3` | the same gate, three losses | `O2_NoUncountedMint` | violated | violated | 2,372 |
 | `S_O2_resent_latebot` | the same gate, one loss, a due re-send may go out late | `O2_NoUncountedMint` | violated | violated | 127 |
 
-The first-half runs (`F_*`), except `F_v2_shiftWT` and `F_so_lagbound`, were recorded on an earlier revision of `TimingHD.tla`. It differed in two ways:
-- the proof ghost fields (`at`, `nf`, `nh`, `lsl`), which no guard reads;
-- the time-step rule: an event at the current time was refused when a deadline had already passed.
-
-The second difference matters only for a deadline that is already past when it starts, which only close by hand can have, in the second half. It was found in review: it froze the model after a late route close and made the first O2 proof vacuous. Every proof and every second-half run (`S_*`) was re-run after the fix, and the probe `S_probe_latecbh` reaches the case.
+`F_fail2_1ops` and `F_prompt_anylag_tact` were recorded on an earlier revision of `TimingHD.tla` that differs only in proof ghost fields no guard reads and in refusing an event at the current time once a deadline had passed, which cannot happen in the first half, where every deadline lies at or after the moment it starts; every other result above is from the committed model.
 
 ### Apalache inductive proofs (`apalache/prove.py`)
 
@@ -643,7 +678,7 @@ Every check passed, 57 in all.
 - **A clock lag beyond the budget** is not covered by the proofs ("A clock lag beyond the budget").
 - **The other reading of r46** (a still-open answer counts as an answer) is not proved, nor is reading r47's schedule from the previous send.
 - **E1 and E2** (efficiency) are checked with TLC only.
-- **Close by hand under a timing gate** has no gate shown safe beyond one loss (correction 7). O2 is proved only for a gate that does not open with one loss.
+- **Close by hand under a timing gate** has no gate shown safe beyond one loss ("Close by hand: read the away chain"). O2 is proved only for a gate that, in bounded search, does not open with one loss.
 - **The timers that follow from the windows** (the first ask at `V + WT[A] + T_bot`, the earliest cancel at `V + 2·WT[A]`, and `stopWaitingAt` at `V + 4·WT[A]`; r13, r45, r46, r49) hold by construction of r45 and r46 as modeled; they are not separate invariants. `stopWaitingAt` is never read here: there is no receipt without a ticket and no hold reversal.
 - **The example's latencies** are one month of CCIP measurements, not bounds.
 - **Conformance.** The models say nothing about whether the contracts implement the rules as modeled.
