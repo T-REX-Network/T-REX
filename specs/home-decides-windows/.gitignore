@@ -1,0 +1,13 @@
+# Pinned tools (./get-tla2tools.sh, ./get-apalache.sh)
+tla2tools.jar
+tla2tools.jar.part
+.tools/
+
+# Run outputs: the expected results are in README.md
+tlc/out/
+tlc/cfg/
+tlc/.meta/
+tlc/.tmp/
+apalache/out/
+apalache/proof/
+__pycache__/
