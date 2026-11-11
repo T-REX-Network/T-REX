@@ -64,6 +64,8 @@ Each term is measured for chain `c`, or set by policy where marked. `A` is the c
 | `δ_ahead(c)`, `δ_lag(c)` | How far `c`'s clock may lead or trail home's | `AheadA`, `LagA`, `AheadB`, `LagB` |
 | shift | How much later the valid until of a ticket copy from a home block a reorg dropped can be (sc30). The corrected conditions count it inside `δ_lag` | `ShiftA` |
 
+`D_min` and `T_rep` are 0 in practice with the current design. The Lite sends the receipt in the transaction that executes the ticket, and its answer to an ask in the transaction that delivers the ask (r20, r21-r24), so `T_rep` = 0. `D_min` = 0 is the safe lower bound, and the only condition that uses it is the ticket-side clock bound, which `WT[c] ≥ δ_lag(c)` already covers. The models keep both as free terms so that the proofs also hold for an implementation that sends receipts later or for a known minimum delivery time.
+
 ## Properties
 
 | Id | Invariant | Statement | Kind |
