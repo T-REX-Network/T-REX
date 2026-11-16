@@ -287,6 +287,10 @@ library ErrorsLib {
     error ChainInboundPaused(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
+    /// @dev `gateway` would be both the fast and the final route of `chainKey`.
+    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
+    /// @dev `gateway` is the fast route of `chainKey`, which carries validations out and nothing in.
+    error GatewayIsFastRoute(address gateway, bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
     error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
     error GatewayNotTrusted(address gateway);

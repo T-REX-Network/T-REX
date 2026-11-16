@@ -160,6 +160,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc ITREXMessaging
+    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
+        _setFastRoute(chainType, chainReference, gateway);
+    }
+
+    /// @inheritdoc ITREXMessaging
     function setPeer(bytes32 chainKey, bytes calldata peer) external restricted {
         _setPeer(chainKey, peer);
     }
