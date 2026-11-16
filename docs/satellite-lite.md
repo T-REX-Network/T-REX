@@ -30,6 +30,12 @@ that recall was dispatched to.
    again, before or after it was consumed, is ignored (a resend repeats the issuance byte for byte), and the
    instruction ids of rules 9 and 10.
 2. **Accept only the reference token as author**, through its own gateway.
+2a. **Send every report on the final route.** A chain may have two routes on the reference side: a fast one, set
+   with `setFastRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
+   `setRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
+   token refuses a delivery from the fast route with `GatewayIsFastRoute`, and pins each validation leg to the final
+   route of the moment (`pinnedRouteFor`), so a validation that arrived on the fast gateway is settled through the
+   final one, not back through the gateway that delivered it.
 
 ### Validations
 

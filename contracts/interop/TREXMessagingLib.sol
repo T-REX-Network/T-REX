@@ -119,6 +119,10 @@ library TREXMessagingLib {
 
         /// Chains whose messages are refused, and left deliverable, until the pauser lifts it.
         mapping(bytes32 chainKey => bool paused) inboundPaused;
+
+        /// The gateway carrying validations only, per chain, ahead of the chain's finality. Zero sends them on
+        /// `routes`. Never carries an instruction, and never delivers anything to this token.
+        mapping(bytes32 chainKey => address gateway) fastRoutes;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
@@ -182,9 +186,23 @@ library TREXMessagingLib {
         require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.GatewayNotTrusted(gateway));
 
         bytes32 chainKey = _registerChain(s, chainType, chainReference);
+        _requireDistinctRoutes(chainKey, gateway, s.fastRoutes[chainKey]);
         s.routes[chainKey] = gateway;
 
         emit EventsLib.RouteSet(chainKey, gateway);
+    }
+
+    /// @dev See {ITREXMessaging-setFastRoute}. Authorization is the caller's.
+    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external {
+        MessagingStorage storage s = layout();
+
+        require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.GatewayNotTrusted(gateway));
+
+        bytes32 chainKey = _registerChain(s, chainType, chainReference);
+        _requireDistinctRoutes(chainKey, gateway, s.routes[chainKey]);
+        s.fastRoutes[chainKey] = gateway;
+
+        emit EventsLib.FastRouteSet(chainKey, gateway);
     }
 
     /// @dev See {ITREXMessaging-setPeer}. Authorization is the caller's.
@@ -228,11 +246,13 @@ library TREXMessagingLib {
 
     /* ----- Outbound ----- */
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`, through the chain's fast route when
+    /// one is set and still trusted, else through its final route; pins the final route.
     ///
-    /// The first dispatch of a validation toward a chain records the gateway; its settlement legs from
-    /// that chain are then matched against that gateway alone. A re-dispatch through the same gateway
-    /// is allowed, so a lost message can be re-sent.
+    /// The chain must be open on its final route either way, since that is the route the settlement comes back
+    /// through: the first dispatch of a validation toward a chain records the final gateway, and its settlement
+    /// legs from that chain are then matched against that gateway alone. A re-dispatch is allowed while the final
+    /// route is still the pinned one, so a lost message can be re-sent.
     function sendComplianceValidation(bytes32 chainKey, uint256 validationId, bytes memory body)
         external
         returns (bytes32 sendId)
@@ -249,10 +269,17 @@ library TREXMessagingLib {
             require(pinned == gateway, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
         }
 
+        // A validation moves nothing on its own: sending it ahead of finality risks only a validation the
+        // satellite executes and this chain then loses, which the settlement intake refuses. A fast gateway
+        // the registry dropped falls back to the final route rather than stranding issuance.
+        address fast = s.fastRoutes[chainKey];
+        if (fast != address(0) && s.registry.isTrusted(fast)) gateway = fast;
+
         sendId = _send(gateway, peer, chainKey, MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
     }
 
-    /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current route.
+    /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current final route. The
+    /// fast route is never used here: an instruction moves value, so it waits for the chain's finality.
     ///
     /// Fail-closed before anything leaves: a registry must be set, the chain must be routed, the routed
     /// gateway must still be trusted at this instant, and the peer must be addressable.
@@ -293,6 +320,9 @@ library TREXMessagingLib {
 
         require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
         s.received[gateway][receiveId] = true;
+
+        // Everything a token receives reports value that moved, so it is taken from a final route only.
+        require(s.fastRoutes[chainKey] != gateway, ErrorsLib.GatewayIsFastRoute(gateway, chainKey));
 
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _requireCurrentPeer(chainKey, sender);
@@ -414,6 +444,11 @@ library TREXMessagingLib {
         }
         require(keccak256(sender) == recall.peerKey, ErrorsLib.SenderNotPeer(chainKey, sender));
         require(recall.gateway == gateway, ErrorsLib.GatewayNotPinned(gateway, recallId, chainKey));
+    }
+
+    /// @dev One gateway cannot be both routes of a chain, or the fast one would carry what must wait for finality.
+    function _requireDistinctRoutes(bytes32 chainKey, address gateway, address other) private pure {
+        require(gateway == address(0) || gateway != other, ErrorsLib.FastRouteIsFinalRoute(chainKey, gateway));
     }
 
     function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {
