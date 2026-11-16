@@ -89,7 +89,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     uint256 public callsResend;
     uint256 public callsRelay;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
         gateway = _newTrustedGateway(POLYGON);
@@ -117,7 +117,12 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         vm.stopPrank();
 
         targetContract(address(this));
-        bytes4[] memory selectors = new bytes4[](8);
+        targetSelector(FuzzSelector({ addr: address(this), selectors: _targetSelectors() }));
+    }
+
+    /// @dev The transitions the fuzzer calls. A suite built on this one appends its own.
+    function _targetSelectors() internal view virtual returns (bytes4[] memory selectors) {
+        selectors = new bytes4[](8);
         selectors[0] = this.mint.selector;
         selectors[1] = this.transfer.selector;
         selectors[2] = this.delegate.selector;
@@ -126,7 +131,6 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         selectors[5] = this.liteResendsProof.selector;
         selectors[6] = this.relay.selector;
         selectors[7] = this.drop.selector;
-        targetSelector(FuzzSelector({ addr: address(this), selectors: selectors }));
     }
 
     /* ----- Transitions ----- */
@@ -183,12 +187,12 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         }
     }
 
-    function liteResendsProof(uint256 idSeed) external {
+    function liteResendsProof(uint256 idSeed) external virtual {
         if (recallActor.length == 1) return;
         try lite.resendProof(1 + idSeed % (recallActor.length - 1)) { } catch { }
     }
 
-    function relay(uint256 indexSeed) external {
+    function relay(uint256 indexSeed) external virtual {
         callsRelay++;
         uint256 length = gateway.queueLength();
         if (length == 0) return;
