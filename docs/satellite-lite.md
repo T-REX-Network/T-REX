@@ -67,7 +67,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes through the gateway and to the peer the issuance pinned; refused while issuance toward that chain is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
+| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes through the gateway and to the peer the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -117,7 +117,7 @@ and must not keep running. The remedy against a peer abusing it is to distrust i
 
 | Brake | Stops | Set by | Lifted by |
 |---|---|---|---|
-| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof | the pauser; the token itself on a settlement or proof for an id it never issued | the pauser, `unpause` |
+| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof; new validations, approvals into issuance and validation resends | the pauser; the token itself on a settlement or proof for an id it never issued | the pauser, `unpause` |
 | chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new validations and validation resends toward it; discards and resolutions of validations still awaiting its leg | the pauser; the token itself on a replayed settlement or a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
 | chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
 | route close, `setRoute(..., 0)` | every send toward one chain and every message from it, a settlement of a validation already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again | the identity manager | the identity manager, with a trusted gateway |

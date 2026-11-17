@@ -67,6 +67,9 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        // Running: a paused token refuses every request (TokenPaused).
+        vm.prank(agent);
+        token.unpause();
         polygonGateway = _newTrustedGateway(POLYGON);
         optimismGateway = _newTrustedGateway(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
@@ -240,8 +243,6 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(ledger.pendingInOf(address(bobIdentity)), 50);
         assertEq(ledger.pendingInOf(address(0)), 0, "nothing promised to identity zero");
 
-        vm.prank(agent);
-        token.unpause();
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, aliceSat, bobSat, 40)));
 
         assertEq(ledger.positionOf(address(bobIdentity)), 40, "settled on bob's identity");
