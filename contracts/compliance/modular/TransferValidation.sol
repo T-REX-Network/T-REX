@@ -209,7 +209,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev The one classification, for a leg delivered now and for a leg parked earlier and settled by the
     ///  issuance of its id. In order: no body issued under the id, so the leg is parked; the substantive gate,
     ///  wallets and amount against the issued terms, failed, so the leg is refused with the hash as the evidence
-    ///  of why; a leg already accounted for, so a replay; and only then the leg is applied, late or not.
+    ///  of why; a leg already accounted for, so a replay, or a duplicate when it is the very leg applied or parked;
+    ///  and only then the leg is applied, late or not.
     function _classify(bytes32 originChainKey, MessageTypesLib.SettlementNotification memory notification)
         private
         returns (ISettlementHandler.Verdict)
@@ -220,8 +221,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         // anywhere: an id never taken, or a request still awaiting approval, refused, or left unanswered. The
         // satellite executed a body this chain did not issue, which a reorg explains as well as a hostile Lite.
         if (validation.hash == bytes32(0)) {
-            TransferValidationLib.park(originChainKey, notification);
-            return ISettlementHandler.Verdict.PauseChain;
+            bool duplicate = TransferValidationLib.park(originChainKey, notification);
+            return duplicate ? ISettlementHandler.Verdict.None : ISettlementHandler.Verdict.PauseChain;
         }
 
         // 1. Which leg this is, and whether it sits inside the issued terms, see {TransferValidationLib-judge}.
@@ -233,10 +234,13 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             }
             return ISettlementHandler.Verdict.PauseChain;
         }
-        if (_alreadyAccountedFor(validation.status, leg)) {
-            TransferValidationLib.recordReplay(notification.validationId, originChainKey);
-            return ISettlementHandler.Verdict.PauseChain;
+        // The very leg applied before, delivered again, is a duplicate and changes nothing; anything else already
+        // accounted for replays. A leg to apply is recorded first, so its copy is recognised later.
+        bool accountedFor = _alreadyAccountedFor(validation.status, leg);
+        if (TransferValidationLib.recordLeg(originChainKey, notification, accountedFor)) {
+            return ISettlementHandler.Verdict.None;
         }
+        if (accountedFor) return ISettlementHandler.Verdict.PauseChain;
 
         // 2. Take in what this chain reported: complete the movement, or wait for the other chain.
         bool late = _wasDiscarded(validation.status);

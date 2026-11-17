@@ -108,6 +108,10 @@ library TransferValidationLib {
         /// Legs reported for an id with no issued body, per origin chain, see {ITransferValidation-ParkedLeg}.
         /// Written by the settlement path, consumed by the issuance of that id.
         mapping(bytes32 validationId => mapping(bytes32 chainKey => ITransferValidation.ParkedLeg leg)) parkedLegs;
+        /// `keccak256(abi.encode(notification))` of the leg each chain reported for each validation, written when
+        /// the leg is parked or applied and kept, so the same leg delivered again, under another receive id, is
+        /// told apart from a replay, as the token keeps `settledProofs` for burn proofs.
+        mapping(bytes32 validationId => mapping(bytes32 chainKey => bytes32 legHash)) reportedLegs;
     }
 
     /// @dev The recipient's and the spender's envelopes of a validation awaiting approval.
@@ -480,10 +484,34 @@ library TransferValidationLib {
         if (pendingPastRelease || unansweredPastDeadline) return ITransferValidation.ValidationStatus.Expired;
     }
 
-    /// @dev Records a leg already accounted for, see {TransferValidation-_alreadyAccountedFor}: the caller pauses
-    ///  the chain.
-    function recordReplay(bytes32 validationId, bytes32 chainKey) external {
-        emit EventsLib.ReplayedSettlement(validationId, chainKey);
+    /// @dev Records a leg about to be applied, or judges one already accounted for, see
+    ///  {TransferValidation-_alreadyAccountedFor}. A leg about to be applied is kept by hash, so the same leg
+    ///  delivered again is recognised; the caller applies it next, and a revert there undoes the record. Of a leg
+    ///  already accounted for, the very leg that was applied, from the same chain, is a duplicate: a gateway
+    ///  redelivery or a Lite's resend, which repeats its settlement byte for byte. It changes nothing and pauses
+    ///  nothing (`SettlementDuplicate`). Anything else is a replay (`ReplayedSettlement`) and the caller pauses the
+    ///  chain.
+    /// @param accountedFor whether the leg is already accounted for
+    /// @return duplicate whether the leg, already accounted for, is the one that was applied
+    function recordLeg(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification, bool accountedFor)
+        external
+        returns (bool duplicate)
+    {
+        if (accountedFor) return _replayOrDuplicate(chainKey, notification);
+        layout().reportedLegs[notification.validationId][chainKey] = _legHash(notification);
+    }
+
+    function _replayOrDuplicate(bytes32 chainKey, MessageTypesLib.SettlementNotification memory notification)
+        private
+        returns (bool duplicate)
+    {
+        duplicate = layout().reportedLegs[notification.validationId][chainKey] == _legHash(notification);
+        if (duplicate) emit EventsLib.SettlementDuplicate(notification.validationId, chainKey);
+        else emit EventsLib.ReplayedSettlement(notification.validationId, chainKey);
+    }
+
+    function _legHash(MessageTypesLib.SettlementNotification memory notification) private pure returns (bytes32) {
+        return keccak256(abi.encode(notification));
     }
 
     /// @dev See {ITransferValidation-setIssuancePaused}. Idempotent: the same state again changes nothing and
@@ -641,19 +669,22 @@ library TransferValidationLib {
     }
 
     /// @dev Keeps a leg reported for an id nothing was issued under, one per origin chain, so that once the
-    ///  request is sent again with the same salt it can be settled, see {takeParkedLeg}. A second leg from the
-    ///  same chain is a replay. Either way the caller pauses the chain: it executed what this chain never sent.
-    function park(bytes32 originChainKey, MessageTypesLib.SettlementNotification memory notification) external {
+    ///  request is sent again with the same salt it can be settled, see {takeParkedLeg}. The parked leg delivered
+    ///  again is a duplicate and changes nothing; any other second leg from the same chain is a replay. Except for
+    ///  a duplicate, the caller pauses the chain: it executed what this chain never sent.
+    /// @return duplicate whether the leg is the one already parked
+    function park(bytes32 originChainKey, MessageTypesLib.SettlementNotification memory notification)
+        external
+        returns (bool duplicate)
+    {
         ITransferValidation.ParkedLeg storage parked = layout().parkedLegs[notification.validationId][originChainKey];
-        if (parked.exists) {
-            emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
-            return;
-        }
+        if (parked.exists) return _replayOrDuplicate(originChainKey, notification);
         parked.from = notification.from;
         parked.to = notification.to;
         parked.amount = notification.amount;
         parked.hash = notification.hash;
         parked.exists = true;
+        layout().reportedLegs[notification.validationId][originChainKey] = _legHash(notification);
         emit EventsLib.SettlementParked(
             notification.validationId, originChainKey, notification.amount, notification.hash
         );

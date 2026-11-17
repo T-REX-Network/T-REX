@@ -112,9 +112,13 @@ interface ISettlementHandler {
     /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. Four cases:
     /// - An id with no issued body: the leg is parked under its id and origin chain (`SettlementParked`), so the
     ///   request, sent again with the same salt, issues the same id, and `settleParkedLeg` then judges it as any
-    ///   leg. A second leg from the same chain for a parked id is a replay.
+    ///   leg. The parked leg delivered again is a duplicate; any other second leg from the same chain for a
+    ///   parked id is a replay.
     /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
     ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
+    /// One case returns `None` without applying anything: the leg already applied or parked from that chain,
+    /// delivered again byte for byte under another receive id (`SettlementDuplicate`), as a gateway redelivery or
+    /// a Lite resending its settlement produces. It is consumed and pauses nothing.
     /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
     ///   issued (`SettlementRejected`); the validation stands, the discard and resolution paths still apply.
     /// - A leg outside the issued terms carrying another hash, from a chain the validation involves: the satellite
