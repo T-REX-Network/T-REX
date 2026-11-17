@@ -192,6 +192,7 @@ interface ITransferValidation {
     /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
     ///   otherwise reverts with `NotAuthorizedForWallet`.
+    /// - The token not paused; otherwise reverts with `TokenPaused`.
     /// - A validity window set, no involved satellite chain paused, and each with a reconciliation window;
     ///   otherwise `ValidityWindowNotSet`, `ValidationIssuancePaused` or `ReconciliationWindowNotSet`.
     /// - No involved satellite chain with its inbound paused on the token; otherwise `ChainInboundPaused`.
@@ -234,7 +235,8 @@ interface ITransferValidation {
     /// - It must be stored `AwaitingApproval`; otherwise reverts with `ValidationNotAwaitingApproval`.
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `expiry`; otherwise reverts with `ValidationExpired`.
-    /// - On an approval, every involved chain still open, configured and not paused, as at a request.
+    /// - On an approval, the token not paused, otherwise `TokenPaused`, and every involved chain still open,
+    ///   configured and not paused, as at a request.
     ///
     /// Emits `TransferValidationIssued` and sends the legs, or emits `ValidationApprovalRefused`.
     /// @param validationId The validation awaiting approval.
@@ -334,6 +336,7 @@ interface ITransferValidation {
     ///   resent leg could reach the Lite after the pair was resolved and the burned amount returned to the sender
     ///   on the ledger, so the receiving chain would mint an amount the ledger attributes to the sender, and its
     ///   report would land on a resolved id. The last resend stays one reconciliation window ahead of the resolution.
+    /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
     /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `ChainInboundPaused`.
     /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`. The
