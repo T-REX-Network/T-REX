@@ -260,6 +260,41 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
     }
 
+    /// @notice An approval sends the legs out, so a paused token refuses it as it refuses a request; the approval
+    ///         stays recorded on the module and is finalised once the token is unpaused.
+    function test_finalize_RevertWhen_TheTokenIsPaused_ThenSucceedsOnceUnpaused() public {
+        uint256 id = _request(10, 150);
+        _approve(backend, id, 150);
+        vm.prank(agent);
+        token.pause();
+
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
+        _finalize(id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
+        assertEq(gateway.queueLength(), 0, "nothing sent");
+
+        vm.prank(agent);
+        token.unpause();
+        _finalize(id);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(gateway.queueLength(), 1);
+    }
+
+    /// @notice A refusal sends nothing, so it goes through while the token is paused and gives the room back.
+    function test_refuseValidation_Success_WhileTheTokenIsPaused() public {
+        uint256 freeBefore = token.availableOf(aliceSat);
+        uint256 id = _request(10, 150);
+        vm.prank(agent);
+        token.pause();
+
+        vm.prank(backend);
+        module.refuseValidation(address(boundCompliance), id);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(token.availableOf(aliceSat), freeBefore);
+    }
+
     // ==== Several approvers ====
 
     /// @notice Approvers answer in order, and the lowest maximum wins.

@@ -236,6 +236,8 @@ library ErrorsLib {
     error ZeroDuration();
     /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
     error ValidationIssuancePaused(bytes32 chainKey);
+    /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused.
+    error TokenPaused();
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.

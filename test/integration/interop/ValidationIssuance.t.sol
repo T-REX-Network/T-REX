@@ -25,6 +25,9 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        // Running: a paused token refuses every request (TokenPaused).
+        vm.prank(agent);
+        token.unpause();
         polygonGateway = _newTrustedGateway(POLYGON);
         optimismGateway = _newTrustedGateway(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
