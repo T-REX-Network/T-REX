@@ -589,11 +589,13 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.balanceOf(alice), MINTED - 500 + 200);
     }
 
-    /// @notice A validation that settled first left the wallet short: the proof waits, deliverable, and a proof
-    ///         for what is actually left applies.
+    /// @notice A validation issued before the recall settled first and left the wallet short: the proof waits,
+    ///         deliverable, and a proof for what is actually left applies. Issued after the recall, the validation
+    ///         could not have drawn on the recalled amount, see `RecallReservation.t.sol`.
     function test_handleBurnProof_RevertWhen_TheBridgedPositionNoLongerCovers_ThenAppliesForWhatIsLeft() public {
-        uint256 recallId = _instructed();
+        _delegate(alice, 500);
         uint256 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
+        uint256 recallId = _instruct(200);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, aliceSat, bobSat, 400)));
         assertEq(token.bridgedBalanceOf(aliceSat), 100);
         uint256 tooMuch = _proof(polygonGateway, recallId, aliceSat, 200);
