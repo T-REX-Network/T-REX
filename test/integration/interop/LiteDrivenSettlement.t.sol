@@ -336,14 +336,16 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(token.totalSupply(), MINTED);
     }
 
-    /// @notice A validation executed while the instruction was in flight: the Lite burns what it has left and
-    ///         proves that.
+    /// @notice A validation issued before the recall executed while the instruction was in flight: the Lite burns
+    ///         what it has left and proves that. Issued after the recall, it could not have drawn on the recalled
+    ///         amount, see `RecallReservation.t.sol`.
     function test_recall_Success_WhenTheLiteHadLessToBurn() public {
+        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
+        uint256 validation = _last(polygonGateway);
         vm.prank(agent);
         uint256 recallId = token.instructRecall(aliceSat, 200, alice);
         uint256 instruction = _last(polygonGateway);
-        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
-        polygonGateway.relay(_last(polygonGateway));
+        polygonGateway.relay(validation);
         _execute(id, 400);
         polygonGateway.relay(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
