@@ -139,6 +139,8 @@ library TokenDelegationLib {
     ///  wallet's bridged position so the proof that answers can always apply, and not by its reservations: a
     ///  validation that executes on the satellite first leaves the satellite less to burn, and the proof carries
     ///  what it burned, down to zero. The gateway and the peer it goes to are recorded, and only they may answer.
+    ///  The open record is what {TokenLedgerLib-availableOf} subtracts, so validations issued from now on cannot
+    ///  draw on the recalled amount.
     /// @return recallId The id the proof must answer with.
     function instructRecall(bytes calldata wallet, uint256 amount, address nativeWallet)
         external

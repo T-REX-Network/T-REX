@@ -178,7 +178,9 @@ interface IToken is IERC3643 {
     /// @param wallet the satellite wallet, ERC-7930
     function reservedOf(bytes calldata wallet) external view returns (uint256);
 
-    /// @dev What `wallet` can still send: its bridged balance less what open validations may draw from it.
+    /// @dev What `wallet` can still send: its bridged balance less what open validations may draw from it and
+    ///  less the amount of its open recall, from {instructRecall} until the proof settles it. Floors at zero.
+    ///  The compliance narrows every new validation to this, so none is issued against tokens being recalled.
     /// @param wallet the satellite wallet, ERC-7930
     function availableOf(bytes calldata wallet) external view returns (uint256);
 
@@ -234,6 +236,7 @@ interface IToken is IERC3643 {
     ///  Reverts with `ZeroValue`, `ZeroAddress`, `WalletsNotLinked` (revoked wallets still resolve),
     ///  `NotASatelliteWallet`, `RecallPending`, `InsufficientBridgedBalance` above the wallet's bridged position, and
     ///  `ChainNotOpen`. Reservations are not subtracted: the satellite burns what it still holds and proves that.
+    ///  From here until the proof lands, `amount` is subtracted from {availableOf}, so no new validation draws on it.
     ///  Emits `RecallInstructed` and `ProtocolMessageSent`.
     /// @param wallet the ERC-7930 envelope of the satellite wallet to burn
     /// @param amount the most the satellite may burn
