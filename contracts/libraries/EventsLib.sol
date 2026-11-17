@@ -260,9 +260,14 @@ library EventsLib {
     ///         `chainKey` is the chain of the leg that completed it.
     event ValidationSettled(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
     /// @notice Emergency: a trusted gateway delivered a leg already accounted for, or a second leg for an id
-    ///         whose first one is parked. Nothing is applied and the token pauses its inbound from `chainKey`,
-    ///         lifted by the pauser after an investigation.
+    ///         whose first one is parked, other than that very leg delivered again (`SettlementDuplicate`).
+    ///         Nothing is applied and the token pauses its inbound from `chainKey`, lifted by the pauser after an
+    ///         investigation.
     event ReplayedSettlement(bytes32 indexed validationId, bytes32 indexed chainKey);
+    /// @notice The leg already applied or parked for `validationId` from `chainKey` was delivered again, byte for
+    ///         byte, under another receive id: a gateway redelivery or a Lite resending its settlement. Nothing is
+    ///         applied and nothing is paused; the delivery is consumed.
+    event SettlementDuplicate(bytes32 indexed validationId, bytes32 indexed chainKey);
     /// @notice A leg arrived from `chainKey` for an id with no issued body: the satellite executed a validation
     ///         this chain never sent, which a reorg that dropped the issuance explains as well as a hostile Lite.
     ///         The leg is kept under its id and the token pauses its inbound from `chainKey`. Once the request is
