@@ -297,6 +297,7 @@ contract NamespaceFieldsTest is Test {
         parked.amount = 31;
         parked.hash = bytes32(uint256(32));
         parked.exists = true;
+        validationStorage.reportedLegs[bytes32(NUMBER)][KEY] = bytes32(uint256(34));
 
         assertEq(_word(_field(base, 0)), 11, "defaultValidityWindow");
         assertEq(_word(_entry(_field(base, 1), KEY)), 12, "reconciliationWindows");
@@ -312,6 +313,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_field(leg, 2)), 31, "parkedLegs.amount");
         assertEq(_word(_field(leg, 3)), 32, "parkedLegs.hash");
         assertEq(_word(_field(leg, 4)), 1, "parkedLegs.exists");
+        assertEq(_word(_entry(_entry(_field(base, 6), bytes32(NUMBER)), KEY)), 34, "reportedLegs");
 
         bytes32 entry = _entry(_field(base, 3), bytes32(NUMBER));
         assertEq(_word(_field(entry, 0)), 21, "validations.hash");

@@ -161,11 +161,11 @@ contract CrossChainSettlementTest is InteropSuiteTest {
 
     // ==== refusal Tests ====
 
-    /// @notice A consumed leg delivered again as a fresh message moves nothing and pauses the inbound of the chain
+    /// @notice Another burn leg under a consumed id, delivered as a fresh message, moves nothing and pauses the inbound of the chain
     ///         that sent it: the other chain's leg still lands and settles the pair, and the token is not paused.
     function test_handleSettlement_Success_WhenAConsumedLegIsReplayed() public {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
-        uint256 replay = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95));
+        uint256 replay = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 96));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReplayedSettlement(id, polygon);
