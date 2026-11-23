@@ -361,7 +361,9 @@ interface IERC3643 is IERC20, IERC20Metadata {
 
     /**
      *  @dev Initiates burning of tokens in batch.
-     *  Requires that the `_userAddresses` addresses are all verified and whitelisted addresses.
+     *  Burns bypass holder eligibility and transfer-rule admission checks, including while paused or
+     *  address-frozen. Each burn automatically releases only the frozen amount needed to cover it,
+     *  then notifies compliance through `destroyed`.
      *  IMPORTANT: THIS TRANSACTION COULD EXCEED GAS LIMIT IF `_userAddresses.length` IS TOO HIGH.
      *  USE WITH CARE TO AVOID "OUT OF GAS" TRANSACTIONS AND POTENTIAL LOSS OF TX FEES.
      *  @param _userAddresses The addresses of the wallets concerned by the burn.
