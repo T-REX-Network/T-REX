@@ -10,6 +10,13 @@ fs_permissions = [
     { access = "read-write", path = "./deployments" },
     # scratch manifest for test/unit/scripts/DeployUtilityChecker.t.sol
     { access = "read-write", path = "./cache" },
+    # scripts/deploy: committed config, address tables and creation bytecode (written by ExportBytecode and
+    # AddressTable), and the build artifacts the bytecode is exported from.
+    { access = "read-write", path = "./deploy" },
+    { access = "read", path = "./out" },
+    { access = "read", path = "./out-onchainid" },
+    # ExportBytecode records the ONCHAINID revision the bytecode was built from.
+    { access = "read", path = "./soldeer.lock" },
 ]
 
 solc_version = "0.8.30"
@@ -33,6 +40,15 @@ runs = 256
 depth = 64
 fail_on_revert = false
 call_override = false
+
+# ONCHAINID build used by scripts/deploy/ExportBytecode.s.sol. IdentityFactory is over the EIP-170 limit
+# without the IR pipeline, and upstream builds and tests every ONCHAINID contract with it, so the deployed
+# ONCHAINID bytecode comes from this profile. Build the contracts by path (see deploy/README.md); the
+# artifacts go to their own folders so they never mix with the default build.
+[profile.onchainid]
+via_ir = true
+out = "out-onchainid"
+cache_path = "cache-onchainid"
 
 # Fast profile used by the Gambit mutation-testing runner (mutation/run_mutation.sh).
 # Reduced fuzz/invariant budgets keep per-mutant wall-clock low while still exercising

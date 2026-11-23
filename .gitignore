@@ -3,6 +3,8 @@ dependencies/
 deployments/
 out/
 cache/
+out-onchainid/
+cache-onchainid/
 coverage/
 coverage.json
 gas-report.txt
