@@ -77,6 +77,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { issuerConfirmsClaim } from "../ERC-3643/base/ERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
@@ -118,6 +119,28 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
                 break;
             }
         }
+    }
+
+    /// @inheritdoc IUtilityChecker
+    function getTransferFromStatus(address _token, address _spender, address _from, address _to, uint256 _amount)
+        external
+        view
+        returns (TransferFromStatus memory _status)
+    {
+        _status.inputsValid = _spender != address(0) && _from != address(0) && _to != address(0);
+        if (!_status.inputsValid) return _status;
+
+        IERC3643 token = IERC3643(_token);
+        (bool frozen,) = getFreezeStatus(_token, _from, _to, _amount);
+        _status.freezeStatus = !token.paused() && !frozen;
+        _status.eligibilityStatus = token.identityRegistry().isVerified(_to);
+        _status.allowanceStatus = token.allowance(_from, _spender) >= _amount;
+
+        IModularCompliance compliance = IModularCompliance(address(token.compliance()));
+        IModule.TransferContext memory context = _buildContext(_token, address(compliance), _from, _to, _amount);
+        context.spender = InteroperableAddress.formatEvmV1(block.chainid, _spender);
+        _status.complianceStatus = _rulesAllow(compliance, context);
+        _status.spenderStatus = _spenderAllowed(compliance, context);
     }
 
     /// @inheritdoc IUtilityChecker
@@ -301,7 +324,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
     }
 
-    /// @dev The context the compliance would build for a native movement: both wallets resolved, no spender.
+    /// @dev The context the compliance would build for a native transfer or mint, before adding any spender.
     function _buildContext(address _token, address _compliance, address _from, address _to, uint256 _value)
         private
         view
@@ -309,6 +332,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     {
         IERC3643IdentityRegistry registry = IERC3643(_token).identityRegistry();
         ctx.compliance = _compliance;
+        ctx.kind = _from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
         if (_from != address(0)) {
             ctx.fromIdentity = address(registry.identity(_from));
             ctx.fromWallet = WalletKeyLib.walletId(_from);
@@ -319,6 +343,35 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
         ctx.amountMin = _value;
         ctx.amountMax = _value;
+    }
+
+    /// @dev The compliance's rule gate, without writing its transient transferFrom context.
+    function _rulesAllow(IModularCompliance compliance, IModule.TransferContext memory context)
+        private
+        view
+        returns (bool)
+    {
+        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
+        if (rules.length != 0 && context.fromWallet != bytes32(0) && context.fromIdentity == address(0)) return false;
+        uint256 allowed = type(uint256).max;
+        for (uint256 i; i < rules.length; i++) {
+            uint256 answer = IModule(rules[i]).allowedAmount(context);
+            if (answer < allowed) allowed = answer;
+        }
+        return context.amountMax <= allowed;
+    }
+
+    /// @dev Every bound SPENDER module sees the same compliance-scoped context that the token supplies.
+    function _spenderAllowed(IModularCompliance compliance, IModule.TransferContext memory context)
+        private
+        view
+        returns (bool)
+    {
+        address[] memory modules = compliance.getModulesByType(IModule.ModuleType.SPENDER);
+        for (uint256 i; i < modules.length; i++) {
+            if (!IModule(modules[i]).moduleCheckSpender(context)) return false;
+        }
+        return true;
     }
 
     function _authorizeUpgrade(

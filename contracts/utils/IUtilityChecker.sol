@@ -82,6 +82,22 @@ interface IUtilityChecker {
         bool pass;
     }
 
+    /// @dev Independent conditions for a native `transferFrom`; all must pass before execution is attempted.
+    struct TransferFromStatus {
+        /// The sender, recipient and spender are nonzero. A zero amount is supported.
+        bool inputsValid;
+        /// The token is unpaused, neither wallet is address-frozen, and the sender has enough free balance.
+        bool freezeStatus;
+        /// The recipient passes the token's identity registry.
+        bool eligibilityStatus;
+        /// Every RULE module permits the amount, with the actual spender in its context.
+        bool complianceStatus;
+        /// Every SPENDER module permits the spender.
+        bool spenderStatus;
+        /// The holder's allowance covers the amount, including unlimited allowance.
+        bool allowanceStatus;
+    }
+
     /// @dev This function verifies if the transfer is restricted due to frozen addresses or tokens.
     /// @param _token The address of the token contract.
     /// @param _from The address of the sender.
@@ -94,11 +110,14 @@ interface IUtilityChecker {
         view
         returns (bool _frozen, uint256 _availableBalance);
 
-    /// @dev This function performs a comprehensive check on whether a transfer would succeed:
+    /// @dev Previews the listed conditions for an ordinary direct transfer:
     ///     - check if token is paused,
     ///     - check freeze conditions,
     ///     - check eligibilty,
     ///     - check compliance.
+    ///      Spender policy and allowance are excluded; use `getTransferFromStatus` for delegated transfers.
+    ///      Module and registry reverts propagate. Post-movement hooks and later state changes are not simulated,
+    ///      so passing flags do not guarantee transaction success.
     /// @param _token The address of the token contract.
     /// @param _from The address of the sender.
     /// @param _to The address of the recipient.
@@ -114,9 +133,25 @@ interface IUtilityChecker {
         view
         returns (bool _freezeStatus, bool _eligibilityStatus, bool _complianceStatus);
 
-    /// @dev Check trade validity and return the status of each module for this transfer. A sender or a recipient
-    ///      that resolves to no identity is refused by the compliance before any rule is asked, so every row then
-    ///      allows zero.
+    /// @notice Previews the conditions for a native transfer made by an approved spender.
+    /// @dev Uses the same resolved movement context for RULE and SPENDER modules as `Token.transferFrom`.
+    ///      The token-only, state-changing `canSpenderCall` is not invoked. Module and registry reverts propagate.
+    ///      These are independent condition flags, not an execution simulation: post-movement hooks and state
+    ///      changes before execution can still reject the transaction. All flags are false for invalid inputs.
+    /// @param _token The token whose current state is read.
+    /// @param _spender The caller that will execute `transferFrom`.
+    /// @param _from The holder whose tokens and allowance will be used.
+    /// @param _to The recipient of the tokens.
+    /// @param _amount The amount to transfer; zero follows the token's normal checks.
+    /// @return _status Input, freeze, eligibility, rule, spender-policy and allowance results.
+    function getTransferFromStatus(address _token, address _spender, address _from, address _to, uint256 _amount)
+        external
+        view
+        returns (TransferFromStatus memory _status);
+
+    /// @dev Returns each RULE module's result for a direct transfer. While rules are bound, a sender that resolves
+    ///      to no identity is refused before any rule is asked, so every row then fails and allows zero. Recipient
+    ///      admission is checked separately by the token's identity registry, not by these rule rows.
     /// @param _token The address of the token contract.
     /// @param _from Address of the sender.
     /// @param _to Address of the receiver.
