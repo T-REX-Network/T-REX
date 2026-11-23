@@ -58,6 +58,7 @@ import {
     MODULE_TYPE_VALIDATOR
 } from "@openzeppelin/contracts/interfaces/draft-IERC7579.sol";
 import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
+import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
 
 import { ITREXFactory } from "contracts/factory/ITREXFactory.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
@@ -1426,16 +1427,7 @@ abstract contract PlanBuilder {
     }
 
     function _u(uint256 value) internal pure returns (string memory) {
-        if (value == 0) return "0";
-        uint256 digits;
-        for (uint256 v = value; v != 0; v /= 10) {
-            digits++;
-        }
-        bytes memory out = new bytes(digits);
-        for (uint256 v = value; v != 0; v /= 10) {
-            out[--digits] = bytes1(uint8(48 + v % 10));
-        }
-        return string(out);
+        return Strings.toString(value);
     }
 
 }

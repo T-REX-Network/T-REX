@@ -39,6 +39,8 @@
 
 pragma solidity 0.8.30;
 
+import { Vm } from "@forge-std/Vm.sol";
+
 /// @title CreateXAddressLib
 /// @notice Address math for the deployment, computed without calling any chain.
 /// @dev Three ways an address is made here:
@@ -54,6 +56,8 @@ pragma solidity 0.8.30;
 ///      checked against the vendored CreateX bytecode in test/unit/deploy/CreateXAddressLib.t.sol.
 library CreateXAddressLib {
 
+    Vm private constant VM = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
     /// @dev keccak256 of CreateX's CREATE3 proxy init code `0x67363d3d37363d34f03d5260086018f3`. Not the same proxy
     ///      as OpenZeppelin's `Create3` library (whose hash is 0x57a34f6e…), so the two give different addresses.
     bytes32 internal constant CREATE3_PROXY_INITCODE_HASH =
@@ -63,13 +67,12 @@ library CreateXAddressLib {
 
     /// @notice The address `deployer` creates with CREATE2 for `salt` and init code hash `initCodeHash`.
     function create2(address deployer, bytes32 salt, bytes32 initCodeHash) internal pure returns (address) {
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), deployer, salt, initCodeHash)))));
+        return VM.computeCreate2Address(salt, initCodeHash, deployer);
     }
 
-    /// @notice The address `deployer` creates with CREATE at `nonce` (nonces 1 to 127, all this deployment needs).
+    /// @notice The address `deployer` creates with CREATE at `nonce`.
     function createAt(address deployer, uint8 nonce) internal pure returns (address) {
-        require(nonce > 0 && nonce < 0x80, "CreateXAddressLib: nonce out of range");
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes2(0xd694), deployer, bytes1(nonce))))));
+        return VM.computeCreateAddress(deployer, nonce);
     }
 
     /// @notice A CreateX salt bound to `sender`, with redeploy protection off (same address on every chain).
@@ -80,12 +83,16 @@ library CreateXAddressLib {
 
     /// @notice The salt CreateX actually uses for a `permissionedSalt` called by `sender`.
     function guardPermissioned(address sender, bytes32 salt) internal pure returns (bytes32) {
+        // Taking the salt's first 20 bytes is the point: CreateX reads them as the address the salt is bound to.
+        // forge-lint: disable-next-line(unsafe-typecast)
         require(address(bytes20(salt)) == sender && salt[20] == 0x00, "CreateXAddressLib: salt not bound to sender");
         return keccak256(abi.encode(bytes32(uint256(uint160(sender))), salt));
     }
 
     /// @notice The salt CreateX actually uses for a permissionless salt (first 20 bytes random, not the caller).
     function guardRandom(bytes32 salt) internal pure returns (bytes32) {
+        // Taking the salt's first 20 bytes is the point: CreateX reads them as the address the salt is bound to.
+        // forge-lint: disable-next-line(unsafe-typecast)
         if (address(bytes20(salt)) == address(0)) revert SaltPrefixNotRandom(salt);
         return keccak256(abi.encode(salt));
     }

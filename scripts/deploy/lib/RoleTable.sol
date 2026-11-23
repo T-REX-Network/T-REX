@@ -64,28 +64,37 @@ library RoleTable {
 
     uint64 internal constant ADMIN = 0;
 
+    // Names the platform roles hash into (RolesLib.platform(bytes32)).
+    bytes32 private constant CLAIM_ISSUER_ADMIN_NAME = "CLAIM_ISSUER_ADMIN";
+    bytes32 private constant ISSUER_NAME = "ISSUER";
+    bytes32 private constant PUBLIC_AUTHORITY_NAME = "PUBLIC_AUTHORITY";
+    bytes32 private constant ROLE_MANAGER_NAME = "ROLE_MANAGER";
+    bytes32 private constant GUARDIAN_NAME = "GUARDIAN";
+    bytes32 private constant TOKEN_ISSUER_NAME = "TOKEN_ISSUER";
+    bytes32 private constant REPUTATION_MANAGER_NAME = "REPUTATION_MANAGER";
+
     /// @dev ONCHAINID identity-creation roles: claim issuer admins, issuers, public authorities.
     function claimIssuerAdmin() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("CLAIM_ISSUER_ADMIN"));
+        return RolesLib.platform(CLAIM_ISSUER_ADMIN_NAME);
     }
 
     function issuer() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("ISSUER"));
+        return RolesLib.platform(ISSUER_NAME);
     }
 
     function publicAuthority() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("PUBLIC_AUTHORITY"));
+        return RolesLib.platform(PUBLIC_AUTHORITY_NAME);
     }
 
     /// @dev Admin of the operational roles. The RoleRevoker holds it with no delay (revocation at once); the
     ///      Protocol Admin Safe holds it behind the power delay (grants are visible before they apply).
     function roleManager() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("ROLE_MANAGER"));
+        return RolesLib.platform(ROLE_MANAGER_NAME);
     }
 
     /// @dev Cancels scheduled operations of the delayed roles; cannot execute anything.
     function guardian() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("GUARDIAN"));
+        return RolesLib.platform(GUARDIAN_NAME);
     }
 
     /// @dev Everything that changes code: suite versions, beacon upgrades, proxy upgrades, the factory setters.
@@ -95,7 +104,7 @@ library RoleTable {
 
     /// @dev Deploys token suites through the TREXFactory.
     function tokenIssuer() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("TOKEN_ISSUER"));
+        return RolesLib.platform(TOKEN_ISSUER_NAME);
     }
 
     /// @dev Held by the TREXFactory: lets it create ASSET identities for the tokens it deploys.
@@ -109,7 +118,7 @@ library RoleTable {
     }
 
     function reputationManager() internal pure returns (uint64) {
-        return RolesLib.platform(bytes32("REPUTATION_MANAGER"));
+        return RolesLib.platform(REPUTATION_MANAGER_NAME);
     }
 
 }
