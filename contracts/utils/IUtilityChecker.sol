@@ -98,7 +98,28 @@ interface IUtilityChecker {
         bool allowanceStatus;
     }
 
-    /// @dev This function verifies if the transfer is restricted due to frozen addresses or tokens.
+    /// @dev Conditions checked before an authorized mint; pause and wallet freezes do not constrain a mint.
+    struct MintStatus {
+        /// The recipient is nonzero. A zero amount is supported.
+        bool inputsValid;
+        /// The recipient passes the token's identity registry.
+        bool eligibilityStatus;
+        /// Every RULE module permits this MINT context and amount.
+        bool complianceStatus;
+    }
+
+    /// @dev Balance conditions and the automatic release of frozen tokens for an authorized burn.
+    struct BurnStatus {
+        /// The holder is nonzero. A zero amount is supported.
+        bool inputsValid;
+        /// The holder's total balance covers the amount, including its frozen tokens.
+        bool balanceStatus;
+        /// Frozen tokens the burn would release; zero for invalid inputs or insufficient total balance.
+        uint256 unfreezeAmount;
+    }
+
+    /// @dev Checks freeze and free-balance conditions for ordinary transfers with nonzero sender and recipient.
+    ///      Zero-side mint/burn inputs are outside this endpoint's scope; use `getMintStatus` or `getBurnStatus`.
     /// @param _token The address of the token contract.
     /// @param _from The address of the sender.
     /// @param _to The address of the recipient.
@@ -116,6 +137,8 @@ interface IUtilityChecker {
     ///     - check eligibilty,
     ///     - check compliance.
     ///      Spender policy and allowance are excluded; use `getTransferFromStatus` for delegated transfers.
+    ///      Sender and recipient must be nonzero for this preview's ordinary-transfer interpretation; use
+    ///      `getMintStatus` and `getBurnStatus` for issuance and redemption. This does not change legacy input handling.
     ///      Module and registry reverts propagate. Post-movement hooks and later state changes are not simulated,
     ///      so passing flags do not guarantee transaction success.
     /// @param _token The address of the token contract.
@@ -148,6 +171,32 @@ interface IUtilityChecker {
         external
         view
         returns (TransferFromStatus memory _status);
+
+    /// @notice Previews recipient admission and compliance rules for an authorized mint.
+    /// @dev Mints have no source balance and ignore pause and wallet freezes. Caller authorization, supply/balance
+    ///      overflow and post-movement hooks are not simulated; passing flags do not guarantee execution. Registry
+    ///      and module reverts propagate, and later state changes may alter the result. Invalid inputs return false flags.
+    /// @param _token The token whose current state is read.
+    /// @param _to The recipient of the newly issued tokens.
+    /// @param _amount The amount to mint; zero follows the token's normal admission and rule checks.
+    /// @return _status Nonzero-recipient, eligibility and MINT rule results.
+    function getMintStatus(address _token, address _to, uint256 _amount)
+        external
+        view
+        returns (MintStatus memory _status);
+
+    /// @notice Previews a holder's total burnable balance and the frozen amount the burn would release.
+    /// @dev Burns ignore pause, address freezes, recipient admission and RULE modules. Caller authorization and
+    ///      post-movement hooks are not simulated; passing flags do not guarantee execution, and later state changes
+    ///      may alter the result. Token-view reverts propagate. Invalid inputs return false flags and zero unfreeze.
+    /// @param _token The token whose current state is read.
+    /// @param _from The holder whose tokens will be destroyed.
+    /// @param _amount The amount to burn; zero is supported.
+    /// @return _status Nonzero-holder and total-balance results, with the automatic unfreeze amount when covered.
+    function getBurnStatus(address _token, address _from, uint256 _amount)
+        external
+        view
+        returns (BurnStatus memory _status);
 
     /// @dev Returns each RULE module's result for a direct transfer. While rules are bound, a sender that resolves
     ///      to no identity is refused before any rule is asked, so every row then fails and allows zero. Recipient

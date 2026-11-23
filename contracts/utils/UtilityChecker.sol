@@ -144,6 +144,40 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
     }
 
     /// @inheritdoc IUtilityChecker
+    function getMintStatus(address _token, address _to, uint256 _amount)
+        external
+        view
+        returns (MintStatus memory _status)
+    {
+        _status.inputsValid = _to != address(0);
+        if (!_status.inputsValid) return _status;
+
+        IERC3643 token = IERC3643(_token);
+        _status.eligibilityStatus = token.identityRegistry().isVerified(_to);
+        IModularCompliance compliance = IModularCompliance(address(token.compliance()));
+        IModule.TransferContext memory context = _buildContext(_token, address(compliance), address(0), _to, _amount);
+        _status.complianceStatus = _rulesAllow(compliance, context);
+    }
+
+    /// @inheritdoc IUtilityChecker
+    function getBurnStatus(address _token, address _from, uint256 _amount)
+        external
+        view
+        returns (BurnStatus memory _status)
+    {
+        _status.inputsValid = _from != address(0);
+        if (!_status.inputsValid) return _status;
+
+        IERC3643 token = IERC3643(_token);
+        uint256 balance = token.balanceOf(_from);
+        _status.balanceStatus = _amount <= balance;
+        if (!_status.balanceStatus) return _status;
+
+        uint256 freeBalance = balance - token.getFrozenTokens(_from);
+        if (_amount > freeBalance) _status.unfreezeAmount = _amount - freeBalance;
+    }
+
+    /// @inheritdoc IUtilityChecker
     function getVerifiedDetails(address _token, address _userAddress)
         public
         view
