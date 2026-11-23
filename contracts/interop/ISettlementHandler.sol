@@ -82,10 +82,12 @@ interface ISettlementHandler {
     /// The notification is decoded and passed on as is; classifying it is this handler's job, against the
     /// validation it issued: the token and the wallets must be the issued ones, the leg must come from the chain
     /// recorded for its side, and the amount must sit inside the issued bounds. A leg that fails any of these
-    /// reverts, which leaves the message deliverable again. A leg for a `Pending` validation settles it, whatever
-    /// the clock says; one for a `Discarded` validation reconciles it late: applied anyway, since the satellite
-    /// execution is final, the modules caught up with no live reservation, `LateReconciliation` emitted and the
-    /// leg's chain paused for issuance until the manager unpauses it.
+    /// reverts, which leaves the message deliverable again. A `Pending` validation accepts its expected legs
+    /// whatever the clock says and settles when all have arrived. A leg for a discarded validation reconciles
+    /// late because the satellite execution is final. Every accepted late leg emits `LateReconciliation`.
+    /// On completion, the movement is applied and the modules are caught up without that validation's released
+    /// reservation. Only when the executed amount exceeds what the current rules allow is the completing leg's
+    /// chain paused for validation issuance, until the manager unpauses it.
     /// A silent failure would instead leave the message marked as received and unretryable.
     ///
     /// Two emergencies never revert and return `haltToken` instead: a leg already consumed, and an id that was
