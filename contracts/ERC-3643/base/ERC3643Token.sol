@@ -527,8 +527,9 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
     ///  compliance notification. Pause policy: the pause halts every balance movement between wallets,
     ///  and every caller of this function enforces it before calling; `_forcedTransfer` and
     ///  `_recoveryAddress` both use `whenNotPaused`. Mints and burns stay allowed while paused, see
-    ///  {_update}. Callers are also responsible for notifying compliance themselves, which is why
-    ///  `_forcedTransfer` and `_recoveryAddress` each call `transferred` explicitly.
+    ///  {_update}. Callers are also responsible for notifying compliance themselves. The base
+    ///  `_forcedTransfer` and `_recoveryAddress` implementations call `transferred`; derived overrides
+    ///  must provide the appropriate post-movement notification.
     function _forceUpdate(address from, address to, uint256 value) internal virtual {
         _autoUnfreezeFor(from, value);
         super._update(from, to, value);
