@@ -1,0 +1,75 @@
+{
+  "anchor": {
+    "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+    "runtimeCodeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989",
+    "runtimeFile": "create2-factory-runtime.hex",
+    "source": "Arachnid deterministic-deployment-proxy (keyless). Runtime read from Base Sepolia; hash matches OpenZeppelin's review."
+  },
+  "safeSingletonFactory": {
+    "address": "0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7",
+    "runtimeCodeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989",
+    "runtimeFile": "create2-factory-runtime.hex",
+    "source": "safe-global/safe-singleton-factory; same 69-byte runtime as the anchor."
+  },
+  "createx": {
+    "canonicalAddress": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+    "initCodeFile": "createx.hex",
+    "initCodeHash": "0x12ec861579b63a3ab9db3b5a23c57d56402ad3061475b088f17054e2f2daf22f",
+    "canonicalRuntimeCodeHash": "0xbd8a7ea8cfca7b4e5f5041d7d4b17bc317c5ce42cfbc42066a00cf26b43eb53f",
+    "source": "Input of the presigned CreateX deployment tx (pcaversaccio/createx scripts/presigned-createx-deployment-transactions/signed_serialised_transaction_gaslimit_3000000_.json), tx 0xb6274b80bc7cda162df89894c7748a5cb7ba2eaa6004183c41a1837c3b072f1e, signer 0xeD456e05CaAb11d66C4c797dD6c1D6f9A7F352b5 nonce 0 -> canonical address. Runtime hash read from Base Sepolia.",
+    "build": {
+      "repository": "https://github.com/pcaversaccio/createx",
+      "commit": "6e853597b890fe49cb67c3c1f6e8df39a99c560d",
+      "source": "src/CreateX.sol",
+      "solc": "0.8.23",
+      "evmVersion": "paris",
+      "optimizer": true,
+      "optimizerRuns": 10000000,
+      "viaIR": false,
+      "bytecodeHash": "none",
+      "cborMetadata": true,
+      "rebuildCheck": "deploy/vendor/check-createx.sh rebuilds it from this commit and compares the hash"
+    },
+    "pinnedInCode": "BytecodeStore.CREATEX_INITCODE_HASH, checked on every read"
+  },
+  "safe": {
+    "version": "1.4.1",
+    "deployer": "0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7",
+    "salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "contracts": {
+      "Safe": {
+        "address": "0x41675C099F32341bf84BFc5382aF534df5C7461a",
+        "initCodeHash": "0xbdd9e3833a8bdf0f6b4312e07bc851afc298d53690a00a28cade5de8b6ac0f36",
+        "runtimeCodeHash": "0x1fe2df852ba3299d6534ef416eefa406e56ced995bca886ab7a553e6d0c5e1c4"
+      },
+      "SafeL2": {
+        "address": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+        "initCodeHash": "0x3555bd3ee95b1c6605c602740d71efaf200068e0395ccd701ac82ab8e42307bd",
+        "runtimeCodeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff"
+      },
+      "SafeProxyFactory": {
+        "address": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+        "initCodeHash": "0x596f87ec561ad5ea1c13253af5c91247a713253499b74a5d594537cae42eaaa9",
+        "runtimeCodeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317"
+      },
+      "CompatibilityFallbackHandler": {
+        "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
+        "initCodeHash": "0x5a63128db658d8601220c014848acd6c27b855a0427f0181eb3ba8c25e2d3e95",
+        "runtimeCodeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9"
+      },
+      "MultiSendCallOnly": {
+        "address": "0x9641d764fc13c8B624c04430C7356C1C7C8102e2",
+        "initCodeHash": "0xa7934433f19155c708af2674b14c6c8b591fedbed7b01ce8cf64014f307468a0",
+        "runtimeCodeHash": "0xecd5bd14a08c5d2122379900b2f272bdf107a7e92423c10dd5fe3254386c9939"
+      },
+      "SafeToL2Setup": {
+        "address": "0xBD89A1CE4DDe368FFAB0eC35506eEcE0b1fFdc54",
+        "initCodeHash": "0x300904dfcd0b144c4079d07b6f21dab054b06b38e84700c808d0efb85a922e47",
+        "runtimeCodeHash": "0x2f25df28caf984366ee584e13241707e85dcd5a6ea0c14267928dafc1fd6274b"
+      }
+    },
+    "source": "Init code from npm @safe-global/safe-contracts@1.4.1 build artifacts; SafeToL2Setup init code from its Safe Singleton Factory creation tx on Base Sepolia (0xdda2f545956df46dce18975e4fbc0a8fdd97efeeb10b53a16b82a936ef27d2f1). Addresses and runtime code hashes match @safe-global/safe-deployments v1.4.1 canonical entries.",
+    "proxyCreationCodeFile": "safe-1.4.1/SafeProxy.hex",
+    "proxyCreationCodeNote": "SafeProxy creation code from the same npm artifacts; SafeProxyFactory.proxyCreationCode() returns it. Used to predict Safe addresses."
+  }
+}
