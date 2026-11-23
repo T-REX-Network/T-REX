@@ -248,14 +248,9 @@ library AccessManagerSetupLib {
         address registry = _registryOf(token);
         address identityRegistryStorage = _storageOf(registry);
 
-        uint32 recordedDomainId = accessManager.domainOf(identityRegistryStorage);
-        if (recordedDomainId == 0) {
-            accessManager.assign(domainId, identityRegistryStorage);
-        } else {
-            require(
-                recordedDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(identityRegistryStorage, recordedDomainId)
-            );
-        }
+        _recordDomain(accessManager, identityRegistryStorage, domainId);
+        _recordDomain(accessManager, registry, domainId);
+        _recordDomain(accessManager, _complianceOf(token), domainId);
 
         _commission(accessManager, token, registry, identityRegistryStorage, domainId);
     }
@@ -388,6 +383,17 @@ library AccessManagerSetupLib {
             accessManager.setRoleAdmin(
                 RolesLib.forDomain(domainId, table[i].role), RolesLib.forDomain(domainId, table[i].admin)
             );
+        }
+    }
+
+    /// @dev Records an unassigned suite component and refuses a record from another domain. Matching
+    ///      records stay untouched, so commissioning shared components does not repeat their assignment events.
+    function _recordDomain(TREXAccessManager accessManager, address component, uint32 domainId) private {
+        uint32 recordedDomainId = accessManager.domainOf(component);
+        if (recordedDomainId == 0) {
+            accessManager.assign(domainId, component);
+        } else {
+            require(recordedDomainId == domainId, ErrorsLib.SuiteAlreadySetUp(component, recordedDomainId));
         }
     }
 
