@@ -367,15 +367,15 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
 
     /// @dev Freezes part of a wallet's balance. The frozen amount may never exceed the balance.
     function _freezePartialTokens(address userAddress, uint256 amount) internal virtual {
-        ERC3643TokenStorage storage s = _erc3643TokenStorage();
+        ERC3643TokenStorage storage tokenStorage = _erc3643TokenStorage();
         uint256 balance = balanceOf(userAddress);
         // Subtracting cannot underflow, since the frozen amount never exceeds the balance; adding could overflow and
         // revert with a panic instead of the error below.
+        uint256 availableBalance = balance - tokenStorage.frozenTokens[userAddress];
         require(
-            amount <= balance - s.frozenTokens[userAddress],
-            IERC20Errors.ERC20InsufficientBalance(userAddress, balance, amount)
+            amount <= availableBalance, IERC20Errors.ERC20InsufficientBalance(userAddress, availableBalance, amount)
         );
-        s.frozenTokens[userAddress] += amount;
+        tokenStorage.frozenTokens[userAddress] += amount;
         emit TokensFrozen(userAddress, amount);
     }
 
