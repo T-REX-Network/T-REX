@@ -43,7 +43,7 @@ that recall was dispatched to.
 7. Report every leg it executed, exactly once, carrying the `hashValidation` of the body it executed under. One-leg
    movements carry both wallets; on a two-leg movement the sending Lite reports the burn leg with `to` empty, the
    receiving Lite the mint leg with `from` empty. A report lost on the way may be sent again byte for byte: the
-   reference chain recognises the leg it already applied or parked (`SettlementDuplicate`) and changes nothing.
+   reference chain recognises a leg it already consumed (`SettlementDuplicate`) and changes nothing.
 
 ### The two-leg invariant
 
@@ -124,7 +124,7 @@ amount to the sender. The leg already sent keeps settling from the peer it was s
 | Broken rule | Reference-chain reaction |
 |---|---|
 | 3, 7: a settlement leg for a validation already settled, other than the applied leg itself, a leg for a pair the keeper already resolved, or a second, different leg from one chain for a parked id | `ReplayedSettlement`, the token stops taking that chain's messages (`setInboundPaused`) |
-| the applied or parked leg delivered again, byte for byte (a gateway redelivery, or the Lite resending its settlement) | `SettlementDuplicate`, consumed, nothing applied, nothing paused |
+| a leg already consumed, whether applied, parked or refused, delivered again byte for byte (a gateway redelivery, or the Lite resending its settlement) | `SettlementDuplicate`, consumed, nothing applied, nothing paused; a chain paused over the first delivery and reopened stays open |
 | a settlement for a validation never issued, or recorded but never sent | `SettlementParked`, the leg kept under its id, the token stops taking that chain's messages; once the request is sent again with the same salt, `settleParkedLeg` settles it |
 | 5, 6: amount outside the range, wrong wallets or chain, under the issued hash | `SettlementRejected`, consumed, the token stops taking that chain's messages; the validation stands |
 | 5, 6 under another hash: a body the reference chain never canonically issued | `ValidationOrphaned`, consumed, the token stops taking that chain's messages; `Orphaned` while no leg had landed |

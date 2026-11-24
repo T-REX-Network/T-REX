@@ -105,6 +105,27 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         assertTrue(token.isInboundPaused(polygon));
     }
 
+    /// @dev A leg outside the issued terms pauses its chain. Once the pauser has reopened it, the copy still
+    ///      waiting at the gateway is consumed as a duplicate: the chain is not stopped twice over one leg.
+    function test_handleSettlement_KeepsTheChainOpen_WhenARejectedLegIsDeliveredAgainAfterThePauseIsLifted() public {
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 90, 100);
+        uint256 first = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 101));
+        uint256 again = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 101));
+        polygonGateway.relay(first);
+        assertTrue(token.isInboundPaused(polygon), "the leg outside the terms pauses its chain");
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.SettlementDuplicate(id, polygon);
+        polygonGateway.relay(again);
+
+        assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(again)), "consumed");
+        _assertNothingPaused();
+        assertEq(token.bridgedBalanceOf(bobSat), 0, "nothing applied");
+        assertEq(_status(id), uint8(ITransferValidation.ValidationStatus.Pending), "the validation stands");
+    }
+
     /* ----- Two legs ----- */
 
     /// @dev The burn leg delivered again before the mint: one hold, and the mint still completes the pair.

@@ -641,7 +641,64 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.positionOf(bobId), 50);
     }
 
-    /// @notice The same leg from another chain is not the leg that chain reported: a replay.
+    /// @notice A leg outside the issued terms pauses its chain once. Delivered again after the pauser reopened the
+    ///         chain, it is a duplicate: not judged again, nothing announced twice, nothing paused.
+    function test_handleSettlement_Success_WhenARejectedLegIsDeliveredAgain() public {
+        bytes32 id = _issue();
+        MessageTypesLib.SettlementNotification memory leg = _leg(id, fromSat, toSat, 91);
+        vm.prank(token);
+        _assertRejected(id, polygon, leg);
+
+        vm.recordLogs();
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
+        _assertUntouched(id);
+    }
+
+    /// @notice The leg that orphaned a validation, delivered again, is a duplicate: `ValidationOrphaned` is not
+    ///         emitted a second time and the chain is not paused a second time.
+    function test_handleSettlement_Success_WhenAnOrphanedLegIsDeliveredAgain() public {
+        bytes32 id = _issue();
+        MessageTypesLib.SettlementNotification memory leg =
+            _legUnder(id, fromSat, toSat, 95, keccak256("a body this chain never issued"));
+        vm.prank(token);
+        assertEq(uint8(mc.handleSettlement(polygon, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+
+        vm.recordLogs();
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+    }
+
+    /// @notice A conflicting body under a settled id pauses its chain once; that same body again is a duplicate,
+    ///         and the applied leg stays the applied one.
+    function test_handleSettlement_Success_WhenAReplayedLegIsDeliveredAgain() public {
+        _track();
+        bytes32 id = _issue();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        MessageTypesLib.SettlementNotification memory conflicting = _leg(id, fromSat, toSat, 60);
+        vm.prank(token);
+        assertEq(uint8(mc.handleSettlement(polygon, conflicting)), uint8(ISettlementHandler.Verdict.PauseChain));
+
+        vm.recordLogs();
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, conflicting);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
+        assertEq(mc.validationOf(id).executedAmount, 50);
+    }
+
+    /// @notice A duplicate is per chain: the burn leg polygon reported, arriving from optimism, was never consumed
+    ///         from optimism, so it is judged, refused as outside the terms of that chain's side, and pauses it.
     function test_handleSettlement_Success_WhenTheSettledLegComesFromAnotherChain() public {
         _track();
         bytes32 id = _issueCrossChain();
@@ -1059,6 +1116,13 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.SettlementRejected(id, chainKey, leg.amount, leg.hash);
         assertEq(uint8(mc.handleSettlement(chainKey, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
+    }
+
+    /// @dev A duplicate delivery emits its notification and `SettlementDuplicate`, and nothing a judged leg emits.
+    function _assertOnlyADuplicateWasAnnounced(Vm.Log[] memory logs) private pure {
+        assertEq(logs.length, 2, "the notification and the duplicate, nothing judged again");
+        assertEq(logs[0].topics[0], EventsLib.SettlementNotified.selector);
+        assertEq(logs[1].topics[0], EventsLib.SettlementDuplicate.selector);
     }
 
     function _assertUntouched(bytes32 id) private view {
