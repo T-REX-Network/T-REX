@@ -135,19 +135,19 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     /* ----- Transitions ----- */
 
-    function mint(uint256 actorSeed, uint256 amount) external {
+    function mint(uint256 actorSeed, uint256 amount) public virtual {
         vm.prank(agent);
         token.mint(actors[actorSeed % ACTORS], bound(amount, 1, MAX_AMOUNT));
     }
 
-    function transfer(uint256 fromSeed, uint256 toSeed, uint256 amount) external {
+    function transfer(uint256 fromSeed, uint256 toSeed, uint256 amount) public virtual {
         address from = actors[fromSeed % ACTORS];
         amount = bound(amount, 0, token.balanceOf(from));
         vm.prank(from);
         try token.transfer(actors[toSeed % ACTORS], amount) { } catch { }
     }
 
-    function delegate(uint256 actorSeed, uint256 amount) external {
+    function delegate(uint256 actorSeed, uint256 amount) public virtual {
         callsDelegate++;
         uint256 actor = actorSeed % ACTORS;
         amount = bound(amount, 1, MAX_AMOUNT);
@@ -158,7 +158,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         } catch { }
     }
 
-    function instructRecall(uint256 actorSeed, uint256 amount) external {
+    function instructRecall(uint256 actorSeed, uint256 amount) public virtual {
         callsInstruct++;
         uint256 actor = actorSeed % ACTORS;
         amount = bound(amount, 1, MAX_AMOUNT);
@@ -168,7 +168,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         } catch { }
     }
 
-    function resend(uint256 idSeed, bool recall) external {
+    function resend(uint256 idSeed, bool recall) public virtual {
         callsResend++;
         if (recall) {
             if (recallActor.length == 1) return;
@@ -202,7 +202,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         try gateway.relay(index) { } catch { }
     }
 
-    function drop(uint256 indexSeed) external {
+    function drop(uint256 indexSeed) public virtual {
         uint256 length = gateway.queueLength();
         if (length == 0) return;
         uint256 index = indexSeed % length;
