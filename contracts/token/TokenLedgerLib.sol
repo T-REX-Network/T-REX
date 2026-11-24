@@ -151,8 +151,10 @@ library TokenLedgerLib {
         TokenStorage storage s = layout();
         bytes32 key = WalletKeyLib.canonicalKey(wallet);
         uint256 balance = s.bridgedBalance[key];
-        uint256 reserved = s.reservedForValidations[key] + s.recalls[s.openRecall[key]].amount;
-        return reserved < balance ? balance - reserved : 0;
+        uint256 reservedForValidations = s.reservedForValidations[key];
+        uint256 recalledAmount = s.recalls[s.openRecall[key]].amount;
+        uint256 heldBack = reservedForValidations + recalledAmount;
+        return heldBack < balance ? balance - heldBack : 0;
     }
 
     /* ----- Reservations ----- */

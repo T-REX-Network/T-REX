@@ -196,6 +196,33 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(module.requestOf(address(boundCompliance), id).amountMax, 0, "forgotten once issued");
     }
 
+    /// @notice A request that reserved before a recall keeps its reservation through the approval: the recall is
+    ///         bounded by the position, not by reservations, so the two may together exceed it. Approved after
+    ///         the recall, the validation can still execute first; the satellite then burns what is left and
+    ///         proves that. Nothing requested after the recall gets any room.
+    function test_finalize_Success_WhenARecallWasInstructedWhileTheRequestWaited() public {
+        uint256 id = _request(10, 1500);
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(aliceSat, 800, alice);
+        assertEq(token.availableOf(aliceSat), 0, "1500 reserved and 800 recalled against 2000");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
+        _request(1, 1);
+
+        _approve(backend, id, 1500);
+        _finalize(id);
+        assertEq(boundCompliance.validationOf(id).amountMax, 1500, "the earlier reservation stands");
+
+        gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 1500)));
+        gateway.relay(_liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, 500))));
+
+        assertEq(token.bridgedBalanceOf(aliceSat), 0);
+        assertEq(token.bridgedBalanceOf(bobSat), 1500);
+        assertEq(token.pendingRecall(recallId).amount, 0, "the recall settled on what was left to burn");
+        assertEq(token.availableOf(aliceSat), 0);
+        assertFalse(token.paused());
+        assertFalse(token.isInboundPaused(polygon));
+    }
+
     /// @notice An approver can lower the maximum; the difference goes back at once.
     function test_approveValidation_Success_WhenTheApproverNarrows() public {
         uint256 id = _request(10, 150);
