@@ -117,7 +117,7 @@ and must not keep running. The remedy against a peer abusing it is to distrust i
 
 | Brake | Stops | Set by | Lifted by |
 |---|---|---|---|
-| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof; new validations, approvals into issuance and validation resends | the pauser; the token itself on a settlement or proof for an id it never issued | the pauser, `unpause` |
+| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof; new validations, approvals into issuance and validation resends; discards and resolutions of validations that may have a leg waiting | the pauser; the token itself on a settlement or proof for an id it never issued | the pauser, `unpause` |
 | chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new validations and validation resends toward it; discards and resolutions of validations still awaiting its leg | the pauser; the token itself on a replayed settlement or a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
 | chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
 | route close, `setRoute(..., 0)` | every send toward one chain and every message from it, a settlement of a validation already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again | the identity manager | the identity manager, with a trusted gateway |

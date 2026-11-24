@@ -301,6 +301,8 @@ interface ITransferValidation {
     /// - `block.timestamp` must be past each id's `releaseAt`; otherwise reverts with `ValidationNotReleasable`.
     /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
     ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
+    /// - The token not paused; otherwise reverts with `TokenPaused`: every settlement waits at its gateway under
+    ///   the pause, so the leg that answers the validation may be among them.
     /// - No chain an id still awaits with its inbound paused on the token; otherwise reverts with
     ///   `ChainInboundPaused`: the reports held at that gateway may answer the validation.
     ///
@@ -318,9 +320,10 @@ interface ITransferValidation {
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - The validation must be awaiting its other leg; otherwise reverts with `ValidationNotStuck`.
     /// - `block.timestamp` must be past the second window; otherwise reverts with `ValidationNotYetResolvable`.
-    /// - The chain owing the missing leg must not have its inbound paused on the token; otherwise reverts with
-    ///   `ChainInboundPaused`: the leg may be waiting at that gateway, and returning the hold under it would leave
-    ///   the ledger crediting the sender for what the receiving chain minted.
+    /// - The token must not be paused, otherwise `TokenPaused`, and the chain owing the missing leg must not have
+    ///   its inbound paused on the token, otherwise `ChainInboundPaused`: the leg may be waiting at that gateway,
+    ///   and returning the hold under it would leave the ledger crediting the sender for what the receiving chain
+    ///   minted.
     ///
     /// Emits `ValidationResolved`.
     function resolveStuckValidation(uint256 validationId) external;

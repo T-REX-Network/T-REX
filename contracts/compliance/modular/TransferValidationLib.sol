@@ -191,16 +191,18 @@ library TransferValidationLib {
             return;
         }
 
+        // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
+        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
+        // are checked again, since one may have been paused while the request waited, and so is the token: all
+        // of it before anything is written.
+        _requireTokenRunning(token);
+        _openChainWindow(store, token, validation.fromChainKey);
+        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
+
         if (approvedMax < validation.amountMax) {
             _release(validation, validation.amountMax - approvedMax, token);
             validation.amountMax = approvedMax;
         }
-        // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
-        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
-        // are checked again, since one may have been paused while the request waited, and so is the token.
-        _requireTokenRunning(token);
-        _openChainWindow(store, token, validation.fromChainKey);
-        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
         validation.status = ITransferValidation.ValidationStatus.Pending;
 
         bytes memory body = _issueRecorded(
@@ -341,6 +343,8 @@ library TransferValidationLib {
     /// @dev Nothing goes out while the token is paused: an incident is under investigation, every settlement
     ///  reverts and waits at its gateway, so a validation sent now could only be executed on a satellite with its
     ///  report held, and its window could run out before the pause is lifted. Request, approval and resend alike.
+    ///  For the same reason no validation with a leg possibly in flight is discarded or resolved under it, see
+    ///  {requireAwaitedInboundOpen}.
     function _requireTokenRunning(address token) private view {
         require(!IToken(token).paused(), ErrorsLib.TokenPaused());
     }
@@ -355,8 +359,11 @@ library TransferValidationLib {
     ///  reports held at that chain's gateway may already answer it: discarding or resolving on their absence
     ///  would release or return what they move, and they would then land on a validation that no longer expects
     ///  them. Which chains count follows the status: both while `Pending`, the one owing the missing leg once the
-    ///  other landed.
+    ///  other landed. The token's own pause holds every chain's reports the same way, so nothing is decided under
+    ///  it either: a pause that outlasts `releaseAt` would otherwise release a reservation whose leg is waiting,
+    ///  and the room it frees could be issued again before that leg lands.
     function requireAwaitedInboundOpen(address token, ITransferValidation.Validation storage validation) external view {
+        _requireTokenRunning(token);
         ITransferValidation.ValidationStatus status = validation.status;
         bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint
             || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint;

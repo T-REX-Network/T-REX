@@ -90,6 +90,46 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload, "byte for byte");
     }
 
+    /* ----- discardExpiredValidations ----- */
+
+    /// @dev The pause outlasts the validation's windows while the satellite's report waits at the gateway. The
+    ///      validation is not discarded under the pause, so its reservation is not released for another request
+    ///      to take, and the report settles it once the token runs again.
+    function test_discardExpiredValidations_RevertWhen_TheTokenIsPaused_ThenTheHeldLegSettles() public {
+        uint256 id = _request();
+        uint256 leg = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 100));
+        _pause();
+        vm.warp(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
+        boundCompliance.discardExpiredValidations(ids);
+        assertEq(token.reservedOf(aliceSat), 100, "the reservation stays while the leg may be waiting");
+
+        _unpause();
+        polygonGateway.relay(leg);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobSat), 100);
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "settled, not reconciled late");
+    }
+
+    /// @dev Once the token runs again, a validation nobody executed is discarded as before.
+    function test_discardExpiredValidations_Success_OnceTheTokenIsUnpaused() public {
+        uint256 id = _request();
+        _pause();
+        vm.warp(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+        _unpause();
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+
+        boundCompliance.discardExpiredValidations(ids);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(token.reservedOf(aliceSat), 0);
+    }
+
     /// @dev The pause takes nothing back: a validation issued before it stays `Pending`, its reservation held,
     ///      and the satellite's report waits at the gateway until the unpause, as every settlement does.
     function test_pause_LeavesAValidationIssuedBeforeItPending() public {
