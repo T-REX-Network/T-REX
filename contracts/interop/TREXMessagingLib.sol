@@ -260,28 +260,31 @@ library TREXMessagingLib {
         returns (bytes32 sendId)
     {
         MessagingStorage storage s = layout();
-        (address gateway, bytes memory peer) = _openRoute(s, chainKey);
+        (address finalRoute, bytes memory peer) = _openRoute(s, chainKey);
 
         address pinned = s.pinnedRoutes[validationId][chainKey];
         if (pinned == address(0)) {
-            s.pinnedRoutes[validationId][chainKey] = gateway;
+            s.pinnedRoutes[validationId][chainKey] = finalRoute;
             s.pinnedPeers[validationId][chainKey] = keccak256(peer);
 
-            emit EventsLib.ValidationRoutePinned(validationId, chainKey, gateway);
+            emit EventsLib.ValidationRoutePinned(validationId, chainKey, finalRoute);
         } else {
-            bool sameGateway = pinned == gateway;
+            bool sameFinalRoute = pinned == finalRoute;
             bool samePeer = s.pinnedPeers[validationId][chainKey] == keccak256(peer);
-            require(sameGateway, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
+            require(sameFinalRoute, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
             require(samePeer, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
         }
 
-        // A validation moves nothing on its own: sending it ahead of finality risks only a validation the
-        // satellite executes and this chain then loses, which the settlement intake refuses. A fast gateway
-        // the registry dropped falls back to the final route rather than stranding issuance.
-        address fast = s.fastRoutes[chainKey];
-        if (fast != address(0) && s.registry.isTrusted(fast)) gateway = fast;
+        // A validation moves nothing on its own: sending it ahead of finality risks a validation the satellite
+        // executes and this chain then loses to a reorg. Its settlement is then never applied: the settlement
+        // intake finds no such validation and treats it as an emergency, see
+        // {ISettlementHandler-handleSettlement}. A fast gateway the registry dropped falls back to the final
+        // route rather than stranding issuance.
+        address fastRoute = s.fastRoutes[chainKey];
+        bool fastRouteUsable = fastRoute != address(0) && s.registry.isTrusted(fastRoute);
+        address sendingGateway = fastRouteUsable ? fastRoute : finalRoute;
 
-        sendId = _send(gateway, peer, chainKey, MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
+        sendId = _send(sendingGateway, peer, chainKey, MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
     }
 
     /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current final route. The
@@ -468,8 +471,11 @@ library TREXMessagingLib {
     }
 
     /// @dev One gateway cannot be both routes of a chain, or the fast one would carry what must wait for finality.
-    function _requireDistinctRoutes(bytes32 chainKey, address gateway, address other) private pure {
-        require(gateway == address(0) || gateway != other, ErrorsLib.FastRouteIsFinalRoute(chainKey, gateway));
+    /// @param gateway the route being set, zero when it is being unset
+    /// @param otherRoute the chain's other route as it stands
+    function _requireDistinctRoutes(bytes32 chainKey, address gateway, address otherRoute) private pure {
+        bool unsetsTheRoute = gateway == address(0);
+        require(unsetsTheRoute || gateway != otherRoute, ErrorsLib.FastRouteIsFinalRoute(chainKey, gateway));
     }
 
     function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {

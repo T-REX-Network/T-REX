@@ -248,17 +248,49 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     }
 
     /// @dev The fast route is judged at delivery: a final gateway that later became the fast route delivers
-    ///  nothing more, even for a validation pinned to it.
+    ///  nothing more while it is one, even for a validation pinned to it, since what it relays no longer waits for
+    ///  finality. The refusal reverts, so the leg is not lost: it lands once the gateway is no longer the fast route.
     function test_settlement_RevertWhen_ThePinnedGatewayBecameTheFastRoute() public {
         uint256 id = _issue();
-        ERC7786GatewayMock newFinal = _newTrustedGateway(POLYGON);
-        _setFastRoute(POLYGON, address(0));
-        _openEvmChain(token, POLYGON, address(newFinal));
-        _setFastRoute(POLYGON, address(finalGateway));
+        _makeTheFinalGatewayTheFastRoute();
         uint256 index = _liteSettles(finalGateway, token, _settlement(id, aliceSat, bobSat, 60));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(finalGateway), polygon));
         finalGateway.relay(index);
+        assertFalse(token.messageReceived(address(finalGateway), finalGateway.receiveIdFor(index)), "deliverable");
+
+        _setFastRoute(POLYGON, address(0));
+        finalGateway.relay(index);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobSat), 60);
+    }
+
+    /// @dev The same for an open recall: its proof is refused while the gateway it was dispatched through is the
+    ///  fast route, stays deliverable, and settles once that gateway is no longer the fast route.
+    function test_burnProof_RevertWhen_TheRecallsGatewayBecameTheFastRoute() public {
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(aliceSat, 100, alice);
+        _makeTheFinalGatewayTheFastRoute();
+        uint256 index = _proof(finalGateway, recallId, 100);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(finalGateway), polygon));
+        finalGateway.relay(index);
+        assertEq(token.pendingRecall(recallId).amount, 100, "still open");
+
+        _setFastRoute(POLYGON, address(0));
+        finalGateway.relay(index);
+
+        assertEq(token.bridgedBalanceOf(aliceSat), 900);
+        assertEq(token.pendingRecall(recallId).amount, 0, "settled");
+    }
+
+    /// @dev Polygon gets a new final route and its former one becomes the fast route.
+    function _makeTheFinalGatewayTheFastRoute() private {
+        ERC7786GatewayMock newFinal = _newTrustedGateway(POLYGON);
+        _setFastRoute(POLYGON, address(0));
+        _openEvmChain(token, POLYGON, address(newFinal));
+        _setFastRoute(POLYGON, address(finalGateway));
     }
 
 }

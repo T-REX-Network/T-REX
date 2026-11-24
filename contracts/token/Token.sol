@@ -178,7 +178,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /* ----- Interop Dispatch ----- */
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
+    /// its final route.
     ///
     /// The reference side has two contracts with something to say, the compliance and the token, but
     /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
