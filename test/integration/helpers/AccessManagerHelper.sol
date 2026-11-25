@@ -86,6 +86,10 @@ abstract contract AccessManagerHelper is Test {
         return RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER);
     }
 
+    function _assetDeployerRole() internal pure returns (uint64) {
+        return RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER);
+    }
+
     /// @notice Wires the two deploy selectors to the suite deployer role, and each setter to the role that owns its
     ///         subject: the implementation authority to the version manager, the gateway registry to the interop
     ///         manager, the identity factory to the platform owner.
@@ -102,7 +106,7 @@ abstract contract AccessManagerHelper is Test {
 
     /// @notice Wires the TREXImplementationAuthority governance selectors to the OWNER role for `ia`.
     function _authorizeIAGovernance(address ia) internal {
-        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia);
+        AccessManagerSetupLib.setupTREXImplementationAuthorityRoles(accessManager, ia, _versionManagerRole());
     }
 
     /// @notice Wires the selector-to-role mappings for every contract of a deployed TREX suite.
@@ -176,7 +180,7 @@ abstract contract AccessManagerHelper is Test {
     /// @notice Grants ASSET_DEPLOYER, which the ONCHAINID IdentityFactory resolves when minting
     ///         IdentityTypes.ASSET identities (the TREXFactory token-OID auto-mint path).
     function _grantTokenOidMinterRole(address account) internal {
-        accessManager.grantRole(RolesLib.platform(RolesLib.PlatformRole.ASSET_DEPLOYER), account, NO_EXECUTION_DELAY);
+        accessManager.grantRole(_assetDeployerRole(), account, NO_EXECUTION_DELAY);
     }
 
     function _grantAgentAdminRole(address account) internal {

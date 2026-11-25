@@ -993,14 +993,25 @@ All notable changes to this project will be documented in this file.
   decides the bridges new tokens trust; `setIdFactory` to the platform owner role. No role exists only to
   configure the factory, so nobody can go around the version manager or the interop manager by repointing
   it. The function refuses the suite deployer role as any setter role, and the manager's `ADMIN_ROLE` as the
-  suite deployer role (`SuiteDeployerCannotConfigureFactory`), and the public role for any of the four
-  (`PlatformRoleCannotBePublic`). A platform picks any id of its manager, including a named platform role
-  through the new `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles
-  do. The `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
+  suite deployer role (`SuiteDeployerCannotConfigureFactory`). The three other platform
+  setup functions follow the same rule: `setupTREXImplementationAuthorityRoles`,
+  `setupTrustedGatewayRegistryRoles` and `setupIdentityFactoryPolicy` each take the role id they map to,
+  instead of reading a `RolesLib.PlatformRole` constant. All of them refuse the public role
+  (`PlatformRoleCannotBePublic`). No role is hardcoded at the platform layer any more: a platform picks
+  any id of its manager, including a named platform role through the new
+  `RolesLib.platform(bytes32 name)`, which hashes the name the same way custom suite roles do. The
+  `PlatformRole` enum stays as the default vocabulary and every existing id is unchanged. A named
   platform role whose hash would pack to the manager's public role is refused (`PlatformRoleCannotBePublic`).
   The role split alone needs no redeploy of an existing factory: remap the two deploy selectors with
   `setTargetFunctionRole`, grant the suite deployer role to current deployers and revoke the platform
   `OWNER` from them.
+- **`UtilityChecker` is gated by the AccessManager, not by a single owner** (#103). It was the only
+  upgradeable contract of the suite on `OwnableUpgradeable`. It is now `AccessManagedOwnableUpgradeable`
+  like the compliance modules: `initialize(address accessManager)` replaces `initialize()`,
+  `_authorizeUpgrade` is `restricted`, and `owner()` reports the authority. `DeployUtilityChecker`
+  reads the manager from the manifest's `accessManager` key (override with
+  `UTILITY_CHECKER_ACCESS_MANAGER`) and, on `upgrade()`, checks that the deployer may call
+  `upgradeToAndCall` through that manager instead of comparing owners.
 - **A supplied token ONCHAINID must already be bound to the token address** (OZ L-24, #161). With
   `TokenDetails.ONCHAINID` set, `_deployToken` accepted an IdentityFactory slot that bound nothing to the
   predicted token address and never bound it either, so any holder of the ASSET role could later bind the live
