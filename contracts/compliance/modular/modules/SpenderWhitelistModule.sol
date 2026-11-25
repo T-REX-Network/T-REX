@@ -148,7 +148,7 @@ contract SpenderWhitelistModule is AbstractModuleUpgradeable, AccessManagedOwnab
 
     /// @inheritdoc IModule
     /// @dev Allowed when the spender's wallet is on the calling compliance's list.
-    function moduleCheckSpender(TransferContext calldata ctx) external view override returns (bool) {
+    function checkSpender(TransferContext calldata ctx) external view override returns (bool) {
         return isSpenderAllowed(ctx.compliance, ctx.spender);
     }
 

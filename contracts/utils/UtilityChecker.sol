@@ -77,6 +77,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { issuerConfirmsClaim } from "../ERC-3643/base/ERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { WalletKeyLib } from "../libraries/WalletKeyLib.sol";
 import { IIdentityRegistryStorage } from "../registry/interface/IIdentityRegistryStorage.sol";
@@ -277,9 +278,9 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         returns (ComplianceCheckDetails[] memory _details)
     {
         IModularCompliance compliance = IModularCompliance(address(IERC3643(_token).compliance()));
-        // Only the `RULE` modules are consulted, matching what the compliance actually calls. Listing the
+        // Only the `TRANSFER_CHECK` modules are consulted, matching what the compliance actually calls. Listing the
         // others would report a pass they never gave.
-        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.RULE);
+        address[] memory rules = compliance.getModulesByType(IModule.ModuleType.TRANSFER_CHECK);
         IModule.TransferContext memory ctx = _buildContext(_token, address(compliance), _from, _to, _value);
         // A zero wallet is the missing side of a mint or a burn, not a wallet without an identity.
         // The compliance refuses a sender with no identity before asking any rule, so every rule is reported as
@@ -294,7 +295,7 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
                     ComplianceCheckDetails({ moduleName: IModule(rules[i]).name(), allowedAmount: 0, pass: false });
                 continue;
             }
-            uint256 allowed = IModule(rules[i]).allowedAmount(ctx);
+            uint256 allowed = IModule(rules[i]).checkTransfer(ctx);
             _details[i] = ComplianceCheckDetails({
                 moduleName: IModule(rules[i]).name(), allowedAmount: allowed, pass: _value <= allowed
             });
@@ -319,6 +320,8 @@ contract UtilityChecker is IUtilityChecker, OwnableUpgradeable, UUPSUpgradeable 
         }
         ctx.amountMin = _value;
         ctx.amountMax = _value;
+        // The same kind the compliance gives `canTransfer`, so a rule that reads it answers the same here.
+        ctx.kind = _from == address(0) ? MovementKindLib.MINT : MovementKindLib.TRANSFER;
     }
 
     function _authorizeUpgrade(

@@ -186,7 +186,7 @@ interface IModularCompliance is IERC3643Compliance {
      *  {canTransfer}
      *  returns true when no bound module objects, including when none enforces a spender rule
      *  only the bound token may call it, right before its `transferFrom` moves anything: `_spender` is kept
-     *  for the rest of that transfer, so the `RULE` and `TRACKER` modules see it in their context too
+     *  for the rest of that transfer, so the `TRANSFER_CHECK` and `AFTER` modules see it in their context too
      */
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external returns (bool);
 

@@ -64,7 +64,7 @@ pragma solidity 0.8.30;
  * per-chain issuance pause, the lifecycle of every issued validation and the keeper's discard. A satellite
  * executes a transfer only against a `ComplianceValidation` the reference chain issued for that exact transfer;
  * this is where it comes from. A ceiling on what may be issued is a rule, not a setting: a module answers it
- * from `allowedAmount`.
+ * from `checkTransfer`.
  */
 interface ITransferValidation {
 
@@ -165,7 +165,7 @@ interface ITransferValidation {
         uint256 executedAmount;
         /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
         bytes legWallet;
-        /// The spender the validation names, empty when `from` executes itself. Kept so the `TRACKER` modules
+        /// The spender the validation names, empty when `from` executes itself. Kept so the `AFTER` modules
         /// are told who executed it when it settles.
         bytes spender;
     }
@@ -175,7 +175,7 @@ interface ITransferValidation {
     /// the reference chain is refused: the Lite that executes a validation must physically hold the position it
     /// moves, where a native balance stays free to leave between issuance and settlement. The caller derives the
     /// requested range from an amount and a slippage tolerance; the range is only ever narrowed: capped at `from`'s
-    /// bridged position less what is already pending out of it, then at the smallest `allowedAmount` any module
+    /// bridged position less what is already pending out of it, then at the smallest `checkTransfer` answer any module
     /// answers (skipped when both wallets belong to one identity).
     ///
     /// Requirements:

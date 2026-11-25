@@ -414,7 +414,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         expected.kind = MovementKindLib.CROSS_CHAIN;
         expected.isIssuance = true;
         expected.spender = spender;
-        vm.expectCall(module, abi.encodeCall(IModule.allowedAmount, (expected)));
+        vm.expectCall(module, abi.encodeCall(IModule.checkTransfer, (expected)));
 
         vm.prank(aliceIdentity);
         mc.requestTransferValidation(fromSat, toSat, 10, 90, spender);

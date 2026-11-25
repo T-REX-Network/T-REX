@@ -90,8 +90,8 @@ import { IModule } from "./modules/IModule.sol";
 /// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
-/// `RULE` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
-/// every `TRACKER` module what happened. A mint and a burn are the same movement with one side missing, so the
+/// `TRANSFER_CHECK` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
+/// every `AFTER` module what happened. A mint and a burn are the same movement with one side missing, so the
 /// three base hooks differ only in which side they fill in. A module is kept in one list per type it named at
 /// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
 contract ModularCompliance is
@@ -329,7 +329,7 @@ contract ModularCompliance is
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
 
-    /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
+    /// @dev Rule evaluation: the amount must be at most the smallest amount any `TRANSFER_CHECK` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
     ///  A sender that resolves to no identity is refused outright while a rule is bound: it would read as a mint
@@ -337,13 +337,13 @@ contract ModularCompliance is
     ///  registry's storage or unbinds a registry from it. The recipient needs no such guard, since the token asks
     ///  `isVerified` first, and that requires an active identity even with the eligibility checks disabled.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
-        if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
+        if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        return value <= _minAllowedAmount(ctx);
+        return value <= _callCheckTransfer(ctx);
     }
 
-    /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
+    /// @dev A transfer: the position follows the tokens, then every `AFTER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
         _applyMovement(from, to, value, MovementKindLib.TRANSFER);
     }
@@ -450,14 +450,14 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The smallest answer of the `RULE` modules. `allowedAmount` is a view on the interface, so each
+    /// @dev The smallest answer of the `TRANSFER_CHECK` modules. `checkTransfer` is a view on the interface, so each
     ///  call is a `staticcall` and a module that writes there reverts.
-    function _minAllowedAmount(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
+    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
         allowed = type(uint256).max;
-        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.RULE];
+        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK];
         uint256 length = rules.length();
         for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).allowedAmount(ctx);
+            uint256 answer = IModule(rules.at(i)).checkTransfer(ctx);
             if (answer < allowed) allowed = answer;
         }
     }
@@ -467,14 +467,14 @@ contract ModularCompliance is
         EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
         uint256 length = spenderRules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(spenderRules.at(i)).moduleCheckSpender(ctx)) return false;
+            if (!IModule(spenderRules.at(i)).checkSpender(ctx)) return false;
         }
         return true;
     }
 
     /// @inheritdoc TransferValidation
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal override {
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
+        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.AFTER];
         uint256 length = trackers.length();
         for (uint256 i = 0; i < length; i++) {
             IModule(trackers.at(i)).afterTransfer(ctx);
