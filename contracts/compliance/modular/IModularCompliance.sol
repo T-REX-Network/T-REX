@@ -194,12 +194,12 @@ interface IModularCompliance is IERC3643Compliance {
 
     /**
      *  @dev function called whenever the token moves tokens outside a plain transfer: a forced transfer or a
-     *  recovery by an agent, or a delegation out to a satellite wallet, which the holder, the holder's identity
-     *  or an agent may start
+     *  recovery by an agent, a delegation out to a satellite wallet, which the holder, the holder's identity
+     *  or an agent may start, or the recall that brings it back
      *  the standard `transferred` cannot say what moved the tokens, and a module counting an investor's own
      *  activity must tell these movements apart, so the token reports them here with the kind they were,
-     *  `FORCED_TRANSFER`, `RECOVERY` or `DELEGATION` from `MovementKindLib`, and the trackers see them under
-     *  that kind
+     *  `FORCED_TRANSFER`, `RECOVERY`, `DELEGATION` or `RECALL` from `MovementKindLib`, and the trackers see
+     *  them under that kind
      *  no rule is asked: the token checked the movement itself, see the token
      *  the token is trusted with `_kind`: it is the only caller and the kind is its own operation
      *  This function can be called ONLY by the token bound to the compliance
@@ -218,10 +218,10 @@ interface IModularCompliance is IERC3643Compliance {
     function getModulesByType(IModule.ModuleType moduleType) external view returns (address[] memory);
 
     /**
-     *  @dev settles who owns a native wallet before tokens land on it outside a movement the compliance hears
-     *  of, a recall's credit: an empty wallet the registry relinked takes its new owner, a funded one reverts
-     *  with `WalletBoundToAnotherIdentity` until the registry names the owner the ledger credited. No movement
-     *  is counted and no module is called. A no-op when the owner has not changed.
+     *  @dev settles who owns a native wallet before a recall's credit lands on it: an empty wallet the registry
+     *  relinked takes its new owner, a funded one reverts with `WalletBoundToAnotherIdentity` until the registry
+     *  names the owner the ledger credited. No movement is counted and no module is called; the credit itself
+     *  is reported afterwards through `agentTransferred` as a `RECALL`. A no-op when the owner has not changed.
      *  This function can be called ONLY by the token bound to the compliance
      *  @param _wallet the native wallet about to be credited
      */

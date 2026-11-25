@@ -55,8 +55,8 @@ undeliverable until `forceRemoveModule` drops the module, and with it the veto o
 forced transfer and a recovery, which are the agent's override, usually the movement that has to get
 through; and on a burn, which only an agent can call, so a revert there blocks a redemption the same way.
 So an `AFTER` module that judges the state reads `kind` and refuses `TRANSFER` and `MINT` only, letting
-`BURN`, `CROSS_CHAIN`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross chains belongs in
-`checkTransfer`, which narrows the issuance before anything leaves.
+`BURN`, `CROSS_CHAIN`, `DELEGATION`, `RECALL`, `FORCED_TRANSFER` and `RECOVERY` pass. A limit on what may cross
+chains belongs in `checkTransfer`, which narrows the issuance before anything leaves.
 
 ## checkTransfer
 
@@ -88,7 +88,7 @@ struct TransferContext {
     bytes32 toWallet;       // zero on a burn
     uint256 amountMin;      // equal to amountMax on a native movement
     uint256 amountMax;      // the amount that moved, or the requested maximum on an issuance
-    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION; never zero
+    uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION, RECALL; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
     bytes   data;           // empty today; room for a later compliance to say more without a selector change
@@ -109,10 +109,16 @@ asked about those two, so a `TRANSFER_CHECK` module only ever sees `TRANSFER`, `
 position does not move. A tracker of the investor's own activity leaves it out like `FORCED_TRANSFER` and
 `RECOVERY`; a holder count sees no change of ownership.
 
-The way back, a recall answered by a satellite's burn proof, is not a movement and no module is told. Before the
-credit lands the token calls `syncOwner(nativeWallet)`, which settles who owns that wallet: an empty wallet the
-registry relinked takes its new owner, a funded one is refused until the registry names the owner the ledger
-credited. The credit is already counted in that identity's position as a bridged one, so nothing else moves.
+`RECALL` is the way back, a recall answered by a satellite's burn proof: the exact inverse of a `DELEGATION`, so a
+module that debited the out-leg has the in-leg to credit. `fromWallet` and `toWallet` are both the native wallet
+the credit landed on, as on the way out; the position does not move, and no rule is asked. Before the credit lands
+the token calls `syncOwner(nativeWallet)`, which settles who owns that wallet: an empty wallet the registry
+relinked takes its new owner, a funded one is refused until the registry names the owner the ledger credited. The
+credit is already counted in that identity's position as a bridged one, so nothing else moves. The `RECALL` is
+reported after the mint, through `agentTransferred` like the `DELEGATION`, with both identities the owner that
+sync settled on. The mint itself goes through no hook, so a module never sees a plain `MINT` of tokens it saw
+leave as a `DELEGATION`. A tracker of the investor's own activity leaves it out; a module keeping its own record
+of native balances credits it, and needs no reseed after a round trip.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that

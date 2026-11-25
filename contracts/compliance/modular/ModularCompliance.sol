@@ -359,13 +359,13 @@ contract ModularCompliance is
     }
 
     /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
-    ///  and no module is told.
+    ///  and no module is told. The recall it precedes is reported by {agentTransferred} once the token minted.
     function syncOwner(address wallet) external onlyBoundToken {
         _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced, recovery and delegation paths so that the trackers learn what moved the tokens.
+    ///  the token's forced, recovery, delegation and recall paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         _applyMovement(from, to, amount, kind);
@@ -383,7 +383,8 @@ contract ModularCompliance is
     ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
     ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
     ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
-    ///  the full adjustment.
+    ///  the full adjustment. A recall names the native wallet on both sides too, after its mint: `syncOwner`
+    ///  settled that wallet's owner before the mint, so no owner is left to follow here.
     ///
     ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
     ///  is not taken for it.

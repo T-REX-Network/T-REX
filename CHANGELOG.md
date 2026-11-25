@@ -59,9 +59,11 @@ All notable changes to this project will be documented in this file.
     gateway, so a later route or peer change cannot strand it; a distrusted gateway is still refused. It must name the
     instructed wallet and chain and prove at most the instructed amount, possibly zero. Before the credit,
     `ModularCompliance.syncOwner(nativeWallet)` follows any relink of the native wallet. The bridged position is
-    debited (`Recalled`, `RecallSettled`) and the native wallet the instruction recorded is minted to. The settled
-    proof's hash is kept: the same proof again is a no-op (`BurnProofDuplicate`); a different proof for a settled
-    recall, or one for a recall never issued, pauses the token (`ReplayedBurnProof`).
+    debited (`Recalled`, `RecallSettled`) and the native wallet the instruction recorded is minted to. The compliance
+    is then told as `RECALL` (`MovementKindLib.RECALL = 8`), native wallet to the same native wallet, the inverse of
+    the `DELEGATION`, so an `AFTER` module sees both legs of a round trip; no rule is asked, and a zero proof reports
+    nothing. The settled proof's hash is kept: the same proof again is a no-op (`BurnProofDuplicate`); a different
+    proof for a settled recall, or one for a recall never issued, pauses the token (`ReplayedBurnProof`).
   - `resend(kind, id, data)` (AGENT) sends a mint (`kind` 0) or recall (`kind` 1) instruction again, byte for byte,
     under its id, through the current route, to the same peer (`PeerChanged` otherwise). A recall resend moves the
     admitted gateway to the current route.
