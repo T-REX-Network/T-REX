@@ -592,6 +592,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **The compliance's cross-chain flows live in linked libraries.** `ModularCompliance` was 35 bytes under the
+  EIP-170 limit and is now 15,663 bytes, 8,913 under. The questions `requestTransferValidation` asks moved into
+  `TransferValidationLib`, next to the issuance they lead to; settlement, discard and the resolution of a stuck
+  pair moved into a new linked library, `TransferSettlementLib`. No function, event, error or storage slot
+  changes: the compliance's ABI is the same entry for entry, the events and errors those libraries raise being
+  declared again on `ITransferValidation`. A native transfer, mint or burn reaches no library, as before. A
+  deployment links one more library, which `scripts/deploy-and-record.sh` records as `transferSettlementLib`.
 - **Breaking, `RecoverySuccess` and `UpdatedTokenInformation`**: no argument is `indexed` anymore, matching
   the ERC-3643 specification. `RecoverySuccess(address lostWallet, address newWallet, address investorOnchainID)`
   and `UpdatedTokenInformation(string, string, uint8, string, address newOnchainID)` keep their topic hash but

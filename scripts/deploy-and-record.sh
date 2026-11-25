@@ -72,9 +72,9 @@ TRUSTED_GATEWAY_REGISTRY=$(addr_for TrustedGatewayRegistry)
 TREX_FACTORY=$(addr_for TREXFactory)
 
 # Token is linked against TREXMessagingLib, TokenDelegationLib, TokenLedgerLib, TokenRecoveryLib and
-# TokenGuardsLib; ModularCompliance against ModuleSetLib and TransferValidationLib (ComplianceLedgerLib is
-# internal and never deployed). forge deploys each library ahead of the script's own transactions and records
-# it under "libraries" as "<source>:<name>:<address>".
+# TokenGuardsLib; ModularCompliance against ModuleSetLib, TransferValidationLib and TransferSettlementLib
+# (ComplianceLedgerLib is internal and never deployed). forge deploys each library ahead of the script's own
+# transactions and records it under "libraries" as "<source>:<name>:<address>".
 lib_addr() {
     python3 -c '
 import json, sys
@@ -93,6 +93,7 @@ RECOVERY_LIB=$(lib_addr TokenRecoveryLib)
 GUARDS_LIB=$(lib_addr TokenGuardsLib)
 MODULE_SET_LIB=$(lib_addr ModuleSetLib)
 TRANSFER_VALIDATION_LIB=$(lib_addr TransferValidationLib)
+TRANSFER_SETTLEMENT_LIB=$(lib_addr TransferSettlementLib)
 
 # beacons() returns a SuiteBeacons tuple (token, registry, irs, mc, accessManager) - fetch
 # post-hoc, they're not top-level CREATEs.
@@ -112,6 +113,7 @@ cat > "deployments/$NETWORK_NAME.json" <<JSON
   "guardsLib": "$GUARDS_LIB",
   "moduleSetLib": "$MODULE_SET_LIB",
   "transferValidationLib": "$TRANSFER_VALIDATION_LIB",
+  "transferSettlementLib": "$TRANSFER_SETTLEMENT_LIB",
   "identityRegistryStorageImpl": "$IRS_IMPL",
   "modularComplianceImpl": "$MC_IMPL",
   "trexRegistryImpl": "$TREX_REGISTRY_IMPL",
