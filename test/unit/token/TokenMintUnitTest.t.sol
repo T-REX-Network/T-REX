@@ -69,7 +69,7 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
 
     function testTokenMintRevertsWhenCallerOnlyBurner() public {
         address burner = makeAddr("Burner");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_BURNER), burner, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_BURNER), burner, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, burner));
         vm.prank(burner);
@@ -146,8 +146,8 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
     ///         also answers for a selector with no row, so `batchMint` still follows `mint`'s role.
     function testTokenBatchMintStillFollowsMintWhenMappedToAdminRole() public {
         address minter = makeAddr("Minter");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
-        _mapBatchMint(accessManager.ADMIN_ROLE());
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
+        _mapBatchMint(suiteManager.ADMIN_ROLE());
 
         vm.prank(minter);
         token.batchMint(_oneRecipient(), _oneAmount());
@@ -161,8 +161,8 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
         address minter = makeAddr("Minter");
         address batchMinter = makeAddr("BatchMinter");
         uint64 batchRole = RolesLib.forDomain(1, RolesLib.Role.OWNER);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
-        accessManager.grantRole(batchRole, batchMinter, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_MINTER), minter, 0);
+        suiteManager.grantRole(batchRole, batchMinter, 0);
         _mapBatchMint(batchRole);
 
         address[] memory recipients = _oneRecipient();
@@ -180,7 +180,7 @@ contract TokenMintUnitTest is TokenBaseUnitTest {
     function _mapBatchMint(uint64 roleId) internal {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = token.batchMint.selector;
-        accessManager.setTargetFunctionRole(address(token), selectors, roleId);
+        suiteManager.setTargetFunctionRole(address(token), selectors, roleId);
     }
 
     function _oneRecipient() internal view returns (address[] memory recipients) {

@@ -189,18 +189,17 @@ library ErrorsLib {
     error WalletNotActive(address wallet);
 
     // AccessManagerSetupLib Errors
-    error NotAssigned(address target);
     error SuiteDeployerCannotConfigureFactory();
     error PlatformRoleCannotBePublic();
-    /// @dev `target`, a storage, a registry or a compliance, is already set up in `domainId`, so a suite of
-    ///      another domain cannot use it.
-    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();
 
     // TREXAccessManager Errors
     error DomainNotFound(uint32 domainId);
+    /// @dev `target` is already set up in `domainId`: a token is set up once, and a storage, a registry or a
+    ///      compliance already in a domain cannot be used by a suite of another one.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();

@@ -67,11 +67,11 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     function setUp() public override {
         super.setUp();
 
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
 
         // setCompliance is guarded by onlySharedAuthority(compliance): the new compliance must report the
         // same AccessManager authority as the Token, so the mock advertises the suite's AccessManager.
-        vm.mockCall(newCompliance, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(newCompliance, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
 
         // setCompliance also requires the target to advertise, via ERC-165, every interface the token calls.
         mockSupportsInterface(newCompliance, type(IERC3643Compliance).interfaceId);
@@ -89,7 +89,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
 
     function testTokenSetComplianceRevertsWhenCallerOnlyTokenAdmin() public {
         address tokenAdmin = makeAddr("TokenAdmin");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.TOKEN_MANAGER), tokenAdmin, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.TOKEN_MANAGER), tokenAdmin, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, tokenAdmin));
         vm.prank(tokenAdmin);
@@ -106,7 +106,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     /// @notice A target with no ERC-165 support is refused, so a mistyped address cannot break transfers.
     function testTokenSetComplianceRevertsWhenNoERC165() public {
         address notAContract = makeAddr("NotAContract");
-        vm.mockCall(notAContract, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(notAContract, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
 
         vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
         token.setCompliance(notAContract);
@@ -117,7 +117,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     /// @notice A contract that is not a compliance is refused, ahead of the getTokenBound() probe.
     function testTokenSetComplianceRevertsWhenWrongInterface() public {
         address wrongType = makeAddr("IdentityRegistryNotCompliance");
-        vm.mockCall(wrongType, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(wrongType, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         mockSupportsInterface(wrongType, type(IERC3643IdentityRegistry).interfaceId);
 
         vm.expectRevert(ErrorsLib.InvalidCompliance.selector);
@@ -130,7 +130,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     ///  every `transferFrom` and `handleSettlement` on every settlement delivery, and those would revert.
     function testTokenSetComplianceRevertsWhenOnlyStandardInterface() public {
         address standardOnly = makeAddr("StandardOnlyCompliance");
-        vm.mockCall(standardOnly, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(standardOnly, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(
             standardOnly, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(0))
         );
@@ -146,7 +146,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     /// @notice A compliance that is modular but cannot receive settlements is refused as well.
     function testTokenSetComplianceRevertsWhenNoSettlementHandler() public {
         address noSettlement = makeAddr("NoSettlementCompliance");
-        vm.mockCall(noSettlement, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(noSettlement, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(
             noSettlement, abi.encodeWithSelector(IERC3643Compliance.getTokenBound.selector), abi.encode(address(0))
         );

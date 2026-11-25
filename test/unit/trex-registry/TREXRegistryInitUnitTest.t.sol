@@ -55,7 +55,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         registry.init(
             address(identityRegistryStorage),
-            address(accessManager),
+            address(suiteManager),
             new uint256[](0),
             new address[](0),
             new uint256[][](0)
@@ -70,7 +70,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
             address(impl),
             abi.encodeCall(
                 TREXRegistry.init,
-                (address(0), address(accessManager), new uint256[](0), new address[](0), new uint256[][](0))
+                (address(0), address(suiteManager), new uint256[](0), new address[](0), new uint256[][](0))
             )
         );
     }
@@ -101,7 +101,7 @@ contract TREXRegistryInitUnitTest is TREXRegistryBaseUnitTest {
                         TREXRegistry.init,
                         (
                             address(identityRegistryStorage),
-                            address(accessManager),
+                            address(suiteManager),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)

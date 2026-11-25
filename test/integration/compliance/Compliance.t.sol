@@ -232,20 +232,20 @@ contract ComplianceTest is TREXSuiteTest {
     function test_bindAndUnbindToken_Success_WhenScheduledByDelayedOwner() public {
         Token testToken = _deployToken("salt2", "Dino Token", "DINO");
         address delayedOwner = makeAddr("delayedOwner");
-        accessManager.grantRole(_role(RolesLib.Role.OWNER), delayedOwner, 1 days);
+        suiteManager.grantRole(_role(RolesLib.Role.OWNER), delayedOwner, 1 days);
         bytes memory bindCall = abi.encodeCall(IERC3643Compliance.bindToken, (address(testToken)));
         bytes memory unbindCall = abi.encodeCall(IERC3643Compliance.unbindToken, (address(testToken)));
 
         uint256 start = block.timestamp;
         vm.prank(delayedOwner);
-        accessManager.schedule(address(complianceBeta), bindCall, 0);
+        suiteManager.schedule(address(complianceBeta), bindCall, 0);
         vm.warp(start + 1 days);
         vm.prank(delayedOwner);
         complianceBeta.bindToken(address(testToken));
         assertTrue(complianceBeta.isTokenBound(address(testToken)));
 
         vm.prank(delayedOwner);
-        accessManager.schedule(address(complianceBeta), unbindCall, 0);
+        suiteManager.schedule(address(complianceBeta), unbindCall, 0);
         vm.warp(start + 2 days);
         vm.prank(delayedOwner);
         complianceBeta.unbindToken(address(testToken));
