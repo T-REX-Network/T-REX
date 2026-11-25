@@ -130,7 +130,8 @@ contract TREXSuiteTest is AccessManagerHelper {
     Account public bobSigner = makeAccount("bobSigner");
 
     function setUp() public virtual {
-        _deployAccessManager();
+        _deployPlatformManager();
+        _deploySuiteManager();
         _deployOnchainId();
         _deployImplementations();
         _deployFactories();
@@ -149,7 +150,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     }
 
     /// @dev Deploys the ONCHAINID stack: the merged ERC734Validator (enshrined key/claim registry), the
-    ///      identity implementation bound to it, the IdentityFactory governed by the suite's AccessManager
+    ///      identity implementation bound to it, the IdentityFactory governed by the platform AccessManager
     ///      that owns the upgradeable beacon, and the module singletons every identity installs. Identity
     ///      types are registered with the factory here because it rejects unregistered types from both
     ///      deploy paths.
@@ -160,19 +161,19 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      immutable) -> factory.initializeBeacon (deploys the beacon at its predetermined CREATE3 slot).
     function _deployOnchainId() internal {
         vm.startPrank(deployer);
-        idFactory = new IdentityFactory(address(accessManager));
+        idFactory = new IdentityFactory(address(platformManager));
         keyApprovalModule = new KeyApprovalModule();
-        reputationRegistry = new ReputationRegistry(address(accessManager), address(idFactory));
+        reputationRegistry = new ReputationRegistry(address(platformManager), address(idFactory));
         validatorModule = new ERC734Validator(address(idFactory), address(reputationRegistry));
         identityImplementation = new Identity(address(validatorModule), address(idFactory));
         vm.stopPrank();
 
         // Registered after the module singletons exist: the per-type module bundles reference them.
         _registerIdentityTypePolicies(idFactory);
-        accessManager.grantRole(_identityIssuerRole(), deployer, NO_EXECUTION_DELAY);
+        platformManager.grantRole(_identityIssuerRole(), deployer, NO_EXECUTION_DELAY);
 
-        // The factory's beacon owner is the suite AccessManager, so initializeBeacon is restricted;
-        // the test contract is the AM admin and drives it.
+        // The factory's beacon owner is the platform AccessManager, so initializeBeacon is restricted;
+        // the test contract is its admin and drives it.
         idFactory.initializeBeacon(address(identityImplementation));
         identityBeacon = UpgradeableBeacon(idFactory.beacon());
 
@@ -193,13 +194,13 @@ contract TREXSuiteTest is AccessManagerHelper {
         vm.stopPrank();
     }
 
-    /// @dev Deploys an IdentityFactory governed by the suite's AccessManager and registers the identity
+    /// @dev Deploys an IdentityFactory governed by the platform AccessManager and registers the identity
     ///      types the suite mints. The factory owns its own beacon (deployed later via initializeBeacon),
     ///      so no beacon is passed here. Tests that need a second, independent global registry call this
     ///      directly.
     function _newIdentityFactory() internal returns (IdentityFactory factory) {
         vm.startPrank(deployer);
-        factory = new IdentityFactory(address(accessManager));
+        factory = new IdentityFactory(address(platformManager));
         vm.stopPrank();
 
         _registerIdentityTypePolicies(factory);
@@ -212,7 +213,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      address before the suite deploys. ASSET is gated behind ASSET_DEPLOYER with self-deploy off,
     ///      mirroring production: only a registered token factory mints token OIDs, and a token cannot sign
     ///      for itself.
-    /// @dev Called as the test contract, which is the AccessManager admin (see AccessManagerHelper);
+    /// @dev Called as the test contract, which is the platform AccessManager admin (see AccessManagerHelper);
     ///      `setIdentityTypePolicy` is restricted and its selector defaults to ADMIN_ROLE.
     function _registerIdentityTypePolicies(IdentityFactory factory) internal {
         uint64 identityIssuerRole = _identityIssuerRole();
@@ -306,7 +307,7 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      Creating an ASSET identity for another account needs the ASSET role, so the test contract takes it.
     function _bindTokenIdentity(string memory salt, address managementKey) internal returns (address) {
         address predictedToken = _predictSuiteAddress(salt, "Token");
-        _grantTokenOidMinterRole(address(this));
+        _grantAssetDeployerRole(address(this));
         Structs.KeyParam[] memory keys = new Structs.KeyParam[](1);
         keys[0] = _ecdsaKey(managementKey, KeyPurposes.MANAGEMENT);
         return idFactory.createIdentityFor(predictedToken, IdentityTypes.ASSET, salt, keys);
@@ -335,15 +336,17 @@ contract TREXSuiteTest is AccessManagerHelper {
         trexImplementationAuthority = _deployTREXImplementationAuthority();
 
         // Network-level, shared by every suite. Deployed before the factory, which wires it into every token.
-        trustedGatewayRegistry = new TrustedGatewayRegistry(address(accessManager));
-        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(trustedGatewayRegistry));
+        trustedGatewayRegistry = new TrustedGatewayRegistry(address(platformManager));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            platformManager, address(trustedGatewayRegistry), _interopManagerRole()
+        );
         _grantInteropManagerRole(address(this));
 
-        trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(accessManager));
+        trexFactory = _newTREXFactory(address(trexImplementationAuthority), address(platformManager));
 
         // The IdentityFactory gates ASSET minting on ASSET_DEPLOYER, resolved against its own
-        // authority (the suite AccessManager here). Without this the auto-mint path reverts.
-        _grantTokenOidMinterRole(address(trexFactory));
+        // authority, the platform AccessManager. Without this the auto-mint path reverts.
+        _grantAssetDeployerRole(address(trexFactory));
 
         _setupFactoryRoles(address(trexFactory));
     }
@@ -353,11 +356,10 @@ contract TREXSuiteTest is AccessManagerHelper {
     ///      to VERSION_MANAGER, which the deployer holds.
     function _deployTREXImplementationAuthority() internal returns (TREXImplementationAuthority) {
         TREXImplementationAuthority ia = new TREXImplementationAuthority(
-            address(accessManager), VersionLib.pack(5, 0, 0), _suiteImplementations()
+            address(platformManager), VersionLib.pack(5, 0, 0), _suiteImplementations()
         );
 
-        _authorizeIAGovernance(address(ia));
-        _grantOwnerRole(deployer);
+        _setupImplementationAuthorityRoles(address(ia));
         _grantPlatformRoles(deployer);
         _grantVersionManagerRole(deployer);
 
@@ -383,7 +385,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             ONCHAINID: address(0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager),
+            accessManager: address(suiteManager),
             accessManagerAdmin: address(0)
         });
 
@@ -414,7 +416,7 @@ contract TREXSuiteTest is AccessManagerHelper {
             ONCHAINID: address(0),
             complianceModules: new address[](0),
             complianceSettings: new bytes[](0),
-            accessManager: address(accessManager),
+            accessManager: address(suiteManager),
             accessManagerAdmin: address(0)
         });
 
@@ -453,14 +455,10 @@ contract TREXSuiteTest is AccessManagerHelper {
         trexFactory.deployTREXSuite(salt, tokenDetails, claimDetails);
     }
 
-    /// @notice Wires the selector-to-role mappings on the AccessManager for every contract of `_token`'s suite.
+    /// @notice Sets `_token`'s suite up in the fixture's domain of the supplied AccessManager, which the
+    ///         factory leaves to the issuer.
     function _setupTokenSuiteRoles(Token _token) internal {
-        // The registry answers topicsRegistry()/issuersRegistry() with its own address, so a single
-        // registry wiring covers all three sub-surfaces.
-        IERC3643IdentityRegistry ir = _token.identityRegistry();
-        _setupSuiteRoles(address(_token), address(ir), address(ir.identityStorage()), address(_token.compliance()));
-        _grantAgentRole(address(_token));
-        _grantStorageWriterRole(address(ir));
+        _setupSuiteRoles(address(_token));
         _grantAgentRole(agent);
     }
 
@@ -474,10 +472,10 @@ contract TREXSuiteTest is AccessManagerHelper {
         bytes[] memory noSettings = new bytes[](0);
         address mcBeacon = ITREXImplementationAuthority(implementationAuthority_).beacons().mcBeacon;
         BeaconProxy proxy = new BeaconProxy(
-            mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(accessManager), noModules, noSettings))
+            mcBeacon, abi.encodeCall(ModularCompliance.init, (sentinel, address(suiteManager), noModules, noSettings))
         );
         ModularCompliance freshCompliance = ModularCompliance(address(proxy));
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(freshCompliance), DOMAIN);
+        _setupComplianceRoles(address(freshCompliance));
         freshCompliance.unbindToken(sentinel);
         return freshCompliance;
     }

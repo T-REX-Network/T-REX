@@ -65,9 +65,6 @@ import { KeyPurposes } from "@onchain-id/solidity/contracts/libraries/KeyPurpose
 import { KeyTypes } from "@onchain-id/solidity/contracts/libraries/KeyTypes.sol";
 import { Structs } from "@onchain-id/solidity/contracts/storage/Structs.sol";
 
-import {
-    AccessManagerUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -75,7 +72,6 @@ import { Create3 } from "@openzeppelin/contracts/utils/Create3.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularCompliance } from "../compliance/modular/ModularCompliance.sol";
-import { AccessManagerSetupLib } from "../libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
@@ -134,11 +130,11 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuite}.
-     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
-     *  domain named after the token, assigns the token and its storage, commissions the suite and hands
-     *  `ADMIN_ROLE` to `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls
-     *  it: the suite deploys with no role wiring and is not operable until the issuer commissions it with
-     *  `AccessManagerSetupLib.commissionSuite`.
+     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager` that lays
+     *  out the suite's roles itself when it is initialized, with `tokenDetails.accessManagerAdmin` as its
+     *  admin from the first block; the factory never holds a role on it. With a supplied manager the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
+     *  sets it up (`TREXAccessManager.setupSuite`).
      */
     function deployTREXSuite(string memory salt, TokenDetails calldata tokenDetails, ClaimDetails calldata claimDetails)
         external
@@ -153,11 +149,11 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
 
     /**
      *  @dev See {ITREXFactory-deployTREXSuiteIsolated}.
-     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager`, creates a
-     *  domain named after the token, assigns the token and its storage, commissions the suite and hands
-     *  `ADMIN_ROLE` to `tokenDetails.accessManagerAdmin`. With a supplied manager the factory never calls
-     *  it: the suite deploys with no role wiring and is not operable until the issuer commissions it with
-     *  `AccessManagerSetupLib.commissionSuite`.
+     *  With `tokenDetails.accessManager == address(0)` the factory deploys a `TREXAccessManager` that lays
+     *  out the suite's roles itself when it is initialized, with `tokenDetails.accessManagerAdmin` as its
+     *  admin from the first block; the factory never holds a role on it. With a supplied manager the
+     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
+     *  sets it up (`TREXAccessManager.setupSuite`).
      */
     function deployTREXSuiteIsolated(
         string memory salt,
@@ -230,13 +226,19 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         ClaimDetails calldata claimDetails,
         ITREXImplementationAuthority.SuiteBeacons memory beacons
     ) private returns (address) {
-        address manager = tokenDetails.accessManager;
-        if (manager == address(0)) {
-            manager = _deployAccessManager(salt, beacons.accessManagerBeacon);
-        }
+        // A reused storage is wired by its address; a fresh one by the address CREATE3 will give it.
         address irs = tokenDetails.irs;
         if (irs == address(0)) {
-            irs = _deployIRS(salt, beacons.irsBeacon, manager);
+            irs = _predictAddress(salt, IRS);
+        }
+        address manager = tokenDetails.accessManager;
+        if (manager == address(0)) {
+            // The manager lays the suite's roles out as it is initialized, against the addresses the
+            // suite contracts are about to be deployed at. The issuer's admin is its admin from here on.
+            manager = _deployAccessManager(salt, beacons.accessManagerBeacon, tokenDetails, irs);
+        }
+        if (tokenDetails.irs == address(0)) {
+            _deployIRS(salt, beacons.irsBeacon, manager);
         } else {
             address authority = IAccessManaged(irs).authority();
             require(authority == manager, ErrorsLib.StorageAuthorityMismatch(irs, manager, authority));
@@ -252,10 +254,6 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         address mc = _deployMC(salt, beacons.mcBeacon, tokenDetails, manager);
         address token = _deployToken(salt, beacons.tokenBeacon, tokenDetails, manager, registry, mc);
         tokenDeployed[salt] = token;
-        if (tokenDetails.accessManager == address(0)) {
-            _handOverAccessManager(manager, tokenDetails.accessManagerAdmin, token, tokenDetails.name);
-        }
-
         emit EventsLib.TREXSuiteDeployed(token, registry, irs, mc, salt);
         return token;
     }
@@ -384,23 +382,28 @@ contract TREXFactory is ITREXFactory, AccessManagedOwnable {
         return bytes20(address(this)) | keccak256(bytes(string.concat(salt, contractType))) >> 168;
     }
 
-    function _deployAccessManager(string memory salt, address accessManagerBeacon) private returns (address) {
-        return _deploy(
-            salt,
-            ACCESS_MANAGER,
-            _beaconProxyBytecode(
-                accessManagerBeacon, abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
+    /// @dev Deploys the suite's own `TREXAccessManager` and initializes it in the proxy constructor with
+    ///      `tokenDetails.accessManagerAdmin` as admin and the four suite addresses CREATE3 will produce
+    ///      for `salt`. The manager writes its own role layout from those addresses, so the suite is
+    ///      operable as soon as its contracts land, and this factory never holds a role on it.
+    function _deployAccessManager(
+        string memory salt,
+        address accessManagerBeacon,
+        TokenDetails calldata tokenDetails,
+        address identityStorage
+    ) private returns (address) {
+        bytes memory initData = abi.encodeCall(
+            TREXAccessManager.initializeSuite,
+            (
+                tokenDetails.accessManagerAdmin,
+                tokenDetails.name,
+                _predictAddress(salt, TOKEN),
+                _predictAddress(salt, REGISTRY),
+                identityStorage,
+                _predictAddress(salt, MC)
             )
         );
-    }
-
-    function _handOverAccessManager(address manager, address admin, address token, string memory name) private {
-        TREXAccessManager accessManager = TREXAccessManager(manager);
-        uint32 domainId = accessManager.createDomain(name);
-        accessManager.assign(domainId, token);
-        AccessManagerSetupLib.commissionSuite(accessManager, token);
-        accessManager.grantRole(AccessManagerSetupLib.ADMIN_ROLE, admin, 0);
-        accessManager.renounceRole(AccessManagerSetupLib.ADMIN_ROLE, address(this));
+        return _deploy(salt, ACCESS_MANAGER, _beaconProxyBytecode(accessManagerBeacon, initData));
     }
 
     function _deployTREXRegistry(

@@ -58,6 +58,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 pragma solidity 0.8.30;
 
+import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -131,7 +132,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _narrowAmountRange(draft, from, to, spender);
         _requireSpenderAllowed(draft, to, spender);
 
-        validationId = _issueValidation(from, to, spender, draft);
+        // Issued and sent at once, or kept awaiting approval while an `APPROVAL` module is bound.
+        validationId = TransferValidationLib.issue(from, to, spender, draft, address(_boundToken()));
     }
 
     /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
@@ -167,14 +169,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
     ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
     function _setExpiryAndRelease(TransferValidationLib.Draft memory draft) private view {
-        TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
-        draft.reconciliationWindow = _openChainWindow(store, draft.fromChainKey);
-        if (draft.twoLegs) {
-            uint64 toWindow = _openChainWindow(store, draft.toChainKey);
-            if (toWindow > draft.reconciliationWindow) draft.reconciliationWindow = toWindow;
-        }
-        draft.expiry = uint64(block.timestamp) + store.defaultValidityWindow;
+        (draft.expiry, draft.reconciliationWindow) = TransferValidationLib.expiryAndWindow(
+            address(_boundToken()), draft.fromChainKey, draft.toChainKey, draft.twoLegs
+        );
     }
 
     /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
@@ -221,7 +218,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             draft.amountMax,
             spender
         );
-        uint256 allowed = _minAllowedAmount(ctx);
+        uint256 allowed = _callCheckTransfer(ctx);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
         require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
     }
@@ -247,37 +244,48 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         require(_spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
-    /// @dev Turns a settled draft into an issued validation, see {TransferValidationLib-issue}, then sends
-    ///  one leg per satellite chain involved.
-    function _issueValidation(
-        bytes calldata from,
-        bytes calldata to,
-        bytes calldata spender,
-        TransferValidationLib.Draft memory draft
-    ) private returns (uint256 validationId) {
-        bytes memory body;
-        (validationId, body) = TransferValidationLib.issue(from, to, spender, draft, address(_boundToken()));
+    /// @inheritdoc ITransferValidation
+    /// @dev The answer, the narrowing and the legs live in {TransferValidationLib-answerApproval}.
+    function answerApproval(uint256 validationId, uint256 approvedMax) external {
+        TransferValidationLib.answerApproval(validationId, approvedMax, address(_boundToken()));
+    }
 
-        _dispatchLeg(draft.fromChainKey, validationId, body);
-        if (draft.twoLegs) _dispatchLeg(draft.toChainKey, validationId, body);
+    /// @inheritdoc ITransferValidation
+    /// @dev The record does not keep `to`, which the caller supplies again with `spender`; the rebuilt leg
+    ///  must hash to what was issued, see {TransferValidationLib-resend}. Nothing is written: the
+    ///  reservation, the id and the pinned route are those of the issuance, and the token refuses the send once
+    ///  the leg's pinned gateway or peer is no longer the chain's.
+    function resendValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+        external
+    {
+        TransferValidationLib.resend(
+            validationId,
+            chainKey,
+            to,
+            spender,
+            address(_boundToken()),
+            _canCallSelector(msg.sender, this.resendValidation.selector)
+        );
     }
 
     /* ----- Settlement ----- */
 
     /// @dev Classifies an attributed settlement against the stored validation. Reverts on a leg that does not
-    ///  match; returns `true` on the two emergencies (a replayed leg, a never-issued id), which write nothing and
-    ///  halt the token; reconciles a `Discarded` validation late, with the warning and the per-chain pause on a
-    ///  breach. See {ISettlementHandler}.
+    ///  match; returns a pause on the two emergencies, which write nothing: `HaltToken` on an id never sent,
+    ///  `PauseChain` on a leg already accounted for; reconciles a `Discarded` validation late, with the warning
+    ///  and the per-chain issuance pause on a breach. See {ISettlementHandler}.
     function _handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         internal
-        returns (bool halt)
+        returns (ISettlementHandler.Verdict verdict)
     {
-        TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        if (!_isIssued(store, notification.validationId)) {
+        Validation storage validation = _validationStorage().validations[notification.validationId];
+        // The hash is written when a validation is issued and sent, so a record without one was never sent
+        // anywhere: an id never taken, or a request still awaiting approval, refused, or left unanswered. No
+        // satellite could have executed it.
+        if (validation.hash == bytes32(0)) {
             emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
-            return true;
+            return ISettlementHandler.Verdict.HaltToken;
         }
-        Validation storage validation = store.validations[notification.validationId];
 
         // 1. Which leg this is, and that its amount is inside the issued range.
         Leg leg = _matchLeg(validation, originChainKey, notification);
@@ -287,7 +295,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         );
         if (_alreadyAccountedFor(validation.status, leg)) {
             emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
-            return true;
+            return ISettlementHandler.Verdict.PauseChain;
         }
 
         // 2. Take in what this chain reported: complete the movement, or wait for the other chain.
@@ -300,6 +308,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
             emit EventsLib.LateReconciliation(notification.validationId, originChainKey);
             if (breachesRule) _setIssuancePaused(originChainKey, true);
         }
+        return ISettlementHandler.Verdict.None;
     }
 
     /// @dev Takes in what one chain reported and moves the validation on.
@@ -488,7 +497,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  relocation between two wallets of one identity moves no position, so no distribution rule applies to it.
     function _exceedsWhatRulesAllowNow(IModule.TransferContext memory ctx, uint256 amount) private view returns (bool) {
         if (_isRelocation(ctx.fromIdentity, ctx.toIdentity)) return false;
-        return amount > _minAllowedAmount(ctx);
+        return amount > _callCheckTransfer(ctx);
     }
 
     /* ----- Discard ----- */
@@ -500,10 +509,12 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  When the burn leg is the one that landed, the tokens it burned are waiting in transit: they go back to
     ///  the wallet they left. When it was the mint leg, nothing on this chain can be returned, so the chain
     ///  that owes the burn stops being issued to instead and an operator investigates. Either way the
-    ///  validation ends in `Resolved`, where any leg arriving afterwards halts the token.
+    ///  validation ends in `Resolved`, where any leg arriving afterwards pauses its chain's inbound. While the
+    ///  chain owing the leg has its inbound paused on the token the leg may be waiting at its gateway, so the
+    ///  pair is not resolved under the pause, see {TransferValidationLib-requireAwaitedInboundOpen}.
     function _resolveStuckValidation(uint256 validationId) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+        require(_isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
         require(
             _awaitingOtherLeg(validation.status), ErrorsLib.ValidationNotStuck(validationId, uint8(validation.status))
@@ -511,6 +522,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
         uint64 resolvableAt = _secondWindowEnd(validation);
         require(block.timestamp > resolvableAt, ErrorsLib.ValidationNotYetResolvable(validationId, resolvableAt));
+        _requireAwaitedInboundOpen(validation);
 
         uint256 returnedAmount = 0;
         if (_burnArrived(validation.status)) {
@@ -533,13 +545,21 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  leg that lands afterwards into a late reconciliation, which can pause its chain's issuance, so during the
     ///  first window the keeper alone judges that a leg is late rather than slow. Past the second window a pair
     ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
+    ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token: its leg may be
+    ///  waiting at that gateway, see {TransferValidationLib-requireAwaitedInboundOpen}.
     function _discardExpiredValidations(uint256[] calldata validationIds) internal {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
         bool keeper = _canCallSelector(msg.sender, this.discardExpiredValidations.selector);
         for (uint256 i = 0; i < validationIds.length; i++) {
             uint256 validationId = validationIds[i];
-            require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+            require(_isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
             Validation storage validation = store.validations[validationId];
+            // Nothing was sent for a validation still awaiting approval, so no leg can be in flight: anyone may
+            // discard it once its deadline passed, and the reservation comes back.
+            if (validation.status == ValidationStatus.AwaitingApproval) {
+                TransferValidationLib.discardUnanswered(validationId, address(_boundToken()));
+                continue;
+            }
             require(
                 validation.status == ValidationStatus.Pending,
                 ErrorsLib.ValidationNotDiscardable(validationId, uint8(validation.status))
@@ -552,6 +572,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
                 uint64 publicAt = _secondWindowEnd(validation);
                 require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(validationId, publicAt));
             }
+            _requireAwaitedInboundOpen(validation);
 
             _moveTo(validation, ValidationStatus.Discarded, false);
 
@@ -595,13 +616,16 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @inheritdoc ITransferValidation
     function statusOf(uint256 validationId) public view returns (ValidationStatus) {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
-        require(_isIssued(store, validationId), ErrorsLib.UnknownValidation(validationId));
+        require(_isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];
-        // `Expired` is the one status never stored: it is `Pending` once the clock has passed `releaseAt`. Every
+        // `Expired` is the one status never stored: it is `Pending` once the clock has passed `releaseAt`, or
+        // `AwaitingApproval` once its deadline for an answer passed. Either way it can now be discarded. Every
         // other state is returned as it stands, including which leg a pair is still waiting for.
-        if (validation.status == ValidationStatus.Pending && block.timestamp > validation.releaseAt) {
-            return ValidationStatus.Expired;
-        }
+        bool pendingPastRelease =
+            validation.status == ValidationStatus.Pending && block.timestamp > validation.releaseAt;
+        bool unansweredPastDeadline =
+            validation.status == ValidationStatus.AwaitingApproval && block.timestamp >= validation.expiry;
+        if (pendingPastRelease || unansweredPastDeadline) return ValidationStatus.Expired;
         return validation.status;
     }
 
@@ -639,19 +663,17 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     /// @dev Whether the AccessManager lets `caller` call `selector` on this contract now.
     function _canCallSelector(address caller, bytes4 selector) internal view virtual returns (bool);
 
-    /// @dev The smallest amount any `RULE` module allows for `ctx`, `type(uint256).max` when none is bound.
-    ///  Evaluated under `staticcall`: the ledger still describes the state before the move.
-    function _minAllowedAmount(IModule.TransferContext memory ctx) internal view virtual returns (uint256);
+    /// @dev Calls `checkTransfer` on every `TRANSFER_CHECK` module, before anything moves, and returns the smallest
+    ///  amount they allow for `ctx`, `type(uint256).max` when none is bound. Evaluated under `staticcall`: the
+    ///  ledger still describes the state before the move.
+    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view virtual returns (uint256);
 
     /// @dev Whether every `SPENDER` module accepts `ctx.spender`, `true` when none is bound. A view: the
     ///  modules are called under `staticcall`.
     function _spenderAllowed(IModule.TransferContext memory ctx) internal view virtual returns (bool);
 
-    /// @dev Calls `afterTransfer` on every `TRACKER` module, once the positions have been updated.
+    /// @dev Calls `afterTransfer` on every `AFTER` module, once the positions have been updated.
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal virtual;
-
-    /// @dev Sends one leg of a validation toward `chainKey`, through the token.
-    function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal virtual;
 
     /// @dev Applies a settled validation to the ledger, through the token, once.
     function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId) internal virtual;
@@ -685,7 +707,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Whether this leg has nothing left to do: either its own half already arrived, or the keeper gave up
     ///  on the pair and sent the tokens back. Both mean the amount it carries is already accounted for
-    ///  somewhere else, so applying it again would move tokens twice. The caller treats it as an emergency.
+    ///  somewhere else, so applying it again would move tokens twice. The caller pauses the leg's chain.
     function _alreadyAccountedFor(ValidationStatus status, Leg leg) internal pure returns (bool) {
         if (status == ValidationStatus.Resolved) return true;
         if (leg == Leg.Mint) return _mintArrived(status);
@@ -709,13 +731,14 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  every validation, the identities' rows for every one that is not a relocation.
     function _stillReservesPending(ValidationStatus status) internal pure returns (bool) {
         return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingMint
-            || status == ValidationStatus.AwaitingBurn;
+            || status == ValidationStatus.AwaitingBurn || status == ValidationStatus.AwaitingApproval;
     }
 
     /// @dev Whether the sender wallet's pending amount is still reserved in this state. Once the burn leg has
     ///  arrived the tokens are in transit, so the wallet's cap must stop counting them.
     function _stillReservesWallet(ValidationStatus status) internal pure returns (bool) {
-        return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingBurn;
+        return status == ValidationStatus.Pending || status == ValidationStatus.AwaitingBurn
+            || status == ValidationStatus.AwaitingApproval;
     }
 
     /// @dev Where a validation goes when a leg lands on it, and whether that leg completes the movement.
@@ -752,7 +775,8 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @dev Moves a validation to `next` and gives back whatever `next` no longer reserves. Because the
     ///  reservations are read off the status, a release happens exactly when the move stops reserving something,
-    ///  and arriving twice at the same state gives nothing back twice.
+    ///  and arriving twice at the same state gives nothing back twice. A validation `AwaitingApproval` is
+    ///  released in `TransferValidationLib._release` instead, which mirrors this: keep the two in step.
     /// @param heldByTheHold true when the caller is about to take an in-transit hold, which gives the wallet's
     ///  reservation back itself; this function then leaves that half alone rather than releasing it twice.
     function _moveTo(Validation storage validation, ValidationStatus next, bool heldByTheHold) private {
@@ -790,15 +814,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         _recordOwnerChange(wallet, previous, owner);
     }
 
-    /// @dev The reconciliation window of a chain that is open and configured.
-    function _openChainWindow(TransferValidationLib.ValidationStorage storage store, bytes32 chainKey)
-        private
-        view
-        returns (uint64 window)
-    {
-        require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
-        window = store.reconciliationWindows[chainKey];
-        require(window != 0, ErrorsLib.ReconciliationWindowNotSet(chainKey));
+    /// @dev See {TransferValidationLib-requireAwaitedInboundOpen}.
+    function _requireAwaitedInboundOpen(Validation storage validation) private view {
+        TransferValidationLib.requireAwaitedInboundOpen(address(_boundToken()), validation);
     }
 
     function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
@@ -806,8 +824,9 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         return MessageTypesLib.chainKey(chainType, chainReference);
     }
 
-    /// @dev Ids start at 1 and `lastValidationId` is the last one issued.
-    function _isIssued(TransferValidationLib.ValidationStorage storage store, uint256 validationId)
+    /// @dev Whether the id was taken: issued, or recorded awaiting approval. Ids start at 1 and
+    ///  `lastValidationId` is the last one taken.
+    function _isRecorded(TransferValidationLib.ValidationStorage storage store, uint256 validationId)
         private
         view
         returns (bool)

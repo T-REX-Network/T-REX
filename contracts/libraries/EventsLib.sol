@@ -90,7 +90,9 @@ library EventsLib {
     /// @notice Emitted when the proof that already settled a recall is delivered again: nothing is applied.
     event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when a burn proof answers a recall never issued, or differs from the proof that settled it.
-    ///  The token pauses itself until an agent unpauses it, as it does on a replayed settlement.
+    ///  Nothing is applied. As on a replayed settlement, the token pauses its inbound from `originChainKey` when
+    ///  the recall is one it issued, and pauses itself when it is not, since an unknown id may as well mean the
+    ///  token's own records are out of step, see {ISettlementHandler-Verdict}.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
@@ -189,6 +191,11 @@ library EventsLib {
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
+    /// @notice Emitted when the token stops taking messages from `chainKey`: by the pauser, or on a message that
+    ///  chain sent for something already accounted for. Deliveries from that chain revert and stay deliverable.
+    event InboundPaused(bytes32 indexed chainKey);
+    /// @notice Emitted when the pauser takes messages from `chainKey` again.
+    event InboundUnpaused(bytes32 indexed chainKey);
 
     // ModularCompliance Interop Events
 
@@ -219,6 +226,21 @@ library EventsLib {
     event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event ValidationDiscarded(uint256 indexed validationId);
+    /// @notice Emitted when a validation is recorded and reserved while an `APPROVAL` module decides it.
+    event TransferValidationAwaitingApproval(
+        uint256 indexed validationId,
+        bytes from,
+        bytes to,
+        bytes spender,
+        uint256 amountMin,
+        uint256 amountMax,
+        uint64 deadline
+    );
+    /// @notice Emitted when a validation awaiting approval is refused, or left unanswered past its deadline, and
+    ///         its reservation released.
+    event ValidationApprovalRefused(uint256 indexed validationId);
+    /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
+    event ValidationResent(uint256 indexed validationId, bytes32 indexed chainKey);
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
     ///         the validation is pinned and can no longer be discarded.
     event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
@@ -233,7 +255,9 @@ library EventsLib {
     ///         `chainKey` is the chain of the leg that completed it.
     event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
     /// @notice Emergency: a trusted gateway delivered a leg already consumed, or an id never issued. Nothing is
-    ///         applied and the token pauses itself until an agent unpauses it.
+    ///         applied. On a consumed leg the token pauses its inbound from `chainKey`; on an id never issued it
+    ///         pauses itself, since an unknown id may as well mean the token's own records are out of step, see
+    ///         {ISettlementHandler-Verdict}. Either is lifted by the pauser after an investigation.
     event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
     // TREXAccessManager Events
 

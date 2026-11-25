@@ -119,7 +119,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
             address(
                 new ModuleProxy(
                     address(new MaxBalancePerIdentityModule()),
-                    abi.encodeCall(MaxBalancePerIdentityModule.initialize, (address(accessManager)))
+                    abi.encodeCall(MaxBalancePerIdentityModule.initialize, (address(suiteManager)))
                 )
             )
         );
@@ -136,8 +136,8 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
     function test_moduleTypes_NamesOnlyRule() public view {
         assertEq(rule.moduleTypes().length, 1);
-        assertEq(uint8(rule.moduleTypes()[0]), uint8(IModule.ModuleType.RULE));
-        assertEq(boundCompliance.getModulesByType(IModule.ModuleType.RULE)[0], address(rule));
+        assertEq(uint8(rule.moduleTypes()[0]), uint8(IModule.ModuleType.TRANSFER_CHECK));
+        assertEq(boundCompliance.getModulesByType(IModule.ModuleType.TRANSFER_CHECK)[0], address(rule));
         assertTrue(rule.isPlugAndPlay());
         assertEq(rule.name(), "MaxBalancePerIdentityModule");
     }

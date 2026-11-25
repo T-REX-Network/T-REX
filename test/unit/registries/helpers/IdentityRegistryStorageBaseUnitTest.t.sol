@@ -39,13 +39,13 @@
 
 pragma solidity 0.8.30;
 
+import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
+
 import { Test, Vm } from "@forge-std/Test.sol";
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
-import { AccessManager } from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
 import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
@@ -55,10 +55,9 @@ import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 /// @dev The registry and the identity factory are mocked at the ABI level: on a write the storage only asks its
 ///      factory for the wallet's identity, to tell whether the local binding shadows a global one. The factory knows
 ///      `wallet` as `globalIdentity` and does not know `otherWallet`.
-abstract contract IdentityRegistryStorageBaseUnitTest is Test {
+abstract contract IdentityRegistryStorageBaseUnitTest is AccessManagerHelper {
 
     IdentityRegistryStorage internal irs;
-    AccessManager internal accessManager;
 
     address internal registry = makeAddr("registry");
     address internal idFactory = makeAddr("idFactory");
@@ -69,20 +68,20 @@ abstract contract IdentityRegistryStorageBaseUnitTest is Test {
     address internal otherWallet = makeAddr("otherWallet");
 
     function setUp() public virtual {
-        accessManager = new AccessManager(address(this));
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
+        _deploySuiteManager();
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_BINDER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.IRS_WRITER), address(this), 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.OWNER), address(this), 0);
 
         address beacon = BeaconProxyDeployer.newBeacon(address(new IdentityRegistryStorage()));
         irs = IdentityRegistryStorage(
             BeaconProxyDeployer.newProxy(
-                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(accessManager), address(0), idFactory))
+                beacon, abi.encodeCall(IdentityRegistryStorage.init, (address(suiteManager), address(0), idFactory))
             )
         );
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(irs), 1);
+        _setupStorageRoles(address(irs));
 
-        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(accessManager)));
+        vm.mockCall(registry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(registry, abi.encodeCall(ITREXRegistry.identityFactory, ()), abi.encode(idFactory));
         vm.mockCall(
             idFactory,

@@ -95,7 +95,9 @@ interface IModularCompliance is IERC3643Compliance {
      *  @dev re-reads what a bound module says it is and files it again
      *  @param _module address of the bound module to resynchronise
      *  a module sits behind a proxy, so an implementation upgrade can change what `moduleTypes` answers while
-     *  this compliance still routes by what it recorded at binding. Until this is called, the compliance keeps
+     *  this compliance still routes by what it recorded at binding. A module on `AbstractModuleUpgradeable`
+     *  refuses such an upgrade; this is the repair for one that is not, or whose new code dropped that guard.
+     *  Until this is called, the compliance keeps
      *  calling the module for a type it dropped, which reverts on every movement, and never calls it for a type
      *  it gained
      *  removing and re-adding the module is not the same thing: an unbind increments the module's bind nonce,
@@ -186,18 +188,18 @@ interface IModularCompliance is IERC3643Compliance {
      *  {canTransfer}
      *  returns true when no bound module objects, including when none enforces a spender rule
      *  only the bound token may call it, right before its `transferFrom` moves anything: `_spender` is kept
-     *  for the rest of that transfer, so the `RULE` and `TRACKER` modules see it in their context too
+     *  for the rest of that transfer, so the `TRANSFER_CHECK` and `AFTER` modules see it in their context too
      */
     function canSpenderCall(address _spender, address _from, address _to, uint256 _value) external returns (bool);
 
     /**
      *  @dev function called whenever the token moves tokens outside a plain transfer: a forced transfer or a
-     *  recovery by an agent, or a delegation out to a satellite wallet, which the holder, the holder's identity
-     *  or an agent may start
+     *  recovery by an agent, a delegation out to a satellite wallet, which the holder, the holder's identity
+     *  or an agent may start, or the recall that brings it back
      *  the standard `transferred` cannot say what moved the tokens, and a module counting an investor's own
      *  activity must tell these movements apart, so the token reports them here with the kind they were,
-     *  `FORCED_TRANSFER`, `RECOVERY` or `DELEGATION` from `MovementKindLib`, and the trackers see them under
-     *  that kind
+     *  `FORCED_TRANSFER`, `RECOVERY`, `DELEGATION` or `RECALL` from `MovementKindLib`, and the trackers see
+     *  them under that kind
      *  no rule is asked: the token checked the movement itself, see the token
      *  the token is trusted with `_kind`: it is the only caller and the kind is its own operation
      *  This function can be called ONLY by the token bound to the compliance
@@ -216,10 +218,10 @@ interface IModularCompliance is IERC3643Compliance {
     function getModulesByType(IModule.ModuleType moduleType) external view returns (address[] memory);
 
     /**
-     *  @dev settles who owns a native wallet before tokens land on it outside a movement the compliance hears
-     *  of, a recall's credit: an empty wallet the registry relinked takes its new owner, a funded one reverts
-     *  with `WalletBoundToAnotherIdentity` until the registry names the owner the ledger credited. No movement
-     *  is counted and no module is called. A no-op when the owner has not changed.
+     *  @dev settles who owns a native wallet before a recall's credit lands on it: an empty wallet the registry
+     *  relinked takes its new owner, a funded one reverts with `WalletBoundToAnotherIdentity` until the registry
+     *  names the owner the ledger credited. No movement is counted and no module is called; the credit itself
+     *  is reported afterwards through `agentTransferred` as a `RECALL`. A no-op when the owner has not changed.
      *  This function can be called ONLY by the token bound to the compliance
      *  @param _wallet the native wallet about to be credited
      */
