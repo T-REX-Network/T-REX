@@ -280,6 +280,52 @@ interface ITransferValidation {
     /// Emits `ValidationResolved`.
     function resolveStuckValidation(uint256 validationId) external;
 
+    /// @dev Sends the leg of an issued validation toward `chainKey` again, byte for byte, through the gateway the
+    /// issuance pinned. The way to recover a leg the transport lost before the satellite's deadline, instead of
+    /// waiting for `releaseAt` and asking for a new validation. `to` is the one envelope the record does not keep;
+    /// it is read off `TransferValidationIssued`, like `spender`, and both must rebuild the issued hash, so a
+    /// resend can neither widen nor retarget the movement. Nothing is written.
+    ///
+    /// Requirements:
+    /// - `validationId` must have been issued; otherwise reverts with `UnknownValidation`.
+    /// - `chainKey` must be the sender's chain or, on two legs, the recipient's; otherwise reverts with
+    ///   `ChainNotPartOfValidation`.
+    /// - It must be stored `Pending`, or, for the recipient's leg, `AwaitingMint`: the burn landed and the
+    ///   receiving Lite still needs the leg to check the burn message against; otherwise reverts with
+    ///   `ValidationNotResendable`. A discarded pair is never resendable: its burn landed past `releaseAt`.
+    /// - `block.timestamp` must be before `expiry` while `Pending`, and before `releaseAt` once the burn landed;
+    ///   otherwise reverts with `ValidationExpired`. Past `expiry` no satellite may execute; past `releaseAt` a
+    ///   resent leg could reach the Lite after the pair was resolved and the burned amount returned to the sender
+    ///   on the ledger, so the receiving chain would mint an amount the ledger attributes to the sender, and its
+    ///   report would land on a resolved id. The last resend stays one reconciliation window ahead of the resolution.
+    /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
+    /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`. The
+    ///   bound token is part of the hash, so a compliance bound to another token since cannot resend old ids.
+    /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `chainKey` is the
+    ///   recipient's chain, or authorised by the AccessManager for this selector; otherwise reverts with
+    ///   `NotAuthorizedForWallet`.
+    /// - The leg's pinned gateway and peer must still be the chain's route and peer; otherwise the token reverts
+    ///   with `ValidationAlreadyRouted`. A `Pending` validation then returns its reservation through discard at
+    ///   `releaseAt`; one awaiting the mint cannot be discarded, and `resolveStuckValidation` returns the burned
+    ///   amount to the sender once the second window has passed.
+    ///
+    /// Nothing counts or spaces resends. The token forwards no value to the gateway, so a resend costs its caller
+    /// the gas and whatever the gateway charges, and the Lite ignores a leg it already holds. A deployment whose
+    /// relayer pays per message meters at the relayer.
+    ///
+    /// The leg goes to the peer the issuance pinned, the only one its settlement is accepted from: after a peer
+    /// change the leg already sent keeps settling from the previous peer, and a resend toward the new one is
+    /// refused. Neither the resend nor the issuance is gated by the token pause: the pause stops movements, and a
+    /// settlement is one.
+    ///
+    /// Emits `ValidationResent`, then the token's `ProtocolMessageSent`.
+    /// @param validationId The validation whose leg is sent again.
+    /// @param chainKey The chain the leg goes to, keyed as `MessageTypesLib.chainKey` computes it.
+    /// @param to ERC-7930 interoperable address of the recipient, as issued.
+    /// @param spender ERC-7930 address of the spender, as issued, or empty.
+    function resendValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+        external;
+
     /// @dev The window added to the issuance timestamp to compute `expiry`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);
 
