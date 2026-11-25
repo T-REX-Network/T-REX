@@ -39,6 +39,7 @@
 
 pragma solidity 0.8.30;
 
+import { IdentityFactory } from "@onchain-id/solidity/contracts/factory/IdentityFactory.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { IERC20Permit } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
@@ -197,6 +198,23 @@ contract TokenAdminTest is TREXSuiteTest {
         token.setIdentityRegistry(newIR);
 
         assertEq(address(token.identityRegistry()), newIR);
+    }
+
+    /// @notice The ONCHAINID was checked against the IdentityFactory of the registry the token had. A registry
+    ///         built on another IdentityFactory, which binds no identity to the token, is refused: the token
+    ///         would keep an ONCHAINID its registry's factory does not bind to it.
+    function test_setIdentityRegistry_RevertWhen_TheNewRegistrysFactoryBindsNoIdentityToTheToken() public {
+        address currentRegistry = address(token.identityRegistry());
+        address tokenIdentity = token.onchainID();
+        IdentityFactory otherFactory = _newIdentityFactory();
+        address registryOnTheOtherFactory = _newRegistryOn(otherFactory);
+
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, address(token), tokenIdentity));
+        token.setIdentityRegistry(registryOnTheOtherFactory);
+
+        assertEq(address(token.identityRegistry()), currentRegistry, "the token keeps its registry");
+        assertEq(token.onchainID(), tokenIdentity);
     }
 
     // ============ totalSupply() Tests ============
@@ -564,6 +582,25 @@ contract TokenAdminTest is TREXSuiteTest {
         // the delegatecall to mockImpl.init() finds no such function, so the proxy constructor reverts
         vm.expectRevert();
         _newTokenProxy(beacon, randomAddress, address(complianceProxy), "Test", "TST", 18, address(0), deployer);
+    }
+
+    /// @dev A registry of the token's own domain, built on `factory` instead of the suite's IdentityFactory.
+    function _newRegistryOn(IdentityFactory factory) private returns (address registry) {
+        registry = address(
+            new ERC1967Proxy(
+                address(new TREXRegistry(address(factory))),
+                abi.encodeCall(
+                    TREXRegistry.init,
+                    (
+                        address(token.identityRegistry().identityStorage()),
+                        address(suiteManager),
+                        new uint256[](0),
+                        new address[](0),
+                        new uint256[][](0)
+                    )
+                )
+            )
+        );
     }
 
     function _tokenBeacon() private view returns (address) {

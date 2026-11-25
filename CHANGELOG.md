@@ -625,6 +625,9 @@ All notable changes to this project will be documented in this file.
   with `TokenIdentityNotBound` for any other value, the same rule `TREXFactory` applies at deploy. `init` runs
   the same check, so a token deployed outside the factory cannot start out on another token's identity either.
   Zero is accepted only while the factory binds no identity to the token. The check lives in `TokenGuardsLib`.
+  `setIdentityRegistry` holds the new registry to the same rule: a registry built on another IdentityFactory
+  is refused with `TokenIdentityNotBound` unless that factory binds the token to the ONCHAINID the token
+  holds, so the token and its registry agree whichever of the two changes.
   For factory tokens the ONCHAINID is fixed at deploy: the factory binds it before the token exists, and an
   ASSET binding can be neither revoked nor moved, so the setter only accepts the identity the token already
   has. Moving a token to a new identity is no longer possible.

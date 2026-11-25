@@ -79,10 +79,19 @@ import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 library TokenGuardsLib {
 
     /// @dev A token with supply keeps its registry, and the new one must advertise the standard interface and
-    ///  the T-REX one. Reverts `TokenCirculating`, then `InvalidIdentityRegistry`.
+    ///  the T-REX one. Its IdentityFactory must also bind the token to the ONCHAINID the token holds, see
+    ///  {checkOnchainID}: that identity was checked against the factory of the registry the token had, and a
+    ///  registry built on another factory may bind the token to another identity, or to none. Reverts
+    ///  `TokenCirculating`, then `InvalidIdentityRegistry`, then `TokenIdentityNotBound`.
     /// @param current the registry the token has now, zero during initialization
     /// @param supply the token's total supply, native and bridged
-    function checkIdentityRegistry(address current, address identityRegistryAddress, uint256 supply) external view {
+    /// @param onchainIdAddress the ONCHAINID the token holds
+    function checkIdentityRegistry(
+        address current,
+        address identityRegistryAddress,
+        uint256 supply,
+        address onchainIdAddress
+    ) external view {
         require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
 
         // The token's recovery and delegation, and the spender check on every `transferFrom`, call T-REX
@@ -94,6 +103,8 @@ library TokenGuardsLib {
             ERC165Checker.supportsAllInterfaces(identityRegistryAddress, calledInterfaces),
             ErrorsLib.InvalidIdentityRegistry()
         );
+
+        _requireBoundOnchainID(identityRegistryAddress, onchainIdAddress);
     }
 
     /// @dev The token's ONCHAINID must be the identity its registry's IdentityFactory binds to the token's
@@ -101,6 +112,11 @@ library TokenGuardsLib {
     ///  so no other token's identity passes, and zero passes only while no identity is bound. Reverts
     ///  `TokenIdentityNotBound`.
     function checkOnchainID(address identityRegistryAddress, address onchainIdAddress) external view {
+        _requireBoundOnchainID(identityRegistryAddress, onchainIdAddress);
+    }
+
+    /// @dev The rule of {checkOnchainID}, shared with {checkIdentityRegistry}.
+    function _requireBoundOnchainID(address identityRegistryAddress, address onchainIdAddress) private view {
         IIdentityFactory identityFactory = ITREXRegistry(identityRegistryAddress).identityFactory();
         bytes memory tokenAccount = InteroperableAddress.formatEvmV1(block.chainid, address(this));
         address boundIdentity = identityFactory.getIdentity(tokenAccount);

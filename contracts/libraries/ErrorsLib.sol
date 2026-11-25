@@ -170,7 +170,8 @@ library ErrorsLib {
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
     /// @dev A token's ONCHAINID, supplied at deploy or set later, must be the identity the IdentityFactory binds
-    ///  to the token's address.
+    ///  to the token's address. A new identity registry is held to the same rule, on its own IdentityFactory,
+    ///  for the ONCHAINID the token already has.
     error TokenIdentityNotBound(address token, address suppliedIdentity);
     /// @dev Only a MANAGEMENT key of a supplied ONCHAINID may deploy a suite with it.
     error TokenIdentityNotManagedByCaller(address suppliedIdentity, address caller);

@@ -468,12 +468,18 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  A token with supply keeps its registry. The compliance attributes every position through it, so a
     ///  registry that binds wallets differently would leave positions under identities no wallet resolves
     ///  to any more. Wallet bindings are changed in the registry the token has, never by swapping it.
+    ///
+    ///  The new registry's IdentityFactory must bind the token to the ONCHAINID the token holds, the rule of
+    ///  {_setOnchainID} seen from the other side: whichever of the two changes, the token never points at an
+    ///  identity its registry's factory does not bind to it.
     function _setIdentityRegistry(address identityRegistryAddress)
         internal
         override
         onlySharedAuthority(identityRegistryAddress)
     {
-        TokenGuardsLib.checkIdentityRegistry(address(_getIdentityRegistry()), identityRegistryAddress, totalSupply());
+        TokenGuardsLib.checkIdentityRegistry(
+            address(_getIdentityRegistry()), identityRegistryAddress, totalSupply(), _erc3643TokenStorage().onchainId
+        );
 
         super._setIdentityRegistry(identityRegistryAddress);
     }
