@@ -604,6 +604,11 @@ All notable changes to this project will be documented in this file.
   and `UpdatedTokenInformation(string, string, uint8, string, address newOnchainID)` keep their topic hash but
   carry every argument in the data field. Consumers filtering these events by wallet or ONCHAINID topic must
   decode the data instead.
+- **The token shares its repeated call sites.** `Token` was 212 bytes under the EIP-170 limit and is now 641
+  under, with no change in what it does. The compiler emits every call into the compliance or a linked library
+  in full, so the three places that report an agent's movement (`agentTransferred`) and the two that check the
+  ONCHAINID now go through one private function each, and the refusal of a message from a chain whose inbound is
+  paused moved to the end of `TREXMessagingLib.acceptMessage`, where it runs in the same order as before.
 - **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
   after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
   token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
