@@ -94,10 +94,11 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @inheritdoc ITransferValidation
     /// @dev Five questions, in order: where is this going, may the caller ask for it, by when must it happen,
-    ///  how much may actually move, and may the named spender execute it. Only then is anything written. A chain
-    ///  that already reported a leg under this id, parked while nothing was issued, is not sent to; the parked
-    ///  leg is settled by {settleParkedLeg}, its own call, so nothing it may revert on can keep the request from
-    ///  issuing.
+    ///  how much may actually move, and may the named spender execute it. Only then is anything written. The
+    ///  questions no rule answers are asked in {TransferValidationLib-draftRequest}, for this contract's size; the
+    ///  rules and the spender are asked here, since the modules are this contract's. A chain that already
+    ///  reported a leg under this id, parked while nothing was issued, is not sent to; the parked leg is settled
+    ///  by {settleParkedLeg}, its own call, so nothing it may revert on can keep the request from issuing.
     function requestTransferValidation(
         bytes calldata from,
         bytes calldata to,
@@ -106,83 +107,22 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         bytes calldata spender,
         bytes32 salt
     ) external returns (bytes32 validationId) {
-        require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
-
-        TransferValidationLib.Draft memory draft;
-        draft.amountMin = requestedMin;
-        draft.amountMax = requestedMax;
-        _resolveRoute(draft, from, to, spender);
-        _requireCallerOwnsTheWallet(draft, from);
-        _setExpiryAndRelease(draft);
-        _narrowAmountRange(draft, from, to, spender);
+        address token = address(_boundToken());
+        TransferValidationLib.Draft memory draft = TransferValidationLib.draftRequest(
+            from,
+            to,
+            spender,
+            requestedMin,
+            requestedMax,
+            token,
+            _canCallSelector(msg.sender, this.requestTransferValidation.selector)
+        );
+        _capAtWhatTheRulesAllow(draft, to, spender);
+        require(draft.amountMax != 0, ErrorsLib.ZeroValue());
         _requireSpenderAllowed(draft, to, spender);
 
         // Issued and sent at once, or kept awaiting approval while an `APPROVAL` module is bound.
-        validationId = TransferValidationLib.issue(from, to, spender, salt, draft, address(_boundToken()));
-    }
-
-    /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
-    ///  two when the wallets are on two different satellite chains. The spender is parsed here and judged in
-    ///  {_requireSpenderAllowed}, once the range is known.
-    function _resolveRoute(
-        TransferValidationLib.Draft memory draft,
-        bytes calldata from,
-        bytes calldata to,
-        bytes calldata spender
-    ) private view {
-        (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
-        require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
-        (bool toNative,) = WalletKeyLib.isReferenceChain(to);
-        draft.fromChainKey = _chainKeyOf(from);
-        draft.toChainKey = _chainKeyOf(to);
-        draft.twoLegs = !toNative && draft.fromChainKey != draft.toChainKey;
-        if (spender.length != 0) WalletKeyLib.parse(spender);
-    }
-
-    /// @dev Who may ask: the identity the sending wallet is linked to, or an address the AccessManager
-    ///  authorised for this selector. A satellite wallet never matches its own bytes, so a wallet can never
-    ///  request a validation for itself; its identity does that.
-    function _requireCallerOwnsTheWallet(TransferValidationLib.Draft memory draft, bytes calldata from) private view {
-        draft.fromIdentity = address(_boundRegistry().resolveIdentity(from));
-        require(draft.fromIdentity != address(0), ErrorsLib.UnverifiedWallet(from));
-        require(
-            msg.sender == draft.fromIdentity || _canCallSelector(msg.sender, this.requestTransferValidation.selector),
-            ErrorsLib.NotAuthorizedForWallet(msg.sender, from)
-        );
-    }
-
-    /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
-    ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
-    function _setExpiryAndRelease(TransferValidationLib.Draft memory draft) private view {
-        (draft.expiry, draft.reconciliationWindow) = TransferValidationLib.expiryAndWindow(
-            address(_boundToken()), draft.fromChainKey, draft.toChainKey, draft.twoLegs
-        );
-    }
-
-    /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
-    ///  then to the smallest amount the rules allow.
-    function _narrowAmountRange(
-        TransferValidationLib.Draft memory draft,
-        bytes calldata from,
-        bytes calldata to,
-        bytes calldata spender
-    ) private view {
-        ITREXRegistry registry = _boundRegistry();
-        require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
-        draft.toIdentity = address(registry.resolveIdentity(to));
-        draft.fromKey = WalletKeyLib.canonicalKey(from);
-
-        _capAtWhatTheWalletCanSend(draft, from);
-        _capAtWhatTheRulesAllow(draft, to, spender);
-        require(draft.amountMax != 0, ErrorsLib.ZeroValue());
-    }
-
-    /// @dev Caps the range at what the sending wallet can still send: its bridged balance less what earlier
-    ///  validations may still draw from it.
-    function _capAtWhatTheWalletCanSend(TransferValidationLib.Draft memory draft, bytes calldata from) private view {
-        uint256 free = _boundToken().availableOf(from);
-        if (free < draft.amountMax) draft.amountMax = free;
-        require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
+        validationId = TransferValidationLib.issue(from, to, spender, salt, draft, token);
     }
 
     /// @dev Caps the range at the smallest amount the rules allow. Skipped when both wallets belong to one
@@ -713,11 +653,6 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
         bool walletIsEmpty = balance == 0;
         require(walletIsEmpty, ErrorsLib.WalletBoundToAnotherIdentity(wallet, previous));
         _recordOwnerChange(wallet, previous, owner);
-    }
-
-    function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
-        (bytes2 chainType, bytes memory chainReference,) = WalletKeyLib.parse(wallet);
-        return MessageTypesLib.chainKey(chainType, chainReference);
     }
 
     function _validationStorage() internal pure returns (TransferValidationLib.ValidationStorage storage) {

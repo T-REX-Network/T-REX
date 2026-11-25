@@ -67,6 +67,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
+import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
@@ -316,10 +317,92 @@ library TransferValidationLib {
         require(block.timestamp < deadline, ErrorsLib.ValidationExpired(validationId, deadline));
     }
 
+    /// @dev A request before any rule is asked, see {ITransferValidation-requestTransferValidation}: where it
+    ///  goes, whether the caller may ask for it, by when it must happen, and how much the sending wallet can
+    ///  send. The checks run in that order, each one as the compliance ran it before they moved here for its
+    ///  size; the rules and the spender are the compliance's to ask, on the draft this returns.
+    ///
+    ///  Where: both envelopes parse, the sender sits on a satellite, and the legs are two when the wallets are on
+    ///  two different satellite chains. The spender is parsed here and judged by the compliance, once the range
+    ///  is known.
+    ///
+    ///  Who: the identity the sending wallet is linked to, or an address the AccessManager authorised for the
+    ///  request. A satellite wallet never matches its own bytes, so a wallet can never request a validation for
+    ///  itself; its identity does that.
+    ///
+    ///  How much: the range only ever narrows, here to what the sending wallet can still send, its bridged
+    ///  balance less what earlier validations may still draw from it.
+    /// @param token the token the compliance is bound to
+    /// @param authorised whether the AccessManager lets the caller request a validation for any wallet
+    function draftRequest(
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        address token,
+        bool authorised
+    ) external view returns (Draft memory draft) {
+        require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
+        draft.amountMin = requestedMin;
+        draft.amountMax = requestedMax;
+        _resolveRoute(draft, from, to, spender);
+        ITREXRegistry registry = ITREXRegistry(address(IToken(token).identityRegistry()));
+        _requireCallerOwnsTheWallet(draft, registry, from, authorised);
+        (draft.expiry, draft.reconciliationWindow) =
+            _expiryAndWindow(token, draft.fromChainKey, draft.toChainKey, draft.twoLegs);
+        _capAtWhatTheWalletCanSend(draft, registry, token, from, to);
+    }
+
+    function _resolveRoute(Draft memory draft, bytes calldata from, bytes calldata to, bytes calldata spender)
+        private
+        view
+    {
+        (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
+        require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
+        (bool toNative,) = WalletKeyLib.isReferenceChain(to);
+        draft.fromChainKey = _chainKeyOf(from);
+        draft.toChainKey = _chainKeyOf(to);
+        draft.twoLegs = !toNative && draft.fromChainKey != draft.toChainKey;
+        if (spender.length != 0) WalletKeyLib.parse(spender);
+    }
+
+    function _requireCallerOwnsTheWallet(
+        Draft memory draft,
+        ITREXRegistry registry,
+        bytes calldata from,
+        bool authorised
+    ) private view {
+        draft.fromIdentity = address(registry.resolveIdentity(from));
+        require(draft.fromIdentity != address(0), ErrorsLib.UnverifiedWallet(from));
+        require(msg.sender == draft.fromIdentity || authorised, ErrorsLib.NotAuthorizedForWallet(msg.sender, from));
+    }
+
+    function _capAtWhatTheWalletCanSend(
+        Draft memory draft,
+        ITREXRegistry registry,
+        address token,
+        bytes calldata from,
+        bytes calldata to
+    ) private view {
+        require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
+        draft.toIdentity = address(registry.resolveIdentity(to));
+        draft.fromKey = WalletKeyLib.canonicalKey(from);
+
+        uint256 free = IToken(token).availableOf(from);
+        if (free < draft.amountMax) draft.amountMax = free;
+        require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
+    }
+
+    function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
+        (bytes2 chainType, bytes memory chainReference,) = WalletKeyLib.parse(wallet);
+        return MessageTypesLib.chainKey(chainType, chainReference);
+    }
+
     /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
     ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
-    function expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
-        external
+    function _expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
+        private
         view
         returns (uint64 expiry, uint64 window)
     {
