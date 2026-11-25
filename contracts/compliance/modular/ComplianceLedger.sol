@@ -59,7 +59,6 @@
 
 pragma solidity 0.8.30;
 
-import { EventsLib } from "../../libraries/EventsLib.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 
@@ -71,8 +70,8 @@ import { IComplianceLedger } from "./IComplianceLedger.sol";
  * token's hooks and issues every cross-chain validation itself, so it is the one contract that can keep an
  * identity's total and its outstanding promises. Modules read them and keep none of their own.
  *
- * Only this contract writes them, from the hooks and from the issuance, settlement and discard paths. There is
- * no setter, no writer role and no key: four mappings and four views.
+ * Only the compliance writes them, from the hooks and from the issuance, settlement and discard paths, each
+ * through {ComplianceLedgerLib}. There is no setter, no writer role and no key: four mappings and four views.
  *
  * Registry writes never move a wallet to another identity. Its owner can still change when the owner swaps the
  * registry's storage, or unbinds a registry from that storage. The ledger follows the registry so that rules
@@ -110,62 +109,6 @@ abstract contract ComplianceLedger is IComplianceLedger {
     /// @inheritdoc IComplianceLedger
     function ownerOf(address wallet) external view returns (address) {
         return _ledger().ownerOf[wallet];
-    }
-
-    /// @dev Who a native wallet's tokens belong to now, given who the registry names. Records the first owner
-    ///  seen, follows a change of owner, and keeps the remembered owner when the registry names nobody.
-    /// @return owner the identity to debit or credit for this wallet
-    /// @return previous the identity that was credited before, when the owner just changed; zero otherwise. The
-    ///  caller decides whether the wallet may change owner: only an empty one may.
-    function _followOwner(address wallet, address resolved) internal returns (address owner, address previous) {
-        mapping(address => address) storage ownerOf = _ledger().ownerOf;
-        address recorded = ownerOf[wallet];
-        if (resolved == address(0)) return (recorded, address(0));
-        if (recorded == resolved) return (resolved, address(0));
-        ownerOf[wallet] = resolved;
-        return (resolved, recorded);
-    }
-
-    /// @dev Says that `wallet` now belongs to `owner`. Only an empty wallet gets here, so no position moves; the
-    ///  event keeps its amount field, always zero, so indexers built on it need no change.
-    function _recordOwnerChange(address wallet, address previous, address owner) internal {
-        emit EventsLib.WalletOwnerChanged(wallet, previous, owner, 0);
-    }
-
-    /// @dev Moves `amount` of position from one identity to the other: one side loses it, the other gains it.
-    ///
-    ///  A relocation between two wallets of one identity is not a change of ownership, so nothing moves.
-    ///  A zero wallet is the absent side of a mint or a burn, and is simply skipped.
-    function _movePosition(
-        address fromIdentity,
-        address toIdentity,
-        bytes32 fromWallet,
-        bytes32 toWallet,
-        uint256 amount
-    ) internal {
-        if (_isRelocation(fromIdentity, toIdentity)) return;
-        mapping(address identity => uint256 amount) storage position = _ledger().position;
-        if (fromWallet != bytes32(0)) position[fromIdentity] -= amount;
-        if (toWallet != bytes32(0)) position[toIdentity] += amount;
-    }
-
-    /// @dev Undoes the total of {ComplianceLedgerLib-reservePending}, once the movement is over: the validation
-    ///  settled, or the keeper discarded it. Every validation gets here, a relocation included.
-    function _releasePendingTotal(uint256 amountMax) internal {
-        _ledger().pendingTotal -= amountMax;
-    }
-
-    /// @dev Undoes the identities' rows of {ComplianceLedgerLib-reservePending}. Only a validation that wrote
-    ///  them gets here, so never a relocation.
-    function _releasePendingOfIdentities(address fromIdentity, address toIdentity, uint256 amountMax) internal {
-        ComplianceLedgerLib.Ledger storage ledger = _ledger();
-        ledger.pendingOut[fromIdentity] -= amountMax;
-        ledger.pendingIn[toIdentity] -= amountMax;
-    }
-
-    /// @dev See {ComplianceLedgerLib-isRelocation}.
-    function _isRelocation(address fromIdentity, address toIdentity) internal pure returns (bool) {
-        return ComplianceLedgerLib.isRelocation(fromIdentity, toIdentity);
     }
 
     function _ledger() internal pure returns (ComplianceLedgerLib.Ledger storage) {

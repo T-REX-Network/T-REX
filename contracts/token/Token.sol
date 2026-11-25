@@ -131,7 +131,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _initERC3643(identityRegistryAddress, complianceAddress, onchainIdAddress);
         // `_initERC3643` writes the ONCHAINID without the setter's check. A token deployed outside the factory
         // could otherwise start out pointing at another token's identity.
-        TokenGuardsLib.checkOnchainID(identityRegistryAddress, onchainIdAddress);
+        _checkOnchainID(identityRegistryAddress, onchainIdAddress);
 
         // The network's registry, fixed for the token's lifetime: no role can move it afterwards.
         _setTrustedGatewayRegistry(trustedGatewayRegistryAddress);
@@ -456,7 +456,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev Adds T-REX validation to the standard setter. Investors find the token through its ONCHAINID, so
     ///  the token may only point at the identity the IdentityFactory binds to it, never at another token's.
     function _setOnchainID(address onchainIdAddress) internal override {
-        TokenGuardsLib.checkOnchainID(address(_getIdentityRegistry()), onchainIdAddress);
+        _checkOnchainID(address(_getIdentityRegistry()), onchainIdAddress);
         super._setOnchainID(onchainIdAddress);
     }
 
@@ -530,8 +530,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
 
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(lostWallet, newWallet, investorTokens, MovementKindLib.RECOVERY);
+        _reportAgentMovement(lostWallet, newWallet, investorTokens, MovementKindLib.RECOVERY);
 
         if (migrateIdentity) _getIdentityRegistry().deleteIdentity(lostWallet);
 
@@ -555,8 +554,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
         // Reported as an agent's movement, so a module counting what the investor does can leave it out.
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
+        _reportAgentMovement(from, to, amount, MovementKindLib.FORCED_TRANSFER);
         return true;
     }
 
@@ -617,8 +615,20 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         }
         if (amount == 0) return;
         ERC20Upgradeable._update(address(0), nativeWallet, amount);
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
+        _reportAgentMovement(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
+    }
+
+    /// @dev {TokenGuardsLib-checkOnchainID}, from `init` and from the setter. One function for both because every
+    ///  separate call into a linked library is compiled in full, and the token sits at the contract size limit.
+    function _checkOnchainID(address identityRegistryAddress, address onchainIdAddress) private view {
+        TokenGuardsLib.checkOnchainID(identityRegistryAddress, onchainIdAddress);
+    }
+
+    /// @dev Tells the compliance about a movement an agent made, so the modules can leave it out of what they
+    ///  count against the investor. One function for the forced transfer, the recovery and the recall, for the
+    ///  reason {_checkOnchainID} gives.
+    function _reportAgentMovement(address from, address to, uint256 amount, uint8 kind) private {
+        IModularCompliance(address(_getCompliance())).agentTransferred(from, to, amount, kind);
     }
 
     /// @dev The two brakes a handler can ask for, see {ISettlementHandler-Verdict}.

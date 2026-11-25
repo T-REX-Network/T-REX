@@ -592,11 +592,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **The compliance's cross-chain flows live in linked libraries.** `ModularCompliance` was 35 bytes under the
+  EIP-170 limit and is now 15,663 bytes, 8,913 under. The questions `requestTransferValidation` asks moved into
+  `TransferValidationLib`, next to the issuance they lead to; settlement, discard and the resolution of a stuck
+  pair moved into a new linked library, `TransferSettlementLib`. No function, event, error or storage slot
+  changes: the compliance's ABI is the same entry for entry, the events and errors those libraries raise being
+  declared again on `ITransferValidation`. A native transfer, mint or burn reaches no library, as before. A
+  deployment links one more library, which `scripts/deploy-and-record.sh` records as `transferSettlementLib`.
 - **Breaking, `RecoverySuccess` and `UpdatedTokenInformation`**: no argument is `indexed` anymore, matching
   the ERC-3643 specification. `RecoverySuccess(address lostWallet, address newWallet, address investorOnchainID)`
   and `UpdatedTokenInformation(string, string, uint8, string, address newOnchainID)` keep their topic hash but
   carry every argument in the data field. Consumers filtering these events by wallet or ONCHAINID topic must
   decode the data instead.
+- **The token shares its repeated call sites.** `Token` was 212 bytes under the EIP-170 limit and is now 641
+  under, with no change in what it does. The compiler emits every call into the compliance or a linked library
+  in full, so the three places that report an agent's movement (`agentTransferred`) and the two that check the
+  ONCHAINID now go through one private function each, and the refusal of a message from a chain whose inbound is
+  paused moved to the end of `TREXMessagingLib.acceptMessage`, where it runs in the same order as before.
 - **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
   after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
   token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
