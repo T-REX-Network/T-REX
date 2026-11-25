@@ -61,7 +61,6 @@ pragma solidity 0.8.30;
 
 import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Recipient.sol";
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 import { ITREXMessaging } from "./ITREXMessaging.sol";
@@ -156,7 +155,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     {
         (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
             TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
-        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
 
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _handleSettlement(chainKey, body);

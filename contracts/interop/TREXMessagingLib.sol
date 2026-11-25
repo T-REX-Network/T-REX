@@ -311,8 +311,9 @@ library TREXMessagingLib {
     /// the peer and gateway its validation was pinned to, or the current ones for an id this token never
     /// dispatched; a burn proof for a recall still open comes from the peer and gateway that recall was
     /// dispatched to, so a later route or peer change cannot strand it, and any other burn proof from the current
-    /// peer and route. Acting on the message is left to the token, since only it knows its compliance and its
-    /// pause. The gateway's trust is the caller's check, made before this is reached, so a gateway the registry
+    /// peer and route. A chain whose inbound is paused is refused last, once the message is attributed to it, so
+    /// the revert undoes the replay guard's record and the delivery stays deliverable. Acting on the message is
+    /// left to the token, since only it knows its compliance and its pause. The gateway's trust is the caller's check, made before this is reached, so a gateway the registry
     /// no longer trusts is refused even when pinned.
     /// @return messageType `SETTLEMENT_NOTIFICATION` or `BURN_PROOF`; anything else reverts.
     /// @return chainKey The chain the message is attributed to.
@@ -346,6 +347,8 @@ library TREXMessagingLib {
         } else {
             revert ErrorsLib.MessageTypeNotInbound(messageType);
         }
+
+        require(!s.inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
     }
 
     /// @dev Hands an admitted settlement to `handler`, decoded, and reports the handler's verdict.
