@@ -74,7 +74,8 @@ import { IModule } from "./modules/IModule.sol";
  * These are owner operations, run rarely, and their bytecode is what kept the compliance over EIP-170. The
  * compliance reaches them by DELEGATECALL, so the storage is its own `erc3643.storage.TREXCompliance`
  * namespace at the slot it always had, every module sees the compliance as its caller, and every event is
- * the compliance's. Reading the lists, which every transfer does, stays in the compliance itself.
+ * the compliance's. Asking the modules, which every transfer does, is internal here: it is compiled into the
+ * compliance itself, and into the validation libraries that ask the same modules about a cross-chain movement.
  *
  * Nothing here checks a caller: the compliance's entry points do, before they reach this.
  */
@@ -146,6 +147,40 @@ library ModuleSetLib {
         }
 
         emit EventsLib.ModuleInteraction(_module, callData);
+    }
+
+    /// @dev Calls `checkTransfer` on every `TRANSFER_CHECK` module, before anything moves, and returns the
+    ///  smallest amount they allow for `ctx`, `type(uint256).max` when none is bound. `checkTransfer` is a view
+    ///  on the interface, so each call is a `staticcall` and a module that writes there reverts: the ledger
+    ///  still describes the state before the move.
+    function callCheckTransfer(IModule.TransferContext memory ctx) internal view returns (uint256 allowed) {
+        allowed = type(uint256).max;
+        EnumerableSet.AddressSet storage rules = layout().byType[IModule.ModuleType.TRANSFER_CHECK];
+        uint256 length = rules.length();
+        for (uint256 i = 0; i < length; i++) {
+            uint256 answer = IModule(rules.at(i)).checkTransfer(ctx);
+            if (answer < allowed) allowed = answer;
+        }
+    }
+
+    /// @dev Whether every `SPENDER` module accepts `ctx.spender`, `true` when none is bound. A view: the
+    ///  modules are called under `staticcall`.
+    function spenderAllowed(IModule.TransferContext memory ctx) internal view returns (bool) {
+        EnumerableSet.AddressSet storage spenderRules = layout().byType[IModule.ModuleType.SPENDER];
+        uint256 length = spenderRules.length();
+        for (uint256 i = 0; i < length; i++) {
+            if (!IModule(spenderRules.at(i)).checkSpender(ctx)) return false;
+        }
+        return true;
+    }
+
+    /// @dev Calls `afterTransfer` on every `AFTER` module, once the positions have been updated.
+    function callAfterTransfer(IModule.TransferContext memory ctx) internal {
+        EnumerableSet.AddressSet storage trackers = layout().byType[IModule.ModuleType.AFTER];
+        uint256 length = trackers.length();
+        for (uint256 i = 0; i < length; i++) {
+            IModule(trackers.at(i)).afterTransfer(ctx);
+        }
     }
 
     /// @dev The compliance's module namespace. Internal, so the reads every transfer makes stay in the
