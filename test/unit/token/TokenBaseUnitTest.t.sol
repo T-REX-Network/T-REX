@@ -39,6 +39,8 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
@@ -46,6 +48,7 @@ import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityReg
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
+import { ITREXRegistry } from "contracts/registry/interface/ITREXRegistry.sol";
 import { Token } from "contracts/token/Token.sol";
 
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
@@ -65,6 +68,7 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
     address identityRegistry = makeAddr("IdentityRegistryMock");
     address compliance = makeAddr("ComplianceMock");
     address onchainId = makeAddr("OnchainIdMock");
+    address identityFactory = makeAddr("IdentityFactoryMock");
 
     address user1 = makeAddr("User1");
     address user2 = makeAddr("User2");
@@ -86,6 +90,10 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
 
         // Network-level, so it answers to the platform manager, never to the suite's.
         trustedGatewayRegistry = new TrustedGatewayRegistry(address(platformManager));
+
+        // `init` accepts only the ONCHAINID the IdentityFactory binds to the token, so the token's address is
+        // bound to `onchainId` before the proxy is deployed there.
+        mockIdentityBoundToToken(nextDeployedAddress(), onchainId);
 
         token = Token(
             BeaconProxyDeployer.newProxy(
@@ -135,6 +143,27 @@ abstract contract TokenBaseUnitTest is AccessManagerHelper {
         );
 
         vm.mockCall(identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.deleteIdentity.selector), "");
+
+        vm.mockCall(
+            identityRegistry,
+            abi.encodeWithSelector(ITREXRegistry.identityFactory.selector),
+            abi.encode(identityFactory)
+        );
+    }
+
+    /// @dev The address the next contract this test deploys lands at, so a token can be bound before it exists.
+    function nextDeployedAddress() internal view returns (address) {
+        return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+    }
+
+    /// @dev Makes the mocked IdentityFactory answer `boundIdentity` for `tokenAddress`.
+    function mockIdentityBoundToToken(address tokenAddress, address boundIdentity) internal {
+        bytes memory tokenAccount = InteroperableAddress.formatEvmV1(block.chainid, tokenAddress);
+        vm.mockCall(
+            identityFactory,
+            abi.encodeWithSelector(IIdentityFactory.getIdentity.selector, tokenAccount),
+            abi.encode(boundIdentity)
+        );
     }
 
 }
