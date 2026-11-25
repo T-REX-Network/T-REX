@@ -39,7 +39,9 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -53,6 +55,7 @@ import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
 
     address newIdentityRegistry = makeAddr("NewIdentityRegistry");
+    address otherIdentityFactory = makeAddr("OtherIdentityFactoryMock");
 
     function setUp() public override {
         super.setUp();
@@ -114,11 +117,7 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenSetIdentityRegistryNominal() public {
-        vm.mockCall(
-            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
-        );
-        mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
-        mockSupportsInterface(newIdentityRegistry, type(ITREXRegistry).interfaceId);
+        _mockNewRegistryOn(identityFactory);
         _setupRegistryRoles(newIdentityRegistry);
         suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT), address(token), 0);
 
@@ -127,6 +126,63 @@ contract TokenSetIdentityRegistryUnitTest is TokenBaseUnitTest {
         token.setIdentityRegistry(newIdentityRegistry);
 
         assertEq(address(token.identityRegistry()), newIdentityRegistry);
+    }
+
+    /// @notice A registry built on another IdentityFactory is accepted when that factory binds the token to the
+    ///  ONCHAINID the token holds: the rule is the binding, not which factory answers.
+    function testTokenSetIdentityRegistryNominalWhenAnotherFactoryBindsTheSameIdentity() public {
+        _mockNewRegistryOn(otherIdentityFactory);
+        _mockOtherFactoryBindsTheTokenTo(onchainId);
+
+        token.setIdentityRegistry(newIdentityRegistry);
+
+        assertEq(address(token.identityRegistry()), newIdentityRegistry);
+        assertEq(token.onchainID(), onchainId, "the ONCHAINID is untouched");
+    }
+
+    /// @notice The ONCHAINID was checked against the factory of the registry the token had. A registry whose
+    ///  factory binds the token to another identity is refused, so the token cannot end up pointing at an
+    ///  identity its registry does not bind to it.
+    function testTokenSetIdentityRegistryRevertsWhenItsFactoryBindsTheTokenToAnotherIdentity() public {
+        _mockNewRegistryOn(otherIdentityFactory);
+        _mockOtherFactoryBindsTheTokenTo(makeAddr("AnotherIdentity"));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, address(token), onchainId));
+        token.setIdentityRegistry(newIdentityRegistry);
+
+        assertEq(address(token.identityRegistry()), identityRegistry, "rejected registry must not be recorded");
+    }
+
+    /// @notice A registry whose factory binds no identity to the token is refused too, while the token holds one.
+    function testTokenSetIdentityRegistryRevertsWhenItsFactoryBindsNoIdentityToTheToken() public {
+        _mockNewRegistryOn(otherIdentityFactory);
+        _mockOtherFactoryBindsTheTokenTo(address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, address(token), onchainId));
+        token.setIdentityRegistry(newIdentityRegistry);
+
+        assertEq(address(token.identityRegistry()), identityRegistry, "rejected registry must not be recorded");
+    }
+
+    /// @dev A valid new registry, sharing the token's authority, built on `factory`.
+    function _mockNewRegistryOn(address factory) private {
+        vm.mockCall(
+            newIdentityRegistry, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager))
+        );
+        mockSupportsInterface(newIdentityRegistry, type(IERC3643IdentityRegistry).interfaceId);
+        mockSupportsInterface(newIdentityRegistry, type(ITREXRegistry).interfaceId);
+        vm.mockCall(
+            newIdentityRegistry, abi.encodeWithSelector(ITREXRegistry.identityFactory.selector), abi.encode(factory)
+        );
+    }
+
+    function _mockOtherFactoryBindsTheTokenTo(address boundIdentity) private {
+        bytes memory tokenAccount = InteroperableAddress.formatEvmV1(block.chainid, address(token));
+        vm.mockCall(
+            otherIdentityFactory,
+            abi.encodeWithSelector(IIdentityFactory.getIdentity.selector, tokenAccount),
+            abi.encode(boundIdentity)
+        );
     }
 
 }
