@@ -202,7 +202,6 @@ interface IToken is IERC3643 {
         address accessManagerAddress
     ) external;
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
     /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled by
     ///  `settleParkedLeg` once that id is issued, gets the same brake it would have got at delivery, see
     ///  {ISettlementHandler-Verdict}. Callable by the bound compliance alone.
@@ -210,6 +209,7 @@ interface IToken is IERC3643 {
     /// @param verdict what to apply; `None` applies nothing
     function applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) external;
 
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
     function dispatchComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes calldata body)
         external
         returns (bytes32);

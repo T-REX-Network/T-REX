@@ -189,7 +189,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     /// @notice The other way out of a drop. The Lite executed the dropped body above what the request, sent
     ///         again, is issued at: the parked leg fits no issued terms and its hash is not the issued one, so
     ///         the validation ends `Orphaned` at issuance, nothing moves, and the chain is paused again.
-    function test_reorg_Success_WhenTheResubmittedTermsNoLongerCoverTheParkedLeg() public {
+    function test_reorg_OrphansTheValidation_WhenTheResubmittedTermsNoLongerCoverTheParkedLeg() public {
         bytes32 salt = _salt();
         MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
         bytes32 id = orphaned.validationId;
@@ -298,7 +298,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     }
 
     /// @notice Refused, the request issues nothing and the leg stays parked for the operator to read.
-    function test_reorg_Success_WhenTheResubmittedRequestIsRefusedTheLegStaysParked() public {
+    function test_reorg_LeavesTheLegParked_WhenTheResubmittedRequestIsRefused() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
         bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;

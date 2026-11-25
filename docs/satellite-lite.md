@@ -72,6 +72,7 @@ depends on which block, or in which order, its transaction landed. That holds fo
 | Type | Lane | Why |
 |---|---|---|
 | `COMPLIANCE_VALIDATION` | may ride before finality | `validationId` is `keccak256(canonicalKey(from), salt)`, a function of the request and never of the chain's ordering or clock; the settlement path never halts the token |
+| `SETTLEMENT_NOTIFICATION`, `BURN_PROOF` | MUST wait for the satellite chain's finality | the reference chain applies a report once and cannot take it back; a leg or a burn its chain later reorgs away would stay on the ledger for a movement that never happened |
 | `MINT_INSTRUCTION`, `RECALL_INSTRUCTION` | MUST wait for finality | `delegationId` and `recallId` are counters, assigned by inclusion order; a reorg can give the same id to another instruction |
 
 A Lite that executes a validation before finality owns the reorg exposure, and the reference chain bounds it to
@@ -85,7 +86,10 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
   carries the `salt`, so an agent can send it on the requester's behalf from the Lite's copy. Anyone then calls
   `settleParkedLeg(validationId, chainKey)`, which judges the leg as a delivery would (`ParkedLegSettled`, or one
   of the outcomes below); a leg that reverts there stays parked and is tried again, and once the keeper resolved
-  the pair it ends as a replay.
+  the pair it ends as a replay. When the request can no longer be issued, because a rule that allowed it now
+  refuses it or an `APPROVAL` module refuses it this time, the leg stays parked and readable through
+  `parkedLegOf`: nothing is applied, and the ledger does not follow what the Lite executed until an agent
+  corrects it.
 - **Re-issued with another body.** The hash in the report tells the two cases apart. A leg inside the issued terms
   settles whatever hash it carries (`SettlementBodyDiverged` when it is not the issued one). A leg outside the
   terms with the issued hash is a Lite that broke rule 5 or 6 (`SettlementRejected`); one with another hash, from

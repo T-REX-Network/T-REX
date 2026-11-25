@@ -78,14 +78,16 @@ import { IModule } from "./modules/IModule.sol";
 
 /**
  * @title TransferValidationLib
- * @dev The layout of the compliance's validation record, and the last step of an issuance, deployed once
- * and linked: once every question about a requested validation is answered, this takes the next id, keeps
- * the validation, reserves its amount, announces it and encodes what the satellites will execute against.
+ * @dev The layout of the compliance's validation record, and both ends of an issuance, deployed once and
+ * linked. {draftRequest} asks the questions no rule answers: where the request goes, whether the caller may
+ * ask for it, by when it must happen and how much the sending wallet can still send. Once the rules and the
+ * spender are judged, {issue} derives the id from the sender and the salt, keeps the validation, reserves
+ * its amount, announces it, encodes what the satellites will execute against and sends its legs.
  *
- * That step is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept
- * it over EIP-170. The compliance reaches it by DELEGATECALL, so the storage is its own namespaces at the
- * slots they always had, the token sees the compliance as its caller, and the event is the compliance's.
- * Deciding whether a validation may be issued, and sending its legs, stay in the compliance.
+ * Those steps are registry reads, storage writes and ABI encoding the compliance would otherwise carry, and
+ * they are what kept it over EIP-170. The compliance reaches them by DELEGATECALL, so the storage is its own
+ * namespaces at the slots they always had, the token sees the compliance as its caller, and the event is the
+ * compliance's. Asking the modules, the rules and the spender, stays in the compliance: they are its own.
  */
 library TransferValidationLib {
 
@@ -627,7 +629,10 @@ library TransferValidationLib {
 
         bool involved = originChainKey == validation.fromChainKey
             || (validation.twoLegs && originChainKey == validation.toChainKey);
-        if (!involved || notification.hash == validation.hash) {
+        // No reorg explains the leg: the chain could not have executed under this id, or it executed the very
+        // body this chain issued and left its terms.
+        bool brokeTheIssuedBody = !involved || notification.hash == validation.hash;
+        if (brokeTheIssuedBody) {
             emit EventsLib.SettlementRejected(
                 notification.validationId, originChainKey, notification.amount, notification.hash
             );
@@ -669,9 +674,11 @@ library TransferValidationLib {
     {
         ValidationStorage storage store = layout();
         ITransferValidation.ParkedLeg memory parked = store.parkedLegs[validationId][chainKey];
+        // A leg is parked under the id for this chain.
+        require(parked.exists, ErrorsLib.ParkedLegNotSettleable(validationId, chainKey));
+        // The id is issued: a record without a hash was never sent anywhere, and there is nothing to judge against.
         require(
-            parked.exists && store.validations[validationId].hash != bytes32(0),
-            ErrorsLib.ParkedLegNotSettleable(validationId, chainKey)
+            store.validations[validationId].hash != bytes32(0), ErrorsLib.ParkedLegNotSettleable(validationId, chainKey)
         );
         require(!IToken(token).paused(), ErrorsLib.TokenPaused());
         // A delivered leg from a paused chain waits at the gateway; a parked one from it waits here, for the same
