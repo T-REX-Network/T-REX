@@ -238,7 +238,7 @@ contract RuleAndTrackerModule is RecordingModule {
         _countAndRecord(ctx);
     }
 
-    function moduleTypes() external pure returns (ModuleType[] memory types) {
+    function moduleTypes() external pure virtual returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
         types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.AFTER;
@@ -246,6 +246,17 @@ contract RuleAndTrackerModule is RecordingModule {
 
     function name() external pure override returns (string memory) {
         return "RuleAndTrackerModule";
+    }
+
+}
+
+/// @dev The same two types as {RuleAndTrackerModule}, listed in the other order.
+contract TrackerAndRuleModule is RuleAndTrackerModule {
+
+    function moduleTypes() external pure override returns (ModuleType[] memory types) {
+        types = new ModuleType[](2);
+        types[0] = ModuleType.AFTER;
+        types[1] = ModuleType.TRANSFER_CHECK;
     }
 
 }
