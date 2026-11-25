@@ -59,6 +59,7 @@
 
 pragma solidity 0.8.30;
 
+import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
@@ -66,6 +67,7 @@ import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
+import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
@@ -76,14 +78,14 @@ import { IModule } from "./modules/IModule.sol";
 
 /**
  * @title TransferValidationLib
- * @dev The layout of the compliance's validation record, and the last step of an issuance, deployed once
- * and linked: once every question about a requested validation is answered, this takes the next id, keeps
- * the validation, reserves its amount, announces it and encodes what the satellites will execute against.
+ * @dev The layout of the compliance's validation record, and the issuance half of a validation's life,
+ * deployed once and linked: the questions a request must answer, then the next id, the record, the reservation,
+ * the announcement and the legs the satellites will execute against; the answer of an approval; a resend.
  *
- * That step is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept
- * it over EIP-170. The compliance reaches it by DELEGATECALL, so the storage is its own namespaces at the
- * slots they always had, the token sees the compliance as its caller, and the event is the compliance's.
- * Deciding whether a validation may be issued, and sending its legs, stay in the compliance.
+ * That is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept it over
+ * EIP-170. The compliance reaches it by DELEGATECALL, so the storage is its own namespaces at the slots they
+ * always had, the token and the modules see the compliance as their caller, and every event is the
+ * compliance's. What happens once a satellite executed, or never did, is {TransferSettlementLib}.
  */
 library TransferValidationLib {
 
@@ -131,14 +133,150 @@ library TransferValidationLib {
         uint64 reconciliationWindow;
     }
 
+    /// @dev Issues a validation, see {ITransferValidation-requestTransferValidation}. Five questions, in order:
+    ///  where is this going, may the caller ask for it, by when must it happen, how much may actually move, and
+    ///  may the named spender execute it. Only then is anything written.
+    /// @param token the token the compliance is bound to
+    /// @param authority the compliance's AccessManager
+    /// @return validationId the id taken
+    function request(
+        bytes calldata from,
+        bytes calldata to,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        bytes calldata spender,
+        address token,
+        address authority
+    ) external returns (uint256 validationId) {
+        require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
+
+        Draft memory draft;
+        draft.amountMin = requestedMin;
+        draft.amountMax = requestedMax;
+        _resolveRoute(draft, from, to, spender);
+        _requireCallerOwnsTheWallet(draft, from, token, authority);
+        (draft.expiry, draft.reconciliationWindow) =
+            _expiryAndWindow(token, draft.fromChainKey, draft.toChainKey, draft.twoLegs);
+        _narrowAmountRange(draft, from, to, spender, token);
+        _requireSpenderAllowed(draft, to, spender);
+
+        // Issued and sent at once, or kept awaiting approval while an `APPROVAL` module is bound.
+        validationId = _issue(from, to, spender, draft, token);
+    }
+
+    /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
+    ///  two when the wallets are on two different satellite chains. The spender is parsed here and judged in
+    ///  {_requireSpenderAllowed}, once the range is known.
+    function _resolveRoute(Draft memory draft, bytes calldata from, bytes calldata to, bytes calldata spender)
+        private
+        view
+    {
+        (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
+        require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
+        (bool toNative,) = WalletKeyLib.isReferenceChain(to);
+        draft.fromChainKey = _chainKeyOf(from);
+        draft.toChainKey = _chainKeyOf(to);
+        draft.twoLegs = !toNative && draft.fromChainKey != draft.toChainKey;
+        if (spender.length != 0) WalletKeyLib.parse(spender);
+    }
+
+    /// @dev Who may ask: the identity the sending wallet is linked to, or an address the AccessManager
+    ///  authorised for this selector. A satellite wallet never matches its own bytes, so a wallet can never
+    ///  request a validation for itself; its identity does that.
+    function _requireCallerOwnsTheWallet(Draft memory draft, bytes calldata from, address token, address authority)
+        private
+        view
+    {
+        draft.fromIdentity = address(_registryOf(token).resolveIdentity(from));
+        require(draft.fromIdentity != address(0), ErrorsLib.UnverifiedWallet(from));
+        bool callerIsTheWalletsIdentity = msg.sender == draft.fromIdentity;
+        require(
+            callerIsTheWalletsIdentity || _mayRequestForAnyWallet(authority),
+            ErrorsLib.NotAuthorizedForWallet(msg.sender, from)
+        );
+    }
+
+    /// @dev Whether the AccessManager lets the caller request a validation for any wallet, now. Asked only when
+    ///  the caller is not the wallet's identity, so an identity pays no call to the manager.
+    function _mayRequestForAnyWallet(address authority) private view returns (bool) {
+        (bool immediate,) = AuthorityUtils.canCallWithDelay(
+            authority, msg.sender, address(this), ITransferValidation.requestTransferValidation.selector
+        );
+        return immediate;
+    }
+
+    /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
+    ///  then to the smallest amount the rules allow.
+    function _narrowAmountRange(
+        Draft memory draft,
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender,
+        address token
+    ) private view {
+        ITREXRegistry registry = _registryOf(token);
+        require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
+        draft.toIdentity = address(registry.resolveIdentity(to));
+        draft.fromKey = WalletKeyLib.canonicalKey(from);
+
+        _capAtWhatTheWalletCanSend(draft, from, token);
+        _capAtWhatTheRulesAllow(draft, to, spender);
+        require(draft.amountMax != 0, ErrorsLib.ZeroValue());
+    }
+
+    /// @dev Caps the range at what the sending wallet can still send: its bridged balance less what earlier
+    ///  validations may still draw from it.
+    function _capAtWhatTheWalletCanSend(Draft memory draft, bytes calldata from, address token) private view {
+        uint256 free = IToken(token).availableOf(from);
+        if (free < draft.amountMax) draft.amountMax = free;
+        require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
+    }
+
+    /// @dev Caps the range at the smallest amount the rules allow. Skipped when both wallets belong to one
+    ///  identity, since relocating your own tokens changes no position and no distribution rule applies.
+    function _capAtWhatTheRulesAllow(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
+        if (ComplianceLedgerLib.isRelocation(draft.fromIdentity, draft.toIdentity)) return;
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            spender
+        );
+        uint256 allowed = ModuleSetLib.callCheckTransfer(ctx);
+        if (allowed < draft.amountMax) draft.amountMax = allowed;
+        require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
+    }
+
+    /// @dev Who may execute: every `SPENDER` module must accept the named spender, since no module runs on the
+    ///  satellite and this is the only place it can be refused. A validation the sender executes itself names
+    ///  no spender and asks nobody. Asked on a relocation too: who executes is not about distribution.
+    function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
+        if (spender.length == 0) return;
+        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+            address(this),
+            draft.fromIdentity,
+            draft.toIdentity,
+            draft.fromKey,
+            WalletKeyLib.walletId(to),
+            draft.amountMin,
+            draft.amountMax,
+            spender
+        );
+        require(ModuleSetLib.spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
+    }
+
     /// @dev Turns a settled draft into a validation: take the next id, keep its terms and reserve the amount.
     ///  With no `APPROVAL` module bound, issue it at once: build the object the satellite will execute against,
     ///  announce it and send one leg per satellite chain involved. With one bound, keep it `AwaitingApproval`
     ///  instead, sent nowhere until {answerApproval}.
     /// @param token the token the compliance is bound to
     /// @return validationId the id taken
-    function issue(bytes calldata from, bytes calldata to, bytes calldata spender, Draft memory draft, address token)
-        external
+    function _issue(bytes calldata from, bytes calldata to, bytes calldata spender, Draft memory draft, address token)
+        private
         returns (uint256 validationId)
     {
         validationId = ++layout().lastValidationId;
@@ -174,7 +312,7 @@ library TransferValidationLib {
     /// @param token the token the compliance is bound to
     function answerApproval(uint256 validationId, uint256 approvedMax, address token) external {
         ValidationStorage storage store = layout();
-        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        require(isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage validation = store.validations[validationId];
         require(
             validation.status == ITransferValidation.ValidationStatus.AwaitingApproval,
@@ -252,7 +390,7 @@ library TransferValidationLib {
         bool authorised
     ) external {
         ValidationStorage storage store = layout();
-        require(validationId != 0 && validationId <= store.lastValidationId, ErrorsLib.UnknownValidation(validationId));
+        require(isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage validation = store.validations[validationId];
         _requireResendable(validation, validationId, chainKey);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
@@ -306,8 +444,8 @@ library TransferValidationLib {
 
     /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
     ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
-    function expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
-        external
+    function _expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
+        private
         view
         returns (uint64 expiry, uint64 window)
     {
@@ -345,7 +483,7 @@ library TransferValidationLib {
     ///  would release or return what they move, and they would then land on a validation that no longer expects
     ///  them. Which chains count follows the status: both while `Pending`, the one owing the missing leg once the
     ///  other landed.
-    function requireAwaitedInboundOpen(address token, ITransferValidation.Validation storage validation) external view {
+    function requireAwaitedInboundOpen(address token, ITransferValidation.Validation storage validation) internal view {
         ITransferValidation.ValidationStatus status = validation.status;
         bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint
             || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint;
@@ -353,6 +491,22 @@ library TransferValidationLib {
             || status == ITransferValidation.ValidationStatus.DiscardedAwaitingBurn;
         if (!mintOwed) _requireInboundOpen(token, validation.fromChainKey);
         if (!burnOwed && validation.twoLegs) _requireInboundOpen(token, validation.toChainKey);
+    }
+
+    /// @dev Pauses or resumes issuance toward a chain. Idempotent: the same state again changes nothing and
+    ///  emits nothing.
+    function setIssuancePaused(bytes32 chainKey, bool paused) internal {
+        ValidationStorage storage store = layout();
+        if (store.issuancePaused[chainKey] == paused) return;
+        store.issuancePaused[chainKey] = paused;
+        if (paused) emit EventsLib.ValidationIssuancePaused(chainKey);
+        else emit EventsLib.ValidationIssuanceUnpaused(chainKey);
+    }
+
+    /// @dev Whether the id was taken: issued, or recorded awaiting approval. Ids start at 1 and
+    ///  `lastValidationId` is the last one taken.
+    function isRecorded(ValidationStorage storage store, uint256 validationId) internal view returns (bool) {
+        return validationId != 0 && validationId <= store.lastValidationId;
     }
 
     function layout() internal pure returns (ValidationStorage storage $) {
@@ -365,7 +519,7 @@ library TransferValidationLib {
     ///  {ITransferValidation-discardExpiredValidations}: nothing was sent for it, so no leg can be in flight.
     ///  The reservation comes back and the envelopes kept for the answer are deleted.
     /// @param token the token the compliance is bound to
-    function discardUnanswered(uint256 validationId, address token) external {
+    function discardUnanswered(uint256 validationId, address token) internal {
         ValidationStorage storage store = layout();
         ITransferValidation.Validation storage validation = store.validations[validationId];
         require(
@@ -475,7 +629,7 @@ library TransferValidationLib {
 
     /// @dev Gives back `amount` of what a validation `AwaitingApproval` reserved: in the ledger's total, against
     ///  the identities unless it is a relocation, and against the sending wallet on the token. Mirrors what
-    ///  `TransferValidation._moveTo` releases when a status stops reserving, see `_stillReservesPending` and
+    ///  `TransferSettlementLib._moveTo` releases when a status stops reserving, see `_stillReservesPending` and
     ///  `_stillReservesWallet` there: keep the two in step. It lives here because a narrowing gives back part
     ///  of the amount, which no status move does, and the library cannot call the contract's internals.
     function _release(ITransferValidation.Validation storage validation, uint256 amount, address token) private {
@@ -493,6 +647,16 @@ library TransferValidationLib {
         EnumerableSet.AddressSet storage approvalModules = ModuleSetLib.layout().byType[IModule.ModuleType.APPROVAL];
         if (approvalModules.length() == 0) return address(0);
         return approvalModules.at(0);
+    }
+
+    /// @dev The registry of the token the compliance is bound to.
+    function _registryOf(address token) private view returns (ITREXRegistry) {
+        return ITREXRegistry(address(IToken(token).identityRegistry()));
+    }
+
+    function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
+        (bytes2 chainType, bytes memory chainReference,) = WalletKeyLib.parse(wallet);
+        return MessageTypesLib.chainKey(chainType, chainReference);
     }
 
 }

@@ -75,13 +75,16 @@ import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
+import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { ITransferValidation } from "./ITransferValidation.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
+import { TransferSettlementLib } from "./TransferSettlementLib.sol";
 import { TransferValidation } from "./TransferValidation.sol";
+import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
@@ -183,10 +186,7 @@ contract ModularCompliance is
         onlyBoundToken
         returns (ISettlementHandler.Verdict verdict)
     {
-        emit EventsLib.SettlementNotified(
-            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
-        );
-        return _handleSettlement(originChainKey, notification);
+        return TransferSettlementLib.handleSettlement(originChainKey, notification, _getTokenBound());
     }
 
     /**
@@ -233,7 +233,7 @@ contract ModularCompliance is
     {
         _transferFromSpender = _spender;
         if (_moduleSet().byType[IModule.ModuleType.SPENDER].length() == 0) return true;
-        return _spenderAllowed(_buildNativeContext(_from, _to, _value));
+        return ModuleSetLib.spenderAllowed(_buildNativeContext(_from, _to, _value));
     }
 
     /**
@@ -264,19 +264,21 @@ contract ModularCompliance is
 
     /// @inheritdoc ITransferValidation
     function setIssuancePaused(bytes32 chainKey, bool paused) external restricted {
-        _setIssuancePaused(chainKey, paused);
+        TransferValidationLib.setIssuancePaused(chainKey, paused);
     }
 
     /// @inheritdoc ITransferValidation
     function resolveStuckValidation(uint256 validationId) external restricted {
-        _resolveStuckValidation(validationId);
+        TransferSettlementLib.resolveStuckValidation(validationId, _getTokenBound());
     }
 
     /// @inheritdoc ITransferValidation
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
     function discardExpiredValidations(uint256[] calldata validationIds) external {
-        _discardExpiredValidations(validationIds);
+        TransferSettlementLib.discardExpiredValidations(
+            validationIds, _getTokenBound(), _canCallSelector(msg.sender, this.discardExpiredValidations.selector)
+        );
     }
 
     /**
@@ -340,7 +342,7 @@ contract ModularCompliance is
         if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        return value <= _callCheckTransfer(ctx);
+        return value <= ModuleSetLib.callCheckTransfer(ctx);
     }
 
     /// @dev A transfer: the position follows the tokens, then every `AFTER` module is told.
@@ -361,7 +363,8 @@ contract ModularCompliance is
     /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
     ///  and no module is told. The recall it precedes is reported by {agentTransferred} once the token minted.
     function syncOwner(address wallet) external onlyBoundToken {
-        _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
+        address token = _getTokenBound();
+        ComplianceLedgerLib.currentOwner(token, wallet, address(_registryOf(token).identity(wallet)), 0);
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
@@ -389,21 +392,26 @@ contract ModularCompliance is
     ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
     ///  is not taken for it.
     function _applyMovement(address from, address to, uint256 value, uint8 kind) private {
-        ITREXRegistry registry = _boundRegistry();
+        address token = _getTokenBound();
+        ITREXRegistry registry = _registryOf(token);
         address fromIdentity;
         address toIdentity;
         // A self-transfer leaves the balance where it was; a delegation reports holder to holder after its burn.
         bool balanceUnchanged = from == to && kind != MovementKindLib.DELEGATION;
         int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
-        if (from != address(0)) fromIdentity = _currentOwner(from, address(registry.identity(from)), adjustment);
-        if (to != address(0)) toIdentity = _currentOwner(to, address(registry.identity(to)), -adjustment);
+        if (from != address(0)) {
+            fromIdentity = ComplianceLedgerLib.currentOwner(token, from, address(registry.identity(from)), adjustment);
+        }
+        if (to != address(0)) {
+            toIdentity = ComplianceLedgerLib.currentOwner(token, to, address(registry.identity(to)), -adjustment);
+        }
 
         IModule.TransferContext memory ctx = TransferContextLib.native(
             address(this), kind, fromIdentity, toIdentity, from, to, value, _transferFromSpenderEnvelope()
         );
         _transferFromSpender = address(0);
-        _movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
-        _callAfterTransfer(ctx);
+        ComplianceLedgerLib.movePosition(ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, ctx.amountMax);
+        ModuleSetLib.callAfterTransfer(ctx);
     }
 
     /// @dev Resolves both wallets once, through the registry's native lookup, and builds the context of a
@@ -414,7 +422,7 @@ contract ModularCompliance is
         view
         returns (IModule.TransferContext memory)
     {
-        ITREXRegistry registry = _boundRegistry();
+        ITREXRegistry registry = _registryOf(_getTokenBound());
         address fromIdentity;
         address toIdentity;
         if (from != address(0)) fromIdentity = address(registry.identity(from));
@@ -439,70 +447,20 @@ contract ModularCompliance is
         return IToken(_getTokenBound());
     }
 
+    /// @dev The registry of the bound token.
+    function _registryOf(address token) private view returns (ITREXRegistry) {
+        return ITREXRegistry(address(IToken(token).identityRegistry()));
+    }
+
     /// @inheritdoc TransferValidation
-    function _boundRegistry() internal view override returns (ITREXRegistry) {
-        return ITREXRegistry(address(_boundToken().identityRegistry()));
+    function _authority() internal view override returns (address) {
+        return authority();
     }
 
     /// @inheritdoc TransferValidation
     function _canCallSelector(address caller, bytes4 selector) internal view override returns (bool) {
         (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
         return immediate;
-    }
-
-    /// @inheritdoc TransferValidation
-    /// @dev The smallest answer of the `TRANSFER_CHECK` modules. `checkTransfer` is a view on the interface, so each
-    ///  call is a `staticcall` and a module that writes there reverts.
-    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
-        allowed = type(uint256).max;
-        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK];
-        uint256 length = rules.length();
-        for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).checkTransfer(ctx);
-            if (answer < allowed) allowed = answer;
-        }
-    }
-
-    /// @inheritdoc TransferValidation
-    function _spenderAllowed(IModule.TransferContext memory ctx) internal view override returns (bool) {
-        EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
-        uint256 length = spenderRules.length();
-        for (uint256 i = 0; i < length; i++) {
-            if (!IModule(spenderRules.at(i)).checkSpender(ctx)) return false;
-        }
-        return true;
-    }
-
-    /// @inheritdoc TransferValidation
-    function _callAfterTransfer(IModule.TransferContext memory ctx) internal override {
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.AFTER];
-        uint256 length = trackers.length();
-        for (uint256 i = 0; i < length; i++) {
-            IModule(trackers.at(i)).afterTransfer(ctx);
-        }
-    }
-
-    /// @inheritdoc TransferValidation
-    function _settleOnToken(bytes memory from, bytes memory to, uint256 amount, uint256 validationId)
-        internal
-        override
-    {
-        _boundToken().settleValidation(from, to, amount, validationId);
-    }
-
-    /// @inheritdoc TransferValidation
-    function _holdOnToken(bytes memory from, uint256 amount, uint256 validationId, uint256 reserved) internal override {
-        _boundToken().holdInTransit(from, amount, validationId, reserved);
-    }
-
-    /// @inheritdoc TransferValidation
-    function _releaseOnToken(bytes memory wallet, uint256 amount) internal override {
-        _boundToken().releaseFromValidation(wallet, amount);
-    }
-
-    /// @inheritdoc TransferValidation
-    function _returnHeldOnToken(bytes memory to, uint256 validationId) internal override {
-        _boundToken().returnHeldInTransit(to, validationId);
     }
 
     /* ----- Module lifecycle ----- */
