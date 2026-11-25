@@ -40,6 +40,7 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
+import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 
@@ -51,7 +52,7 @@ abstract contract RecordingModule is AbstractModuleUpgradeable {
     uint256 public mintActionCalls;
     uint256 public burnActionCalls;
 
-    /// @dev What the fixture answers from `allowedAmount`. Set in `initialize`, not through a field
+    /// @dev What the fixture answers from `checkTransfer`. Set in `initialize`, not through a field
     ///      initializer: those run in the implementation's constructor and never reach proxy storage.
     uint256 internal _allowed;
 
@@ -112,16 +113,56 @@ abstract contract RecordingModule is AbstractModuleUpgradeable {
 
 }
 
+/// @dev A post-state veto: an `AFTER` module that refuses every movement once `setAllow(false)`, by reverting
+///      with its own error, which is how a check on the state a movement leaves behind is written.
+contract RevertingAfterModule is RecordingModule {
+
+    error AfterRefused();
+
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        require(_allowed != 0, AfterRefused());
+        _countAndRecord(ctx);
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.AFTER;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "RevertingAfterModule";
+    }
+
+}
+
+/// @dev A `TRANSFER_CHECK` that reads `kind`: it refuses every mint and allows everything else.
+contract NoMintModule is RecordingModule {
+
+    function checkTransfer(TransferContext calldata ctx) external pure override returns (uint256) {
+        return ctx.kind == MovementKindLib.MINT ? 0 : type(uint256).max;
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.TRANSFER_CHECK;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "NoMintModule";
+    }
+
+}
+
 /// @dev A rule and nothing else.
 contract RuleOnlyModule is RecordingModule {
 
-    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.RULE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -133,14 +174,14 @@ contract RuleOnlyModule is RecordingModule {
 /// @dev A rule that caps only delegated movements: what moves through `transferFrom` or a named spender.
 contract DelegatedCapRuleModule is RecordingModule {
 
-    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.spender.length == 0) return type(uint256).max;
         return _allowed;
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.RULE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -152,7 +193,7 @@ contract DelegatedCapRuleModule is RecordingModule {
 /// @dev A spender policy and nothing else.
 contract SpenderOnlyModule is RecordingModule {
 
-    function moduleCheckSpender(TransferContext calldata) external view override returns (bool) {
+    function checkSpender(TransferContext calldata) external view override returns (bool) {
         return _spenderAllowed;
     }
 
@@ -177,7 +218,7 @@ contract TrackerOnlyModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.TRACKER;
+        types[0] = ModuleType.AFTER;
     }
 
     function name() external pure override returns (string memory) {
@@ -189,7 +230,7 @@ contract TrackerOnlyModule is RecordingModule {
 /// @dev Both vets a movement and keeps a count of it, the shape of a rule with a counter of its own.
 contract RuleAndTrackerModule is RecordingModule {
 
-    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
@@ -197,10 +238,10 @@ contract RuleAndTrackerModule is RecordingModule {
         _countAndRecord(ctx);
     }
 
-    function moduleTypes() external pure returns (ModuleType[] memory types) {
+    function moduleTypes() external pure virtual returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.RULE;
-        types[1] = ModuleType.TRACKER;
+        types[0] = ModuleType.TRANSFER_CHECK;
+        types[1] = ModuleType.AFTER;
     }
 
     function name() external pure override returns (string memory) {
@@ -209,14 +250,25 @@ contract RuleAndTrackerModule is RecordingModule {
 
 }
 
+/// @dev The same two types as {RuleAndTrackerModule}, listed in the other order.
+contract TrackerAndRuleModule is RuleAndTrackerModule {
+
+    function moduleTypes() external pure override returns (ModuleType[] memory types) {
+        types = new ModuleType[](2);
+        types[0] = ModuleType.AFTER;
+        types[1] = ModuleType.TRANSFER_CHECK;
+    }
+
+}
+
 /// @dev Names all three types, so a compliance routes every question at it.
 contract AllTypesModule is RecordingModule {
 
-    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
-    function moduleCheckSpender(TransferContext calldata) external view override returns (bool) {
+    function checkSpender(TransferContext calldata) external view override returns (bool) {
         return _spenderAllowed;
     }
 
@@ -226,9 +278,9 @@ contract AllTypesModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](3);
-        types[0] = ModuleType.RULE;
+        types[0] = ModuleType.TRANSFER_CHECK;
         types[1] = ModuleType.SPENDER;
-        types[2] = ModuleType.TRACKER;
+        types[2] = ModuleType.AFTER;
     }
 
     function name() external pure override returns (string memory) {
@@ -255,8 +307,8 @@ contract DuplicateTypeModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.RULE;
-        types[1] = ModuleType.RULE;
+        types[0] = ModuleType.TRANSFER_CHECK;
+        types[1] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -282,14 +334,14 @@ contract WritingRuleModule {
         _bound[compliance] = false;
     }
 
-    function allowedAmount(IModule.TransferContext calldata) external returns (uint256) {
+    function checkTransfer(IModule.TransferContext calldata) external returns (uint256) {
         writes++;
         return type(uint256).max;
     }
 
     function moduleTypes() external pure returns (IModule.ModuleType[] memory types) {
         types = new IModule.ModuleType[](1);
-        types[0] = IModule.ModuleType.RULE;
+        types[0] = IModule.ModuleType.TRANSFER_CHECK;
     }
 
     function isComplianceBound(address compliance) external view returns (bool) {
@@ -324,14 +376,14 @@ contract LockedSenderModule is RecordingModule {
         lockedOf[msg.sender][identity] = locked;
     }
 
-    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.fromIdentity == address(0)) return type(uint256).max;
         return lockedOf[ctx.compliance][ctx.fromIdentity] ? 0 : type(uint256).max;
     }
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.RULE;
+        types[0] = ModuleType.TRANSFER_CHECK;
     }
 
     function name() external pure override returns (string memory) {
@@ -349,7 +401,7 @@ contract CappedRecipientModule is RecordingModule {
         capOf[msg.sender] = cap;
     }
 
-    function allowedAmount(TransferContext calldata ctx) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.toIdentity == address(0) || ctx.fromIdentity == ctx.toIdentity) return type(uint256).max;
         uint256 cap = capOf[ctx.compliance];
         if (cap == 0) return type(uint256).max;
@@ -364,8 +416,8 @@ contract CappedRecipientModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.RULE;
-        types[1] = ModuleType.TRACKER;
+        types[0] = ModuleType.TRANSFER_CHECK;
+        types[1] = ModuleType.AFTER;
     }
 
     function name() external pure override returns (string memory) {
@@ -378,7 +430,7 @@ contract CappedRecipientModule is RecordingModule {
 ///      actions stay at the base default, so a mint is the only movement it records.
 contract RuleAndMintTrackerModule is RecordingModule {
 
-    function allowedAmount(TransferContext calldata) external view override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view override returns (uint256) {
         return _allowed;
     }
 
@@ -388,8 +440,8 @@ contract RuleAndMintTrackerModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](2);
-        types[0] = ModuleType.RULE;
-        types[1] = ModuleType.TRACKER;
+        types[0] = ModuleType.TRANSFER_CHECK;
+        types[1] = ModuleType.AFTER;
     }
 
     function name() external pure override returns (string memory) {
@@ -402,7 +454,7 @@ contract RuleAndMintTrackerModule is RecordingModule {
 ///      it for an amount. Covers the desync direction that would silently drop a rule.
 contract UndeclaredRuleModule is RecordingModule {
 
-    function allowedAmount(TransferContext calldata) external pure override returns (uint256) {
+    function checkTransfer(TransferContext calldata) external pure override returns (uint256) {
         return 0;
     }
 
@@ -412,11 +464,66 @@ contract UndeclaredRuleModule is RecordingModule {
 
     function moduleTypes() external pure returns (ModuleType[] memory types) {
         types = new ModuleType[](1);
-        types[0] = ModuleType.TRACKER;
+        types[0] = ModuleType.AFTER;
     }
 
     function name() external pure override returns (string memory) {
         return "UndeclaredRuleModule";
+    }
+
+}
+
+/// @dev A tracker that keeps its own record of native balances, the shape of a snapshot or a max-balance module
+///      that cannot read the token: a native wallet (a key below 2^160) is debited on every departure and credited
+///      on every arrival, a `DELEGATION` debits its native wallet alone, a `RECALL` credits it alone, and
+///      an optional cap refuses a `TRANSFER` or a `MINT` that leaves the recipient's record above it.
+contract NativeLedgerModule is RecordingModule {
+
+    error CapExceeded(bytes32 wallet, uint256 recorded, uint256 cap);
+
+    mapping(bytes32 wallet => uint256 amount) public recorded;
+    uint256 public cap;
+
+    function setCap(uint256 newCap) external {
+        cap = newCap;
+    }
+
+    function afterTransfer(TransferContext calldata ctx) external override onlyComplianceCall {
+        _countAndRecord(ctx);
+        if (ctx.kind == MovementKindLib.DELEGATION) {
+            _debit(ctx.fromWallet, ctx.amountMax);
+            return;
+        }
+        if (ctx.kind == MovementKindLib.RECALL) {
+            _credit(ctx.toWallet, ctx.amountMax);
+            return;
+        }
+        _debit(ctx.fromWallet, ctx.amountMax);
+        _credit(ctx.toWallet, ctx.amountMax);
+        if (cap == 0 || (ctx.kind != MovementKindLib.TRANSFER && ctx.kind != MovementKindLib.MINT)) return;
+        uint256 held = recorded[ctx.toWallet];
+        require(held <= cap, CapExceeded(ctx.toWallet, held, cap));
+    }
+
+    function moduleTypes() external pure returns (ModuleType[] memory types) {
+        types = new ModuleType[](1);
+        types[0] = ModuleType.AFTER;
+    }
+
+    function name() external pure override returns (string memory) {
+        return "NativeLedgerModule";
+    }
+
+    function _credit(bytes32 wallet, uint256 amount) private {
+        if (_isNative(wallet)) recorded[wallet] += amount;
+    }
+
+    function _debit(bytes32 wallet, uint256 amount) private {
+        if (_isNative(wallet)) recorded[wallet] -= amount;
+    }
+
+    function _isNative(bytes32 wallet) private pure returns (bool) {
+        return wallet != bytes32(0) && uint256(wallet) < (1 << 160);
     }
 
 }

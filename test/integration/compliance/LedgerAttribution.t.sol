@@ -145,7 +145,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         _revokeAlice();
 
         // Still locked after it, and locked by the rule: the module answers zero for this very identity.
-        assertEq(lockup.allowedAmount(_contextFrom(aliceIdentity)), 0, "the rule still refuses the sender");
+        assertEq(lockup.checkTransfer(_contextFrom(aliceIdentity)), 0, "the rule still refuses the sender");
 
         vm.prank(alice);
         vm.expectRevert(ERC3643ErrorsLib.ComplianceNotFollowed.selector);
@@ -160,7 +160,7 @@ contract LedgerAttributionTest is TREXSuiteTest {
         LockedSenderModule lockup = _bindLockup(address(aliceIdentity));
 
         assertEq(
-            lockup.allowedAmount(_contextFrom(IIdentity(address(0)))), type(uint256).max, "a zero sender is a mint"
+            lockup.checkTransfer(_contextFrom(IIdentity(address(0)))), type(uint256).max, "a zero sender is a mint"
         );
     }
 

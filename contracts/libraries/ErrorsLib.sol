@@ -136,6 +136,8 @@ library ErrorsLib {
     error ModuleHasNoType();
     /// @dev A module names the same type twice.
     error DuplicateModuleType(uint8 moduleType);
+    /// @dev An upgrade would change the types a module names, which every bound compliance read at binding.
+    error ModuleTypesChanged();
     error ModuleNotBound();
     error TokenNotBound();
 
@@ -147,6 +149,17 @@ library ErrorsLib {
     error OnlyComplianceContractCanCall();
     error SpenderAlreadyAllowed(bytes spender);
     error SpenderNotListed(bytes spender);
+    error ApprovalIdAlreadyUsed(bytes32 approvalId);
+    error OneApprovalModuleOnly();
+    error ApproversNotSet();
+    error NotAnApprover(address caller);
+    error NotTheNextApprover(address caller, address expected);
+    error UnknownApprovalRequest(uint256 validationId);
+    error ApproversChanged(uint256 validationId);
+    error NotFullyApproved(uint256 validationId);
+    error AlreadyFullyApproved(uint256 validationId);
+    error ExpiryInPast(uint64 expiry);
+    error TransferNotApproved(address from, address to, uint256 amount);
 
     // TREXFactory Errors
     error AuthorityMismatch();
@@ -190,18 +203,17 @@ library ErrorsLib {
     error WalletNotActive(address wallet);
 
     // AccessManagerSetupLib Errors
-    error NotAssigned(address target);
     error SuiteDeployerCannotConfigureFactory();
     error PlatformRoleCannotBePublic();
-    /// @dev `target`, a storage, a registry or a compliance, is already set up in `domainId`, so a suite of
-    ///      another domain cannot use it.
-    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // RolesLib Errors
     error InvalidDomain();
 
     // TREXAccessManager Errors
     error DomainNotFound(uint32 domainId);
+    /// @dev `target` is already set up in `domainId`: a token is set up once, and a storage, a registry or a
+    ///      compliance already in a domain cannot be used by a suite of another one.
+    error SuiteAlreadySetUp(address target, uint32 domainId);
 
     // TrustedIssuersRegistry Errors
     error ClaimTopicsCannotBeEmpty();
@@ -241,6 +253,21 @@ library ErrorsLib {
     error UnverifiedWallet(bytes wallet);
     /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
     error SenderNotOnSatellite(bytes wallet);
+    /// @dev Only a validation stored `AwaitingApproval` can be answered; `status` is the one found instead.
+    error ValidationNotAwaitingApproval(uint256 validationId, uint8 status);
+    /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
+    error NotTheApprovalModule(address caller);
+    /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
+    ///  it is `AwaitingMint`; `status` is the `ValidationStatus` found instead.
+    error ValidationNotResendable(uint256 validationId, uint8 status);
+    /// @dev The deadline for a resend has passed: `expiry` while `Pending`, since past it no satellite may execute;
+    ///  `releaseAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
+    error ValidationExpired(uint256 validationId, uint64 deadline);
+    /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
+    error ChainNotPartOfValidation(uint256 validationId, bytes32 chainKey);
+    /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id. The bound token is part
+    ///  of the hash too, so a compliance bound to another token since the issuance gets this for every old id.
+    error ValidationBodyMismatch(uint256 validationId);
     /// @dev The id was never issued by this compliance.
     error UnknownValidation(uint256 validationId);
     /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
@@ -258,6 +285,7 @@ library ErrorsLib {
     error SettlementAmountMismatch(uint256 validationId, uint256 expected, uint256 amount);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
+    error ChainInboundPaused(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);

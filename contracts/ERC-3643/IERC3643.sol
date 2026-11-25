@@ -53,7 +53,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /// @param _newVersion The version of the token implementation.
     /// @param _newOnchainID The address of the token's ONCHAINID.
     event UpdatedTokenInformation(
-        string _newName, string _newSymbol, uint8 _newDecimals, string _newVersion, address indexed _newOnchainID
+        string _newName, string _newSymbol, uint8 _newDecimals, string _newVersion, address _newOnchainID
     );
 
     /// @dev Emitted when the Identity Registry bound to the token is set or replaced.
@@ -68,7 +68,7 @@ interface IERC3643 is IERC20, IERC20Metadata {
     /// @param _lostWallet The address of the wallet that lost access.
     /// @param _newWallet The address of the replacement wallet.
     /// @param _investorOnchainID The address of the investor's ONCHAINID.
-    event RecoverySuccess(address indexed _lostWallet, address indexed _newWallet, address indexed _investorOnchainID);
+    event RecoverySuccess(address _lostWallet, address _newWallet, address _investorOnchainID);
 
     /// @dev Emitted when a wallet's frozen status changes.
     /// @notice `_owner` records the actor that set the frozen status (`_msgSender()`). When the call is

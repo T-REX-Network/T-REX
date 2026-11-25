@@ -153,11 +153,14 @@ interface ITREXFactory {
      *  CTR : deploy CTR contract (proxy), set required claims, set owner
      *  TIR : deploy TIR contract (proxy), set trusted issuers, set owner
      *  Compliance: deploy modular compliance, bind with token, add modules, set modules parameters, set owner
-     *  AccessManager : when `_tokenDetails.accessManager` is zero, deploy a `TREXAccessManager` (proxy),
-     *  create a domain named after the token, assign the token and its storage to it, commission the
-     *  suite and hand `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
-     *  factory never calls it: the suite deploys with no role wiring and is not operable until the
-     *  issuer commissions it (`AccessManagerSetupLib.commissionSuite`).
+     *  AccessManager : when `_tokenDetails.accessManager` is zero, deploy a `TREXAccessManager` (proxy)
+     *  initialized with `TREXAccessManager.initializeSuite`: `_tokenDetails.accessManagerAdmin` is its only
+     *  admin from the first block, and it sets the suite's roles up itself in a domain named after the
+     *  token. The factory never holds a role on it. When a manager is supplied the factory never calls it:
+     *  the suite deploys with no role wiring and is not operable until the issuer calls
+     *  `TREXAccessManager.setupSuite(domainId, token)` on it, in the same `multicall` as `createDomain` when the
+     *  suite needs a new domain. The factory never writes into a manager it is given, so this second
+     *  transaction is the issuer's own.
      *  All contracts are deployed using CREATE3, and therefore are deployed at a predetermined address
      *  The address can be the same on all EVM blockchains as long as this factory is deployed at the
      *  same address on each chain
@@ -189,10 +192,12 @@ interface ITREXFactory {
      *  `_tokenDetails.irs` must be zero: a reused IRS keeps the beacon that deployed it, so the suite always
      *  deploys its own identity storage through the cloned IRS beacon.
      *  When `_tokenDetails.accessManager` is zero the factory deploys a `TREXAccessManager` behind the cloned
-     *  beacon, creates a domain named after the token, assigns the token and its storage, commissions the
-     *  suite and hands `ADMIN_ROLE` to `_tokenDetails.accessManagerAdmin`. When a manager is supplied the
-     *  factory never calls it: the suite deploys with no role wiring and is not operable until the issuer
-     *  commissions it (`AccessManagerSetupLib.commissionSuite`).
+     *  beacon, initialized as in {deployTREXSuite}: `_tokenDetails.accessManagerAdmin` is its only admin and
+     *  it sets the suite's roles up itself. When a manager is supplied the factory never calls it: the suite
+     *  deploys with no role wiring and is not operable until the issuer calls
+     *  `TREXAccessManager.setupSuite(domainId, token)` on it, in the same `multicall` as `createDomain` when the
+     *  suite needs a new domain. The factory never writes into a manager it is given, so this second
+     *  transaction is the issuer's own.
      *  Restricted to the suite deployer role chosen at setup
      *  (`AccessManagerSetupLib.setupTREXFactoryRoles`), which is never one of the three setter roles.
      *  emits `TREXSuiteDeployed` and `IsolatedSuiteDeployed` events

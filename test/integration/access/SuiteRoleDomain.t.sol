@@ -41,19 +41,14 @@ pragma solidity 0.8.30;
 
 import { KeyManager } from "@onchain-id/solidity/contracts/KeyManager.sol";
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
-import {
-    AccessManagerUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagerUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
-import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { IERC3643 } from "contracts/ERC-3643/IERC3643.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { ITREXFactory } from "contracts/factory/TREXFactory.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { IdentityRegistryStorage } from "contracts/registry/implementation/IdentityRegistryStorage.sol";
@@ -64,27 +59,29 @@ import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 
 contract SuiteRoleDomainTest is TREXSuiteTest {
 
-    uint32 internal constant TEAM = 5;
+    /// @dev Three domains created on the fixture's manager next to its own `DOMAIN`: two unrelated funds and
+    ///      one team that runs several tokens.
+    uint32 internal domainA;
+    uint32 internal domainB;
+    uint32 internal team;
+    /// @dev Fixed ids used only to check the packing arithmetic.
     uint32 internal constant DOMAIN_A = 10;
     uint32 internal constant DOMAIN_B = 20;
     Token internal tokenA;
     Token internal tokenB;
-    TREXAccessManager internal domainManager;
+    /// @dev A second manager with no domain yet, the shape an issuer gets when they run one themselves.
+    TREXAccessManager internal issuerManager;
     address internal agentA = makeAddr("agentA");
     address internal agentB = makeAddr("agentB");
 
     function setUp() public override {
         super.setUp();
-        tokenA = _deployBare("ns-a", address(0), address(accessManager));
-        tokenB = _deployBare("ns-b", address(0), address(accessManager));
-        domainManager = TREXAccessManager(
-            address(
-                new ERC1967Proxy(
-                    address(new TREXAccessManager()),
-                    abi.encodeCall(AccessManagerUpgradeable.initialize, (address(this)))
-                )
-            )
-        );
+        domainA = suiteManager.createDomain("Fund A");
+        domainB = suiteManager.createDomain("Fund B");
+        team = suiteManager.createDomain("Team");
+        tokenA = _deployBare("ns-a", address(0), address(suiteManager));
+        tokenB = _deployBare("ns-b", address(0), address(suiteManager));
+        issuerManager = _newTREXAccessManager(address(this));
     }
 
     function testFuzz_forDomain_PacksAndDecodes(uint32 domainId, uint8 roleIndex) public pure {
@@ -144,6 +141,20 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertNotEq(RolesLib.platform(RolesLib.PlatformRole.OWNER), RolesLib.forDomain(DOMAIN_A, RolesLib.Role.OWNER));
     }
 
+    function test_platform_CustomRoleIsFlaggedAndDistinctFromEnumRoles() public pure {
+        uint64 custom = RolesLib.platform(bytes32("TOKEN_ISSUER"));
+        (uint32 domainId, uint32 role, bool isCustom) = RolesLib.decode(custom);
+        assertEq(domainId, RolesLib.PLATFORM_DOMAIN);
+        assertTrue(isCustom);
+        assertEq(role, uint32(uint256(keccak256(abi.encode(bytes32("TOKEN_ISSUER"))))) & ~RolesLib.CUSTOM_ROLE_FLAG);
+        for (uint8 i = 0; i <= uint8(type(RolesLib.PlatformRole).max); i++) {
+            assertNotEq(custom, RolesLib.platform(RolesLib.PlatformRole(i)));
+        }
+        assertEq(custom, RolesLib.platform(bytes32("TOKEN_ISSUER")));
+        assertNotEq(custom, RolesLib.platform(bytes32("VERSION_MANAGER")));
+        assertNotEq(custom, RolesLib.forDomain(DOMAIN_A, bytes32("TOKEN_ISSUER")));
+    }
+
     function packExternally(uint32 domainId, RolesLib.Role role) external pure returns (uint64) {
         return RolesLib.forDomain(domainId, role);
     }
@@ -153,9 +164,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_AgentOfAOperatesAOnly() public {
-        _commission(tokenA, DOMAIN_A);
-        _commission(tokenB, DOMAIN_B);
-        _grantAllAgentRoles(accessManager, agentA, DOMAIN_A);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
+        _setupSuiteInto(suiteManager, tokenB, domainB);
+        _grantAllAgentRoles(suiteManager, agentA, domainA);
 
         vm.startPrank(agentA);
         tokenA.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -182,9 +193,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_AgentOfBOperatesBOnly() public {
-        _commission(tokenA, DOMAIN_A);
-        _commission(tokenB, DOMAIN_B);
-        _grantAllAgentRoles(accessManager, agentB, DOMAIN_B);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
+        _setupSuiteInto(suiteManager, tokenB, domainB);
+        _grantAllAgentRoles(suiteManager, agentB, domainB);
 
         vm.startPrank(agentB);
         tokenB.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -197,9 +208,9 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_TwoTokensInOneDomainShareOneTeam() public {
-        _commissionIntoTeam(tokenA);
-        _commissionIntoTeam(tokenB);
-        _grantAllAgentRoles(accessManager, agentA, TEAM);
+        _setupSuiteInto(suiteManager, tokenA, team);
+        _setupSuiteInto(suiteManager, tokenB, team);
+        _grantAllAgentRoles(suiteManager, agentA, team);
 
         IERC3643IdentityRegistry registryB = tokenB.identityRegistry();
         vm.startPrank(agentA);
@@ -224,52 +235,46 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function test_explicitDomain_MapsEverySuiteContractIntoTheDomain() public {
-        _commission(tokenA, DOMAIN_A);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
         address suiteRegistry = address(tokenA.identityRegistry());
         address irs = address(tokenA.identityRegistry().identityStorage());
         address mc = address(tokenA.compliance());
 
+        assertEq(suiteManager.domainOf(address(tokenA)), domainA);
+        assertEq(suiteManager.domainOf(suiteRegistry), domainA);
+        assertEq(suiteManager.domainOf(irs), domainA);
+        assertEq(suiteManager.domainOf(mc), domainA);
         assertEq(
-            accessManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
-            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_MINTER)
+            suiteManager.getTargetFunctionRole(address(tokenA), IERC3643.mint.selector),
+            RolesLib.forDomain(domainA, RolesLib.Role.AGENT_MINTER)
         );
         assertEq(
-            accessManager.getTargetFunctionRole(suiteRegistry, IERC3643IdentityRegistry.registerIdentity.selector),
-            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT)
+            suiteManager.getTargetFunctionRole(suiteRegistry, IERC3643IdentityRegistry.registerIdentity.selector),
+            RolesLib.forDomain(domainA, RolesLib.Role.AGENT)
         );
         assertEq(
-            accessManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
-            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER)
+            suiteManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
+            RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER)
         );
         assertEq(
-            accessManager.getTargetFunctionRole(mc, IModularCompliance.addModule.selector),
-            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.OWNER)
+            suiteManager.getTargetFunctionRole(mc, IModularCompliance.addModule.selector),
+            RolesLib.forDomain(domainA, RolesLib.Role.OWNER)
         );
         assertEq(
-            accessManager.getRoleAdmin(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT)),
-            RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_ADMIN)
+            suiteManager.getRoleAdmin(RolesLib.forDomain(domainA, RolesLib.Role.AGENT)),
+            RolesLib.forDomain(domainA, RolesLib.Role.AGENT_ADMIN)
         );
-        (bool tokenIsAgent,) = accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT), address(tokenA));
+        (bool tokenIsAgent,) = suiteManager.hasRole(RolesLib.forDomain(domainA, RolesLib.Role.AGENT), address(tokenA));
         (bool registryWrites,) =
-            accessManager.hasRole(RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER), suiteRegistry);
+            suiteManager.hasRole(RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER), suiteRegistry);
         assertTrue(tokenIsAgent);
         assertTrue(registryWrites);
-    }
-
-    function test_explicitDomain_MapsEveryTableEntry() public {
-        _commission(tokenA, DOMAIN_A);
-        _assertTableMapped(address(tokenA), AccessManagerSetupLib.tokenTable(), DOMAIN_A);
-        _assertTableMapped(address(tokenA.identityRegistry()), AccessManagerSetupLib.registryTable(), DOMAIN_A);
-        _assertTableMapped(
-            address(tokenA.identityRegistry().identityStorage()), AccessManagerSetupLib.storageTable(), DOMAIN_A
-        );
-        _assertTableMapped(address(tokenA.compliance()), AccessManagerSetupLib.complianceTable(), DOMAIN_A);
     }
 
     /// @notice After suite setup, every batch has a row of its own on the role of its single-item function, so
     ///         it takes the full check, scheduled operations included, rather than the immediate-only fallback.
     function test_explicitDomain_EveryBatchHasTheRoleOfItsSingleItemFunction() public {
-        _commission(tokenA, DOMAIN_A);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
         address token = address(tokenA);
         _assertBatchRole(token, IERC3643.batchMint.selector, IERC3643.mint.selector);
         _assertBatchRole(token, IERC3643.batchBurn.selector, IERC3643.burn.selector);
@@ -285,56 +290,44 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
     }
 
     function _assertBatchRole(address target, bytes4 batchSelector, bytes4 singleItemSelector) private view {
-        uint64 singleItemRole = accessManager.getTargetFunctionRole(target, singleItemSelector);
-        assertNotEq(singleItemRole, accessManager.ADMIN_ROLE(), "single-item function is mapped");
-        assertEq(accessManager.getTargetFunctionRole(target, batchSelector), singleItemRole);
-    }
-
-    function _assertTableMapped(address target, AccessManagerSetupLib.SelectorRole[] memory table, uint32 domainId)
-        private
-        view
-    {
-        for (uint256 i = 0; i < table.length; i++) {
-            assertEq(
-                accessManager.getTargetFunctionRole(target, table[i].selector),
-                RolesLib.forDomain(domainId, table[i].role)
-            );
-        }
+        uint64 singleItemRole = suiteManager.getTargetFunctionRole(target, singleItemSelector);
+        assertNotEq(singleItemRole, suiteManager.ADMIN_ROLE(), "single-item function is mapped");
+        assertEq(suiteManager.getTargetFunctionRole(target, batchSelector), singleItemRole);
     }
 
     function test_explicitDomain_StorageWriterStaysUnderAdminRole() public {
-        _commission(tokenA, DOMAIN_A);
-        uint64 writer = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.IRS_WRITER);
-        uint64 agentAdmin = RolesLib.forDomain(DOMAIN_A, RolesLib.Role.AGENT_ADMIN);
-        accessManager.grantRole(agentAdmin, agentA, 0);
+        _setupSuiteInto(suiteManager, tokenA, domainA);
+        uint64 writer = RolesLib.forDomain(domainA, RolesLib.Role.IRS_WRITER);
+        uint64 agentAdmin = RolesLib.forDomain(domainA, RolesLib.Role.AGENT_ADMIN);
+        suiteManager.grantRole(agentAdmin, agentA, 0);
 
-        assertEq(accessManager.getRoleAdmin(writer), 0);
+        assertEq(suiteManager.getRoleAdmin(writer), 0);
         vm.prank(agentA);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, agentA, uint64(0))
         );
-        accessManager.grantRole(writer, agentB, 0);
+        suiteManager.grantRole(writer, agentB, 0);
     }
 
-    function test_registry_CommissionUsesTheAssignedDomain() public {
-        Token fundToken = _deployBare("fund-a", address(0), address(domainManager));
-        uint32 fund = domainManager.createDomain("Fund A");
-        domainManager.assign(fund, address(fundToken));
+    /// @notice An issuer running their own manager creates a domain, then sets a suite up in it.
+    function test_issuerManager_SetupSuiteUsesTheGivenDomain() public {
+        Token fundToken = _deployBare("fund-a", address(0), address(issuerManager));
         address irs = address(fundToken.identityRegistry().identityStorage());
+        uint32 fund = issuerManager.createDomain("Fund A");
 
-        AccessManagerSetupLib.commissionSuite(domainManager, address(fundToken));
+        _setupSuiteInto(issuerManager, fundToken, fund);
 
-        assertEq(domainManager.domainName(fund), "Fund A");
-        assertEq(domainManager.domainOf(irs), fund);
+        assertEq(issuerManager.domainName(fund), "Fund A");
+        assertEq(issuerManager.domainOf(irs), fund);
         assertEq(
-            domainManager.getTargetFunctionRole(address(fundToken), IERC3643.mint.selector),
+            issuerManager.getTargetFunctionRole(address(fundToken), IERC3643.mint.selector),
             RolesLib.forDomain(fund, RolesLib.Role.AGENT_MINTER)
         );
         assertEq(
-            domainManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
+            issuerManager.getTargetFunctionRole(irs, IERC3643IdentityRegistryStorage.addIdentityToStorage.selector),
             RolesLib.forDomain(fund, RolesLib.Role.IRS_WRITER)
         );
-        _grantAllAgentRoles(domainManager, agentA, fund);
+        _grantAllAgentRoles(issuerManager, agentA, fund);
         vm.startPrank(agentA);
         fundToken.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
         fundToken.unpause();
@@ -343,83 +336,48 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(fundToken.balanceOf(alice), 3);
     }
 
-    function test_registry_RevertWhen_TokenIsNotAssigned() public {
-        Token fundToken = _deployBare("fund-x", address(0), address(domainManager));
+    /// @notice The issuer's whole part is one transaction: a new domain and its first suite go through the
+    ///         manager's `multicall`, with the domain id read as `domainCount() + 1` before sending.
+    function test_issuerManager_CreateDomainAndSetupSuiteInOneTransaction() public {
+        address acmeBoard = makeAddr("acmeBoard");
+        TREXAccessManager acmeManager = _newTREXAccessManager(acmeBoard);
+        Token acmeToken = _deployBare("acme", address(0), address(acmeManager));
+        uint32 nextDomainId = acmeManager.domainCount() + 1;
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(TREXAccessManager.createDomain, ("Acme Bonds"));
+        calls[1] = abi.encodeCall(TREXAccessManager.setupSuite, (nextDomainId, address(acmeToken)));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAssigned.selector, address(fundToken)));
-        this.commissionExternally(address(fundToken));
+        vm.prank(acmeBoard);
+        acmeManager.multicall(calls);
+
+        assertEq(acmeManager.domainName(nextDomainId), "Acme Bonds");
+        assertEq(acmeManager.domainOf(address(acmeToken)), nextDomainId);
+        assertEq(
+            acmeManager.getTargetFunctionRole(address(acmeToken), IERC3643.mint.selector),
+            RolesLib.forDomain(nextDomainId, RolesLib.Role.AGENT_MINTER)
+        );
     }
 
-    function commissionExternally(address token) external {
-        AccessManagerSetupLib.commissionSuite(domainManager, token);
+    function test_issuerManager_SetupSuiteRevertWhen_DomainDoesNotExist() public {
+        Token fundToken = _deployBare("fund-x", address(0), address(issuerManager));
+        uint32 missingDomain = 7;
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.DomainNotFound.selector, missingDomain));
+        issuerManager.setupSuite(missingDomain, address(fundToken));
     }
 
-    /// @dev The pure form, called on the manager as a plain `IAccessManager`.
-    function commissionPureFormExternally(address token, uint32 domainId) external {
-        AccessManagerSetupLib.commissionSuite(IAccessManager(address(domainManager)), token, domainId);
-    }
-
-    /// @dev The setup of the audit's scenario: two tokens of two domains, and Y deployed on X's storage.
-    struct TwoDomainsOneStorage {
-        Token tokenX;
-        Token tokenY;
-        IdentityRegistryStorage irs;
-        uint32 fundX;
-        uint32 fundY;
-    }
-
-    /// @dev Token X is commissioned into fund X and alice holds 100 of it. Token Y is deployed on X's storage
-    ///      and assigned to fund Y, but not commissioned: that is the step the tests then try.
-    function _twoDomainsOneStorage() private returns (TwoDomainsOneStorage memory s) {
-        s.tokenX = _deployBare("seize-x", address(0), address(domainManager));
-        s.irs = IdentityRegistryStorage(address(s.tokenX.identityRegistry().identityStorage()));
-        s.tokenY = _deployBare("seize-y", address(s.irs), address(domainManager));
-        s.fundX = domainManager.createDomain("Fund X");
-        s.fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(s.fundX, address(s.tokenX));
-        domainManager.assign(s.fundY, address(s.tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(s.tokenX));
-
-        _grantAllAgentRoles(domainManager, agentA, s.fundX);
-        vm.startPrank(agentA);
-        s.tokenX.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
-        s.tokenX.unpause();
-        s.tokenX.mint(alice, 100);
-        vm.stopPrank();
-    }
-
-    /// @dev Sets Y's suite up in fund Y by hand, table by table, which is what `commissionSuite` would do if it
-    ///      did not refuse X's storage. Then X's `IRS_BINDER` binds Y's registry to X's storage. This is the
-    ///      one way left to put a registry of another domain on a storage, and it takes the admin plus X's
-    ///      binder to do it.
-    function _setUpYByHandOnXsStorage(TwoDomainsOneStorage memory s) private {
-        address registryY = address(s.tokenY.identityRegistry());
-        // The two grants come first, as in `commissionSuite`: once the role admins are set, `AGENT` is handed
-        // out by `AGENT_ADMIN`, which the admin does not hold.
-        domainManager.grantRole(RolesLib.forDomain(s.fundY, RolesLib.Role.AGENT), address(s.tokenY), 0);
-        domainManager.grantRole(RolesLib.forDomain(s.fundY, RolesLib.Role.IRS_WRITER), registryY, 0);
-        AccessManagerSetupLib.setupTokenRoles(domainManager, address(s.tokenY), s.fundY);
-        AccessManagerSetupLib.setupTREXRegistryRoles(domainManager, registryY, s.fundY);
-        AccessManagerSetupLib.setupModularComplianceRoles(domainManager, address(s.tokenY.compliance()), s.fundY);
-        AccessManagerSetupLib.setupRoleAdmins(domainManager, s.fundY);
-
-        _grantStorageBinder(domainManager, s.fundX);
-        s.irs.bindIdentityRegistry(registryY);
-        assertTrue(s.irs.isIdentityRegistryBound(registryY));
-        assertEq(address(s.tokenY.identityRegistry().identityStorage()), address(s.irs));
-    }
-
-    function test_registry_ShareClassesOfOneFundShareOneTeam() public {
-        Token classA = _deployBare("class-a", address(0), address(domainManager));
+    /// @notice Two share classes of one fund share one storage and one team. The second registry is bound to
+    ///         the shared storage by a holder of `IRS_BINDER`; `setupSuite` does not bind.
+    function test_issuerManager_ShareClassesOfOneFundShareOneTeam() public {
+        Token classA = _deployBare("class-a", address(0), address(issuerManager));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(classA.identityRegistry().identityStorage()));
-        Token classB = _deployBare("class-b", address(irs), address(domainManager));
-        uint32 fund = domainManager.createDomain("Fund");
-        domainManager.assign(fund, address(classA));
-        domainManager.assign(fund, address(classB));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(classA));
-        _grantStorageBinder(domainManager, fund);
-        AccessManagerSetupLib.commissionSuite(domainManager, address(classB));
-        _grantAllAgentRoles(domainManager, agentA, fund);
+        Token classB = _deployBare("class-b", address(irs), address(issuerManager));
+        uint32 fund = issuerManager.createDomain("Fund");
+        _setupSuiteInto(issuerManager, classA, fund);
+        _setupSuiteInto(issuerManager, classB, fund);
+        _grantStorageBinder(issuerManager, fund);
+        irs.bindIdentityRegistry(address(classB.identityRegistry()));
+        _grantAllAgentRoles(issuerManager, agentA, fund);
 
         vm.startPrank(agentA);
         classA.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
@@ -437,265 +395,93 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         _assertCannotTouchStorage(agentA, irs);
     }
 
-    /// @notice A storage belongs to one domain. Commissioning a second domain's token onto it is refused, so
-    ///         no registry of another domain ever writes into it.
-    function test_registry_RevertWhen_StorageIsAlreadyInAnotherDomain() public {
-        Token tokenX = _deployBare("fund-x", address(0), address(domainManager));
+    /// @notice A storage reused by a second fund is refused: the second fund's registry would write into the
+    ///         first fund's records, and its agents could register and revoke the first fund's holders.
+    function test_issuerManager_RevertWhen_ReusedStorageIsSetUpInAnotherFund() public {
+        Token tokenX = _deployBare("fund-x", address(0), address(issuerManager));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        Token tokenY = _deployBare("fund-y", address(irs), address(domainManager));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        _grantStorageBinder(domainManager, fundX);
+        Token tokenY = _deployBare("fund-y", address(irs), address(issuerManager));
+        uint32 fundX = issuerManager.createDomain("Fund X");
+        uint32 fundY = issuerManager.createDomain("Fund Y");
+        _setupSuiteInto(issuerManager, tokenX, fundX);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
-        this.commissionExternally(address(tokenY));
+        issuerManager.setupSuite(fundY, address(tokenY));
 
-        // Nothing of Y's suite was set up, and Y's registry cannot write into X's storage.
-        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
-        assertFalse(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
-        (bool registryYWritesInX,) = domainManager.hasRole(
+        _grantStorageBinder(issuerManager, fundX);
+        irs.bindIdentityRegistry(address(tokenY.identityRegistry()));
+        (bool registryYWrites,) = issuerManager.hasRole(
             RolesLib.forDomain(fundX, RolesLib.Role.IRS_WRITER), address(tokenY.identityRegistry())
         );
-        assertFalse(registryYWritesInX);
-        (bool registryYWritesInY,) = domainManager.hasRole(
-            RolesLib.forDomain(fundY, RolesLib.Role.IRS_WRITER), address(tokenY.identityRegistry())
-        );
-        assertFalse(registryYWritesInY);
-    }
-
-    /// @notice The pure form reads the domain from the storage's own rows, so calling it on the manager with
-    ///         another domain is refused the same way: the storage's rows stay in X, and X's registry keeps
-    ///         writing. The caller holds X's `IRS_BINDER`, so the domain check is the only thing refusing.
-    function test_registry_RevertWhen_PureFormPointsAStorageAtAnotherDomain() public {
-        Token tokenX = _deployBare("pure-x", address(0), address(domainManager));
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        Token tokenY = _deployBare("pure-y", address(irs), address(domainManager));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        _grantStorageBinder(domainManager, fundX);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
-        this.commissionPureFormExternally(address(tokenY), fundY);
-
-        assertEq(
-            domainManager.getTargetFunctionRole(
-                address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
-            ),
-            RolesLib.forDomain(fundX, RolesLib.Role.IRS_WRITER)
-        );
-        _assertWritesOnlyInDomain(address(tokenX.identityRegistry()), fundX);
-    }
-
-    /// @notice A bare `assign` of the storage to another domain does not move it: its rows still say X, so
-    ///         commissioning Y's token onto it is refused even though the manager's record now says Y.
-    function test_registry_RevertWhen_StorageIsReassignedByHandToAnotherDomain() public {
-        Token tokenX = _deployBare("reassign-x", address(0), address(domainManager));
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        Token tokenY = _deployBare("reassign-y", address(irs), address(domainManager));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        _grantStorageBinder(domainManager, fundX);
-
-        domainManager.assign(fundY, address(irs));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundX));
-        this.commissionExternally(address(tokenY));
-
-        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
-        assertFalse(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
-    }
-
-    /// @notice The manager form also reads its own record of the storage's domain. A storage recorded in Y
-    ///         by a bare `assign`, with no row mapped yet, is refused for X's token: the record and the rows
-    ///         must agree, and while the rows are empty the record is all there is.
-    function test_registry_RevertWhen_StorageIsRecordedInAnotherDomainBeforeItsRowsAreMapped() public {
-        Token tokenX = _deployBare("record-x", address(0), address(domainManager));
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(irs));
-        assertEq(
-            domainManager.getTargetFunctionRole(
-                address(irs), IERC3643IdentityRegistryStorage.addIdentityToStorage.selector
-            ),
-            0,
-            "the storage's rows are still empty"
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(irs), fundY));
-        this.commissionExternally(address(tokenX));
-
-        assertEq(domainManager.getTargetFunctionRole(address(tokenX), IERC3643.mint.selector), 0);
-    }
-
-    /// @notice A registry belongs to one domain too, so two domains cannot share one. X's token moves to a
-    ///         registry on a fresh storage, which the storage check has nothing to say about, and Y's token
-    ///         adopts X's registry. Commissioning Y is refused on the registry's own rows: X's agents keep their
-    ///         registry and Y's agents never get it.
-    /// @dev A registry keeps its storage for life, so the registry on a fresh storage comes from a suite that is
-    ///      never commissioned. Its rows are mapped to X by hand, without its storage's, so that only the
-    ///      registry's row can refuse Y.
-    function test_registry_RevertWhen_TheRegistryIsSetUpInAnotherDomain() public {
-        Token tokenX = _deployBare("one-reg-x", address(0), address(domainManager));
-        Token tokenY = _deployBare("one-reg-y", address(0), address(domainManager));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        Token neverCommissioned = _deployBare("one-reg-fresh", address(0), address(domainManager));
-        ITREXRegistry registryX = ITREXRegistry(address(neverCommissioned.identityRegistry()));
-
-        // X's IDENTITY_MANAGER points X's token, which has no supply, at the registry on a never commissioned
-        // storage, the registry is mapped to X, then Y's token adopts X's registry. `IDENTITY_MANAGER` is handed
-        // out by `SUITE_ADMIN` once X is commissioned.
-        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.SUITE_ADMIN), address(this), 0);
-        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
-        tokenX.setIdentityRegistry(address(registryX));
-        AccessManagerSetupLib.setupTREXRegistryRoles(domainManager, address(registryX), fundX);
-        tokenY.setIdentityRegistry(address(registryX));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(registryX), fundX));
-        this.commissionExternally(address(tokenY));
-
-        // The registry's rows still belong to X, and nothing of Y's suite was set up.
-        assertEq(
-            domainManager.getTargetFunctionRole(address(registryX), IERC3643IdentityRegistry.registerIdentity.selector),
-            RolesLib.forDomain(fundX, RolesLib.Role.AGENT)
-        );
-        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
-
-        // Commissioning X again maps the fresh storage into X; it needs X's `AGENT_ADMIN` for the token's
-        // `AGENT` grant, which `_grantAllAgentRoles` gives this contract. X's agents write, Y's are refused.
-        _grantAllAgentRoles(domainManager, agentA, fundX);
-        _grantAllAgentRoles(domainManager, agentB, fundY);
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        vm.prank(agentA);
-        registryX.registerIdentity(alice, aliceIdentity, 0);
+        assertFalse(registryYWrites, "a bound registry of another fund cannot write");
+        _grantAllAgentRoles(issuerManager, agentB, fundY);
+        IERC3643IdentityRegistry registryY = tokenY.identityRegistry();
         vm.prank(agentB);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agentB));
-        registryX.registerIdentity(bob, bobIdentity, 0);
-        assertEq(address(registryX.identity(alice)), address(aliceIdentity));
+        registryY.registerIdentity(bob, bobIdentity, 0);
+        _assertCannotTouchStorage(agentB, irs);
     }
 
-    /// @notice A compliance belongs to one domain too. X's OWNER unbinds X's compliance (X has no supply),
-    ///         Y's token adopts it, and commissioning Y is refused on the compliance's own rows.
-    /// @dev A compliance only accepts a token its manager governs, so Y's token functions are mapped to fund Y
-    ///      first, as an admin does before handing a token to its team. Y's `IDENTITY_MANAGER` then points
-    ///      the token at X's compliance.
-    function test_registry_RevertWhen_TheComplianceIsSetUpInAnotherDomain() public {
-        Token tokenX = _deployBare("one-mc-x", address(0), address(domainManager));
-        Token tokenY = _deployBare("one-mc-y", address(0), address(domainManager));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        IModularCompliance complianceX = IModularCompliance(address(tokenX.compliance()));
+    // ============================================================
+    // One domain per storage, registry and compliance
+    // ============================================================
 
-        domainManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.OWNER), address(this), 0);
-        complianceX.unbindToken(address(tokenX));
-        AccessManagerSetupLib.setupTokenRoles(domainManager, address(tokenY), fundY);
-        domainManager.grantRole(RolesLib.forDomain(fundY, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
-        tokenY.setCompliance(address(complianceX));
-        assertEq(complianceX.getTokenBound(), address(tokenY));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(complianceX), fundX));
-        this.commissionExternally(address(tokenY));
-
-        // The compliance's rows still belong to X, and nothing else of Y's suite was set up: Y's registry has
-        // no row and Y's token is not an agent of fund Y.
-        assertEq(
-            domainManager.getTargetFunctionRole(address(complianceX), IModularCompliance.addModule.selector),
-            RolesLib.forDomain(fundX, RolesLib.Role.OWNER)
-        );
-        assertEq(
-            domainManager.getTargetFunctionRole(
-                address(tokenY.identityRegistry()), IERC3643IdentityRegistry.registerIdentity.selector
-            ),
-            0
-        );
-        (bool tokenYIsAgent,) = domainManager.hasRole(RolesLib.forDomain(fundY, RolesLib.Role.AGENT), address(tokenY));
-        assertFalse(tokenYIsAgent);
+    /// @dev The setup of the audit's scenario: two tokens of two domains, and Y deployed on X's storage.
+    struct TwoDomainsOneStorage {
+        Token tokenX;
+        Token tokenY;
+        IdentityRegistryStorage irs;
+        uint32 fundX;
+        uint32 fundY;
     }
 
-    /// @notice Two tokens of one domain may share one registry: its rows are already in that domain, so the
-    ///         second commission is let through and the domain's agents reach both tokens through it.
-    function test_registry_TokensOfOneDomainShareOneRegistry() public {
-        Token tokenX = _deployBare("share-reg-x", address(0), address(domainManager));
-        Token tokenY = _deployBare("share-reg-y", address(0), address(domainManager));
-        uint32 fund = domainManager.createDomain("Fund");
-        domainManager.assign(fund, address(tokenX));
-        domainManager.assign(fund, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        IERC3643IdentityRegistry registryX = tokenX.identityRegistry();
+    /// @dev Token X is set up in fund X and alice holds 100 of it. Token Y is deployed on X's storage but not
+    ///      set up: that is the step the tests then try.
+    function _twoDomainsOneStorage() private returns (TwoDomainsOneStorage memory s) {
+        s.tokenX = _deployBare("seize-x", address(0), address(issuerManager));
+        s.irs = IdentityRegistryStorage(address(s.tokenX.identityRegistry().identityStorage()));
+        s.tokenY = _deployBare("seize-y", address(s.irs), address(issuerManager));
+        s.fundX = issuerManager.createDomain("Fund X");
+        s.fundY = issuerManager.createDomain("Fund Y");
+        _setupSuiteInto(issuerManager, s.tokenX, s.fundX);
 
-        tokenY.setIdentityRegistry(address(registryX));
-        domainManager.grantRole(RolesLib.forDomain(fund, RolesLib.Role.AGENT_ADMIN), address(this), 0);
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenY));
-
-        assertEq(
-            domainManager.getTargetFunctionRole(address(registryX), IERC3643IdentityRegistry.registerIdentity.selector),
-            RolesLib.forDomain(fund, RolesLib.Role.AGENT)
-        );
-        _grantAllAgentRoles(domainManager, agentA, fund);
+        _grantAllAgentRoles(issuerManager, agentA, s.fundX);
         vm.startPrank(agentA);
-        registryX.registerIdentity(alice, aliceIdentity, 0);
-        tokenX.unpause();
-        tokenY.unpause();
-        tokenX.mint(alice, 1);
-        tokenY.mint(alice, 2);
+        s.tokenX.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
+        s.tokenX.unpause();
+        s.tokenX.mint(alice, 100);
         vm.stopPrank();
-        assertEq(tokenX.balanceOf(alice), 1);
-        assertEq(tokenY.balanceOf(alice), 2);
     }
 
-    /// @notice A registry of another domain bound to the storage by hand writes nothing: it holds `IRS_WRITER`
-    ///         in its own domain, and the storage's rows ask for the storage's domain.
-    function test_registry_RegistryOfAnotherDomainBoundByHandWritesNothing() public {
-        TwoDomainsOneStorage memory s = _twoDomainsOneStorage();
-        _setUpYByHandOnXsStorage(s);
-        IERC3643IdentityRegistry registryY = s.tokenY.identityRegistry();
-        bytes memory registryYRefused =
-            abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(registryY));
-        _grantAllAgentRoles(domainManager, agentB, s.fundY);
+    /// @dev Maps Y's registry into fund Y by hand, which is what `setupSuite` would do if it did not refuse X's
+    ///      storage, and has X's `IRS_BINDER` bind it to X's storage. This is the one way left to put a registry
+    ///      of another domain on a storage, and it takes the admin plus X's binder to do it.
+    function _setUpYByHandOnXsStorage(TwoDomainsOneStorage memory s) private {
+        address registryY = address(s.tokenY.identityRegistry());
+        bytes4[] memory agentFunctions = new bytes4[](3);
+        agentFunctions[0] = IERC3643IdentityRegistry.registerIdentity.selector;
+        agentFunctions[1] = IERC3643IdentityRegistry.updateIdentity.selector;
+        agentFunctions[2] = IERC3643IdentityRegistry.deleteIdentity.selector;
+        issuerManager.setTargetFunctionRole(registryY, agentFunctions, RolesLib.forDomain(s.fundY, RolesLib.Role.AGENT));
+        issuerManager.grantRole(RolesLib.forDomain(s.fundY, RolesLib.Role.IRS_WRITER), registryY, 0);
 
-        vm.startPrank(agentB);
-        vm.expectRevert(registryYRefused);
-        registryY.registerIdentity(charlie, charlieIdentity, 0);
-        vm.expectRevert(registryYRefused);
-        registryY.updateIdentity(alice, charlieIdentity);
-        vm.expectRevert(registryYRefused);
-        registryY.deleteIdentity(alice);
-        vm.stopPrank();
-
-        ITREXRegistry registryX = ITREXRegistry(address(s.tokenX.identityRegistry()));
-        assertEq(address(s.irs.storedIdentity(alice)), address(aliceIdentity));
-        assertFalse(registryX.isLocallyRegistered(charlie), "nothing was written for charlie");
-        assertEq(address(registryX.identity(alice)), address(aliceIdentity));
+        _grantStorageBinder(issuerManager, s.fundX);
+        s.irs.bindIdentityRegistry(registryY);
+        assertTrue(s.irs.isIdentityRegistryBound(registryY));
+        assertEq(address(s.tokenY.identityRegistry().identityStorage()), address(s.irs));
     }
 
     /// @notice The audit's scenario, step by step. An agent of Y wants X's storage, where alice, a holder of
-    ///         X, is recorded. Step 1 is the way the audit found: commission Y's suite onto X's storage, which
-    ///         is now refused. Steps 2 to 4 are what is left once Y's registry is put on that storage by hand:
+    ///         X, is recorded. Step 1 is the way the audit found: set Y's suite up onto X's storage, which is
+    ///         now refused. Steps 2 to 4 are what is left once Y's registry is put on that storage by hand:
     ///         register a wallet of theirs under alice's identity, rebind alice to an identity they control,
     ///         move her balance with `identityTransfer`. Every step fails and alice keeps her 100.
     function test_registry_AgentOfAnotherDomainCannotSeizeAHolder() public {
         TwoDomainsOneStorage memory s = _twoDomainsOneStorage();
-        _grantStorageBinder(domainManager, s.fundX);
 
-        // 1. Commission Y onto X's storage. Refused: X's storage stays X's, Y's registry gets no writer role.
+        // 1. Set Y up onto X's storage. Refused: X's storage stays X's, Y's registry gets no writer role.
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(s.irs), s.fundX));
-        this.commissionExternally(address(s.tokenY));
+        issuerManager.setupSuite(s.fundY, address(s.tokenY));
         assertFalse(s.irs.isIdentityRegistryBound(address(s.tokenY.identityRegistry())));
         _assertWritesOnlyInDomain(address(s.tokenX.identityRegistry()), s.fundX);
 
@@ -703,7 +489,7 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         IERC3643IdentityRegistry registryY = s.tokenY.identityRegistry();
         bytes memory registryYRefused =
             abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(registryY));
-        _grantAllAgentRoles(domainManager, agentB, s.fundY);
+        _grantAllAgentRoles(issuerManager, agentB, s.fundY);
 
         // 2. Register a recipient the agent controls under alice's identity, so it passes X's checks.
         vm.prank(agentB);
@@ -725,25 +511,156 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         assertEq(address(s.irs.storedIdentity(alice)), address(aliceIdentity));
     }
 
+    /// @notice A registry of another domain bound to the storage by hand writes nothing: it holds `IRS_WRITER`
+    ///         in its own domain, and the storage's rows ask for the storage's domain.
+    function test_registry_RegistryOfAnotherDomainBoundByHandWritesNothing() public {
+        TwoDomainsOneStorage memory s = _twoDomainsOneStorage();
+        _setUpYByHandOnXsStorage(s);
+        IERC3643IdentityRegistry registryY = s.tokenY.identityRegistry();
+        bytes memory registryYRefused =
+            abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(registryY));
+        _grantAllAgentRoles(issuerManager, agentB, s.fundY);
+
+        vm.startPrank(agentB);
+        vm.expectRevert(registryYRefused);
+        registryY.registerIdentity(charlie, charlieIdentity, 0);
+        vm.expectRevert(registryYRefused);
+        registryY.updateIdentity(alice, charlieIdentity);
+        vm.expectRevert(registryYRefused);
+        registryY.deleteIdentity(alice);
+        vm.stopPrank();
+
+        ITREXRegistry registryX = ITREXRegistry(address(s.tokenX.identityRegistry()));
+        assertEq(address(s.irs.storedIdentity(alice)), address(aliceIdentity));
+        assertFalse(registryX.isLocallyRegistered(charlie), "nothing was written for charlie");
+        assertEq(address(registryX.identity(alice)), address(aliceIdentity));
+    }
+
+    /// @notice A registry belongs to one domain too, so two domains cannot share one. Y's token adopts X's
+    ///         registry, and setting Y's suite up is refused on the registry: X's agents keep their registry
+    ///         and Y's agents never get it.
+    function test_registry_RevertWhen_TheRegistryIsSetUpInAnotherDomain() public {
+        Token tokenX = _deployBare("one-reg-x", address(0), address(issuerManager));
+        Token tokenY = _deployBare("one-reg-y", address(0), address(issuerManager));
+        uint32 fundX = issuerManager.createDomain("Fund X");
+        uint32 fundY = issuerManager.createDomain("Fund Y");
+        _setupSuiteInto(issuerManager, tokenX, fundX);
+        ITREXRegistry registryX = ITREXRegistry(address(tokenX.identityRegistry()));
+
+        // Y's token is not set up yet, so its setters still answer to the manager's admin.
+        tokenY.setIdentityRegistry(address(registryX));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(registryX), fundX));
+        issuerManager.setupSuite(fundY, address(tokenY));
+
+        // The registry's rows still belong to X, and nothing of Y's suite was set up.
+        assertEq(
+            issuerManager.getTargetFunctionRole(address(registryX), IERC3643IdentityRegistry.registerIdentity.selector),
+            RolesLib.forDomain(fundX, RolesLib.Role.AGENT)
+        );
+        assertEq(issuerManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
+        assertEq(issuerManager.domainOf(address(tokenY)), 0);
+
+        // X's agents write through the registry, Y's are refused.
+        _grantAllAgentRoles(issuerManager, agentA, fundX);
+        _grantAllAgentRoles(issuerManager, agentB, fundY);
+        vm.prank(agentA);
+        registryX.registerIdentity(alice, aliceIdentity, 0);
+        vm.prank(agentB);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agentB));
+        registryX.registerIdentity(bob, bobIdentity, 0);
+        assertEq(address(registryX.identity(alice)), address(aliceIdentity));
+    }
+
+    /// @notice A compliance belongs to one domain too. X's OWNER unbinds X's compliance (X has no supply),
+    ///         Y's token adopts it, and setting Y's suite up is refused on the compliance.
+    /// @dev A compliance only accepts a token its manager governs, so Y's `setCompliance` is given a role of
+    ///      fund Y first, as an admin does before handing a token to its team. Y's `IDENTITY_MANAGER` then
+    ///      points the token at X's compliance.
+    function test_registry_RevertWhen_TheComplianceIsSetUpInAnotherDomain() public {
+        Token tokenX = _deployBare("one-mc-x", address(0), address(issuerManager));
+        Token tokenY = _deployBare("one-mc-y", address(0), address(issuerManager));
+        uint32 fundX = issuerManager.createDomain("Fund X");
+        uint32 fundY = issuerManager.createDomain("Fund Y");
+        _setupSuiteInto(issuerManager, tokenX, fundX);
+        IModularCompliance complianceX = IModularCompliance(address(tokenX.compliance()));
+
+        issuerManager.grantRole(RolesLib.forDomain(fundX, RolesLib.Role.OWNER), address(this), 0);
+        complianceX.unbindToken(address(tokenX));
+        bytes4[] memory setCompliance = new bytes4[](1);
+        setCompliance[0] = IERC3643.setCompliance.selector;
+        issuerManager.setTargetFunctionRole(
+            address(tokenY), setCompliance, RolesLib.forDomain(fundY, RolesLib.Role.IDENTITY_MANAGER)
+        );
+        issuerManager.grantRole(RolesLib.forDomain(fundY, RolesLib.Role.SUITE_ADMIN), address(this), 0);
+        issuerManager.grantRole(RolesLib.forDomain(fundY, RolesLib.Role.IDENTITY_MANAGER), address(this), 0);
+        tokenY.setCompliance(address(complianceX));
+        assertEq(complianceX.getTokenBound(), address(tokenY));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SuiteAlreadySetUp.selector, address(complianceX), fundX));
+        issuerManager.setupSuite(fundY, address(tokenY));
+
+        // The compliance's rows still belong to X, and nothing else of Y's suite was set up: Y's registry has
+        // no row and Y's token is not an agent of fund Y.
+        assertEq(
+            issuerManager.getTargetFunctionRole(address(complianceX), IModularCompliance.addModule.selector),
+            RolesLib.forDomain(fundX, RolesLib.Role.OWNER)
+        );
+        assertEq(
+            issuerManager.getTargetFunctionRole(
+                address(tokenY.identityRegistry()), IERC3643IdentityRegistry.registerIdentity.selector
+            ),
+            0
+        );
+        (bool tokenYIsAgent,) = issuerManager.hasRole(RolesLib.forDomain(fundY, RolesLib.Role.AGENT), address(tokenY));
+        assertFalse(tokenYIsAgent);
+    }
+
+    /// @notice Two tokens of one domain may share one registry: it is already in that domain, so the second
+    ///         suite is let through and the domain's agents reach both tokens through it.
+    function test_registry_TokensOfOneDomainShareOneRegistry() public {
+        Token tokenX = _deployBare("share-reg-x", address(0), address(issuerManager));
+        Token tokenY = _deployBare("share-reg-y", address(0), address(issuerManager));
+        uint32 fund = issuerManager.createDomain("Fund");
+        _setupSuiteInto(issuerManager, tokenX, fund);
+        IERC3643IdentityRegistry registryX = tokenX.identityRegistry();
+
+        tokenY.setIdentityRegistry(address(registryX));
+        _setupSuiteInto(issuerManager, tokenY, fund);
+
+        assertEq(
+            issuerManager.getTargetFunctionRole(address(registryX), IERC3643IdentityRegistry.registerIdentity.selector),
+            RolesLib.forDomain(fund, RolesLib.Role.AGENT)
+        );
+        _grantAllAgentRoles(issuerManager, agentA, fund);
+        vm.startPrank(agentA);
+        registryX.registerIdentity(alice, aliceIdentity, 0);
+        tokenX.unpause();
+        tokenY.unpause();
+        tokenX.mint(alice, 1);
+        tokenY.mint(alice, 2);
+        vm.stopPrank();
+        assertEq(tokenX.balanceOf(alice), 1);
+        assertEq(tokenY.balanceOf(alice), 2);
+    }
+
     /// @notice Two tokens of one domain, each with its own registry, still share one storage: both registries
     ///         write through that domain's `IRS_WRITER`, and the domain's agents reach both.
     function test_registry_TokensOfOneDomainShareOneStorage() public {
-        Token tokenX = _deployBare("class-x", address(0), address(domainManager));
+        Token tokenX = _deployBare("class-x", address(0), address(issuerManager));
         IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        Token tokenY = _deployBare("class-y", address(irs), address(domainManager));
-        uint32 fund = domainManager.createDomain("Fund");
-        domainManager.assign(fund, address(tokenX));
-        domainManager.assign(fund, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        _grantStorageBinder(domainManager, fund);
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenY));
+        Token tokenY = _deployBare("class-y", address(irs), address(issuerManager));
+        uint32 fund = issuerManager.createDomain("Fund");
+        _setupSuiteInto(issuerManager, tokenX, fund);
+        _setupSuiteInto(issuerManager, tokenY, fund);
+        _grantStorageBinder(issuerManager, fund);
+        irs.bindIdentityRegistry(address(tokenY.identityRegistry()));
 
-        assertEq(domainManager.domainOf(address(irs)), fund);
-        assertTrue(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
+        assertEq(issuerManager.domainOf(address(irs)), fund);
         _assertWritesOnlyInDomain(address(tokenX.identityRegistry()), fund);
         _assertWritesOnlyInDomain(address(tokenY.identityRegistry()), fund);
 
-        _grantAllAgentRoles(domainManager, agentA, fund);
+        _grantAllAgentRoles(issuerManager, agentA, fund);
         vm.startPrank(agentA);
         tokenX.identityRegistry().registerIdentity(alice, aliceIdentity, 0);
         tokenY.identityRegistry().registerIdentity(bob, bobIdentity, 0);
@@ -753,40 +670,25 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         _assertCannotTouchStorage(agentA, irs);
     }
 
-    /// @notice Whatever domain a suite is commissioned into, its registry holds `IRS_WRITER` there and nowhere
-    ///         else.
+    /// @notice Whatever domain a suite is set up in, its registry holds `IRS_WRITER` there and nowhere else.
     function test_registry_RegistryWritesThroughItsOwnDomainOnly() public {
-        Token tokenX = _deployBare("own-x", address(0), address(domainManager));
-        Token tokenY = _deployBare("own-y", address(0), address(domainManager));
-        uint32 fundX = domainManager.createDomain("Fund X");
-        uint32 fundY = domainManager.createDomain("Fund Y");
-        domainManager.assign(fundX, address(tokenX));
-        domainManager.assign(fundY, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenY));
+        Token tokenX = _deployBare("own-x", address(0), address(issuerManager));
+        Token tokenY = _deployBare("own-y", address(0), address(issuerManager));
+        uint32 fundX = issuerManager.createDomain("Fund X");
+        uint32 fundY = issuerManager.createDomain("Fund Y");
+        _setupSuiteInto(issuerManager, tokenX, fundX);
+        _setupSuiteInto(issuerManager, tokenY, fundY);
 
         _assertWritesOnlyInDomain(address(tokenX.identityRegistry()), fundX);
         _assertWritesOnlyInDomain(address(tokenY.identityRegistry()), fundY);
     }
 
-    function test_registry_BindsAReusedStorageAndRevertsWhenTheCallerCannotBind() public {
-        Token tokenX = _deployBare("bind-x", address(0), address(domainManager));
-        IdentityRegistryStorage irs = IdentityRegistryStorage(address(tokenX.identityRegistry().identityStorage()));
-        Token tokenY = _deployBare("bind-y", address(irs), address(domainManager));
-        uint32 fund = domainManager.createDomain("Fund");
-        domainManager.assign(fund, address(tokenX));
-        domainManager.assign(fund, address(tokenY));
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenX));
-        domainManager.grantRole(RolesLib.forDomain(fund, RolesLib.Role.AGENT_ADMIN), address(this), 0);
-        assertFalse(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
+    // ============================================================
+    // Helpers
+    // ============================================================
 
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
-        this.commissionExternally(address(tokenY));
-        assertEq(domainManager.getTargetFunctionRole(address(tokenY), IERC3643.mint.selector), 0);
-
-        domainManager.grantRole(RolesLib.forDomain(fund, RolesLib.Role.IRS_BINDER), address(this), 0);
-        AccessManagerSetupLib.commissionSuite(domainManager, address(tokenY));
-        assertTrue(irs.isIdentityRegistryBound(address(tokenY.identityRegistry())));
+    function _setupSuiteInto(TREXAccessManager manager, Token target, uint32 domainId) private {
+        manager.setupSuite(domainId, address(target));
     }
 
     function _agentRoles() private pure returns (RolesLib.Role[8] memory) {
@@ -848,20 +750,11 @@ contract SuiteRoleDomainTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
-    function _commission(Token target, uint32 domainId) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), domainId);
-    }
-
-    function _commissionIntoTeam(Token target) private {
-        AccessManagerSetupLib.commissionSuite(accessManager, address(target), TEAM);
-        accessManager.grantRole(RolesLib.forDomain(TEAM, RolesLib.Role.AGENT_ADMIN), address(this), 0);
-    }
-
-    /// @dev `identityRegistry` holds `IRS_WRITER` in `domainId` and in no other domain the test created.
+    /// @dev `identityRegistry` holds `IRS_WRITER` in `domainId` and in no other domain of the issuer's manager.
     function _assertWritesOnlyInDomain(address identityRegistry, uint32 domainId) private view {
-        for (uint32 candidate = 1; candidate <= domainManager.domainCount(); candidate++) {
+        for (uint32 candidate = 1; candidate <= issuerManager.domainCount(); candidate++) {
             (bool writes,) =
-                domainManager.hasRole(RolesLib.forDomain(candidate, RolesLib.Role.IRS_WRITER), identityRegistry);
+                issuerManager.hasRole(RolesLib.forDomain(candidate, RolesLib.Role.IRS_WRITER), identityRegistry);
             assertEq(writes, candidate == domainId, "IRS_WRITER must land in the suite's own domain only");
         }
     }

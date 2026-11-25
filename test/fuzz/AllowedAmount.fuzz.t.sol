@@ -44,7 +44,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
+import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -77,12 +77,10 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         reversed = TransferValidationHarness(
             BeaconProxyDeployer.newProxy(
                 mcBeacon,
-                abi.encodeCall(
-                    ModularCompliance.init, (token, address(accessManager), new address[](0), new bytes[](0))
-                )
+                abi.encodeCall(ModularCompliance.init, (token, address(suiteManager), new address[](0), new bytes[](0)))
             )
         );
-        AccessManagerSetupLib.setupModularComplianceRoles(accessManager, address(reversed), 1);
+        _setupComplianceRoles(address(reversed));
 
         a = RuleOnlyModule(
             address(new ModuleProxy(address(new RuleOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
@@ -103,6 +101,7 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
+        vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", from), abi.encode(aliceIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", to), abi.encode(bobIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", to), abi.encode(true));

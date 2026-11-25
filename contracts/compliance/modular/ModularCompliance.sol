@@ -90,8 +90,8 @@ import { IModule } from "./modules/IModule.sol";
 /// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
-/// `RULE` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
-/// every `TRACKER` module what happened. A mint and a burn are the same movement with one side missing, so the
+/// `TRANSFER_CHECK` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
+/// every `AFTER` module what happened. A mint and a burn are the same movement with one side missing, so the
 /// three base hooks differ only in which side they fill in. A module is kept in one list per type it named at
 /// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
 contract ModularCompliance is
@@ -181,7 +181,7 @@ contract ModularCompliance is
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
         onlyBoundToken
-        returns (bool haltToken)
+        returns (ISettlementHandler.Verdict verdict)
     {
         emit EventsLib.SettlementNotified(
             originChainKey, notification.validationId, notification.from, notification.to, notification.amount
@@ -329,7 +329,7 @@ contract ModularCompliance is
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
 
-    /// @dev Rule evaluation: the amount must be at most the smallest amount any `RULE` module allows.
+    /// @dev Rule evaluation: the amount must be at most the smallest amount any `TRANSFER_CHECK` module allows.
     ///  Nothing is resolved when no rule is bound.
     ///
     ///  A sender that resolves to no identity is refused outright while a rule is bound: it would read as a mint
@@ -337,13 +337,13 @@ contract ModularCompliance is
     ///  registry's storage or unbinds a registry from it. The recipient needs no such guard, since the token asks
     ///  `isVerified` first, and that requires an active identity even with the eligibility checks disabled.
     function _canTransfer(address from, address to, uint256 value) internal view override returns (bool) {
-        if (_moduleSet().byType[IModule.ModuleType.RULE].length() == 0) return true;
+        if (_moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK].length() == 0) return true;
         IModule.TransferContext memory ctx = _buildNativeContext(from, to, value);
         if (from != address(0) && ctx.fromIdentity == address(0)) return false;
-        return value <= _minAllowedAmount(ctx);
+        return value <= _callCheckTransfer(ctx);
     }
 
-    /// @dev A transfer: the position follows the tokens, then every `TRACKER` module is told.
+    /// @dev A transfer: the position follows the tokens, then every `AFTER` module is told.
     function _transferred(address from, address to, uint256 value) internal override {
         _applyMovement(from, to, value, MovementKindLib.TRANSFER);
     }
@@ -359,13 +359,13 @@ contract ModularCompliance is
     }
 
     /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
-    ///  and no module is told.
+    ///  and no module is told. The recall it precedes is reported by {agentTransferred} once the token minted.
     function syncOwner(address wallet) external onlyBoundToken {
         _currentOwner(wallet, address(_boundRegistry().identity(wallet)), 0);
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced, recovery and delegation paths so that the trackers learn what moved the tokens.
+    ///  the token's forced, recovery, delegation and recall paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         _applyMovement(from, to, amount, kind);
@@ -383,7 +383,8 @@ contract ModularCompliance is
     ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
     ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
     ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
-    ///  the full adjustment.
+    ///  the full adjustment. A recall names the native wallet on both sides too, after its mint: `syncOwner`
+    ///  settled that wallet's owner before the mint, so no owner is left to follow here.
     ///
     ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
     ///  is not taken for it.
@@ -450,14 +451,14 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc TransferValidation
-    /// @dev The smallest answer of the `RULE` modules. `allowedAmount` is a view on the interface, so each
+    /// @dev The smallest answer of the `TRANSFER_CHECK` modules. `checkTransfer` is a view on the interface, so each
     ///  call is a `staticcall` and a module that writes there reverts.
-    function _minAllowedAmount(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
+    function _callCheckTransfer(IModule.TransferContext memory ctx) internal view override returns (uint256 allowed) {
         allowed = type(uint256).max;
-        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.RULE];
+        EnumerableSet.AddressSet storage rules = _moduleSet().byType[IModule.ModuleType.TRANSFER_CHECK];
         uint256 length = rules.length();
         for (uint256 i = 0; i < length; i++) {
-            uint256 answer = IModule(rules.at(i)).allowedAmount(ctx);
+            uint256 answer = IModule(rules.at(i)).checkTransfer(ctx);
             if (answer < allowed) allowed = answer;
         }
     }
@@ -467,24 +468,18 @@ contract ModularCompliance is
         EnumerableSet.AddressSet storage spenderRules = _moduleSet().byType[IModule.ModuleType.SPENDER];
         uint256 length = spenderRules.length();
         for (uint256 i = 0; i < length; i++) {
-            if (!IModule(spenderRules.at(i)).moduleCheckSpender(ctx)) return false;
+            if (!IModule(spenderRules.at(i)).checkSpender(ctx)) return false;
         }
         return true;
     }
 
     /// @inheritdoc TransferValidation
     function _callAfterTransfer(IModule.TransferContext memory ctx) internal override {
-        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.TRACKER];
+        EnumerableSet.AddressSet storage trackers = _moduleSet().byType[IModule.ModuleType.AFTER];
         uint256 length = trackers.length();
         for (uint256 i = 0; i < length; i++) {
             IModule(trackers.at(i)).afterTransfer(ctx);
         }
-    }
-
-    /// @inheritdoc TransferValidation
-    /// @dev The token is the wire's only author: it pins the route per leg and refuses a closed chain.
-    function _dispatchLeg(bytes32 chainKey, uint256 validationId, bytes memory body) internal override {
-        IToken(_getTokenBound()).dispatchComplianceValidation(chainKey, validationId, body);
     }
 
     /// @inheritdoc TransferValidation

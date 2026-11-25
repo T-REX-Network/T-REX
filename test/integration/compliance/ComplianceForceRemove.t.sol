@@ -43,6 +43,7 @@ import { Vm } from "@forge-std/Vm.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { ERC1967Utils } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
@@ -151,7 +152,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.transfer(bob, 100);
 
-        _forceRemove(hostage, IModule.ModuleType.RULE);
+        _forceRemove(hostage, IModule.ModuleType.TRANSFER_CHECK);
 
         vm.prank(alice);
         token.transfer(bob, 100);
@@ -173,7 +174,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         vm.expectRevert(RevertEverywhereModule.ModuleHostage.selector);
         token.burn(alice, 10);
 
-        _forceRemove(hostage, IModule.ModuleType.TRACKER);
+        _forceRemove(hostage, IModule.ModuleType.AFTER);
 
         vm.prank(alice);
         token.transfer(bob, 100);
@@ -208,7 +209,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
         vm.prank(deployer);
         mc.forceRemoveModule(hostage);
 
-        address[] memory trackers = mc.getModulesByType(IModule.ModuleType.TRACKER);
+        address[] memory trackers = mc.getModulesByType(IModule.ModuleType.AFTER);
         assertEq(trackers.length, 1);
         assertEq(trackers[0], healthy);
         assertEq(mc.getModules().length, 1);
@@ -318,7 +319,9 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
     function _bindHostage(address implementation) private returns (address module) {
         module = _deploy(implementation);
         _bind(module);
-        UUPSUpgradeable(module).upgradeToAndCall(revertEverywhere, "");
+        // A hostile module owner is not held to the base contract's upgrade rules, so the code is swapped under
+        // the proxy directly.
+        vm.store(module, ERC1967Utils.IMPLEMENTATION_SLOT, bytes32(uint256(uint160(revertEverywhere))));
     }
 
     function _assertTokenOperationsWork() private {
@@ -342,7 +345,7 @@ contract ComplianceForceRemoveTest is TREXSuiteTest {
 
     function _assertNoRouting(address module) private view {
         IModule.ModuleType[3] memory types =
-            [IModule.ModuleType.RULE, IModule.ModuleType.SPENDER, IModule.ModuleType.TRACKER];
+            [IModule.ModuleType.TRANSFER_CHECK, IModule.ModuleType.SPENDER, IModule.ModuleType.AFTER];
         for (uint256 i = 0; i < types.length; i++) {
             address[] memory routed = mc.getModulesByType(types[i]);
             for (uint256 j = 0; j < routed.length; j++) {
