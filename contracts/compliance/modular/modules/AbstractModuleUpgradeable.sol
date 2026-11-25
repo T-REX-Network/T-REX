@@ -82,8 +82,7 @@ import { IModule } from "./IModule.sol";
  * type and forgets to override its function therefore lets everything through rather than reverting, which is
  * why {moduleTypes} and the overrides are reviewed together.
  *
- * What a module names is read at binding. An upgrade that changes it takes effect once each bound compliance
- * calls `resyncModuleTypes`.
+ * What a module names is read at binding, and an upgrade may not change it: see {upgradeToAndCall}.
  */
 abstract contract AbstractModuleUpgradeable is
     IModule,
@@ -162,24 +161,24 @@ abstract contract AbstractModuleUpgradeable is
 
     /**
      *  @dev See {IModule-afterTransfer}.
-     *  Default no-op: a module overrides it only when it names `TRACKER`.
+     *  Default no-op: a module overrides it only when it names `AFTER`.
      */
     // solhint-disable-next-line no-empty-blocks
     function afterTransfer(TransferContext calldata) external virtual onlyComplianceCall { }
 
     /**
-     *  @dev See {IModule-allowedAmount}.
-     *  Default no limit: a module overrides it only when it names `RULE`.
+     *  @dev See {IModule-checkTransfer}.
+     *  Default no limit: a module overrides it only when it names `TRANSFER_CHECK`.
      */
-    function allowedAmount(TransferContext calldata) external view virtual returns (uint256) {
+    function checkTransfer(TransferContext calldata) external view virtual returns (uint256) {
         return type(uint256).max;
     }
 
     /**
-     *  @dev See {IModule-moduleCheckSpender}.
+     *  @dev See {IModule-checkSpender}.
      *  Default allowed: a module overrides it only when it names `SPENDER`.
      */
-    function moduleCheckSpender(TransferContext calldata) external view virtual returns (bool) {
+    function checkSpender(TransferContext calldata) external view virtual returns (bool) {
         return true;
     }
 
@@ -199,6 +198,28 @@ abstract contract AbstractModuleUpgradeable is
     function getNonce(address _compliance) public view returns (uint256) {
         AbstractModuleStorage storage s = _getAbstractModuleStorage();
         return s.nonces[_compliance];
+    }
+
+    /**
+     *  @dev Refuses an upgrade that would change what the module names. Every bound compliance read the types
+     *  once, at binding, and calls the module by them, so new types would be silently ignored by each of
+     *  those compliances. A module that needs other types is a new module: deploy it and bind it in place of
+     *  this one.
+     *  The list is compared before and after the upgrade, so the caller is authorized first. The new code
+     *  must name the same types in the same order.
+     *  The guard runs in this code only: a new implementation that drops this override leaves later upgrades
+     *  unchecked, and each bound compliance's owner repairs those with `resyncModuleTypes`.
+     */
+    function upgradeToAndCall(address newImplementation, bytes memory data) public payable virtual override {
+        // The second read must go through `this`: this frame keeps executing the old implementation's bytecode
+        // after the upgrade, so an internal call would ask the old code again and always match. Only an
+        // external call re-enters the proxy and reaches the new code. The first read goes the same way so both
+        // sides are encoded identically.
+        bytes memory typesBefore = abi.encode(this.moduleTypes());
+
+        super.upgradeToAndCall(newImplementation, data);
+
+        require(keccak256(abi.encode(this.moduleTypes())) == keccak256(typesBefore), ErrorsLib.ModuleTypesChanged());
     }
 
     /**

@@ -62,6 +62,7 @@ pragma solidity 0.8.30;
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
+import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
@@ -80,7 +81,8 @@ import { TokenLedgerLib } from "./TokenLedgerLib.sol";
  * registry, the compliance and the gateway see the token as their caller, and every event is the token's. The
  * registry and the compliance are read from the token's own getters, so the token passes neither. The native
  * half of each movement stays in the token, since it is the ERC-20 balance this library cannot reach: the token
- * burns before {delegateOut} and mints after {consumeBurnProof}; everything bridged happens here.
+ * burns before {delegateOut} and mints after {consumeBurnProof}, then reports the recall to the compliance;
+ * everything bridged happens here.
  *
  * Both instructions are retryable, never written off: {resend} sends an instruction again byte for byte, under
  * the same id, to the same peer, and the Lite acts on each id once. Nothing here checks a caller or the pause:
@@ -96,9 +98,10 @@ library TokenDelegationLib {
 
     /// @dev The rest of a delegation-out, once the token has burned `amount` of `holder`'s native balance: the burn
     ///  stayed inside the free balance, the bridged position of `toWallet` is credited under a fresh delegation id
-    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the compliance is told,
-    ///  the instruction is committed and sent. Any refusal reverts the burn with it, so nothing is delegated that the
-    ///  satellite is not told to mint.
+    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the chain's inbound is
+    ///  not paused (no more supply goes to a chain whose reports are suspect), the compliance is told, the instruction
+    ///  is committed and sent. Any refusal reverts the burn with it, so nothing is delegated that the satellite is not
+    ///  told to mint.
     /// @return sendId The gateway's id for the instruction.
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId) {
         uint256 delegationId = _creditDelegation(holder, toWallet, amount);
@@ -109,6 +112,7 @@ library TokenDelegationLib {
         _compliance().agentTransferred(holder, holder, amount, MovementKindLib.DELEGATION);
 
         bytes32 chainKey = _chainKeyOf(toWallet);
+        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
         TokenLedgerLib.layout().delegations[delegationId] =
             _commitment(chainKey, keccak256(TREXMessagingLib.peerFor(chainKey)), toWallet, amount, holder);
 
@@ -174,18 +178,20 @@ library TokenDelegationLib {
     ///  reverts and stays deliverable. The identity link is checked again, then the compliance follows any relink
     ///  of the native wallet before the credit lands, so the wallet's existing balance is attributed to its current
     ///  owner and the credit, already counted in that identity's position as a bridged one, is not migrated with
-    ///  it. The proof is recorded, the bridged position debited (`Recalled`), and the token mints the native half.
-    ///  A zero proof settles the same way with nothing to move.
+    ///  it. The proof is recorded, the bridged position debited (`Recalled`), and the token mints the native half
+    ///  and reports the `RECALL` to the compliance's trackers. A zero proof settles the same way with nothing to
+    ///  move and nothing to report.
     ///
     ///  With no open recall: the very proof that settled it, from the same chain, is a duplicate and changes
-    ///  nothing; anything else, a recall never issued or a different proof for a settled one, is a message the
-    ///  token cannot account for and reports `halt`, as a replayed settlement does.
-    /// @return halt Whether the token must pause itself.
+    ///  nothing; anything else is a message the token cannot account for, judged as a replayed settlement is. A
+    ///  different proof for a recall the token issued and settled is `PauseChain`: the chain that sent it is at
+    ///  fault. A proof for a recall never issued is `HaltToken`, see {ISettlementHandler-Verdict}.
+    /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the pause.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.
     function consumeBurnProof(bytes32 originChainKey, bytes memory body)
         external
-        returns (bool halt, address nativeWallet, uint256 amount)
+        returns (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount)
     {
         MessageTypesLib.BurnProof memory proof = MessageTypesLib.decodeBurnProof(body);
         bytes32 proofHash = keccak256(abi.encode(originChainKey, body));
@@ -197,10 +203,12 @@ library TokenDelegationLib {
         if (recall.amount == 0) {
             if (s.settledProofs[proof.recallId] == proofHash) {
                 emit EventsLib.BurnProofDuplicate(proof.recallId, originChainKey);
-                return (false, address(0), 0);
+                return (ISettlementHandler.Verdict.None, address(0), 0);
             }
             emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
-            return (true, address(0), 0);
+            bool issued = proof.recallId != 0 && proof.recallId <= s.lastRecallId;
+            return
+                (issued ? ISettlementHandler.Verdict.PauseChain : ISettlementHandler.Verdict.HaltToken, address(0), 0);
         }
 
         require(

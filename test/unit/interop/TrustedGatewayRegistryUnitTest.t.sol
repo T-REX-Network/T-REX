@@ -57,10 +57,15 @@ contract TrustedGatewayRegistryUnitTest is AccessManagerHelper {
     address gateway = makeAddr("Gateway");
 
     function setUp() public {
-        _deployAccessManager();
+        _deployPlatformManager();
+        _deploySuiteManager();
 
-        registry = new TrustedGatewayRegistry(address(accessManager));
-        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(accessManager, address(registry));
+        // Network-level, so it answers to the platform manager; the suite manager exists only to show
+        // that a suite role grants nothing here.
+        registry = new TrustedGatewayRegistry(address(platformManager));
+        AccessManagerSetupLib.setupTrustedGatewayRegistryRoles(
+            platformManager, address(registry), RolesLib.platform(RolesLib.PlatformRole.INTEROP_MANAGER)
+        );
 
         _grantInteropManagerRole(interopManager);
     }

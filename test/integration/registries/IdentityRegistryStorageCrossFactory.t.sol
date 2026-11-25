@@ -68,12 +68,12 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
                     address(new TREXRegistry(address(otherFactory))),
                     abi.encodeCall(
                         TREXRegistry.init,
-                        (address(irs), address(accessManager), new uint256[](0), new address[](0), new uint256[][](0))
+                        (address(irs), address(suiteManager), new uint256[](0), new address[](0), new uint256[][](0))
                     )
                 )
             )
         );
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(otherRegistry), DOMAIN);
+        _setupRegistryRoles(address(otherRegistry));
         _grantStorageWriterRole(address(otherRegistry));
         _grantIRSBinderRole(address(this));
     }
@@ -169,8 +169,7 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
                 new ERC1967Proxy(
                     address(storageImplementation),
                     abi.encodeCall(
-                        IdentityRegistryStorage.init,
-                        (address(accessManager), predictedRegistry, address(pinnedFactory))
+                        IdentityRegistryStorage.init, (address(suiteManager), predictedRegistry, address(pinnedFactory))
                     )
                 )
             )
@@ -183,7 +182,7 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
                         TREXRegistry.init,
                         (
                             address(pinnedStorage),
-                            address(accessManager),
+                            address(suiteManager),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)
@@ -193,8 +192,8 @@ contract IdentityRegistryStorageCrossFactoryTest is TREXSuiteTest {
             )
         );
         assertEq(address(registry), predictedRegistry, "the storage bound the registry it was told about");
-        AccessManagerSetupLib.setupTREXRegistryRoles(accessManager, address(registry), DOMAIN);
-        AccessManagerSetupLib.setupIdentityRegistryStorageRoles(accessManager, address(pinnedStorage), DOMAIN);
+        _setupRegistryRoles(address(registry));
+        _setupStorageRoles(address(pinnedStorage));
         _grantStorageWriterRole(address(registry));
         return registry;
     }
