@@ -570,6 +570,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
+  after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
+  token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
+  `TokenDelegationLib.consumeBurnProof` now return an `ISettlementHandler.Verdict`: `PauseChain` on those, and the
+  token stops taking that chain's messages (`InboundPaused`; deliveries revert with `ChainInboundPaused` and stay
+  deliverable); `HaltToken`, the token pause as before, only for an id the token never issued. The pauser lifts a
+  chain pause with `setInboundPaused(chainKey, false)` and can set one ahead of an incident; `isInboundPaused` reads
+  it, `isChainOpen` does not. A delegation toward a paused chain is refused with `ChainInboundPaused`, and the
+  compliance reads the pause too: nothing is issued or resent toward a paused chain (`ChainInboundPaused`), and a
+  validation still awaiting that chain's leg is neither discarded nor resolved while it lasts, since the reports
+  held at the gateway may answer it. Recall instructions and instruction resends still go out.
+  `TREXMessagingLib.MessagingStorage` gains `inboundPaused` after `pinnedPeers`. Upgrade order is free: an old
+  compliance answering a new token reads `true` as `PauseChain`, a new compliance answering an old token fails to
+  decode and the delivery waits.
 - **License headers and copyright.** Every GPL-3.0 Solidity file carries the T-REX Network header, in the
   form used by the ONCHAINID repository, with the copyright held by Digital Asset Operational Services ISAC
   Ltd. ("T-REX Network"). The dual proprietary or GPL v3 notice of the Tokeny era is gone. Files that still
@@ -812,9 +826,9 @@ All notable changes to this project will be documented in this file.
 - **A zero receive id is not recorded** (OZ L-19, #158): ERC-7786 lets a gateway pass `bytes32(0)`, and recording
   `(gateway, 0)` refused every later message from that gateway with `MessageAlreadyReceived`. A zero id now skips
   the transport record. Every inbound type keeps its own replay protection: a settlement or a leg delivered again
-  finds its validation already past that leg and halts the token (`ReplayedSettlement`); the proof that settled a
-  recall delivered again changes nothing (`BurnProofDuplicate`), and any other proof for it halts the token
-  (`ReplayedBurnProof`). Nonzero ids are recorded and refused on repeat as before.
+  finds its validation already past that leg and pauses its chain's inbound (`ReplayedSettlement`); the proof that
+  settled a recall delivered again changes nothing (`BurnProofDuplicate`), and any other proof for it pauses the
+  chain's inbound too (`ReplayedBurnProof`). Nonzero ids are recorded and refused on repeat as before.
 - **A late report for a discarded validation is documented** (OZ L-06, #151): a keeper discard cannot know whether
   the satellite already executed, so it may release a reservation whose settlement is still in flight. When that
   report lands, its debit is applied, and a newer validation that reserved the same balance can see its own

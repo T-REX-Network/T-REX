@@ -220,6 +220,7 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.chains[KEY].chainReference = hex"02";
         messagingStorage.pinnedRoutes[NUMBER][KEY] = address(0x3);
         messagingStorage.pinnedPeers[NUMBER][KEY] = bytes32(uint256(0x4));
+        messagingStorage.inboundPaused[KEY] = true;
 
         assertEq(_word(_field(base, 0)), 0x1, "registry");
         assertEq(_word(_entry(_field(base, 1), KEY)), 0x2, "routes");
@@ -230,6 +231,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_slot(_field(chain, 1)), _shortBytes(0x02), "chains.chainReference");
         assertEq(_word(_entry(_entry(_field(base, 5), bytes32(NUMBER)), KEY)), 0x3, "pinnedRoutes");
         assertEq(_word(_entry(_entry(_field(base, 6), bytes32(NUMBER)), KEY)), 0x4, "pinnedPeers");
+        assertEq(_word(_entry(_field(base, 7), KEY)), 1, "inboundPaused");
     }
 
     function test_TREXAccessManager() public {

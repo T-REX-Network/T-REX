@@ -507,6 +507,7 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, IERC3643.batchForcedTransfer.selector, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
         _assertRow(target, token, IERC3643.pause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, token, IERC3643.unpause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
+        _assertRow(target, token, ITREXMessaging.setInboundPaused.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         // Registry
         _assertRow(target, registry, ITREXRegistry.disableEligibilityChecks.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, registry, ITREXRegistry.enableEligibilityChecks.selector, domainId, RolesLib.Role.OWNER);

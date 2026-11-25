@@ -46,6 +46,7 @@ import { ITransferValidation } from "contracts/compliance/modular/ITransferValid
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -110,6 +111,7 @@ contract TransferValidationIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
+        vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
 
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);

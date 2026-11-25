@@ -181,7 +181,7 @@ contract ModularCompliance is
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
         onlyBoundToken
-        returns (bool haltToken)
+        returns (ISettlementHandler.Verdict verdict)
     {
         emit EventsLib.SettlementNotified(
             originChainKey, notification.validationId, notification.from, notification.to, notification.amount
