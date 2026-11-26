@@ -274,6 +274,7 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(token, IERC3643.setIdentityRegistry.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setCompliance.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setRoute.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.setFastRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
 
         // Cross-chain instructions.

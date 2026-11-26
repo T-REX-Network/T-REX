@@ -97,7 +97,9 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
         uint256 hugeAmount = type(uint256).max;
 
         vm.expectRevert(
-            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, mintAmount, hugeAmount)
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector, user, mintAmount - freezeAmount, hugeAmount
+            )
         );
         vm.prank(agent);
         token.freezePartialTokens(user, hugeAmount);

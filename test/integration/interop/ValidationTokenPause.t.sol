@@ -37,11 +37,11 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         token.unpause();
     }
 
-    function _request() private returns (uint256) {
+    function _request() private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 100);
     }
 
-    function _resend(uint256 id) private {
+    function _resend(bytes32 id) private {
         vm.prank(address(aliceIdentity));
         boundCompliance.resendValidation(id, polygon, bobSat, "");
     }
@@ -62,7 +62,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         _pause();
         _unpause();
 
-        uint256 id = _request();
+        bytes32 id = _request();
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
         assertEq(polygonGateway.queueLength(), 1);
@@ -80,7 +80,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
 
     /// @dev Refused while paused: `ValidationResend.t.sol`, `test_resendValidation_RevertWhen_TheTokenIsPaused`.
     function test_resendValidation_Success_OnceTheTokenIsUnpaused() public {
-        uint256 id = _request();
+        bytes32 id = _request();
         _pause();
         _unpause();
 
@@ -96,11 +96,11 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
     ///      validation is not discarded under the pause, so its reservation is not released for another request
     ///      to take, and the report settles it once the token runs again.
     function test_discardExpiredValidations_RevertWhen_TheTokenIsPaused_ThenTheHeldLegSettles() public {
-        uint256 id = _request();
+        bytes32 id = _request();
         uint256 leg = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 100));
         _pause();
         vm.warp(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
 
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
@@ -117,11 +117,11 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
 
     /// @dev Once the token runs again, a validation nobody executed is discarded as before.
     function test_discardExpiredValidations_Success_OnceTheTokenIsUnpaused() public {
-        uint256 id = _request();
+        bytes32 id = _request();
         _pause();
         vm.warp(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
         _unpause();
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
 
         boundCompliance.discardExpiredValidations(ids);
@@ -133,7 +133,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
     /// @dev The pause takes nothing back: a validation issued before it stays `Pending`, its reservation held,
     ///      and the satellite's report waits at the gateway until the unpause, as every settlement does.
     function test_pause_LeavesAValidationIssuedBeforeItPending() public {
-        uint256 id = _request();
+        bytes32 id = _request();
         _pause();
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));

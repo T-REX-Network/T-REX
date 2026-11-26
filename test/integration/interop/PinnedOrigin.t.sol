@@ -59,8 +59,8 @@ contract PinnedOriginTest is InteropSuiteTest {
     address newLite = makeAddr("newLite");
 
     bytes32 satellite = polygon;
-    uint256 inFlight = 1;
-    uint256 neverDispatched = 99;
+    bytes32 inFlight = bytes32(uint256(1));
+    bytes32 neverDispatched = bytes32(uint256(99));
     uint256 amount = 100;
 
     function setUp() public override {
@@ -77,7 +77,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         token.unpause();
     }
 
-    function _settlementFrom(address author, uint256 validationId) private returns (uint256) {
+    function _settlementFrom(address author, bytes32 validationId) private returns (uint256) {
         return _queue(
             gateway,
             author,

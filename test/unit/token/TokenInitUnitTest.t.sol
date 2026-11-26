@@ -104,12 +104,14 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
     }
 
     function testTokenInitRevertsIfTrustedGatewayRegistryIsZeroAddress() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), pOnchainId);
         pTrustedGatewayRegistry = address(0);
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         initCall();
     }
 
     function testTokenInitWiresTheTrustedGatewayRegistry() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), pOnchainId);
         vm.expectEmit(false, false, false, true);
         emit EventsLib.TrustedGatewayRegistrySet(pTrustedGatewayRegistry);
         Token newToken = initCall();
@@ -123,14 +125,37 @@ contract TokenInitUnitTest is TokenBaseUnitTest {
         initCall();
     }
 
-    function testTokenInitWithOnchainIdZeroAddress() public {
+    function testTokenInitWithOnchainIdZeroAddressWhenNoIdentityIsBoundToTheToken() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), address(0));
         pOnchainId = address(0);
         Token newToken = initCall();
 
         assertEq(newToken.onchainID(), address(0));
     }
 
+    function testTokenInitRevertsIfOnchainIdIsZeroAddressWhileAnIdentityIsBoundToTheToken() public {
+        address nextToken = nextDeployedAddress();
+        mockIdentityBoundToToken(nextToken, onchainId);
+        pOnchainId = address(0);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, nextToken, address(0)));
+        initCall();
+    }
+
+    function testTokenInitRevertsIfOnchainIdIsAnotherTokensIdentity() public {
+        address nextToken = nextDeployedAddress();
+        mockIdentityBoundToToken(nextToken, onchainId);
+        address anotherTokensIdentity = makeAddr("AnotherTokensIdentity");
+        pOnchainId = anotherTokensIdentity;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.TokenIdentityNotBound.selector, nextToken, anotherTokensIdentity)
+        );
+        initCall();
+    }
+
     function testTokenInitNominal() public {
+        mockIdentityBoundToToken(nextDeployedAddress(), pOnchainId);
         vm.expectEmit(true, true, true, true);
         emit IERC3643.UpdatedTokenInformation(pName, pSymbol, pTokenDecimals, "5.0.0", address(pOnchainId));
         Token newToken = initCall();
