@@ -1,6 +1,6 @@
 {
   "name": "@t-rex-network/t-rex",
-  "version": "0.0.0-development",
+  "version": "5.0.0-beta3",
   "description": "A fully compliant environment for the issuance and use of tokenized securities implementing the ERC-3643 standard.",
   "publishConfig": {
     "access": "public"
