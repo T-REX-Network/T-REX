@@ -47,7 +47,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         token.setFastRoute(chainType, chainReference, gateway);
     }
 
-    function _issue() private returns (uint256) {
+    function _issue() private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 100);
     }
 
@@ -115,7 +115,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     /* ----- Validation ----- */
 
     function test_validation_GoesOutOnTheFastRouteAndPinsTheFinalRoute() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         assertEq(fastGateway.queueLength(), 1, "the validation took the fast route");
         assertEq(finalGateway.queueLength(), 0);
@@ -126,7 +126,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     function test_validation_GoesOutOnTheFinalRouteWhenTheFastRouteIsUnset() public {
         _setFastRoute(POLYGON, address(0));
 
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         assertEq(finalGateway.queueLength(), 1);
         assertEq(fastGateway.queueLength(), 0);
@@ -154,7 +154,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     }
 
     function test_resendValidation_GoesOutOnTheFastRouteAgain() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         vm.prank(address(aliceIdentity));
         boundCompliance.resendValidation(id, polygon, bobSat, "");
@@ -205,7 +205,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     /* ----- Settlement ----- */
 
     function test_settlement_Success_FromTheFinalRoute() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         finalGateway.relay(_liteSettles(finalGateway, token, _settlement(id, aliceSat, bobSat, 60)));
 
@@ -214,7 +214,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     }
 
     function test_settlement_RevertWhen_FromTheFastRoute() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
         uint256 index = _liteSettles(fastGateway, token, _settlement(id, aliceSat, bobSat, 60));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(fastGateway), polygon));
@@ -251,7 +251,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     ///  nothing more while it is one, even for a validation pinned to it, since what it relays no longer waits for
     ///  finality. The refusal reverts, so the leg is not lost: it lands once the gateway is no longer the fast route.
     function test_settlement_RevertWhen_ThePinnedGatewayBecameTheFastRoute() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
         _makeTheFinalGatewayTheFastRoute();
         uint256 index = _liteSettles(finalGateway, token, _settlement(id, aliceSat, bobSat, 60));
 

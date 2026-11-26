@@ -119,7 +119,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function pinnedRouteFor(uint256 validationId, bytes32 chainKey) public view returns (address) {
+    function pinnedRouteFor(bytes32 validationId, bytes32 chainKey) public view returns (address) {
         return TREXMessagingLib.layout().pinnedRoutes[validationId][chainKey];
     }
 
@@ -202,7 +202,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
     /// its final route.
-    function _sendComplianceValidation(bytes32 chainKey, uint256 validationId, bytes memory body)
+    function _sendComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes memory body)
         internal
         returns (bytes32 sendId)
     {

@@ -268,14 +268,22 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    function resolveStuckValidation(uint256 validationId) external restricted {
+    function resolveStuckValidation(bytes32 validationId) external restricted {
         TransferSettlementLib.resolveStuckValidation(validationId, _getTokenBound());
+    }
+
+    /// @inheritdoc ITransferValidation
+    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, and it is
+    ///  judged as a delivery would be. The caller chooses when, as whoever relays a delivery does: a leg that is
+    ///  refused pauses its chain's inbound at that moment, the verdict the delivery would have reached.
+    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external {
+        TransferSettlementLib.settleParkedLeg(validationId, chainKey, _getTokenBound());
     }
 
     /// @inheritdoc ITransferValidation
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
-    function discardExpiredValidations(uint256[] calldata validationIds) external {
+    function discardExpiredValidations(bytes32[] calldata validationIds) external {
         TransferSettlementLib.discardExpiredValidations(
             validationIds, _getTokenBound(), _canCallSelector(msg.sender, this.discardExpiredValidations.selector)
         );

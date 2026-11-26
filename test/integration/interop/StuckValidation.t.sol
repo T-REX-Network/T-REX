@@ -64,7 +64,7 @@ contract StuckValidationTest is InteropSuiteTest {
     bytes internal aliceSat;
     bytes internal bobOptimism;
     uint256 internal issuedAt;
-    uint256 internal id;
+    bytes32 internal id;
     /// Past `releaseAt` plus one more reconciliation window; the pair spans both chains, so it is the longer.
     uint256 internal resolvableAt;
 
@@ -165,7 +165,7 @@ contract StuckValidationTest is InteropSuiteTest {
     ///         need a way home.
     function test_resolveStuckValidation_Success_WhenTheBurnCameLateAfterADiscard() public {
         vm.warp(issuedAt + VALIDITY_WINDOW + OPTIMISM_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);
@@ -185,7 +185,7 @@ contract StuckValidationTest is InteropSuiteTest {
     /// @notice A validation issued with a zero minimum may burn nothing. That burn held nothing in transit, so the
     ///         resolution has nothing to give back, and still releases the reservations and ends in `Resolved`.
     function test_resolveStuckValidation_Success_WhenTheBurnMovedNothing() public {
-        uint256 zeroMinimum = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 0, 100);
+        bytes32 zeroMinimum = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 0, 100);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(zeroMinimum, token, aliceSat, 0)));
         assertEq(token.inTransitOf(zeroMinimum), 0, "a burn of nothing holds nothing");
 

@@ -112,10 +112,10 @@ library TREXMessagingLib {
         mapping(bytes32 chainKey => ChainPrefix) chains;
 
         /// The gateway each validation leg went out through, snapshot at dispatch and never rewritten.
-        mapping(uint256 validationId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
+        mapping(bytes32 validationId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
 
         /// `keccak256` of the peer each validation leg was sent to, snapshot with its gateway.
-        mapping(uint256 validationId => mapping(bytes32 chainKey => bytes32 peerKey)) pinnedPeers;
+        mapping(bytes32 validationId => mapping(bytes32 chainKey => bytes32 peerKey)) pinnedPeers;
 
         /// Chains whose messages are refused, and left deliverable, until the pauser lifts it.
         mapping(bytes32 chainKey => bool paused) inboundPaused;
@@ -255,7 +255,7 @@ library TREXMessagingLib {
     /// its settlement legs from that chain are then matched against those alone, so a later peer change does not
     /// strand them. A re-dispatch is allowed while the final route and the peer are still the pinned ones, so a
     /// lost message can be re-sent.
-    function sendComplianceValidation(bytes32 chainKey, uint256 validationId, bytes memory body)
+    function sendComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes memory body)
         external
         returns (bytes32 sendId)
     {
@@ -433,7 +433,7 @@ library TREXMessagingLib {
         address gateway,
         bytes32 chainKey,
         bytes calldata sender,
-        uint256 validationId
+        bytes32 validationId
     ) private view {
         require(s.routes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
@@ -470,7 +470,7 @@ library TREXMessagingLib {
             return;
         }
         require(keccak256(sender) == recall.peerKey, ErrorsLib.SenderNotPeer(chainKey, sender));
-        require(recall.gateway == gateway, ErrorsLib.GatewayNotPinned(gateway, recallId, chainKey));
+        require(recall.gateway == gateway, ErrorsLib.GatewayNotPinned(gateway, bytes32(recallId), chainKey));
     }
 
     /// @dev One gateway cannot be both routes of a chain, or the fast one would carry what must wait for finality.
