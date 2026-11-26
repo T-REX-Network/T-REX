@@ -61,33 +61,85 @@ pragma solidity 0.8.30;
 
 interface ITrustedGatewayRegistry {
 
-    /// @dev Adds a gateway to, or removes it from, the network's vetted set.
+    /// @dev What the network recorded about a bridge after reviewing it. A record is written once: a bridge whose
+    /// behaviour changes is a new bridge, deployed at a new address and reviewed again.
+    enum BridgeStanding {
+        /// Never reviewed: it carries nothing for any token.
+        Unknown,
+        /// Carries tickets out, possibly before home's finality, at the depth it was recorded with. Never delivers
+        /// anything to a token.
+        TicketBridge,
+        /// Carries money messages out and receipts in, only at full finality.
+        ReceiptBridge,
+        /// Distrusted for good: it is never trusted again.
+        Distrusted
+    }
+
+    /// @dev Records a reviewed bridge that carries tickets, and the depth, in blocks, it really waits for before
+    /// it relays. Zero is full finality. A provider with no depth setting is recorded at the depth it really has.
     ///
-    /// A gateway in this set attests the authorship of every message a token routed through it acts
-    /// on, so a malicious or broken one can impersonate any account on any chain in any message.
-    /// Addition is therefore a deliberate governance act following review of the gateway and its
-    /// underlying protocol. Removal is an emergency lever: it severs every token route through the
-    /// gateway with no further call, because routes are checked against this set on use, not on write.
+    /// A ticket moves nothing on its own, so a ticket bridge may relay before finality. It never delivers anything
+    /// to a token: a token takes every incoming message through a receipt bridge only.
     ///
-    /// A token calls `sendMessage` with no value and no attributes, so only a gateway that takes its fee
-    /// out of band (post-paid, or funded by a relayer) can carry its traffic; one that must be paid with
-    /// the call cannot. Review covers this too.
+    /// A token calls `sendMessage` with no value and no attributes, so only a bridge that takes its fee out of
+    /// band can carry its traffic. Review covers this too.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `gateway` must not be the zero address; otherwise the call reverts with `ZeroAddress`.
+    /// - `bridge` must not be the zero address; otherwise reverts with `ZeroAddress`.
+    /// - `bridge` must never have been distrusted; otherwise reverts with `BridgeDistrusted`.
+    /// - `bridge` must not be recorded yet; otherwise reverts with `BridgeAlreadyRecorded`.
     ///
-    /// Emits a `TrustedGatewaySet` event, including when the value did not change.
-    /// @param gateway The ERC-7786 gateway to vet or unvet.
-    /// @param trusted True to add the gateway to the vetted set, false to remove it.
-    function setTrustedGateway(address gateway, bool trusted) external;
+    /// Emits a `BridgeTrusted` event.
+    /// @param bridge The reviewed ERC-7786 bridge.
+    /// @param depth The depth, in blocks, the bridge waits for before it relays; zero for full finality.
+    function trustTicketBridge(address bridge, uint64 depth) external;
 
-    /// @dev Whether `gateway` is currently vetted by the network.
+    /// @dev Records a reviewed bridge that carries money messages out and receipts in. It waits for full finality
+    /// by definition, so there is no depth to get wrong; a token still reads the bridge's own receiving policy.
     ///
-    /// Callers must read this at the moment they rely on the gateway rather than caching it, so that a
-    /// removal takes effect immediately.
-    /// @param gateway The ERC-7786 gateway to look up.
-    /// @return True when the gateway is in the vetted set right now.
-    function isTrusted(address gateway) external view returns (bool);
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `bridge` must not be the zero address; otherwise reverts with `ZeroAddress`.
+    /// - `bridge` must never have been distrusted; otherwise reverts with `BridgeDistrusted`.
+    /// - `bridge` must not be recorded yet; otherwise reverts with `BridgeAlreadyRecorded`.
+    ///
+    /// Emits a `BridgeTrusted` event.
+    /// @param bridge The reviewed ERC-7786 bridge.
+    function trustReceiptBridge(address bridge) external;
+
+    /// @dev Distrusts `bridge` for good. An emergency lever: it severs every token route through the bridge with
+    /// no further call, because routes are checked against this registry on use, not on write. A distrusted
+    /// address is never trusted again; a repaired bridge is deployed at a new address.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `bridge` must not be the zero address; otherwise reverts with `ZeroAddress`.
+    /// - `bridge` must not be distrusted already; otherwise reverts with `BridgeDistrusted`.
+    ///
+    /// Emits a `BridgeDistrusted` event.
+    /// @param bridge The bridge to distrust.
+    function distrustBridge(address bridge) external;
+
+    /// @dev Whether `bridge` is a ticket bridge or a receipt bridge right now. Callers read this when they rely
+    /// on the bridge rather than caching it, so that a distrust takes effect at once.
+    /// @param bridge The bridge to look up.
+    /// @return True when the bridge is recorded as a ticket bridge or a receipt bridge.
+    function isTrusted(address bridge) external view returns (bool);
+
+    /// @dev Whether `bridge` is a receipt bridge right now: the only kind a token takes a message from.
+    /// @param bridge The bridge to look up.
+    /// @return True when the bridge is recorded as a receipt bridge and not distrusted.
+    function isReceiptBridge(address bridge) external view returns (bool);
+
+    /// @dev The depth, in blocks, a trusted bridge waits for before it relays. Zero is full finality, and a
+    /// receipt bridge always answers zero. For the off-chain tools that size the waiting times.
+    ///
+    /// Requirements:
+    /// - `bridge` must be a ticket bridge or a receipt bridge; otherwise reverts with `BridgeNotTrusted`, so an
+    ///   unknown bridge is never read as one at full finality.
+    /// @param bridge The bridge to look up.
+    /// @return The recorded depth.
+    function depthOf(address bridge) external view returns (uint64);
 
 }

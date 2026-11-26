@@ -72,8 +72,8 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        polygonGateway = _newTrustedGateway(POLYGON);
-        optimismGateway = _newTrustedGateway(OPTIMISM);
+        polygonGateway = _newReceiptBridge(POLYGON);
+        optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
@@ -500,13 +500,13 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         uint256 recallId = token.instructRecall(aliceSat, 200, alice);
         polygonGateway.relay(_last(polygonGateway));
         polygonGateway.drop(_last(polygonGateway));
-        assertEq(token.pendingRecall(recallId).amount, 200, "still waiting");
+        assertEq(_pendingRecall(recallId).amount, 200, "still waiting");
 
         polygonLite.resendProof(recallId);
         polygonGateway.relay(_last(polygonGateway));
 
         assertEq(token.balanceOf(alice), MINTED - DELEGATED + 200);
-        assertEq(token.pendingRecall(recallId).amount, 0);
+        assertEq(_pendingRecall(recallId).amount, 0);
     }
 
     /* ----- Settlement resend ----- */

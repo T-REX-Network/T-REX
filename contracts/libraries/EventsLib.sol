@@ -61,6 +61,7 @@ pragma solidity 0.8.30;
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
 import { IModule } from "../compliance/modular/modules/IModule.sol";
+import { ITrustedGatewayRegistry } from "../interop/ITrustedGatewayRegistry.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { MessageTypesLib } from "./MessageTypesLib.sol";
 import { Version } from "./VersionLib.sol";
@@ -166,7 +167,11 @@ library EventsLib {
 
     // TrustedGatewayRegistry Events
 
-    event TrustedGatewaySet(address indexed gateway, bool trusted);
+    /// @notice Emitted when a reviewed bridge gets its one record: its standing and, for a ticket bridge, the
+    ///  depth it waits for (zero is full finality).
+    event BridgeTrusted(address indexed bridge, ITrustedGatewayRegistry.BridgeStanding standing, uint64 depth);
+    /// @notice Emitted when a bridge is distrusted, for good.
+    event BridgeDistrusted(address indexed bridge);
 
     // TREXMessaging Events
 
@@ -174,12 +179,18 @@ library EventsLib {
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event ReceiptRouteSet(bytes32 indexed chainKey, address indexed gateway);
-    /// @notice Emitted when the fast route of `chainKey`, which carries validations only, is set; zero unsets it.
+    /// @notice Emitted when the receipt route of `chainKey` is set to `bridge`. The away chain's CCIP selector and
+    ///  its receipt bridge are what the token asks `bridge`'s receiving policy about.
+    event ReceiptRouteSet(
+        bytes32 indexed chainKey, address indexed bridge, uint64 awayChainSelector, bytes awayReceiptBridge
+    );
+    /// @notice Emitted when the receipt route of `chainKey` is closed: nothing is sent to or taken from that chain.
+    event ReceiptRouteClosed(bytes32 indexed chainKey);
+    /// @notice Emitted when the ticket route of `chainKey`, which carries tickets only, is set; zero unsets it.
     event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
-    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to `gateway`, the chain's final route at
-    ///         dispatch, which its settlement must come back through, whichever route carried the leg out.
+    /// @notice Emitted when the half of `ticketId` toward `chainKey` is pinned to `gateway`, the chain's receipt
+    ///         route when it left, and to the peer it went to, whichever route carried the ticket out.
     event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event ProtocolMessageReceived(

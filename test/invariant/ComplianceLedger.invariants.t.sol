@@ -112,7 +112,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     function setUp() public override {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
-        gateway = _newTrustedGateway(POLYGON);
+        gateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(gateway));
 
         stranger = makeAddr("stranger");

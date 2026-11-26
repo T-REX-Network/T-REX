@@ -214,18 +214,33 @@ contract SeedInterop is Script {
             gateway = new ERC7786GatewayMock(satelliteChainId);
             console.log("Loopback gateway deployed:", address(gateway));
         }
-        if (!registry.isTrusted(address(gateway))) {
-            registry.setTrustedGateway(address(gateway), true);
-            console.log("Gateway trusted in TrustedGatewayRegistry");
+        // The loopback gateway plays the home receipt bridge: its receiving policy admits the satellite's
+        // receipt bridge (the deployer, who plays every satellite contract) at full finality only.
+        gateway.setReceivingPolicy(_satelliteChainSelector(), _satelliteReceiptBridge(), bytes4(0));
+        if (!registry.isReceiptBridge(address(gateway))) {
+            registry.trustReceiptBridge(address(gateway));
+            console.log("Gateway recorded as a receipt bridge in TrustedGatewayRegistry");
         }
         idFactory.setTrustedGateway(address(gateway), chainType, chainReference, true);
         console.log("Gateway trusted in IdentityFactory for the satellite chain");
     }
 
+    /// @dev The CCIP selector the loopback setup gives the satellite chain. CCIP selectors are not chain ids.
+    function _satelliteChainSelector() internal view returns (uint64) {
+        return uint64(uint256(keccak256(abi.encode("away chain selector", satelliteChainId))));
+    }
+
+    /// @dev The satellite's receipt bridge as CCIP reports a sender: the deployer plays it.
+    function _satelliteReceiptBridge() internal view returns (bytes memory) {
+        return abi.encode(deployer);
+    }
+
     function _ensureRouteAndPeer() internal {
         if (token.receiptRouteFor(chainKey) != address(gateway)) {
-            token.setReceiptRoute(chainType, chainReference, address(gateway));
-            console.log("Route set toward the satellite chain");
+            token.setReceiptRoute(
+                chainType, chainReference, address(gateway), _satelliteChainSelector(), _satelliteReceiptBridge()
+            );
+            console.log("Receipt route set toward the satellite chain");
         }
         bytes memory peer = InteroperableAddress.formatEvmV1(satelliteChainId, deployer);
         if (keccak256(token.peerFor(chainKey)) != keccak256(peer)) {

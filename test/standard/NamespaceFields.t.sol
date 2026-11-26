@@ -219,9 +219,12 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.received[ALICE][KEY] = true;
         messagingStorage.chains[KEY].chainType = 0xabcd;
         messagingStorage.chains[KEY].chainReference = hex"02";
-        messagingStorage.pinnedRoutes[bytes32(NUMBER)][KEY] = address(0x3);
-        messagingStorage.pinnedPeers[bytes32(NUMBER)][KEY] = bytes32(uint256(0x4));
+        messagingStorage.pins[KEY].bridge = address(0x3);
+        messagingStorage.pins[KEY].peerKey = bytes32(uint256(0x4));
         messagingStorage.inboundPaused[KEY] = true;
+        messagingStorage.ticketRoutes[KEY] = address(0x5);
+        messagingStorage.awayReceiptBridges[KEY].chainSelector = 0x6;
+        messagingStorage.awayReceiptBridges[KEY].bridge = hex"07";
 
         assertEq(_word(_field(base, 0)), 0x1, "registry");
         assertEq(_word(_entry(_field(base, 1), KEY)), 0x2, "receiptRoutes");
@@ -230,9 +233,14 @@ contract NamespaceFieldsTest is Test {
         bytes32 chain = _entry(_field(base, 4), KEY);
         assertEq(_word(_field(chain, 0)), 0xabcd, "chains.chainType");
         assertEq(_slot(_field(chain, 1)), _shortBytes(0x02), "chains.chainReference");
-        assertEq(_word(_entry(_entry(_field(base, 5), bytes32(NUMBER)), KEY)), 0x3, "pinnedRoutes");
-        assertEq(_word(_entry(_entry(_field(base, 6), bytes32(NUMBER)), KEY)), 0x4, "pinnedPeers");
-        assertEq(_word(_entry(_field(base, 7), KEY)), 1, "inboundPaused");
+        bytes32 pin = _entry(_field(base, 5), KEY);
+        assertEq(_word(_field(pin, 0)), 0x3, "pins.bridge");
+        assertEq(_word(_field(pin, 1)), 0x4, "pins.peerKey");
+        assertEq(_word(_entry(_field(base, 6), KEY)), 1, "inboundPaused");
+        assertEq(_word(_entry(_field(base, 7), KEY)), 0x5, "ticketRoutes");
+        bytes32 awaySide = _entry(_field(base, 8), KEY);
+        assertEq(_word(_field(awaySide, 0)), 0x6, "awayReceiptBridges.chainSelector");
+        assertEq(_slot(_field(awaySide, 1)), _shortBytes(0x07), "awayReceiptBridges.bridge");
     }
 
     function test_TREXAccessManager() public {

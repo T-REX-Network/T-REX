@@ -101,6 +101,12 @@ contract TokenLedgerHarness is Token {
         this.settleSelf(fromWallet, InteroperableAddress.formatEvmV1(block.chainid, to), amount, ticketId);
     }
 
+    /// @dev The recall instruction `recallId` while it waits for its proof; all zeros once settled or never issued.
+    ///  The token keeps no view of it, so tests read it here.
+    function pendingRecall(uint256 recallId) external view returns (TokenLedgerLib.PendingRecall memory) {
+        return TokenLedgerLib.layout().recalls[recallId];
+    }
+
     /// @dev The second hop of {settleToNative}. Reachable from this contract only.
     function settleSelf(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId) external {
         require(msg.sender == address(this), "TokenLedgerHarness: self-call only");

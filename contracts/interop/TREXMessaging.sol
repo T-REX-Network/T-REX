@@ -119,8 +119,9 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function pinnedRouteFor(bytes32 ticketId, bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().pinnedRoutes[ticketId][chainKey];
+    function pinOf(bytes32 halfKey) public view returns (address bridge, bytes32 peerKey) {
+        TREXMessagingLib.Pin storage pin = TREXMessagingLib.layout().pins[halfKey];
+        return (pin.bridge, pin.peerKey);
     }
 
     /// @inheritdoc ITREXMessaging
@@ -140,8 +141,10 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ERC7786Recipient
+    /// @dev Everything a token receives reports value that moved, so only a receipt bridge delivers to it. A ticket
+    ///  bridge relays before finality and is refused here, whichever away chain it serves.
     function _isAuthorizedGateway(address gateway, bytes calldata) internal view override returns (bool) {
-        return TREXMessagingLib.layout().registry.isTrusted(gateway);
+        return TREXMessagingLib.layout().registry.isReceiptBridge(gateway);
     }
 
     /// @inheritdoc ERC7786Recipient
@@ -182,12 +185,22 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         TREXMessagingLib.setTrustedGatewayRegistry(registry);
     }
 
-    function _setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
-        TREXMessagingLib.setReceiptRoute(chainType, chainReference, gateway);
+    function _setReceiptRoute(
+        bytes2 chainType,
+        bytes calldata chainReference,
+        address bridge,
+        uint64 awayChainSelector,
+        bytes calldata awayReceiptBridge
+    ) internal {
+        TREXMessagingLib.setReceiptRoute(chainType, chainReference, bridge, awayChainSelector, awayReceiptBridge);
     }
 
-    function _setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
-        TREXMessagingLib.setTicketRoute(chainType, chainReference, gateway);
+    function _closeReceiptRoute(bytes32 chainKey) internal {
+        TREXMessagingLib.closeReceiptRoute(chainKey);
+    }
+
+    function _setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) internal {
+        TREXMessagingLib.setTicketRoute(chainType, chainReference, bridge);
     }
 
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
@@ -200,8 +213,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         TREXMessagingLib.setInboundPaused(chainKey, pause);
     }
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
-    /// its final route.
+    /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to
+    /// its receipt route and peer.
     function _sendComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes memory body)
         internal
         returns (bytes32 sendId)

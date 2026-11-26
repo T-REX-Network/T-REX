@@ -44,12 +44,16 @@ that recall was dispatched to.
    what a second body under a known id means, and the instruction ids of rules 9 and 10. A zero receive id names
    no delivery (ERC-7786 allows it) and is never recorded, or the first one would refuse every later message.
 2. **Accept only the reference token as author**, through its own gateway.
-2a. **Send every report on the final route.** A chain may have two routes on the reference side: a fast one, set
-   with `setTicketRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
-   `setReceiptRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
-   token refuses a delivery from the fast route with `WrongRoute`, and pins each validation leg to the final
-   route of the moment (`pinnedRouteFor`), so a validation that arrived on the fast gateway is settled through the
-   final one, not back through the gateway that delivered it.
+2a. **Send every receipt on the receipt route, at full finality.** A chain may have two routes on the reference
+   side: a ticket route, set with `setTicketRoute` to a ticket bridge, that carries tickets out ahead of finality and
+   nothing else, and the receipt route, set with `setReceiptRoute` to a receipt bridge, that carries money messages out
+   and is the only one receipts and burn proofs are taken from. The token takes deliveries from receipt bridges only,
+   so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`), and it reads the receipt
+   bridge's receiving policy for this chain's receipt bridge when the route is set and on every receipt, refusing
+   one that admits less than full finality (`ReceiptBridgeNotFullFinality`). Each half is pinned to the receipt route
+   and the peer it left through (`pinOf`), and its receipt is taken from that pair or the current one, so a ticket
+   that arrived on the ticket bridge is answered through the receipt route, not back through the bridge that
+   delivered it.
 
 ### Validations
 
@@ -136,7 +140,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `sendTicket(ticketId, chainKey, to, spender)`: either leg while `Open` and before `validUntil`; the receiving chain's leg also once the burn landed, before `waitingEndsAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the issuance did, on the fast route when one is set and on the final route otherwise, and only while the final route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
+| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `sendTicket(ticketId, chainKey, to, spender)`: either leg while `Open` and before `validUntil`; the receiving chain's leg also once the burn landed, before `waitingEndsAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the issuance did, on the ticket route when one is set and on the receipt route otherwise, and only while the receipt route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -196,8 +200,8 @@ and must not keep running. The remedy against a peer abusing either is to distru
 | token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof; new validations, approvals into issuance and validation resends; discards and resolutions of validations that may have a leg waiting | the pauser; the token itself on a proof for a recall it never issued | the pauser, `unpause` |
 | chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new validations and validation resends toward it; discards and resolutions of validations still awaiting its leg | the pauser; the token itself on every settlement leg from that chain it cannot account for (replayed, parked, rejected, orphaned) and on a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
 | chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
-| route close, `setReceiptRoute(..., 0)` | every send toward one chain and every message from it, a settlement of a validation already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again | the identity manager | the identity manager, with a trusted gateway |
-| gateway distrust, `TrustedGatewayRegistry` | every message through that gateway, pinned or not, for every token | the registry's owner | the registry's owner |
+| receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled meanwhile | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
+| bridge distrust, `distrustBridge` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled meanwhile | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 
 Before lifting the token pause or a chain pause, the operator has the gateway discard the deliveries refused while
 it was paused that should never land: lifting a pause lets every pending delivery through, and while the replay that

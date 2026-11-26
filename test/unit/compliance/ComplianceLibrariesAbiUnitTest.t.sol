@@ -102,6 +102,7 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         );
         assertEq(ITickets.ValidationNotStuck.selector, ErrorsLib.ValidationNotStuck.selector);
         assertEq(ITickets.ValidationNotYetResolvable.selector, ErrorsLib.ValidationNotYetResolvable.selector);
+        assertEq(ITickets.ChainNotOpen.selector, ErrorsLib.ChainNotOpen.selector);
         assertEq(
             ITickets.NonCanonicalInteroperableAddress.selector, ErrorsLib.NonCanonicalInteroperableAddress.selector
         );

@@ -90,7 +90,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
         gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
@@ -220,7 +220,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         assertEq(token.awayBalanceOf(aliceSat), 0);
         assertEq(token.awayBalanceOf(bobSat), 1500);
-        assertEq(token.pendingRecall(recallId).amount, 0, "the recall settled on what was left to burn");
+        assertEq(_pendingRecall(recallId).amount, 0, "the recall settled on what was left to burn");
         assertEq(token.availableOf(aliceSat), 0);
         assertFalse(token.paused());
         assertFalse(token.isInboundPaused(polygon));

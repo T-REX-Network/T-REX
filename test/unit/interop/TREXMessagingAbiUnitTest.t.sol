@@ -58,6 +58,7 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.TrustedGatewayRegistrySet.selector, EventsLib.TrustedGatewayRegistrySet.selector);
         assertEq(ITREXMessaging.ChainRegistered.selector, EventsLib.ChainRegistered.selector);
         assertEq(ITREXMessaging.ReceiptRouteSet.selector, EventsLib.ReceiptRouteSet.selector);
+        assertEq(ITREXMessaging.ReceiptRouteClosed.selector, EventsLib.ReceiptRouteClosed.selector);
         assertEq(ITREXMessaging.PeerSet.selector, EventsLib.PeerSet.selector);
         assertEq(ITREXMessaging.HalfPinned.selector, EventsLib.HalfPinned.selector);
         assertEq(ITREXMessaging.ProtocolMessageSent.selector, EventsLib.ProtocolMessageSent.selector);
@@ -70,7 +71,9 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.ChainNotRegistered.selector, ErrorsLib.ChainNotRegistered.selector);
         assertEq(ITREXMessaging.BridgeNotOnRoute.selector, ErrorsLib.BridgeNotOnRoute.selector);
         assertEq(ITREXMessaging.BridgeNotPinned.selector, ErrorsLib.BridgeNotPinned.selector);
-        assertEq(ITREXMessaging.BridgeNotTrusted.selector, ErrorsLib.BridgeNotTrusted.selector);
+        assertEq(ITREXMessaging.NotAReceiptBridge.selector, ErrorsLib.NotAReceiptBridge.selector);
+        assertEq(ITREXMessaging.NotATicketBridge.selector, ErrorsLib.NotATicketBridge.selector);
+        assertEq(ITREXMessaging.ReceiptBridgeNotFullFinality.selector, ErrorsLib.ReceiptBridgeNotFullFinality.selector);
         assertEq(ITREXMessaging.InvalidChainReference.selector, ErrorsLib.InvalidChainReference.selector);
         assertEq(ITREXMessaging.InvalidPeer.selector, ErrorsLib.InvalidPeer.selector);
         assertEq(ITREXMessaging.MessageAlreadyReceived.selector, ErrorsLib.MessageAlreadyReceived.selector);

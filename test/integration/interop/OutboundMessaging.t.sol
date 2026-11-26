@@ -70,7 +70,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
 
-        gateway = _newTrustedGateway(POLYGON);
+        gateway = _newReceiptBridge(POLYGON);
         compliance = address(token.compliance());
 
         _openEvmChain(token, POLYGON, address(gateway));
@@ -143,7 +143,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
         _dispatch(ticketId, satellite);
 
-        assertEq(token.pinnedRouteFor(ticketId, satellite), address(gateway));
+        assertEq(_pinnedBridgeOf(ticketId, satellite), address(gateway));
     }
 
     /// @dev A lost message may be re-sent: same validation, same chain, same gateway.
@@ -152,14 +152,14 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _dispatch(ticketId, satellite);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(token.pinnedRouteFor(ticketId, satellite), address(gateway));
+        assertEq(_pinnedBridgeOf(ticketId, satellite), address(gateway));
     }
 
     /// @dev Its legs could never be accepted through the new gateway, so the re-dispatch says so now.
     function testRedispatchThroughAnotherGatewayIsRefused() public {
         _dispatch(ticketId, satellite);
 
-        ERC7786GatewayMock other = _newTrustedGateway(POLYGON);
+        ERC7786GatewayMock other = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(other));
 
         vm.expectRevert(
@@ -172,14 +172,14 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     /// @dev One validation, two chains: each leg pins the route it took, independently.
     function testACrossChainValidationPinsOneRoutePerChain() public {
-        ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
+        ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
         _dispatch(ticketId, satellite);
         _dispatch(ticketId, optimism);
 
-        assertEq(token.pinnedRouteFor(ticketId, satellite), address(gateway));
-        assertEq(token.pinnedRouteFor(ticketId, optimism), address(optimismGateway));
+        assertEq(_pinnedBridgeOf(ticketId, satellite), address(gateway));
+        assertEq(_pinnedBridgeOf(ticketId, optimism), address(optimismGateway));
         assertEq(gateway.queueLength(), 1);
         assertEq(optimismGateway.queueLength(), 1);
     }
@@ -210,8 +210,8 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _delegate(10);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(token.pinnedRouteFor(bytes32(uint256(1)), satellite), address(0));
-        assertEq(token.pinnedRouteFor(bytes32(uint256(2)), satellite), address(0));
+        assertEq(_pinnedBridgeOf(bytes32(uint256(1)), satellite), address(0));
+        assertEq(_pinnedBridgeOf(bytes32(uint256(2)), satellite), address(0));
     }
 
     /* ----- Recall instruction: an order out, a proof back ----- */
@@ -235,9 +235,9 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(instruction.amount, 40);
         assertEq(instruction.nativeWallet, alice);
 
-        assertEq(token.pendingRecall(1).amount, 40);
-        assertEq(token.pendingRecall(1).gateway, address(gateway), "the dispatch gateway is recorded");
-        assertEq(token.pendingRecall(1).peerKey, keccak256(token.peerFor(satellite)), "and the dispatch peer");
+        assertEq(_pendingRecall(1).amount, 40);
+        assertEq(_pendingRecall(1).gateway, address(gateway), "the dispatch gateway is recorded");
+        assertEq(_pendingRecall(1).peerKey, keccak256(token.peerFor(satellite)), "and the dispatch peer");
     }
 
     /// @dev The order changes nothing on the ledger: the position only moves when the answering proof arrives.
@@ -260,8 +260,13 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     /// @dev Routed, but with no address to send to: a non-EVM chain has no CREATE3 default.
     function testDispatchRevertsOnARoutedChainWithNoPeer() public {
+        uint64 solanaSelector = _awayChainSelector(0x01);
+        bytes memory solanaReceiptBridge = abi.encode(makeAddr("solanaReceiptBridge"));
+        ERC7786GatewayMock solanaRoute = new ERC7786GatewayMock(0x01);
+        solanaRoute.setReceivingPolicy(solanaSelector, solanaReceiptBridge, FULL_FINALITY);
+        trustedGatewayRegistry.trustReceiptBridge(address(solanaRoute));
         vm.prank(deployer);
-        token.setReceiptRoute(bytes2(0x0002), hex"01", address(gateway));
+        token.setReceiptRoute(bytes2(0x0002), hex"01", address(solanaRoute), solanaSelector, solanaReceiptBridge);
 
         assertEq(token.peerFor(solana), "");
         assertFalse(token.isChainOpen(solana));
@@ -273,7 +278,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         token.setPeer(solana, hex"0001000201010401020304");
 
         _dispatch(ticketId, solana);
-        assertEq(gateway.queuedMessage(0).recipient, hex"0001000201010401020304");
+        assertEq(solanaRoute.queuedMessage(0).recipient, hex"0001000201010401020304");
     }
 
     function testDispatchRevertsForAnUnauthorizedCaller() public {
@@ -307,7 +312,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         token.dispatchComplianceValidation(satellite, ticketId, validationBody);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(token.pinnedRouteFor(ticketId, satellite), address(0));
+        assertEq(_pinnedBridgeOf(ticketId, satellite), address(0));
     }
 
     /// @dev The emergency lever, proven end to end: removal stops traffic with no call on the token.
@@ -315,7 +320,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _dispatch(ticketId, satellite);
         assertEq(gateway.queueLength(), 1);
 
-        trustedGatewayRegistry.setTrustedGateway(address(gateway), false);
+        trustedGatewayRegistry.distrustBridge(address(gateway));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
         _dispatch(bytes32(uint256(2)), satellite);

@@ -92,7 +92,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     function setUp() public virtual override {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
-        gateway = _newTrustedGateway(POLYGON);
+        gateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(gateway));
         lite = new SatelliteLiteMock(POLYGON, address(token), gateway);
         vm.prank(deployer);
@@ -240,7 +240,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         }
         uint256 pendingBurns;
         for (uint256 id = 1; id < recallActor.length; id++) {
-            if (token.pendingRecall(id).amount != 0) pendingBurns += lite.burnedFor(id);
+            if (_pendingRecall(id).amount != 0) pendingBurns += lite.burnedFor(id);
         }
         assertEq(token.totalAwayBalance(), liteBalances + pendingMints + pendingBurns, "DR-3");
         assertEq(token.totalOnHold(), 0, "DR-3 transit");
@@ -257,7 +257,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     function invariant_DR5_settledRecallsDebitedWhatWasBurned() public view {
         uint256 settledBurns;
         for (uint256 id = 1; id < recallActor.length; id++) {
-            if (token.pendingRecall(id).amount == 0) settledBurns += lite.burnedFor(id);
+            if (_pendingRecall(id).amount == 0) settledBurns += lite.burnedFor(id);
         }
         uint256 delegated;
         for (uint256 id = 1; id < delegationAmount.length; id++) {
@@ -274,7 +274,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     function invariant_callSummary() public view {
         uint256 settled;
         for (uint256 id = 1; id < recallActor.length; id++) {
-            if (token.pendingRecall(id).amount == 0 && lite.recallSeen(id) != 0) settled++;
+            if (_pendingRecall(id).amount == 0 && lite.recallSeen(id) != 0) settled++;
         }
         console.log("delegate calls / landed:", callsDelegate, delegationAmount.length - 1);
         console.log("recall calls / landed / settled:", callsInstruct, recallActor.length - 1, settled);

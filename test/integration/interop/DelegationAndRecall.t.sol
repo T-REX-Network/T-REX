@@ -82,8 +82,8 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        polygonGateway = _newTrustedGateway(POLYGON);
-        optimismGateway = _newTrustedGateway(OPTIMISM);
+        polygonGateway = _newReceiptBridge(POLYGON);
+        optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
         ledger = IComplianceLedger(address(boundCompliance));
         registry = token.identityRegistry();
@@ -325,7 +325,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         uint256 recallId = _instruct(200);
 
         assertEq(recallId, 1);
-        TokenLedgerLib.PendingRecall memory recall = token.pendingRecall(1);
+        TokenLedgerLib.PendingRecall memory recall = _pendingRecall(1);
         assertEq(recall.walletKey, keccak256(aliceSat));
         assertEq(recall.chainKey, polygon);
         assertEq(recall.nativeWallet, alice);
@@ -427,7 +427,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
         token.instructRecall(aliceOptimism, 100, alice);
 
-        uint256 amount = token.pendingRecall(1).amount;
+        uint256 amount = _pendingRecall(1).amount;
         assertEq(amount, 0, "nothing recorded");
     }
 
@@ -463,7 +463,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(aliceSat), 300);
         assertEq(token.totalAwayBalance(), 300);
         assertEq(ledger.positionOf(address(aliceIdentity)), MINTED, "location moved, ownership did not");
-        uint256 amount = token.pendingRecall(recallId).amount;
+        uint256 amount = _pendingRecall(recallId).amount;
         assertEq(amount, 0, "the instruction is consumed");
         assertFalse(token.paused());
         _assertPartition();
@@ -477,7 +477,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 150);
         assertEq(token.awayBalanceOf(aliceSat), 350);
-        uint256 amount = token.pendingRecall(recallId).amount;
+        uint256 amount = _pendingRecall(recallId).amount;
         assertEq(amount, 0, "one proof closes the instruction whatever it proved");
         _assertPartition();
     }
@@ -490,7 +490,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         polygonGateway.relay(index);
 
         assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
-        uint256 amount = token.pendingRecall(recallId).amount;
+        uint256 amount = _pendingRecall(recallId).amount;
         assertEq(amount, 200, "the instruction stays open");
     }
 
@@ -505,7 +505,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         assertEq(token.balanceOf(alice), MINTED - 500, "nothing credited");
         assertEq(token.awayBalanceOf(aliceSat), 500, "nothing debited");
-        uint256 amount = token.pendingRecall(recallId).amount;
+        uint256 amount = _pendingRecall(recallId).amount;
         assertEq(amount, 0, "the instruction is closed");
         assertFalse(token.paused());
     }
@@ -563,20 +563,20 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     function test_handleBurnProof_RevertWhen_TheChainWasClosedAfterTheRecallWasInstructed() public {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId, aliceSat, 200);
-        _openEvmChain(token, POLYGON, address(0));
+        _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(alice), MINTED - 500, "nothing credited while the chain is closed");
-        assertEq(token.pendingRecall(recallId).amount, 200, "the recall stays open");
+        assertEq(_pendingRecall(recallId).amount, 200, "the recall stays open");
         assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
 
         _openEvmChain(token, POLYGON, address(polygonGateway));
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once the route is back");
-        assertEq(token.pendingRecall(recallId).amount, 0, "the instruction is consumed");
+        assertEq(_pendingRecall(recallId).amount, 0, "the instruction is consumed");
     }
 
     function test_handleBurnProof_RevertWhen_TheProofNamesAnotherWallet() public {
@@ -738,7 +738,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         uint256 last = polygonGateway.queueLength() - 1;
         assertEq(polygonGateway.queuedMessage(last).payload, polygonGateway.queuedMessage(last - 1).payload);
-        assertEq(token.pendingRecall(recallId).amount, 200);
+        assertEq(_pendingRecall(recallId).amount, 200);
     }
 
     function test_resend_RevertWhen_TheRecallIsSettled() public {
@@ -802,7 +802,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         );
         polygonGateway.relay(index);
 
-        assertEq(token.pendingRecall(recallId).amount, 100, "the recall stays open");
+        assertEq(_pendingRecall(recallId).amount, 100, "the recall stays open");
         assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
         assertEq(ledger.positionOf(address(aliceIdentity)), 1000 + 300);
         assertEq(ledger.positionOf(address(bobIdentity)), 1000);
@@ -995,18 +995,18 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     ///         through still settles, once.
     function test_handleBurnProof_Success_WhenTheRouteSwitchedAfterTheInstruction() public {
         uint256 recallId = _instructed();
-        ERC7786GatewayMock newGateway = _newTrustedGateway(POLYGON);
+        ERC7786GatewayMock newGateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(newGateway));
 
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 200));
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 200);
-        assertEq(token.pendingRecall(recallId).amount, 0);
+        assertEq(_pendingRecall(recallId).amount, 0);
     }
 
     function test_handleBurnProof_RevertWhen_ItComesThroughAnotherTrustedGateway() public {
         uint256 recallId = _instructed();
-        ERC7786GatewayMock newGateway = _newTrustedGateway(POLYGON);
+        ERC7786GatewayMock newGateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(newGateway));
         uint256 index = _proof(newGateway, recallId, aliceSat, 200);
 
@@ -1020,11 +1020,11 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     function test_handleBurnProof_RevertWhen_ThePinnedGatewayIsNoLongerTrusted() public {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId, aliceSat, 200);
-        trustedGatewayRegistry.setTrustedGateway(address(polygonGateway), false);
+        trustedGatewayRegistry.distrustBridge(address(polygonGateway));
 
         vm.expectRevert();
         polygonGateway.relay(index);
-        assertEq(token.pendingRecall(recallId).amount, 200);
+        assertEq(_pendingRecall(recallId).amount, 200);
     }
 
     /// @notice The peer changed after the instruction: the peer it was dispatched to still answers it, any other
@@ -1052,12 +1052,12 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     /// @notice A resend after a route switch moves the admitted gateway to the current route, which delivered it.
     function test_resend_Success_WhenTheRouteSwitched_TheAnswerComesThroughTheNewRoute() public {
         uint256 recallId = _instructed();
-        ERC7786GatewayMock newGateway = _newTrustedGateway(POLYGON);
+        ERC7786GatewayMock newGateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(newGateway));
 
         vm.prank(agent);
         token.resend(1, recallId, abi.encode(aliceSat));
-        assertEq(token.pendingRecall(recallId).gateway, address(newGateway));
+        assertEq(_pendingRecall(recallId).gateway, address(newGateway));
 
         newGateway.relay(_proof(newGateway, recallId, aliceSat, 200));
         assertEq(token.balanceOf(alice), MINTED - 500 + 200);

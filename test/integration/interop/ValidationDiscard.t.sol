@@ -69,7 +69,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         // Running: a paused token refuses every request (TokenPaused).
         vm.prank(agent);
         token.unpause();
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
@@ -255,7 +255,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
     /// @notice A consumed leg pins the validation: no clock makes it discardable.
     function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLeg() public {
         ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
-        _openEvmChain(token, OPTIMISM, address(_newTrustedGateway(OPTIMISM)));
+        _openEvmChain(token, OPTIMISM, address(_newReceiptBridge(OPTIMISM)));
         bytes memory bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
         // The validation from setUp already holds bob's whole cap, and the cap is per identity, not per
         // wallet. Raise it so this second one can be issued at all.
@@ -279,6 +279,31 @@ contract ValidationDiscardTest is InteropSuiteTest {
             "both validations toward bob are still outstanding"
         );
         assertEq(token.onHoldOf(crossChain), CAP, "the burned amount stays in transit");
+    }
+
+    /// @notice While the receipt route is closed the ticket's receipt cannot land, so the ticket is not cancelled:
+    ///         the away token may have executed it already. Close by hand stays the way out.
+    function test_cancelTickets_RevertWhen_TheReceiptRouteIsClosed() public {
+        _closeEvmChain(token, POLYGON);
+        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        vm.prank(keeper);
+        boundCompliance.cancelTickets(_ids(id));
+
+        assertEq(uint8(boundCompliance.ticketOf(id).status), uint8(ITickets.TicketStatus.Open), "still open");
+    }
+
+    /// @notice The same when the receipt bridge is distrusted: nothing can deliver the receipt meanwhile.
+    function test_cancelTickets_RevertWhen_TheReceiptBridgeIsDistrusted() public {
+        trustedGatewayRegistry.distrustBridge(token.receiptRouteFor(polygon));
+        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        vm.prank(keeper);
+        boundCompliance.cancelTickets(_ids(id));
+
+        assertEq(uint8(boundCompliance.ticketOf(id).status), uint8(ITickets.TicketStatus.Open), "still open");
     }
 
     function _ids(bytes32 one) private pure returns (bytes32[] memory ids) {

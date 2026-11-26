@@ -231,7 +231,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     /// @notice An `AFTER` module is not reached at the issuance of a validation: nothing has moved yet, so
     ///         there is nothing to tell, and a veto bound there cannot block an issuance.
     function test_requestTransferValidation_Success_WhenAfterModulesAreNotTold() public {
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         bytes memory from = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceSat"), 1000);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobSat"));
 
@@ -461,7 +461,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice Issuance asks every rule for an amount, and touches no tracker: nothing has moved yet.
     function test_requestTransferValidation_Success_WhenEveryRuleIsAsked() public {
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
@@ -494,7 +494,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice A rule that allows less narrows the issued range, and the trackers stay untouched.
     function test_requestTransferValidation_Success_WhenARuleNarrowsTheRange() public {
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 

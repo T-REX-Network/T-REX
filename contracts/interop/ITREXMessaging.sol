@@ -65,7 +65,10 @@ interface ITREXMessaging {
 
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event ReceiptRouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event ReceiptRouteSet(
+        bytes32 indexed chainKey, address indexed bridge, uint64 awayChainSelector, bytes awayReceiptBridge
+    );
+    event ReceiptRouteClosed(bytes32 indexed chainKey);
     event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
@@ -79,11 +82,11 @@ interface ITREXMessaging {
     error AwayChainBlocked(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
-    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
-    error WrongRoute(address gateway, bytes32 chainKey);
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
     error BridgeNotPinned(address gateway, bytes32 ticketId, bytes32 chainKey);
-    error BridgeNotTrusted(address gateway);
+    error NotAReceiptBridge(address bridge);
+    error NotATicketBridge(address bridge);
+    error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
@@ -97,48 +100,76 @@ interface ITREXMessaging {
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
 
-    /// @dev Routes this token's traffic to and from a chain through `gateway`.
+    /// @dev Sets the receipt route of an away chain: the receipt bridge that carries this token's money messages
+    /// (move out, bring home) to that chain at full finality, and every receipt from it into this token.
+    ///
+    /// The token asks `bridge` for its receiving policy toward the away chain's receipt bridge, here and again on
+    /// every receipt, and requires full finality: on CCIP the sending bridge picks a message's finality and only
+    /// the receiving policy checks it, so the token reads that policy rather than a label. A receipt route is
+    /// never set to zero; `closeReceiptRoute` closes it. Changing the bridge is one call to this setter.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `gateway` must be registry-trusted or zero; otherwise reverts with `BridgeNotTrusted`.
+    /// - `bridge` must be recorded as a receipt bridge in the registry; otherwise reverts with `NotAReceiptBridge`.
+    ///   A ticket bridge, a distrusted bridge and zero all fail this.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
+    /// - The receiving policy of `bridge` for `awayChainSelector` and `awayReceiptBridge` must admit full finality
+    ///   only; otherwise reverts with `ReceiptBridgeNotFullFinality`.
     ///
     /// Emits `ChainRegistered` on first sight of the prefix, then `ReceiptRouteSet`.
     /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
     /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
-    /// @param gateway The trusted gateway to route through, or zero to close the chain: nothing is sent to
-    /// or accepted from it, settlements of validations already sent included, until a route is set again.
-    function setReceiptRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
+    /// @param bridge The receipt bridge on this chain.
+    /// @param awayChainSelector The away chain's CCIP selector, as `bridge`'s receiving policy knows it.
+    /// @param awayReceiptBridge The bridge on the away chain that sends the receipts, as CCIP reports the sender
+    /// (`abi.encode(address)` on EVM).
+    function setReceiptRoute(
+        bytes2 chainType,
+        bytes calldata chainReference,
+        address bridge,
+        uint64 awayChainSelector,
+        bytes calldata awayReceiptBridge
+    ) external;
 
-    /// @dev Routes this token's compliance validations to a chain through `gateway`, a gateway that relays ahead
-    /// of the chain's finality, while everything else keeps the final route set by `setReceiptRoute`.
-    ///
-    /// The two routes of a chain split its traffic by what a reorg can cost:
-    /// - the fast route carries validations out, and only validations. A validation moves nothing on its own.
-    /// - the final route carries mint and recall instructions out, and is the only route settlements and burn
-    ///   proofs are taken from: a message delivered by the fast route is refused with `WrongRoute`.
-    ///
-    /// A validation goes out on the fast route when it is set and still trusted, otherwise on the final route.
-    /// The chain must be open on its final route either way, and the validation's leg is pinned to that final
-    /// route, which its settlement must come back through (see `pinnedRouteFor`). The Lite on that chain must
-    /// therefore send its settlements through its final route, not back through the gateway that delivered the
-    /// validation.
+    /// @dev Closes the receipt route of `chainKey`: nothing is sent to that away chain and no receipt is taken from
+    /// it, receipts of halves already sent included, until a receipt route is set again. While it is closed no
+    /// ticket toward that chain is cancelled, since its receipt may still be on its way; close by hand stays the
+    /// way out.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `gateway` must be registry-trusted or zero; otherwise reverts with `BridgeNotTrusted`.
-    /// - `gateway` must not be the chain's final route; otherwise reverts with `FastRouteIsFinalRoute`. `setReceiptRoute`
-    ///   refuses the chain's fast route the same way.
+    /// - The receipt route must be set; otherwise reverts with `ChainNotOpen`.
+    ///
+    /// Emits `ReceiptRouteClosed`.
+    /// @param chainKey The away chain whose receipt route is closed.
+    function closeReceiptRoute(bytes32 chainKey) external;
+
+    /// @dev Sets the ticket route of an away chain: a ticket bridge that relays tickets ahead of that chain's
+    /// finality, while everything else keeps the receipt route.
+    ///
+    /// The two routes of a chain split its traffic by what a reorg can cost:
+    /// - the ticket route carries tickets out, and only tickets. A ticket moves nothing on its own.
+    /// - the receipt route carries money messages out and is the only route receipts and burn proofs are taken
+    ///   from. A ticket bridge never delivers to this token: the token takes deliveries from receipt bridges only.
+    ///
+    /// A ticket goes out on the ticket route when it is set and still trusted, otherwise on the receipt route.
+    /// The chain must be open on its receipt route either way, and the half is pinned to that receipt route,
+    /// which its receipt must come back through (see `pinOf`). The away token on that chain must therefore send
+    /// its receipts through its receipt route, not back through the bridge that delivered the ticket.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `bridge` must be recorded as a ticket bridge in the registry, or zero; otherwise reverts with
+    ///   `NotATicketBridge`. A bridge has one record, so a receipt bridge of any away chain is refused.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
     ///
     /// Emits `ChainRegistered` on first sight of the prefix, then `TicketRouteSet`.
     /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
     /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
-    /// @param gateway The trusted gateway to send validations through, or zero to send them on the final route.
-    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
+    /// @param bridge The ticket bridge to send tickets through, or zero to send them on the receipt route.
+    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) external;
 
     /// @dev Registers this token's Lite on `chainKey`: the outbound recipient and the only accepted
     /// inbound author for that chain.
@@ -151,8 +182,8 @@ interface ITREXMessaging {
     ///   and no trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
     ///
-    /// A validation already sent keeps settling from the peer it was sent to; only what is sent after the
-    /// change goes to, and is accepted from, the new peer.
+    /// A half already sent keeps its receipt accepted from the peer it was sent to, as well as from the new one;
+    /// what is sent after the change goes to the new peer.
     ///
     /// Emits `ChainRegistered` on first sight of the prefix, then `PeerSet`.
     /// @param chainKey The chain the peer is on.
@@ -169,8 +200,8 @@ interface ITREXMessaging {
     /// reaches a chain whose reports are suspect, and the compliance neither issues a validation toward it nor
     /// resends one, nor discards or resolves a validation still awaiting that chain's leg, since the held reports
     /// may answer it. A recall instruction and an instruction resend still go out; the proof that answers a recall
-    /// lands once the pause is lifted. To abandon a chain for good, distrust its gateway or close its route, then
-    /// lift the pause so its validations can be discarded and resolved.
+    /// lands once the pause is lifted. To abandon a chain for good, distrust its bridge or close its receipt route,
+    /// then lift the pause so its tickets can be closed by hand.
     ///
     /// Whether a refused delivery can be delivered again is the gateway's: this contract assumes an ERC-7786
     /// gateway that keeps a reverted execution retryable. One that marks it failed for good loses the message,
@@ -185,21 +216,21 @@ interface ITREXMessaging {
     /// @param pause True to refuse, false to take again.
     function setInboundPaused(bytes32 chainKey, bool pause) external;
 
-    /// @dev The gateway registry this token resolves trust against. It is the network's, wired at
-    /// deployment, and no role on the token can move it: removing a gateway from the registry severs
+    /// @dev The bridge registry this token resolves trust against. It is the network's, wired at
+    /// deployment, and no role on the token can move it: distrusting a bridge in the registry severs
     /// every route through it, for every token.
     /// @return The registry address.
     function trustedGatewayRegistry() external view returns (address);
 
-    /// @dev The stored route for `chainKey`, not re-validated: the gateway may have been untrusted
+    /// @dev The stored receipt route for `chainKey`, not re-validated: the bridge may have been distrusted
     /// since. Use `isChainOpen` to know whether it can carry traffic.
     /// @param chainKey The chain to look up.
-    /// @return The routed gateway, or zero when the chain is closed.
+    /// @return The receipt bridge, or zero when the route is closed.
     function receiptRouteFor(bytes32 chainKey) external view returns (address);
 
-    /// @dev The stored fast route for `chainKey`, not re-validated against the registry.
+    /// @dev The stored ticket route for `chainKey`, not re-validated against the registry.
     /// @param chainKey The chain to look up.
-    /// @return The gateway validations go out through, or zero when they use the final route.
+    /// @return The ticket bridge tickets go out through, or zero when they use the receipt route.
     function ticketRouteFor(bytes32 chainKey) external view returns (address);
 
     /// @dev The ERC-7930 prefix recorded for `chainKey`.
@@ -214,21 +245,21 @@ interface ITREXMessaging {
     /// @return The peer as an ERC-7930 address, or empty when the chain cannot be addressed.
     function peerFor(bytes32 chainKey) external view returns (bytes memory);
 
-    /// @dev The final route of `chainKey` when a validation's leg went out toward it, snapshot at dispatch, even
-    /// when the leg itself travelled on the fast route. Settlements of that validation from that chain are
-    /// accepted from this gateway only, so a route switch affects new validations and never orphans a leg in
-    /// flight.
-    /// @param ticketId The validation to look up.
-    /// @param chainKey The chain the leg was dispatched toward.
-    /// @return The pinned gateway, or zero when the leg never went out.
-    function pinnedRouteFor(bytes32 ticketId, bytes32 chainKey) external view returns (address);
+    /// @dev The receipt route and the peer a half left through, written when it first left, even when the ticket
+    /// itself travelled on the ticket route. Its receipt is accepted from this pair or from the chain's current
+    /// one, so a route or peer change never strands a half in flight.
+    /// @param halfKey The half to look up: today `keccak256(abi.encode(ticketId, chainKey))`, the ticket and the
+    /// away chain the half went to.
+    /// @return bridge The pinned receipt bridge, or zero when the half never left.
+    /// @return peerKey The `keccak256` of the peer the half was sent to.
+    function pinOf(bytes32 halfKey) external view returns (address bridge, bytes32 peerKey);
 
-    /// @dev Whether `chainKey` is routed right now: a route, a peer, and a still-trusted gateway. Re-reads the
-    /// registry, so an emergency gateway removal closes every chain routed through it. The inbound pause is a
+    /// @dev Whether `chainKey` is routed right now: a receipt route, a peer, and a bridge still recorded as a
+    /// receipt bridge. Re-reads the registry, so distrusting a bridge closes every chain routed through it. The inbound pause is a
     /// separate state, see `isInboundPaused`: a paused chain stays open for the instructions that still go out
     /// while its deliveries are refused.
     /// @param chainKey The chain to check.
-    /// @return True when the chain has a route, a peer and a trusted gateway.
+    /// @return True when the chain has a receipt route, a peer and a receipt bridge.
     function isChainOpen(bytes32 chainKey) external view returns (bool);
 
     /// @dev Whether messages from `chainKey` are currently refused, see `setInboundPaused`.

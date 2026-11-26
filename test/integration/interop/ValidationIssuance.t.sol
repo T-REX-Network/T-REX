@@ -71,8 +71,8 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         // Running: a paused token refuses every request (TokenPaused).
         vm.prank(agent);
         token.unpause();
-        polygonGateway = _newTrustedGateway(POLYGON);
-        optimismGateway = _newTrustedGateway(OPTIMISM);
+        polygonGateway = _newReceiptBridge(POLYGON);
+        optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
@@ -91,7 +91,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 1);
         assertEq(optimismGateway.queueLength(), 0);
         assertEq(polygonGateway.queuedMessage(0).recipient, token.peerFor(polygon));
-        assertEq(token.pinnedRouteFor(id, polygon), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(id, polygon), address(polygonGateway));
 
         MessageTypesLib.TicketMessage memory sent = _decodeQueuedValidation(polygonGateway, 0);
         assertEq(sent.ticketId, id);
@@ -112,8 +112,8 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
         assertEq(polygonGateway.queueLength(), 1);
         assertEq(optimismGateway.queueLength(), 1);
-        assertEq(token.pinnedRouteFor(id, polygon), address(polygonGateway));
-        assertEq(token.pinnedRouteFor(id, optimism), address(optimismGateway));
+        assertEq(_pinnedBridgeOf(id, polygon), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(id, optimism), address(optimismGateway));
 
         MessageTypesLib.TicketMessage memory burnLeg = _decodeQueuedValidation(polygonGateway, 0);
         MessageTypesLib.TicketMessage memory mintLeg = _decodeQueuedValidation(optimismGateway, 0);
@@ -256,7 +256,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
     /* ----- Fail closed ----- */
 
     function test_requestTransferValidation_RevertWhen_TheGatewayIsNoLongerTrusted() public {
-        trustedGatewayRegistry.setTrustedGateway(address(polygonGateway), false);
+        trustedGatewayRegistry.distrustBridge(address(polygonGateway));
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
@@ -269,8 +269,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
     /// @notice A cross-chain request with one chain closed sends nothing at all.
     function test_requestTransferValidation_RevertWhen_TheSecondLegHasNoRoute() public {
-        vm.prank(deployer);
-        token.setReceiptRoute(bytes2(0x0000), hex"0a", address(0));
+        _closeEvmChain(token, OPTIMISM);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
@@ -282,13 +281,13 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
     function test_requestTransferValidation_Success_WhenARouteSwitchPinsTheNewGatewayForNewIdsOnly() public {
         bytes32 first = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
-        ERC7786GatewayMock replacement = _newTrustedGateway(POLYGON);
+        ERC7786GatewayMock replacement = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(replacement));
 
         bytes32 second = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
 
-        assertEq(token.pinnedRouteFor(first, polygon), address(polygonGateway));
-        assertEq(token.pinnedRouteFor(second, polygon), address(replacement));
+        assertEq(_pinnedBridgeOf(first, polygon), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(second, polygon), address(replacement));
         assertEq(replacement.queueLength(), 1);
     }
 

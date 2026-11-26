@@ -122,16 +122,20 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
     /// @dev The delegation and recall fields were appended after `reservedForTickets` (5): `recalls` at 6,
     ///      `lastRecallId` 7, `openRecall` 8, `settledProofs` 9, `lastDelegationId` 10, `delegations` 11. Inside a
     ///      `PendingRecall`, `amount` is the fourth slot and `gateway` and `peerKey` the fifth and sixth.
+    ///      The token has no view of a recall, so the namespace is written here, in this contract's own storage.
     function testTREXTokenStoragePendingRecall() public {
-        bytes32 entry = keccak256(abi.encode(uint256(1), _treXSlot(6)));
-        vm.store(address(token), bytes32(uint256(entry) + 3), bytes32(uint256(9)));
-        vm.store(address(token), bytes32(uint256(entry) + 4), bytes32(uint256(uint160(address(0xBEEF)))));
-        vm.store(address(token), bytes32(uint256(entry) + 5), bytes32(uint256(0xCAFE)));
+        TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[1];
+        recall.amount = 9;
+        recall.gateway = address(0xBEEF);
+        recall.peerKey = bytes32(uint256(0xCAFE));
 
-        TokenLedgerLib.PendingRecall memory recall = token.pendingRecall(1);
-        assertEq(recall.amount, 9, "recalls is not at offset 6, or amount not at +3");
-        assertEq(recall.gateway, address(0xBEEF), "gateway is not at +4");
-        assertEq(recall.peerKey, bytes32(uint256(0xCAFE)), "peerKey is not at +5");
+        bytes32 entry = keccak256(abi.encode(uint256(1), _treXSlot(6)));
+        uint256 storedAmount = uint256(vm.load(address(this), bytes32(uint256(entry) + 3)));
+        uint256 storedGateway = uint256(vm.load(address(this), bytes32(uint256(entry) + 4)));
+        bytes32 storedPeerKey = vm.load(address(this), bytes32(uint256(entry) + 5));
+        assertEq(storedAmount, 9, "recalls is not at offset 6, or amount not at +3");
+        assertEq(storedGateway, uint256(uint160(address(0xBEEF))), "gateway is not at +4");
+        assertEq(storedPeerKey, bytes32(uint256(0xCAFE)), "peerKey is not at +5");
     }
 
     /// @dev An id planted in `openRecall` (8) makes the next instruction for that wallet refuse with it.

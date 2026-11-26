@@ -58,6 +58,9 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
  * The mock presents every delivered message as coming from `originChainId`, so one instance stands in
  * for the counterpart gateway of one satellite chain: a test deploys one per chain it needs, and a
  * message from the "satellite" is simply sent through the mock by the address playing the Lite.
+ *
+ * Standing in for a home receipt bridge, it also answers CCIP's receiving policy read for one named source only,
+ * the one a test sets with `setReceivingPolicy`; any other source reverts, so no test passes on a default answer.
  */
 contract ERC7786GatewayMock is IERC7786GatewaySource {
 
@@ -73,6 +76,12 @@ contract ERC7786GatewayMock is IERC7786GatewaySource {
     }
 
     QueuedMessage[] private _queue;
+
+    /// @notice The one source the receiving policy answers for, and the finality it admits from it.
+    uint64 public policySourceChainSelector;
+    bytes public policySender;
+    bytes4 public policyAllowedFinality;
+    bool public hasReceivingPolicy;
 
     constructor(uint256 originChainId_) {
         originChainId = originChainId_;
@@ -133,6 +142,33 @@ contract ERC7786GatewayMock is IERC7786GatewaySource {
 
     function receiveIdFor(uint256 index) external view returns (bytes32) {
         return _idFor(index);
+    }
+
+    /// @notice Sets the one source the receiving policy answers for: zero finality admits full finality only.
+    function setReceivingPolicy(uint64 sourceChainSelector, bytes calldata sender, bytes4 allowedFinalityConfig)
+        external
+    {
+        policySourceChainSelector = sourceChainSelector;
+        policySender = sender;
+        policyAllowedFinality = allowedFinalityConfig;
+        hasReceivingPolicy = true;
+    }
+
+    /// @notice CCIP's receiving policy read, answered for the one source set by `setReceivingPolicy`.
+    function getCCVsAndFinalityConfig(uint64 sourceChainSelector, bytes calldata sender)
+        external
+        view
+        returns (
+            address[] memory requiredCCVs,
+            address[] memory optionalCCVs,
+            uint8 optionalThreshold,
+            bytes4 allowedFinalityConfig
+        )
+    {
+        bool isTheNamedSource = hasReceivingPolicy && sourceChainSelector == policySourceChainSelector
+            && keccak256(sender) == keccak256(policySender);
+        require(isTheNamedSource, "ERC7786GatewayMock: no receiving policy for this source");
+        return (requiredCCVs, optionalCCVs, optionalThreshold, policyAllowedFinality);
     }
 
     /// @dev Every message is queued for an explicit relay, so no attribute is ever honoured.

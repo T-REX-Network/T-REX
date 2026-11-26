@@ -50,8 +50,9 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev Routes are snapshot at dispatch. An issuer switching a chain's gateway affects new validations
-///      only; the legs of one already in flight are matched against the gateway that carried it out.
+/// @dev Each half is pinned to the receipt route and the peer it left through. An issuer changing an away chain's
+///      receipt bridge sends new tickets through the new one; a receipt for a half already in flight is taken from
+///      its pinned pair or from the current one, so the change never strands it.
 ///      The validations here are dispatched by the token alone, never issued by the compliance, so every leg
 ///      that passes the transport is parked by the compliance under its id and pauses the satellite's inbound,
 ///      the token itself staying open: the transport verdict is what these tests read, and the parking is
@@ -75,8 +76,8 @@ contract RouteSwitchTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
 
-        oldGateway = _newTrustedGateway(POLYGON);
-        newGateway = _newTrustedGateway(POLYGON);
+        oldGateway = _newReceiptBridge(POLYGON);
+        newGateway = _newReceiptBridge(POLYGON);
         compliance = address(token.compliance());
 
         _openEvmChain(token, POLYGON, address(oldGateway));
@@ -120,17 +121,15 @@ contract RouteSwitchTest is InteropSuiteTest {
         assertFalse(token.paused(), "the token itself stays open");
     }
 
-    function _expectNotPinned(ERC7786GatewayMock gateway, bytes32 ticketId) private {
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.BridgeNotPinned.selector, address(gateway), ticketId, satellite)
-        );
+    function _expectNotOnRoute(ERC7786GatewayMock gateway) private {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(gateway), satellite));
     }
 
     /* ----- The old leg ----- */
 
     function testTheSwitchIsInPlace() public view {
         assertEq(token.receiptRouteFor(satellite), address(newGateway));
-        assertEq(token.pinnedRouteFor(inFlight, satellite), address(oldGateway));
+        assertEq(_pinnedBridgeOf(inFlight, satellite), address(oldGateway));
     }
 
     function testOldLegIsAcceptedFromThePinnedGatewayAfterTheSwitch() public {
@@ -142,18 +141,18 @@ contract RouteSwitchTest is InteropSuiteTest {
         _assertParked(oldGateway, index, inFlight);
     }
 
-    function testOldLegIsRefusedFromTheNewRoute() public {
+    function test_receiveMessage_acceptsAReceiptOnTheCurrentRoute_whenTheHalfIsPinnedToTheOldOne() public {
         uint256 index = _settlementFrom(newGateway, inFlight);
 
-        _expectNotPinned(newGateway, inFlight);
+        _expectHandled(inFlight);
         newGateway.relay(index);
 
-        assertFalse(token.messageReceived(address(newGateway), newGateway.receiveIdFor(index)));
+        _assertParked(newGateway, index, inFlight);
     }
 
-    /// @dev Cross-chain: the second leg of the same validation, from the same chain, keeps the same pin. The pin
-    ///      is checked at admission, ahead of the inbound pause the first leg's parking raised.
-    function testEveryLegOfTheOldValidationHonoursThePin() public {
+    /// @dev Cross-chain: the second leg of the same ticket, from the same chain, is taken from the pinned or the
+    ///      current route alike. Both pass the route check and reach the inbound pause the first leg's parking raised.
+    function testEveryLegOfTheOldTicketIsTakenFromThePinnedOrTheCurrentRoute() public {
         uint256 burnLeg = _liteSends(
             oldGateway,
             token,
@@ -167,7 +166,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         oldGateway.relay(burnLeg);
         _assertParked(oldGateway, burnLeg, inFlight);
 
-        _expectNotPinned(newGateway, inFlight);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, satellite));
         newGateway.relay(replayOnNewRoute);
     }
 
@@ -178,7 +177,7 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         assertEq(oldGateway.queueLength(), 1, "only the in-flight one went through the old gateway");
         assertEq(newGateway.queueLength(), 1);
-        assertEq(token.pinnedRouteFor(issuedAfterSwitch, satellite), address(newGateway));
+        assertEq(_pinnedBridgeOf(issuedAfterSwitch, satellite), address(newGateway));
     }
 
     function testNewValidationSettlesThroughTheNewRouteOnly() public {
@@ -187,7 +186,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         uint256 viaOld = _settlementFrom(oldGateway, issuedAfterSwitch);
         uint256 viaNew = _settlementFrom(newGateway, issuedAfterSwitch);
 
-        _expectNotPinned(oldGateway, issuedAfterSwitch);
+        _expectNotOnRoute(oldGateway);
         oldGateway.relay(viaOld);
 
         _expectHandled(issuedAfterSwitch);
@@ -228,13 +227,13 @@ contract RouteSwitchTest is InteropSuiteTest {
 
     /* ----- Emergency removal of the pinned gateway ----- */
 
-    /// @dev Removal invalidates pinned routes too: the old leg can arrive through nothing, and the
-    ///      validation will expire and be discarded by the slot lifecycle. Safe, and loud.
-    function testRemovingThePinnedGatewayOrphansTheOldLeg() public {
+    /// @dev Distrust reaches pinned routes too: nothing arrives through the old bridge any more, and the old half's
+    ///      receipt lands through the current route instead.
+    function testDistrustingThePinnedBridgeLetsTheOldHalfLandOnTheCurrentRoute() public {
         uint256 viaOld = _settlementFrom(oldGateway, inFlight);
         uint256 viaNew = _settlementFrom(newGateway, inFlight);
 
-        trustedGatewayRegistry.setTrustedGateway(address(oldGateway), false);
+        trustedGatewayRegistry.distrustBridge(address(oldGateway));
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -245,10 +244,11 @@ contract RouteSwitchTest is InteropSuiteTest {
         );
         oldGateway.relay(viaOld);
 
-        _expectNotPinned(newGateway, inFlight);
+        _expectHandled(inFlight);
         newGateway.relay(viaNew);
+        _assertParked(newGateway, viaNew, inFlight);
 
-        assertEq(token.pinnedRouteFor(inFlight, satellite), address(oldGateway), "the pin is a record, not a lever");
+        assertEq(_pinnedBridgeOf(inFlight, satellite), address(oldGateway), "the pin is a record, not a lever");
     }
 
 }

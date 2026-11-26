@@ -20,7 +20,7 @@ contract RecallReservationTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        polygonGateway = _newTrustedGateway(POLYGON);
+        polygonGateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(polygonGateway));
 
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), POSITION);

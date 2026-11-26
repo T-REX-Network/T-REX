@@ -438,7 +438,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
             if (delegationActor[id] == actor && lite.delegationSeen(id) == 0) held += delegationAmount[id];
         }
         for (uint256 id = 1; id < recallActor.length; id++) {
-            if (recallActor[id] == actor && token.pendingRecall(id).amount != 0) held += lite.burnedFor(id);
+            if (recallActor[id] == actor && _pendingRecall(id).amount != 0) held += lite.burnedFor(id);
         }
     }
 
@@ -468,7 +468,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
             );
         }
         for (uint256 id = 1; id < recallActor.length; id++) {
-            print = keccak256(abi.encode(print, token.pendingRecall(id).amount));
+            print = keccak256(abi.encode(print, _pendingRecall(id).amount));
         }
     }
 

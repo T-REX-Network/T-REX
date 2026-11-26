@@ -60,6 +60,7 @@
 pragma solidity 0.8.30;
 
 import { IReceiptHandler } from "../../interop/IReceiptHandler.sol";
+import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -564,8 +565,9 @@ library ReceiptLib {
     ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
     ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token, or the token
     ///  itself is paused: its leg may be waiting at that gateway, see
-    ///  {TicketLib-requireAwaitedInboundOpen}. Nor while a leg is parked
-    ///  under its id: that report waits here instead, see {_requireNoParkedLeg}.
+    ///  {TicketLib-requireAwaitedInboundOpen}. Nor while an away chain it was sent to cannot deliver its receipt,
+    ///  see {_requireReceiptRouteOpen}. Nor while a leg is parked under its id: that report waits here instead, see
+    ///  {_requireNoParkedLeg}.
     /// @param token the token the compliance is bound to
     /// @param keeper whether the AccessManager binds the caller to this selector's role
     function cancelTickets(bytes32[] calldata validationIds, address token, bool keeper) external {
@@ -592,6 +594,8 @@ library ReceiptLib {
                 require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(ticketId, publicAt));
             }
             TicketLib.requireAwaitedInboundOpen(token, validation);
+            _requireReceiptRouteOpen(token, validation.fromChainKey);
+            if (validation.twoLegs) _requireReceiptRouteOpen(token, validation.toChainKey);
             _requireNoParkedLeg(store, ticketId, validation.fromChainKey);
             if (validation.twoLegs) _requireNoParkedLeg(store, ticketId, validation.toChainKey);
 
@@ -599,6 +603,14 @@ library ReceiptLib {
 
             emit EventsLib.TicketCancelled(ticketId);
         }
+    }
+
+    /// @dev A ticket is not cancelled while an away chain it was sent to cannot deliver a receipt: its receipt route
+    ///  is closed, or its bridge distrusted. The away token may have executed it already, and its receipt waits
+    ///  until a receipt route is set again; cancelling meanwhile would free what the receipt still moves. Close by
+    ///  hand stays the way out.
+    function _requireReceiptRouteOpen(address token, bytes32 chainKey) private view {
+        require(ITREXMessaging(token).isChainOpen(chainKey), ErrorsLib.ChainNotOpen(chainKey));
     }
 
     /// @dev A validation is not discarded over a leg parked under its id. The leg was reported while nothing was

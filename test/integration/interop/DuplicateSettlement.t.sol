@@ -24,8 +24,8 @@ contract DuplicateSettlementTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        polygonGateway = _newTrustedGateway(POLYGON);
-        optimismGateway = _newTrustedGateway(OPTIMISM);
+        polygonGateway = _newReceiptBridge(POLYGON);
+        optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);

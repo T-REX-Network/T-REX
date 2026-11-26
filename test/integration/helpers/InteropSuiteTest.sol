@@ -45,9 +45,11 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
+import { TREXMessagingLib } from "contracts/interop/TREXMessagingLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
+import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
@@ -62,6 +64,9 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
 
     bytes32 polygon = _evmChainKey(POLYGON);
     bytes32 optimism = _evmChainKey(OPTIMISM);
+
+    /// @dev CCIP's finality value that admits fully finalized messages only.
+    bytes4 constant FULL_FINALITY = bytes4(0);
 
     uint64 constant VALIDITY_WINDOW = 1 hours;
     uint64 constant POLYGON_WINDOW = 30 minutes;
@@ -144,6 +149,16 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         );
     }
 
+    /// @dev The receipt bridge the half of `ticketId` toward `chainKey` is pinned to; zero when it never left.
+    function _pinnedBridgeOf(bytes32 ticketId, bytes32 chainKey) internal view returns (address bridge) {
+        (bridge,) = token.pinOf(TREXMessagingLib.halfKeyOf(ticketId, chainKey));
+    }
+
+    /// @dev The recall `recallId` as the token stores it, read through the ledger harness.
+    function _pendingRecall(uint256 recallId) internal view returns (TokenLedgerLib.PendingRecall memory) {
+        return TokenLedgerHarness(address(token)).pendingRecall(recallId);
+    }
+
     /// @dev The request sent with the last salt was refused: nothing was recorded under its id.
     function _assertNothingRecorded(
         bytes memory from,
@@ -176,18 +191,44 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return MessageTypesLib.chainKey(chainType, chainReference);
     }
 
-    /// @dev A trusted gateway standing in for `chainId`'s counterpart gateway.
-    function _newTrustedGateway(uint256 chainId) internal returns (ERC7786GatewayMock gateway) {
-        gateway = new ERC7786GatewayMock(chainId);
-        trustedGatewayRegistry.setTrustedGateway(address(gateway), true);
+    /// @dev The CCIP selector the tests give the away chain `chainId`. CCIP selectors are not chain ids.
+    function _awayChainSelector(uint256 chainId) internal pure returns (uint64) {
+        return uint64(uint256(keccak256(abi.encode("away chain selector", chainId))));
     }
 
-    /// @dev Routes `_token`'s traffic for the EVM chain `chainId` through `gateway`, as the issuer.
-    function _openEvmChain(Token _token, uint256 chainId, address gateway) internal {
+    /// @dev The bridge on the away chain `chainId` that sends the receipts, as CCIP reports a sender.
+    function _awayReceiptBridge(uint256 chainId) internal pure returns (bytes memory) {
+        return abi.encode(address(uint160(uint256(keccak256(abi.encode("away receipt bridge", chainId))))));
+    }
+
+    /// @dev A receipt bridge standing in for `chainId`'s counterpart, recorded in the registry, whose receiving
+    ///  policy admits that chain's away receipt bridge at full finality only.
+    function _newReceiptBridge(uint256 chainId) internal returns (ERC7786GatewayMock bridge) {
+        bridge = new ERC7786GatewayMock(chainId);
+        bridge.setReceivingPolicy(_awayChainSelector(chainId), _awayReceiptBridge(chainId), FULL_FINALITY);
+        trustedGatewayRegistry.trustReceiptBridge(address(bridge));
+    }
+
+    /// @dev A ticket bridge toward `chainId`, recorded in the registry with the depth it waits for.
+    function _newTicketBridge(uint256 chainId, uint64 depth) internal returns (ERC7786GatewayMock bridge) {
+        bridge = new ERC7786GatewayMock(chainId);
+        trustedGatewayRegistry.trustTicketBridge(address(bridge), depth);
+    }
+
+    /// @dev Sets `_token`'s receipt route for the EVM chain `chainId` to `bridge`, as the issuer.
+    function _openEvmChain(Token _token, uint256 chainId, address bridge) internal {
         (bytes2 chainType, bytes memory chainReference) = _evmChain(chainId);
 
         vm.prank(deployer);
-        _token.setReceiptRoute(chainType, chainReference, gateway);
+        _token.setReceiptRoute(
+            chainType, chainReference, bridge, _awayChainSelector(chainId), _awayReceiptBridge(chainId)
+        );
+    }
+
+    /// @dev Closes `_token`'s receipt route for the EVM chain `chainId`, as the issuer.
+    function _closeEvmChain(Token _token, uint256 chainId) internal {
+        vm.prank(deployer);
+        _token.closeReceiptRoute(_evmChainKey(chainId));
     }
 
     /// @dev Queues `payload` for `_token` through `gateway`, authored by `author`, returning its index.

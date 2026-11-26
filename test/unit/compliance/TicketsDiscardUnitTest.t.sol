@@ -93,6 +93,9 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
         vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
+        // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
+        vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
+        vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);

@@ -850,7 +850,11 @@ abstract contract PlanBuilder {
         t[2] = FunctionRole(
             a.platformAM,
             a.gatewayRegistry,
-            _sel1(TrustedGatewayRegistry.setTrustedGateway.selector),
+            _sel3(
+                TrustedGatewayRegistry.trustTicketBridge.selector,
+                TrustedGatewayRegistry.trustReceiptBridge.selector,
+                TrustedGatewayRegistry.distrustBridge.selector
+            ),
             RoleTable.interopManager()
         );
         t[3] = FunctionRole(

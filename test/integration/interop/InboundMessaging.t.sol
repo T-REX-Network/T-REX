@@ -71,8 +71,8 @@ contract InboundMessagingTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
 
-        routedGateway = _newTrustedGateway(POLYGON);
-        otherTrustedGateway = _newTrustedGateway(POLYGON);
+        routedGateway = _newReceiptBridge(POLYGON);
+        otherTrustedGateway = _newReceiptBridge(POLYGON);
         untrustedGateway = new ERC7786GatewayMock(POLYGON);
 
         compliance = address(token.compliance());
@@ -132,7 +132,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     ///      The id was never issued here, so each leg is parked under its own chain and that chain's inbound
     ///      pauses; the token itself stays open, and the first leg's pause does not hold the other chain's back.
     function testTwoLegSettlementDeliversBothLegsUnderOneId() public {
-        ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
+        ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
         bytes32 neverIssued = bytes32(uint256(ticketId) + 1);
 
@@ -344,7 +344,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     /// @dev The token's own address, but on a chain the issuer never opened: a chain with no route accepts
     ///      no settlement.
     function testASettlementFromAnUnopenedChainIsRefused() public {
-        ERC7786GatewayMock strangerChain = _newTrustedGateway(OPTIMISM);
+        ERC7786GatewayMock strangerChain = _newReceiptBridge(OPTIMISM);
         uint256 index = _liteSends(strangerChain, token, _settlementPayload());
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
@@ -459,7 +459,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     /// @dev The first leg of a pair delivered twice under a zero id is judged by the compliance too: the burn is
     ///      held in transit once, and the second delivery is a duplicate, consumed with nothing paused.
     function testZeroReceiveIdBurnLegRedeliveryIsADuplicateHeldOnce() public {
-        ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
+        ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
         bytes memory bobOnOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
         bytes32 pairId = _requestValidation(address(aliceIdentity), satelliteFrom, bobOnOptimism, 1, 100);
@@ -555,7 +555,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     function testUntrustingTheGatewayStopsInboundToo() public {
         uint256 index = _peerSendsSettlement();
 
-        trustedGatewayRegistry.setTrustedGateway(address(routedGateway), false);
+        trustedGatewayRegistry.distrustBridge(address(routedGateway));
 
         vm.expectRevert(
             abi.encodeWithSelector(

@@ -158,13 +158,24 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Interop Configuration ----- */
 
     /// @inheritdoc ITREXMessaging
-    function setReceiptRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
-        _setRoute(chainType, chainReference, gateway);
+    function setReceiptRoute(
+        bytes2 chainType,
+        bytes calldata chainReference,
+        address bridge,
+        uint64 awayChainSelector,
+        bytes calldata awayReceiptBridge
+    ) external restricted {
+        _setReceiptRoute(chainType, chainReference, bridge, awayChainSelector, awayReceiptBridge);
     }
 
     /// @inheritdoc ITREXMessaging
-    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
-        _setFastRoute(chainType, chainReference, gateway);
+    function closeReceiptRoute(bytes32 chainKey) external restricted {
+        _closeReceiptRoute(chainKey);
+    }
+
+    /// @inheritdoc ITREXMessaging
+    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) external restricted {
+        _setTicketRoute(chainType, chainReference, bridge);
     }
 
     /// @inheritdoc ITREXMessaging
@@ -181,13 +192,13 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /* ----- Interop Dispatch ----- */
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
-    /// its final route.
+    /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to the
+    /// receipt route and the peer.
     ///
     /// The reference side has two contracts with something to say, the compliance and the token, but
     /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
-    /// only ever has to trust a single reference address. A cross-chain validation is dispatched once
-    /// per involved chain, under the same `ticketId`, and each leg pins its own route.
+    /// only ever has to trust a single reference address. A ticket over two away chains is sent once
+    /// per away chain, under the same `ticketId`, and each half pins its own route.
     ///
     /// Callable by the bound compliance alone. No role opens this door: a validation body and the id it
     /// travels under are the compliance's to author, and a human holding the selector could otherwise
@@ -341,11 +352,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc IToken
     function totalOnHold() external view returns (uint256) {
         return TokenLedgerLib.layout().totalOnHold;
-    }
-
-    /// @inheritdoc IToken
-    function pendingRecall(uint256 recallId) external view returns (TokenLedgerLib.PendingRecall memory) {
-        return TokenLedgerLib.layout().recalls[recallId];
     }
 
     /* ----- Transfer Functions ----- */

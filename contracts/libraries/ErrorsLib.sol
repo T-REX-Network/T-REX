@@ -296,13 +296,19 @@ library ErrorsLib {
     error AwayChainBlocked(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
-    /// @dev `gateway` would be both the fast and the final route of `chainKey`.
-    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
-    /// @dev `gateway` is the fast route of `chainKey`, which carries validations out and nothing in.
-    error WrongRoute(address gateway, bytes32 chainKey);
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
     error BridgeNotPinned(address gateway, bytes32 ticketId, bytes32 chainKey);
     error BridgeNotTrusted(address gateway);
+    /// @dev `bridge` is not recorded as a receipt bridge, the only kind a receipt route may use.
+    error NotAReceiptBridge(address bridge);
+    /// @dev `bridge` is not recorded as a ticket bridge, the only kind a ticket route may use.
+    error NotATicketBridge(address bridge);
+    /// @dev `bridge` was distrusted, and a distrusted bridge is never trusted again.
+    error BridgeDistrusted(address bridge);
+    /// @dev `bridge` already has its one record; a bridge that changes is a new bridge.
+    error BridgeAlreadyRecorded(address bridge);
+    /// @dev The receiving policy of `bridge` admits messages from `chainKey` before that chain's full finality.
+    error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);

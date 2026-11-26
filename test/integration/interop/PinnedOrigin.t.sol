@@ -48,8 +48,9 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev A validation leg is pinned to the gateway and the peer it was sent to. A peer change does not strand
-///      it, and closing the chain stops it like every other message from that chain.
+/// @dev A half is pinned to the receipt bridge and the peer it was sent to. Its receipt is taken from that pair or
+///      from the current one, so a peer change does not strand it, and closing the receipt route stops it like every
+///      other message from that chain.
 ///      The validations are dispatched by the token alone, never issued by the compliance, so a leg that
 ///      passes the transport reaches `receiveReceipt`, which is what these tests read.
 contract PinnedOriginTest is InteropSuiteTest {
@@ -66,7 +67,7 @@ contract PinnedOriginTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
 
-        gateway = _newTrustedGateway(POLYGON);
+        gateway = _newReceiptBridge(POLYGON);
         compliance = address(token.compliance());
         _openEvmChain(token, POLYGON, address(gateway));
 
@@ -110,11 +111,21 @@ contract PinnedOriginTest is InteropSuiteTest {
         gateway.relay(index);
     }
 
-    function testTheNewPeerCannotSettleWhatThePreviousOneWasSent() public {
+    function test_receiveMessage_acceptsAReceiptFromTheCurrentPeer_whenTheHalfIsPinnedToThePreviousOne() public {
         _changePeer();
         uint256 index = _settlementFrom(newLite, inFlight);
 
-        _expectNotPeer(newLite);
+        _expectHandled();
+        gateway.relay(index);
+    }
+
+    /// @dev A peer that is neither the pinned one nor the current one is refused.
+    function testAPeerThatIsNeitherPinnedNorCurrentIsRefused() public {
+        _changePeer();
+        address strangerLite = makeAddr("strangerLite");
+        uint256 index = _settlementFrom(strangerLite, inFlight);
+
+        _expectNotPeer(strangerLite);
         gateway.relay(index);
     }
 
@@ -144,7 +155,7 @@ contract PinnedOriginTest is InteropSuiteTest {
 
     function testAClosedChainRefusesAPinnedSettlement() public {
         uint256 index = _settlementFrom(address(token), inFlight);
-        _openEvmChain(token, POLYGON, address(0));
+        _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
         gateway.relay(index);
@@ -152,7 +163,7 @@ contract PinnedOriginTest is InteropSuiteTest {
 
     function testReopeningTheChainLetsThePinnedSettlementLand() public {
         uint256 index = _settlementFrom(address(token), inFlight);
-        _openEvmChain(token, POLYGON, address(0));
+        _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
         gateway.relay(index);

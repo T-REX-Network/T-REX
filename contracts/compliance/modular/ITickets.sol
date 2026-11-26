@@ -116,6 +116,7 @@ interface ITickets {
     error ValidationNotPubliclyDiscardable(bytes32 ticketId, uint64 publicAt);
     error ValidationNotStuck(bytes32 ticketId, uint8 status);
     error ValidationNotYetResolvable(bytes32 ticketId, uint64 resolvableAt);
+    error ChainNotOpen(bytes32 chainKey);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
@@ -400,6 +401,9 @@ interface ITickets {
     ///   the pause, so the leg that answers the validation may be among them.
     /// - No chain an id still awaits with its inbound paused on the token; otherwise reverts with
     ///   `AwayChainBlocked`: the reports held at that gateway may answer the validation.
+    /// - Every away chain an id was sent to open on the token: a receipt route set, through a bridge still recorded
+    ///   as a receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is
+    ///   not taken as missing; close by hand stays the way out.
     /// - No leg parked under an id for a chain it involves; otherwise reverts with `ApplyWaitingReceiptFirst`:
     ///   the report is already here, and {applyWaitingReceipt} takes it in or refuses it first.
     ///

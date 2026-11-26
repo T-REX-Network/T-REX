@@ -65,8 +65,8 @@ contract ValidationResendTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
-        polygonGateway = _newTrustedGateway(POLYGON);
-        optimismGateway = _newTrustedGateway(OPTIMISM);
+        polygonGateway = _newReceiptBridge(POLYGON);
+        optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
@@ -94,7 +94,7 @@ contract ValidationResendTest is InteropSuiteTest {
 
         assertEq(polygonGateway.queueLength(), 2);
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload);
-        assertEq(token.pinnedRouteFor(id, polygon), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(id, polygon), address(polygonGateway));
         _assertNotPinnedAgain();
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
@@ -370,7 +370,7 @@ contract ValidationResendTest is InteropSuiteTest {
 
     /// @notice The leg's settlement is matched against the pinned gateway, so it is never resent through another.
     function test_resendValidation_RevertWhen_TheRouteWasSwitched() public {
-        ERC7786GatewayMock replacement = _newTrustedGateway(POLYGON);
+        ERC7786GatewayMock replacement = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(replacement));
 
         vm.prank(address(aliceIdentity));

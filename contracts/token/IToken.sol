@@ -61,7 +61,6 @@ pragma solidity 0.8.30;
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
-import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 
 /// @title IToken
 /// @notice The T-REX token surface beyond ERC-3643: the ledger views the standard does not define.
@@ -265,8 +264,5 @@ interface IToken is IERC3643 {
     ///  the one addressed, `UnknownResendKind`, and `ChainNotOpen`. Emits `ProtocolMessageSent` and `InstructionResent`.
     /// @return sendId the gateway's id for the resent instruction
     function resend(uint8 kind, uint256 id, bytes calldata data) external returns (bytes32 sendId);
-
-    /// @notice The recall instruction `recallId` while it waits for its proof; all zeros once settled or never issued.
-    function pendingRecall(uint256 recallId) external view returns (TokenLedgerLib.PendingRecall memory);
 
 }
