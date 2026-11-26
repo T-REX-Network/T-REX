@@ -61,7 +61,6 @@ pragma solidity 0.8.30;
 
 import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Recipient.sol";
 
-import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 import { ITREXMessaging } from "./ITREXMessaging.sol";
@@ -102,6 +101,11 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     /// @inheritdoc ITREXMessaging
     function routeFor(bytes32 chainKey) public view returns (address) {
         return TREXMessagingLib.layout().routes[chainKey];
+    }
+
+    /// @inheritdoc ITREXMessaging
+    function fastRouteFor(bytes32 chainKey) public view returns (address) {
+        return TREXMessagingLib.layout().fastRoutes[chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
@@ -151,7 +155,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     {
         (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
             TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
-        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
 
         if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
             _handleSettlement(chainKey, body);
@@ -183,6 +186,10 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         TREXMessagingLib.setRoute(chainType, chainReference, gateway);
     }
 
+    function _setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
+        TREXMessagingLib.setFastRoute(chainType, chainReference, gateway);
+    }
+
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
         TREXMessagingLib.setPeer(chainKey, peer);
     }
@@ -193,7 +200,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         TREXMessagingLib.setInboundPaused(chainKey, pause);
     }
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
+    /// its final route.
     function _sendComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes memory body)
         internal
         returns (bytes32 sendId)

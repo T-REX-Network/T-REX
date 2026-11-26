@@ -616,11 +616,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **The compliance's cross-chain flows live in linked libraries.** `ModularCompliance` was 35 bytes under the
+  EIP-170 limit and is now 15,663 bytes, 8,913 under. The questions `requestTransferValidation` asks moved into
+  `TransferValidationLib`, next to the issuance they lead to; settlement, discard and the resolution of a stuck
+  pair moved into a new linked library, `TransferSettlementLib`. No function, event, error or storage slot
+  changes: the compliance's ABI is the same entry for entry, the events and errors those libraries raise being
+  declared again on `ITransferValidation`. A native transfer, mint or burn reaches no library, as before. A
+  deployment links one more library, which `scripts/deploy-and-record.sh` records as `transferSettlementLib`.
 - **Breaking, `RecoverySuccess` and `UpdatedTokenInformation`**: no argument is `indexed` anymore, matching
   the ERC-3643 specification. `RecoverySuccess(address lostWallet, address newWallet, address investorOnchainID)`
   and `UpdatedTokenInformation(string, string, uint8, string, address newOnchainID)` keep their topic hash but
   carry every argument in the data field. Consumers filtering these events by wallet or ONCHAINID topic must
   decode the data instead.
+- **The token shares its repeated call sites.** `Token` was 212 bytes under the EIP-170 limit and is now 641
+  under, with no change in what it does. The compiler emits every call into the compliance or a linked library
+  in full, so the three places that report an agent's movement (`agentTransferred`) and the two that check the
+  ONCHAINID now go through one private function each, and the refusal of a message from a chain whose inbound is
+  paused moved to the end of `TREXMessagingLib.acceptMessage`, where it runs in the same order as before.
 - **A replayed leg pauses its chain, not the token.** A settlement leg already accounted for, including one arriving
   after `resolveStuckValidation`, and a burn proof differing from the one that settled its recall, used to pause the
   token: every native transfer and every other chain stopped because one satellite misbehaved. The compliance and
@@ -642,6 +654,19 @@ All notable changes to this project will be documented in this file.
   Network line. `NOTICE.md` states the copyright, the provenance and the GPL v3 section 5(a) modification
   notice, and ships in the npm package. `package.json` declares `GPL-3.0-or-later` and names the company as
   author. The ASCII T-REX logo heads every Solidity file.
+
+- **`setOnchainID` accepts only the token's own identity.** The setter took any address, so an issuer could
+  point its token at another token's ONCHAINID and investors would see the wrong asset behind it. The token now
+  asks the IdentityFactory of its identity registry which identity it binds to the token's address, and reverts
+  with `TokenIdentityNotBound` for any other value, the same rule `TREXFactory` applies at deploy. `init` runs
+  the same check, so a token deployed outside the factory cannot start out on another token's identity either.
+  Zero is accepted only while the factory binds no identity to the token. The check lives in `TokenGuardsLib`.
+  `setIdentityRegistry` holds the new registry to the same rule: a registry built on another IdentityFactory
+  is refused with `TokenIdentityNotBound` unless that factory binds the token to the ONCHAINID the token
+  holds, so the token and its registry agree whichever of the two changes.
+  For factory tokens the ONCHAINID is fixed at deploy: the factory binds it before the token exists, and an
+  ASSET binding can be neither revoked nor moved, so the setter only accepts the identity the token already
+  has. Moving a token to a new identity is no longer possible.
 
 - **Recovery checks that the named investor owns the lost wallet.** `recoveryAddress` took the investor's
   identity from the agent and never compared it with the lost wallet's owner. An agent could name another

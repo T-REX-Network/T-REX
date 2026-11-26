@@ -30,6 +30,12 @@ that recall was dispatched to.
    what a second body under a known id means, and the instruction ids of rules 9 and 10. A zero receive id names
    no delivery (ERC-7786 allows it) and is never recorded, or the first one would refuse every later message.
 2. **Accept only the reference token as author**, through its own gateway.
+2a. **Send every report on the final route.** A chain may have two routes on the reference side: a fast one, set
+   with `setFastRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
+   `setRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
+   token refuses a delivery from the fast route with `GatewayIsFastRoute`, and pins each validation leg to the final
+   route of the moment (`pinnedRouteFor`), so a validation that arrived on the fast gateway is settled through the
+   final one, not back through the gateway that delivered it.
 
 ### Validations
 
@@ -60,7 +66,11 @@ that recall was dispatched to.
    the same id with a different body is refused. The reference chain already burned the native balance and credited
    the bridged position; a Lite that mints twice has inflated its chain.
 10. **A recall instruction burns at most once per `recallId`.** The Lite burns `min(amount, balance)`, where `balance`
-    may be below `amount`, down to zero, when a validation executed first; stores the proof; sends it. A repeated
+    may be below `amount`, down to zero, when a validation requested before the recall executed first, including
+    one that was still awaiting approval when the recall was instructed; stores the proof; sends it. A validation
+    requested after it cannot draw on the recalled amount: the token holds `amount` back from the wallet's
+    `availableOf` from the instruction until the proof settles the recall. Nothing else releases it: an instruction
+    that was never answered may still be executed, so its amount stays held back. A repeated
     instruction is answered with the stored proof, and the operator can resend it. The Lite never answers one id with
     two different proofs and never proves more than instructed. The token credits the native wallet the instruction
     recorded, not one the proof could choose.
@@ -72,7 +82,8 @@ depends on which block, or in which order, its transaction landed. That holds fo
 
 | Type | Lane | Why |
 |---|---|---|
-| `COMPLIANCE_VALIDATION` | may ride before finality | `validationId` is `keccak256(canonicalKey(from), salt)`, a function of the request and never of the chain's ordering or clock; the settlement path never halts the token |
+| `COMPLIANCE_VALIDATION` | may ride before finality | `validationId` is `keccak256(canonicalKey(from), salt)`, a function of the request and never of the chain's ordering or clock; the settlement path never halts the token. A validation issued by an approval SHOULD wait for finality all the same: a reorg can drop the approval and the approver answer otherwise, which leaves the executed leg parked. Which route a validation takes is the token's routing, not this table's |
+| `SETTLEMENT_NOTIFICATION`, `BURN_PROOF` | MUST wait for the satellite chain's finality | the reference chain applies a report once and cannot take it back; a leg or a burn its chain later reorgs away would stay on the ledger for a movement that never happened |
 | `MINT_INSTRUCTION`, `RECALL_INSTRUCTION` | MUST wait for finality | `delegationId` and `recallId` are counters, assigned by inclusion order; a reorg can give the same id to another instruction |
 
 A Lite that executes a validation before finality owns the reorg exposure, and the reference chain bounds it to
@@ -86,7 +97,11 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
   carries the `salt`, so an agent can send it on the requester's behalf from the Lite's copy. Anyone then calls
   `settleParkedLeg(validationId, chainKey)`, which judges the leg as a delivery would (`ParkedLegSettled`, or one
   of the outcomes below); a leg that reverts there stays parked and is tried again, and once the keeper resolved
-  the pair it ends as a replay.
+  the pair it ends as a replay. While a leg is parked under an id its validation is not discarded
+  (`ParkedLegAwaitsSettlement`): the report is already here and is settled first. When the request can no longer be issued, because a rule that allowed it now
+  refuses it or an `APPROVAL` module refuses it this time, the leg stays parked and readable through
+  `parkedLegOf`: nothing is applied and the ledger does not follow what the Lite executed. No function takes
+  such a leg in or sends it back today: that exit needs a contract change.
 - **Re-issued with another body.** The hash in the report tells the two cases apart. A leg inside the issued terms
   settles whatever hash it carries (`SettlementBodyDiverged` when it is not the issued one). A leg outside the
   terms with the issued hash is a Lite that broke rule 5 or 6 (`SettlementRejected`); one with another hash, from
@@ -105,7 +120,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes through the gateway and to the peer the issuance pinned; refused while issuance toward that chain is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
+| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes out as the issuance did, on the fast route when one is set and on the final route otherwise, and only while the final route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |

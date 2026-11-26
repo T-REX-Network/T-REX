@@ -169,7 +169,9 @@ library ErrorsLib {
     error InvalidClaimPattern();
     error InvalidCompliancePattern();
     error MaxClaimIssuersReached(uint256 max);
-    /// @dev A supplied ONCHAINID must already be actively bound to the predicted token address in the IdentityFactory.
+    /// @dev A token's ONCHAINID, supplied at deploy or set later, must be the identity the IdentityFactory binds
+    ///  to the token's address. A new identity registry is held to the same rule, on its own IdentityFactory,
+    ///  for the ONCHAINID the token already has.
     error TokenIdentityNotBound(address token, address suppliedIdentity);
     /// @dev Only a MANAGEMENT key of a supplied ONCHAINID may deploy a suite with it.
     error TokenIdentityNotManagedByCaller(address suppliedIdentity, address caller);
@@ -274,6 +276,9 @@ library ErrorsLib {
     error ValidationAlreadyRequested(bytes32 validationId);
     /// @dev No leg is parked under this id for this chain, or nothing is issued under the id yet.
     error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
+    /// @dev A leg `chainKey` reported for this validation is parked: it is settled first, so that the validation is
+    ///  not discarded over a report this chain already holds.
+    error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
     /// @dev The token is paused: a parked leg, like a delivered one, is settled only once it is unpaused.
     error TokenPaused();
     /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
@@ -290,6 +295,10 @@ library ErrorsLib {
     error ChainInboundPaused(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
+    /// @dev `gateway` would be both the fast and the final route of `chainKey`.
+    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
+    /// @dev `gateway` is the fast route of `chainKey`, which carries validations out and nothing in.
+    error GatewayIsFastRoute(address gateway, bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
     error GatewayNotPinned(address gateway, bytes32 validationId, bytes32 chainKey);
     error GatewayNotTrusted(address gateway);

@@ -75,8 +75,10 @@ interface ISettlementHandler {
     enum Verdict {
         /// Nothing for the token to do: the message was applied, or was a harmless duplicate.
         None,
-        /// The message names something the token issued but already accounted for, so that chain's reports can no
-        /// longer be trusted: the token pauses its inbound from that chain only.
+        /// The message reports something this chain cannot account for, so that chain's reports can no longer be
+        /// trusted: the token pauses its inbound from that chain only. For a settlement that is a leg already
+        /// accounted for, a leg under an id nothing is issued under, which is parked, and a leg outside the issued
+        /// terms, which is rejected or orphans its validation, see {handleSettlement}.
         PauseChain,
         /// The message names a recall the token never issued. The transport says which chain sent it, but not why
         /// the id is unknown: a peer inventing ids, or the token's own records no longer matching what it dispatched

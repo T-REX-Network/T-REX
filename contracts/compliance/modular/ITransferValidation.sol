@@ -68,6 +68,9 @@ pragma solidity 0.8.30;
  */
 interface ITransferValidation {
 
+    // The events and errors below are raised inside `TransferValidationLib` and `TransferSettlementLib`, which
+    // the compliance reaches by DELEGATECALL. They are declared again here so that they stay in the compliance's
+    // ABI; each is documented where it is defined, in `EventsLib` and `ErrorsLib`.
     event TransferValidationIssued(
         bytes32 indexed validationId,
         bytes from,
@@ -79,6 +82,42 @@ interface ITransferValidation {
         uint64 reconciliationWindow,
         bytes32 salt
     );
+    event SettlementNotified(
+        bytes32 indexed originChainKey, bytes32 indexed validationId, bytes from, bytes to, uint256 amount
+    );
+    event ValidationLegConfirmed(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event ValidationSettled(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event LateReconciliation(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event ReplayedSettlement(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event SettlementDuplicate(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event ValidationDiscarded(bytes32 indexed validationId);
+    event ValidationResolved(bytes32 indexed validationId, uint256 returnedAmount);
+    event SettlementParked(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ParkedLegSettled(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event SettlementRejected(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ValidationOrphaned(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event SettlementBodyDiverged(bytes32 indexed validationId, bytes32 indexed chainKey, bytes32 hash);
+
+    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
+    error SenderNotOnSatellite(bytes wallet);
+    error UnverifiedWallet(bytes wallet);
+    error NotAuthorizedForWallet(address caller, bytes wallet);
+    error EmptyValidationRange(uint256 min, uint256 max);
+    error ZeroValue();
+    error ValidationSpenderRefused(bytes spender);
+    error ValidationAlreadyRequested(bytes32 validationId);
+    error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
+    error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
+    error TokenPaused();
+    error SettlementAmountMismatch(bytes32 validationId, uint256 expected, uint256 amount);
+    error ValidationNotDiscardable(bytes32 validationId, uint8 status);
+    error ValidationNotReleasable(bytes32 validationId, uint64 releaseAt);
+    error ValidationNotPubliclyDiscardable(bytes32 validationId, uint64 publicAt);
+    error ValidationNotStuck(bytes32 validationId, uint8 status);
+    error ValidationNotYetResolvable(bytes32 validationId, uint64 resolvableAt);
+    error NonCanonicalInteroperableAddress(bytes envelope);
+    error InteroperableAddressEmptyReferenceAndAddress();
+    error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
 
     /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
     /// the keeper gave up, and what is still reserved are all read off this one value.
@@ -344,6 +383,8 @@ interface ITransferValidation {
     ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
     /// - No chain an id still awaits with its inbound paused on the token; otherwise reverts with
     ///   `ChainInboundPaused`: the reports held at that gateway may answer the validation.
+    /// - No leg parked under an id for a chain it involves; otherwise reverts with `ParkedLegAwaitsSettlement`:
+    ///   the report is already here, and {settleParkedLeg} takes it in or refuses it first.
     ///
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.
@@ -362,6 +403,11 @@ interface ITransferValidation {
     /// - The chain owing the missing leg must not have its inbound paused on the token; otherwise reverts with
     ///   `ChainInboundPaused`: the leg may be waiting at that gateway, and returning the hold under it would leave
     ///   the ledger crediting the sender for what the receiving chain minted.
+    ///
+    /// A leg parked for the chain owing the missing leg does not block the resolution, unlike a discard: the keeper
+    /// settles it with {settleParkedLeg} first, and resolves only when it cannot be settled. A parked leg at another
+    /// amount than the leg that landed reverts there for good, as the same leg delivered would at the gateway, and
+    /// the resolution is the only way the pair ends.
     ///
     /// Emits `ValidationResolved`.
     function resolveStuckValidation(bytes32 validationId) external;

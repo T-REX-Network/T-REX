@@ -175,11 +175,17 @@ interface IToken is IERC3643 {
     function returnHeldInTransit(bytes calldata to, bytes32 validationId) external;
 
     /// @dev What open validations may still draw from `wallet`. The compliance reserves this at issuance and
-    ///  gives it back when the validation settles or is discarded.
+    ///  gives it back when the validation settles or is discarded. The amount of an open recall is not part of
+    ///  it: {availableOf} subtracts both, so `bridgedBalanceOf - reservedOf` overstates what the wallet can send
+    ///  while a recall is open.
     /// @param wallet the satellite wallet, ERC-7930
     function reservedOf(bytes calldata wallet) external view returns (uint256);
 
-    /// @dev What `wallet` can still send: its bridged balance less what open validations may draw from it.
+    /// @dev What `wallet` can still send: its bridged balance less what open validations may draw from it and
+    ///  less the amount of its open recall, from {instructRecall} until the proof settles it. Floors at zero.
+    ///  The compliance narrows every new request to this, so none made after a recall draws on tokens being
+    ///  recalled. A request that reserved before the recall keeps its reservation, issued or still awaiting
+    ///  approval.
     /// @param wallet the satellite wallet, ERC-7930
     function availableOf(bytes calldata wallet) external view returns (uint256);
 
@@ -202,7 +208,6 @@ interface IToken is IERC3643 {
         address accessManagerAddress
     ) external;
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
     /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled by
     ///  `settleParkedLeg` once that id is issued, gets the same brake it would have got at delivery, see
     ///  {ISettlementHandler-Verdict}. Callable by the bound compliance alone.
@@ -210,6 +215,7 @@ interface IToken is IERC3643 {
     /// @param verdict what to apply; `None` applies nothing
     function applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) external;
 
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
     function dispatchComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes calldata body)
         external
         returns (bytes32);
@@ -241,7 +247,10 @@ interface IToken is IERC3643 {
     /// @dev Callable by the AccessManager role bound to this selector. Not pause-gated: the instruction moves nothing.
     ///  Reverts with `ZeroValue`, `ZeroAddress`, `WalletsNotLinked` (revoked wallets still resolve),
     ///  `NotASatelliteWallet`, `RecallPending`, `InsufficientBridgedBalance` above the wallet's bridged position, and
-    ///  `ChainNotOpen`. Reservations are not subtracted: the satellite burns what it still holds and proves that.
+    ///  `ChainNotOpen`. The recall is not bounded by the wallet's reservations, so a holder cannot keep a position
+    ///  from being recalled by reserving it: a validation that reserved earlier may still execute first, and the
+    ///  satellite burns what it still holds and proves that. From here until the proof lands, `amount` is subtracted
+    ///  from {availableOf}, so no validation requested from now on draws on it.
     ///  Emits `RecallInstructed` and `ProtocolMessageSent`.
     /// @param wallet the ERC-7930 envelope of the satellite wallet to burn
     /// @param amount the most the satellite may burn
