@@ -69,11 +69,11 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
     function test_settleValidation_RevertWhen_CallerIsNotTheBoundCompliance() public {
         vm.prank(agent);
         vm.expectRevert(ErrorsLib.OnlyBoundCompliance.selector);
-        token.settleValidation(satellite1, satellite2, 30, VALIDATION_ID);
+        token.finishMove(satellite1, satellite2, 30, VALIDATION_ID);
 
         vm.prank(user1);
         vm.expectRevert(ErrorsLib.OnlyBoundCompliance.selector);
-        token.settleValidation(satellite1, satellite2, 30, VALIDATION_ID);
+        token.finishMove(satellite1, satellite2, 30, VALIDATION_ID);
     }
 
     // ==== shape Tests ====
@@ -84,12 +84,12 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
             keccak256(satellite1), keccak256(satellite2), VALIDATION_ID, satellite1, satellite2, 30
         );
         vm.prank(compliance);
-        token.settleValidation(satellite1, satellite2, 30, VALIDATION_ID);
+        token.finishMove(satellite1, satellite2, 30, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 30);
-        assertEq(token.bridgedBalanceOf(satellite2), 30);
+        assertEq(token.awayBalanceOf(satellite1), 30);
+        assertEq(token.awayBalanceOf(satellite2), 30);
         assertEq(token.balanceOf(user1), 40);
-        assertEq(token.totalBridged(), 60);
+        assertEq(token.totalAwayBalance(), 60);
         assertEq(token.totalSupply(), 100);
         _assertPartition();
     }
@@ -100,11 +100,11 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.SettledToNative(keccak256(satellite1), user2, VALIDATION_ID, satellite1, 20);
         vm.prank(compliance);
-        token.settleValidation(satellite1, nativeUser2, 20, VALIDATION_ID);
+        token.finishMove(satellite1, nativeUser2, 20, VALIDATION_ID);
 
         assertEq(token.balanceOf(user2), 20);
-        assertEq(token.bridgedBalanceOf(satellite1), 40);
-        assertEq(token.totalBridged(), 40);
+        assertEq(token.awayBalanceOf(satellite1), 40);
+        assertEq(token.totalAwayBalance(), 40);
         assertEq(token.totalSupply(), 100);
         _assertPartition();
     }
@@ -116,13 +116,13 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
     function test_settleValidation_RevertWhen_FromIsNative() public {
         vm.prank(compliance);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
-        token.settleValidation(nativeUser1, satellite2, 25, VALIDATION_ID);
+        token.finishMove(nativeUser1, satellite2, 25, VALIDATION_ID);
     }
 
     function test_settleValidation_RevertWhen_TheSatelliteSenderHasNotEnoughBridged() public {
         vm.prank(compliance);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, satellite1, 60, 61));
-        token.settleValidation(satellite1, satellite2, 61, VALIDATION_ID);
+        token.finishMove(satellite1, satellite2, 61, VALIDATION_ID);
     }
 
     function test_settleValidation_RevertWhen_AnEnvelopeIsNotCanonical() public {
@@ -130,13 +130,13 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
 
         vm.prank(compliance);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
-        token.settleValidation(satellite1, padded, 10, VALIDATION_ID);
+        token.finishMove(satellite1, padded, 10, VALIDATION_ID);
     }
 
     function test_settleValidation_RevertWhen_BothWalletsAreNative() public {
         vm.prank(compliance);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
-        token.settleValidation(nativeUser1, nativeUser2, 10, VALIDATION_ID);
+        token.finishMove(nativeUser1, nativeUser2, 10, VALIDATION_ID);
     }
 
 }

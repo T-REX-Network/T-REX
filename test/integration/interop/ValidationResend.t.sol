@@ -42,7 +42,7 @@ pragma solidity 0.8.30;
 import { Vm } from "@forge-std/Vm.sol";
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -88,36 +88,36 @@ contract ValidationResendTest is InteropSuiteTest {
     function test_resendValidation_Success_WhenTheIdentityResendsTheLostLeg() public {
         vm.recordLogs();
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationResent(id, polygon);
+        emit EventsLib.TicketSent(id, polygon);
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 2);
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload);
         assertEq(token.pinnedRouteFor(id, polygon), address(polygonGateway));
         _assertNotPinnedAgain();
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
     function test_resendValidation_Success_WhenAnAgentResendsForTheWallet() public {
         vm.prank(agent);
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 2);
-        assertEq(_decodeQueuedValidation(polygonGateway, 1).validationId, id);
+        assertEq(_decodeQueuedValidation(polygonGateway, 1).ticketId, id);
     }
 
     /// @notice The resent leg is the one the Lite executes against: relayed, it settles like the original would.
     function test_resendValidation_Success_WhenTheResentLegSettles() public {
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 50));
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 50);
-        assertEq(token.bridgedBalanceOf(bobSat), 50);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 50);
+        assertEq(token.awayBalanceOf(bobSat), 50);
     }
 
     /// @notice On two legs each chain's leg is resent on its own; the other queue is untouched.
@@ -126,7 +126,7 @@ contract ValidationResendTest is InteropSuiteTest {
         optimismGateway.drop(0);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(crossChain, optimism, bobOptimism, "");
+        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
 
         assertEq(optimismGateway.queueLength(), 2);
         assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
@@ -134,23 +134,23 @@ contract ValidationResendTest is InteropSuiteTest {
     }
 
     /// @notice Once the burn landed the receiving Lite still needs its leg to check the burn message against, so the
-    ///         recipient's leg goes again past `expiry`, until `releaseAt`; the mint it then reports settles the pair.
+    ///         recipient's leg goes again past `validUntil`, until `waitingEndsAt`; the mint it then reports settles the pair.
     function test_resendValidation_Success_WhenTheRecipientsLegIsResentAfterTheBurnLanded() public {
         bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
         optimismGateway.drop(0);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        vm.warp(boundCompliance.validationOf(crossChain).expiry + 1);
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.AwaitingMint));
+        vm.warp(boundCompliance.ticketOf(crossChain).validUntil + 1);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(crossChain, optimism, bobOptimism, "");
+        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
 
         assertEq(optimismGateway.queueLength(), 2);
         assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
 
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(crossChain, token, bobOptimism, 10)));
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobOptimism), 10);
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobOptimism), 10);
     }
 
     /// @notice After the burn the recipient is the one left waiting, so their identity may resend the leg toward
@@ -161,7 +161,7 @@ contract ValidationResendTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
 
         vm.prank(address(bobIdentity));
-        boundCompliance.resendValidation(crossChain, optimism, bobOptimism, "");
+        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
 
         assertEq(optimismGateway.queueLength(), 2);
         assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
@@ -171,14 +171,14 @@ contract ValidationResendTest is InteropSuiteTest {
     function test_resendValidation_Success_WhenTheSpenderIsSuppliedAgain() public {
         bytes memory spender = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
         vm.prank(address(aliceIdentity));
-        bytes32 withSpender = boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 5, spender, _salt());
+        bytes32 withSpender = boundCompliance.askToMove(aliceSat, bobSat, 1, 5, spender, _salt());
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, withSpender));
-        boundCompliance.resendValidation(withSpender, polygon, bobSat, "");
+        boundCompliance.sendTicket(withSpender, polygon, bobSat, "");
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(withSpender, polygon, bobSat, spender);
+        boundCompliance.sendTicket(withSpender, polygon, bobSat, spender);
         assertEq(_decodeQueuedValidation(polygonGateway, 2).spender, spender);
     }
 
@@ -186,8 +186,8 @@ contract ValidationResendTest is InteropSuiteTest {
 
     function test_resendValidation_RevertWhen_IdWasNeverIssued() public {
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, bytes32(uint256(999))));
-        boundCompliance.resendValidation(bytes32(uint256(999)), polygon, bobSat, "");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, bytes32(uint256(999))));
+        boundCompliance.sendTicket(bytes32(uint256(999)), polygon, bobSat, "");
     }
 
     function test_resendValidation_RevertWhen_TheRecipientDiffersFromTheIssued() public {
@@ -195,19 +195,19 @@ contract ValidationResendTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, id));
-        boundCompliance.resendValidation(id, polygon, other, "");
+        boundCompliance.sendTicket(id, polygon, other, "");
     }
 
     function test_resendValidation_RevertWhen_TheChainIsNotPartOfTheValidation() public {
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotPartOfValidation.selector, id, optimism));
-        boundCompliance.resendValidation(id, optimism, bobSat, "");
+        boundCompliance.sendTicket(id, optimism, bobSat, "");
     }
 
     function test_resendValidation_RevertWhen_AStrangerAsks() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, stranger, aliceSat));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
     function test_resendValidation_RevertWhen_TheRecipientAsksForTheSendersLeg() public {
@@ -217,50 +217,47 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(bobIdentity), aliceSat)
         );
-        boundCompliance.resendValidation(crossChain, polygon, aliceSat, "");
+        boundCompliance.sendTicket(crossChain, polygon, aliceSat, "");
     }
 
-    /// @notice A leg resent from `releaseAt` on could land after the pair was resolved and the burned amount
+    /// @notice A leg resent from `waitingEndsAt` on could land after the pair was resolved and the burned amount
     ///         returned, and mint it a second time; the resend stops one window ahead of the resolution.
     function test_resendValidation_RevertWhen_TheRecipientsLegIsResentFromReleaseAtOn() public {
         bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
         optimismGateway.drop(0);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-        uint64 releaseAt = boundCompliance.validationOf(crossChain).releaseAt;
-        vm.warp(releaseAt);
+        uint64 waitingEndsAt = boundCompliance.ticketOf(crossChain).waitingEndsAt;
+        vm.warp(waitingEndsAt);
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, crossChain, releaseAt));
-        boundCompliance.resendValidation(crossChain, optimism, bobOptimism, "");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, crossChain, waitingEndsAt));
+        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
         assertEq(optimismGateway.queueLength(), 1);
     }
 
-    /// @notice A burn that lands after a discard is past `releaseAt` by definition, so the discarded pair is out of
+    /// @notice A burn that lands after a discard is past `waitingEndsAt` by definition, so the discarded pair is out of
     ///         the resend's reach; only `resolveStuckValidation` ends it.
     function test_resendValidation_RevertWhen_TheBurnLandedAfterADiscard() public {
         bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
         optimismGateway.drop(0);
         uint256 burn = _liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10));
-        vm.warp(boundCompliance.validationOf(crossChain).releaseAt + 1);
+        vm.warp(boundCompliance.ticketOf(crossChain).waitingEndsAt + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = crossChain;
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
         polygonGateway.relay(burn);
-        assertEq(
-            uint8(boundCompliance.statusOf(crossChain)),
-            uint8(ITransferValidation.ValidationStatus.DiscardedAwaitingMint)
-        );
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.DiscardedAwaitingMint));
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(
                 ErrorsLib.ValidationNotResendable.selector,
                 crossChain,
-                uint8(ITransferValidation.ValidationStatus.DiscardedAwaitingMint)
+                uint8(ITickets.TicketStatus.DiscardedAwaitingMint)
             )
         );
-        boundCompliance.resendValidation(crossChain, optimism, bobOptimism, "");
+        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
     }
 
     /// @notice Once the keeper resolved the pair the burned amount is back with the sender; a leg sent now could
@@ -269,31 +266,29 @@ contract ValidationResendTest is InteropSuiteTest {
         bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
         optimismGateway.drop(0);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-        ITransferValidation.Validation memory stored = boundCompliance.validationOf(crossChain);
-        vm.warp(stored.releaseAt + (stored.releaseAt - stored.expiry) + 1);
+        ITickets.Ticket memory stored = boundCompliance.ticketOf(crossChain);
+        vm.warp(stored.waitingEndsAt + (stored.waitingEndsAt - stored.validUntil) + 1);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(crossChain);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotResendable.selector,
-                crossChain,
-                uint8(ITransferValidation.ValidationStatus.Resolved)
+                ErrorsLib.ValidationNotResendable.selector, crossChain, uint8(ITickets.TicketStatus.Resolved)
             )
         );
-        boundCompliance.resendValidation(crossChain, optimism, bobOptimism, "");
+        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
         assertEq(optimismGateway.queueLength(), 1);
     }
 
     function test_resendValidation_RevertWhen_PastTheSatelliteDeadline() public {
-        uint64 expiry = boundCompliance.validationOf(id).expiry;
-        vm.warp(expiry);
+        uint64 validUntil = boundCompliance.ticketOf(id).validUntil;
+        vm.warp(validUntil);
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, id, expiry));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, id, validUntil));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
     function test_resendValidation_RevertWhen_AlreadySettled() public {
@@ -302,11 +297,9 @@ contract ValidationResendTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotResendable.selector, id, uint8(ITransferValidation.ValidationStatus.Settled)
-            )
+            abi.encodeWithSelector(ErrorsLib.ValidationNotResendable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
     /// @notice The sender's leg was consumed by the burn: sending it again could only make the Lite execute twice.
@@ -317,12 +310,10 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.prank(address(aliceIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotResendable.selector,
-                crossChain,
-                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
+                ErrorsLib.ValidationNotResendable.selector, crossChain, uint8(ITickets.TicketStatus.AwaitingMint)
             )
         );
-        boundCompliance.resendValidation(crossChain, polygon, aliceSat, "");
+        boundCompliance.sendTicket(crossChain, polygon, aliceSat, "");
     }
 
     /// @notice A chain whose inbound is paused holds its reports at the gateway; a leg sent now could only add to
@@ -332,8 +323,8 @@ contract ValidationResendTest is InteropSuiteTest {
         token.setInboundPaused(polygon, true);
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
         assertEq(polygonGateway.queueLength(), 1);
     }
 
@@ -344,7 +335,7 @@ contract ValidationResendTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
         assertEq(polygonGateway.queueLength(), 1);
     }
 
@@ -359,7 +350,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, id, polygon, address(polygonGateway))
         );
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 1);
     }
@@ -372,7 +363,7 @@ contract ValidationResendTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 1, "only the issuance went out");
     }
@@ -386,7 +377,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, id, polygon, address(polygonGateway))
         );
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(replacement.queueLength(), 0);
     }
@@ -394,7 +385,7 @@ contract ValidationResendTest is InteropSuiteTest {
     function _assertNotPinnedAgain() private {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         for (uint256 i = 0; i < logs.length; i++) {
-            assertTrue(logs[i].topics[0] != EventsLib.ValidationRoutePinned.selector, "the route was pinned again");
+            assertTrue(logs[i].topics[0] != EventsLib.HalfPinned.selector, "the route was pinned again");
         }
     }
 

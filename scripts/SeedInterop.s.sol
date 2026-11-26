@@ -223,8 +223,8 @@ contract SeedInterop is Script {
     }
 
     function _ensureRouteAndPeer() internal {
-        if (token.routeFor(chainKey) != address(gateway)) {
-            token.setRoute(chainType, chainReference, address(gateway));
+        if (token.receiptRouteFor(chainKey) != address(gateway)) {
+            token.setReceiptRoute(chainType, chainReference, address(gateway));
             console.log("Route set toward the satellite chain");
         }
         bytes memory peer = InteroperableAddress.formatEvmV1(satelliteChainId, deployer);
@@ -239,8 +239,8 @@ contract SeedInterop is Script {
             compliance.setDefaultValidityWindow(1 days);
             console.log("Default validity window set to 1 day");
         }
-        if (compliance.reconciliationWindowOf(chainKey) == 0) {
-            compliance.setReconciliationWindow(chainKey, 1 hours);
+        if (compliance.waitingTimeOf(chainKey) == 0) {
+            compliance.setWaitingTime(chainKey, 1 hours);
             console.log("Reconciliation window set to 1 hour");
         }
     }
@@ -276,7 +276,7 @@ contract SeedInterop is Script {
     // ============ Movements ============
 
     function _delegateOut() internal {
-        if (token.bridgedBalanceOf(satellites[0]) != 0) {
+        if (token.awayBalanceOf(satellites[0]) != 0) {
             console.log("investor0 already holds a bridged position, skipping the delegation");
             return;
         }
@@ -291,32 +291,29 @@ contract SeedInterop is Script {
     function _seedValidations() internal {
         // The salt is the requester's nonce: the id is `keccak256(canonicalKey(from), salt)`, so a seed run
         // that is replayed takes a fresh one.
-        settledValidation = compliance.requestTransferValidation(
-            satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "", _salt("settled")
-        );
+        settledValidation =
+            compliance.askToMove(satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "", _salt("settled"));
         _liteSends(
             MessageTypesLib.encodeSettlement(
-                MessageTypesLib.SettlementNotification({
-                    validationId: settledValidation,
+                MessageTypesLib.ReceiptMessage({
+                    ticketId: settledValidation,
                     from: satellites[0],
                     to: satellites[1],
                     amount: 30 * UNIT,
-                    hash: compliance.validationOf(settledValidation).hash
+                    hash: compliance.ticketOf(settledValidation).hash
                 })
             )
         );
         console.log("Validation settled for 30 GOLD, id", vm.toString(settledValidation));
 
-        pendingValidation = compliance.requestTransferValidation(
-            satellites[0], satellites[1], 5 * UNIT, 20 * UNIT, "", _salt("pending")
-        );
+        pendingValidation =
+            compliance.askToMove(satellites[0], satellites[1], 5 * UNIT, 20 * UNIT, "", _salt("pending"));
         console.log("Validation left pending, id", vm.toString(pendingValidation));
 
         bytes memory nativeInvestor1 = InteroperableAddress.formatEvmV1(block.chainid, wallets[1]);
-        resentValidation = compliance.requestTransferValidation(
-            satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "", _salt("resent")
-        );
-        compliance.resendValidation(resentValidation, chainKey, nativeInvestor1, "");
+        resentValidation =
+            compliance.askToMove(satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "", _salt("resent"));
+        compliance.sendTicket(resentValidation, chainKey, nativeInvestor1, "");
         console.log(
             "Validation issued toward investor1's native wallet and resent once, id", vm.toString(resentValidation)
         );
@@ -368,8 +365,8 @@ contract SeedInterop is Script {
         console.log("========== Interop Seeding Summary ==========");
         console.log("Loopback gateway:        ", address(gateway));
         console.log("Route open:              ", token.isChainOpen(chainKey));
-        console.log("investor0 bridged:       ", token.bridgedBalanceOf(satellites[0]));
-        console.log("investor1 bridged:       ", token.bridgedBalanceOf(satellites[1]));
+        console.log("investor0 bridged:       ", token.awayBalanceOf(satellites[0]));
+        console.log("investor1 bridged:       ", token.awayBalanceOf(satellites[1]));
         console.log("investor1 native:        ", token.balanceOf(wallets[1]));
         console.log("settled validation:      ", vm.toString(settledValidation));
         console.log("pending validation:      ", vm.toString(pendingValidation));

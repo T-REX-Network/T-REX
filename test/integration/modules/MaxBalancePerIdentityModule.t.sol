@@ -41,7 +41,7 @@ pragma solidity 0.8.30;
 
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
@@ -309,18 +309,18 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
         bytes32 id = _issue(10, CAP);
 
-        assertEq(boundCompliance.validationOf(id).amountMax, 300, "narrowed to what is left under the cap");
+        assertEq(boundCompliance.ticketOf(id).amountMax, 300, "narrowed to what is left under the cap");
     }
 
     /// @notice Two validations racing for one cap: the second sees the first one's reservation, which is the
     ///         case a module keeping its own counter used to get wrong.
     function test_requestTransferValidation_Success_WhenTwoValidationsRaceForTheCap() public {
         bytes32 first = _issue(10, 600);
-        assertEq(boundCompliance.validationOf(first).amountMax, 600);
+        assertEq(boundCompliance.ticketOf(first).amountMax, 600);
 
         bytes32 second = _issue(10, 600);
 
-        assertEq(boundCompliance.validationOf(second).amountMax, 400, "the cap is shared, not doubled");
+        assertEq(boundCompliance.ticketOf(second).amountMax, 400, "the cap is shared, not doubled");
         assertEq(_ledger().pendingInOf(address(bobIdentity)), CAP);
     }
 
@@ -331,32 +331,32 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
 
-        assertEq(boundCompliance.validationOf(_issue(10, CAP)).amountMax, CAP);
+        assertEq(boundCompliance.ticketOf(_issue(10, CAP)).amountMax, CAP);
     }
 
     /// @notice A settlement turns the reservation into a position, and the rule narrows against it afterwards.
     function test_handleSettlement_Success_WhenTheExecutedAmountBecomesAPosition() public {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 id = _issue(10, 600);
 
         gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 400)));
 
         assertEq(_position(address(bobIdentity)), 400);
         assertEq(_ledger().pendingInOf(address(bobIdentity)), 0);
-        assertEq(boundCompliance.validationOf(_issue(10, CAP)).amountMax, 600, "the rest of the cap is free");
+        assertEq(boundCompliance.ticketOf(_issue(10, CAP)).amountMax, 600, "the rest of the cap is free");
     }
 
     /// @notice A late settlement above what the rule allows now is applied and reported, pausing that chain.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 late = _issue(10, CAP);
         vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = late;
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
 
         _issue(10, CAP);
 
@@ -364,7 +364,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
         assertEq(_position(address(bobIdentity)), CAP, "applied regardless: the satellite already executed it");
         assertTrue(boundCompliance.isIssuancePaused(polygon), "the origin chain stopped issuing");
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.LateReconciled));
     }
 
     // ==== Helpers ====

@@ -62,7 +62,7 @@ contract TokenReservationStub {
         bridged[keccak256(wallet)] = amount;
     }
 
-    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256) {
+    function awayBalanceOf(bytes calldata wallet) external view returns (uint256) {
         return bridged[keccak256(wallet)];
     }
 
@@ -76,17 +76,17 @@ contract TokenReservationStub {
         return held < balance ? balance - held : 0;
     }
 
-    function reserveForValidation(bytes calldata wallet, uint256 amount) external {
+    function reserveForTicket(bytes calldata wallet, uint256 amount) external {
         reserved[keccak256(wallet)] += amount;
     }
 
-    function releaseFromValidation(bytes calldata wallet, uint256 amount) external {
+    function releaseFromTicket(bytes calldata wallet, uint256 amount) external {
         bytes32 key = keccak256(wallet);
         uint256 held = reserved[key];
         reserved[key] = held < amount ? 0 : held - amount;
     }
 
-    function holdInTransit(bytes calldata wallet, uint256, bytes32, uint256 amountReserved) external {
+    function putOnHold(bytes calldata wallet, uint256, bytes32, uint256 amountReserved) external {
         bytes32 key = keccak256(wallet);
         uint256 held = reserved[key];
         reserved[key] = held < amountReserved ? 0 : held - amountReserved;

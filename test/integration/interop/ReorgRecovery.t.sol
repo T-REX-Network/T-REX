@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -82,8 +82,8 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
         // B lands before A: on the orphaned fork it was the other way round.
         vm.startPrank(address(aliceIdentity));
-        assertEq(boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", saltB), b);
-        assertEq(boundCompliance.requestTransferValidation(aliceSat, bobSat, 50, 60, "", saltA), a);
+        assertEq(boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", saltB), b);
+        assertEq(boundCompliance.askToMove(aliceSat, bobSat, 50, 60, "", saltA), a);
         vm.stopPrank();
         _relayAll(polygonGateway);
 
@@ -91,11 +91,11 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         _execute(b, 95);
         _relayAll(polygonGateway);
 
-        assertEq(uint8(_status(a)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(uint8(_status(b)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(boundCompliance.validationOf(a).executedAmount, 55);
-        assertEq(boundCompliance.validationOf(b).executedAmount, 95);
-        assertEq(token.bridgedBalanceOf(bobSat), 150);
+        assertEq(uint8(_status(a)), uint8(ITickets.TicketStatus.Done));
+        assertEq(uint8(_status(b)), uint8(ITickets.TicketStatus.Done));
+        assertEq(boundCompliance.ticketOf(a).moved, 55);
+        assertEq(boundCompliance.ticketOf(b).moved, 95);
+        assertEq(token.awayBalanceOf(bobSat), 150);
         assertFalse(token.isInboundPaused(polygon));
     }
 
@@ -106,15 +106,15 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ///         sends nothing to the chain that already executed, and settles the parked leg.
     function test_reorg_Success_WhenADroppedIssuanceIsResubmittedWithTheSameSalt() public {
         bytes32 salt = _salt();
-        MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
-        bytes32 id = orphaned.validationId;
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
+        bytes32 id = orphaned.ticketId;
         assertTrue(polygonLite.known(id));
-        assertEq(boundCompliance.validationOf(id).fromIdentity, address(0), "nothing recorded here");
+        assertEq(boundCompliance.ticketOf(id).fromIdentity, address(0), "nothing recorded here");
 
         _execute(id, 95);
         uint256 report = _last(polygonGateway);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementParked(id, polygon, 95, MessageTypesLib.hashValidation(orphaned));
+        emit EventsLib.ReceiptWaiting(id, polygon, 95, MessageTypesLib.hashValidation(orphaned));
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(report);
@@ -122,8 +122,8 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(token.paused(), "the token keeps running");
         assertTrue(token.isInboundPaused(polygon), "the chain that executed before finality is paused");
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(report)), "consumed");
-        assertEq(token.bridgedBalanceOf(bobSat), 0, "nothing applied");
-        ITransferValidation.ParkedLeg memory parked = boundCompliance.parkedLegOf(id, polygon);
+        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
+        ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(id, polygon);
         assertTrue(parked.exists);
         assertEq(parked.amount, 95);
         assertEq(parked.hash, MessageTypesLib.hashValidation(orphaned));
@@ -134,21 +134,21 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         uint256 queued = polygonGateway.queueLength();
 
         vm.prank(address(aliceIdentity));
-        assertEq(boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt), id);
+        assertEq(boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt), id);
         assertEq(polygonGateway.queueLength(), queued, "no leg toward the chain that already executed");
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ParkedLegSettled(id, polygon);
-        boundCompliance.settleParkedLeg(id, polygon);
+        emit EventsLib.WaitingReceiptApplied(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(boundCompliance.validationOf(id).executedAmount, 95);
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
-        assertEq(token.bridgedBalanceOf(aliceSat), DELEGATED - 95);
-        assertFalse(boundCompliance.parkedLegOf(id, polygon).exists);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(boundCompliance.ticketOf(id).moved, 95);
+        assertEq(token.awayBalanceOf(bobSat), 95);
+        assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
+        assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
         assertEq(
-            boundCompliance.validationOf(id).hash,
+            boundCompliance.ticketOf(id).hash,
             MessageTypesLib.hashValidation(orphaned),
             "same terms, same hash, whatever the clock said"
         );
@@ -157,28 +157,28 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
     /// @notice A validation is not discarded over the leg parked under its id: the report of the movement is
     ///         already here, so the discard waits for it, for the public caller as for the keeper. Once the leg is
-    ///         settled the validation is `Settled`, and never a late reconciliation.
+    ///         settled the validation is `Done`, and never a late reconciliation.
     function test_discardExpiredValidations_RevertWhen_ALegIsParkedUnderTheId_ThenTheLegSettles() public {
         bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;
+        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
         // Nobody settled the parked leg, and the second window passed: the discard is open to anyone.
-        ITransferValidation.Validation memory issued = boundCompliance.validationOf(id);
-        vm.warp(uint256(issued.releaseAt) + (issued.releaseAt - issued.expiry) + 1);
+        ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
+        vm.warp(uint256(issued.waitingEndsAt) + (issued.waitingEndsAt - issued.validUntil) + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegAwaitsSettlement.selector, id, polygon));
-        boundCompliance.discardExpiredValidations(ids);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, id, polygon));
+        boundCompliance.cancelTickets(ids);
 
-        boundCompliance.settleParkedLeg(id, polygon);
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
+        boundCompliance.applyWaitingReceipt(id, polygon);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
         assertFalse(boundCompliance.isIssuancePaused(polygon), "settled, not reconciled late");
     }
 
@@ -186,31 +186,31 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ///         of the parked leg wait for the pauser, as a leg at the gateway does.
     function test_reorg_RevertWhen_TheChainIsStillPausedForEitherStep() public {
         bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;
+        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
         assertTrue(token.isInboundPaused(polygon));
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
         // The pauser looks again before the parked leg is taken: it waits under the pause like any delivery.
         vm.prank(agent);
         token.setInboundPaused(polygon, true);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
-        boundCompliance.settleParkedLeg(id, polygon);
-        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.applyWaitingReceipt(id, polygon);
+        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists);
 
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
-        boundCompliance.settleParkedLeg(id, polygon);
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        boundCompliance.applyWaitingReceipt(id, polygon);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     /// @notice The other way out of a drop. The Lite executed the dropped body above what the request, sent
@@ -218,48 +218,48 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ///         the validation ends `Orphaned` at issuance, nothing moves, and the chain is paused again.
     function test_reorg_OrphansTheValidation_WhenTheResubmittedTermsNoLongerCoverTheParkedLeg() public {
         bytes32 salt = _salt();
-        MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
-        bytes32 id = orphaned.validationId;
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
+        bytes32 id = orphaned.ticketId;
         _execute(id, 98);
         polygonGateway.relay(_last(polygonGateway));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 95, "", salt);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 95, "", salt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ValidationOrphaned(id, polygon, 98, MessageTypesLib.hashValidation(orphaned));
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
-        boundCompliance.settleParkedLeg(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Orphaned));
         assertTrue(token.isInboundPaused(polygon));
-        assertEq(token.bridgedBalanceOf(bobSat), 0, "nothing applied");
+        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
         assertEq(token.reservedOf(aliceSat), 0, "the reservation is released");
         assertEq(boundCompliance.pendingInOf(address(bobIdentity)), 0);
-        assertFalse(boundCompliance.parkedLegOf(id, polygon).exists);
+        assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
     }
 
     /// @notice A dropped two-leg issuance: the sending Lite burned and the receiving Lite minted on its word,
     ///         each leg parked on its own chain. The request sent again settles both and sends nothing.
     function test_reorg_Success_WhenADroppedTwoLegIssuanceIsResubmitted() public {
         bytes32 salt = _salt();
-        MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobOptimism, 90, 100);
-        bytes32 id = orphaned.validationId;
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobOptimism, 90, 100);
+        bytes32 id = orphaned.ticketId;
         _deliverToLite(optimismGateway, optimismLite, orphaned);
 
         _execute(id, 95);
         _relayAll(polygonGateway);
         _relayAll(optimismGateway);
         assertEq(optimismLite.balanceOf(bobOptimism), 95, "minted on the burn message");
-        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists, "the burn leg is parked");
-        assertTrue(boundCompliance.parkedLegOf(id, optimism).exists, "the mint leg is parked");
+        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "the burn leg is parked");
+        assertTrue(boundCompliance.waitingReceiptOf(id, optimism).exists, "the mint leg is parked");
         assertTrue(token.isInboundPaused(polygon));
         assertTrue(token.isInboundPaused(optimism));
         assertFalse(token.paused());
-        assertEq(token.inTransitOf(id), 0, "nothing applied");
+        assertEq(token.onHoldOf(id), 0, "nothing applied");
 
         vm.startPrank(agent);
         token.setInboundPaused(polygon, false);
@@ -269,24 +269,24 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         uint256 optimismQueued = optimismGateway.queueLength();
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobOptimism, 90, 100, "", salt);
+        boundCompliance.askToMove(aliceSat, bobOptimism, 90, 100, "", salt);
         assertEq(polygonGateway.queueLength(), polygonQueued, "nothing sent");
         assertEq(optimismGateway.queueLength(), optimismQueued, "nothing sent");
 
         // Either order: the mint leg first waits as it does at delivery.
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ParkedLegSettled(id, optimism);
-        boundCompliance.settleParkedLeg(id, optimism);
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.AwaitingBurn));
+        emit EventsLib.WaitingReceiptApplied(id, optimism);
+        boundCompliance.applyWaitingReceipt(id, optimism);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.AwaitingBurn));
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ParkedLegSettled(id, polygon);
-        boundCompliance.settleParkedLeg(id, polygon);
+        emit EventsLib.WaitingReceiptApplied(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(aliceSat), DELEGATED - 95);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
-        assertEq(token.inTransitOf(id), 0);
-        assertEq(token.totalBridged(), DELEGATED);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
+        assertEq(token.awayBalanceOf(bobOptimism), 95);
+        assertEq(token.onHoldOf(id), 0);
+        assertEq(token.totalAwayBalance(), DELEGATED);
     }
 
     /// @notice A parked leg for a request that then waits for approval stays parked until the answer: issued, it
@@ -294,84 +294,79 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     function test_reorg_Success_WhenTheResubmittedRequestWaitsForApproval() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
-        MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
-        bytes32 id = orphaned.validationId;
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
+        bytes32 id = orphaned.ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.AwaitingApproval));
-        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists, "waits for the answer");
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
+        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "waits for the answer");
+        assertEq(token.awayBalanceOf(bobSat), 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, polygon));
-        boundCompliance.settleParkedLeg(id, polygon);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
         vm.prank(backend);
         module.approveValidation(address(boundCompliance), id, 100);
         module.finalize(address(boundCompliance), id);
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ParkedLegSettled(id, polygon);
-        boundCompliance.settleParkedLeg(id, polygon);
+        emit EventsLib.WaitingReceiptApplied(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
-        assertFalse(boundCompliance.parkedLegOf(id, polygon).exists);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
+        assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
     }
 
     /// @notice Refused, the request issues nothing and the leg stays parked for the operator to read.
     function test_reorg_LeavesTheLegParked_WhenTheResubmittedRequestIsRefused() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;
+        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
         vm.prank(backend);
         module.refuseValidation(address(boundCompliance), id);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
-        assertTrue(boundCompliance.parkedLegOf(id, polygon).exists, "left for the operator");
-        assertEq(boundCompliance.parkedLegOf(id, polygon).amount, 95);
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, polygon));
-        boundCompliance.settleParkedLeg(id, polygon);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Cancelled));
+        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "left for the operator");
+        assertEq(boundCompliance.waitingReceiptOf(id, polygon).amount, 95);
+        assertEq(token.awayBalanceOf(bobSat), 0);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
+        boundCompliance.applyWaitingReceipt(id, polygon);
     }
 
     /// @notice The requester need not come back: the body the Lite holds carries the salt, so an agent sends the
     ///         request again on their behalf from the parked leg's wallets and the Lite's copy.
     function test_reorg_Success_WhenAnAgentResubmitsFromTheLitesCopy() public {
         bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;
+        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
 
-        MessageTypesLib.ComplianceValidation memory held = polygonLite.validationOf(id);
-        ITransferValidation.ParkedLeg memory parked = boundCompliance.parkedLegOf(id, polygon);
+        MessageTypesLib.TicketMessage memory held = polygonLite.ticketOf(id);
+        ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(id, polygon);
         assertEq(held.salt, salt, "the salt is final on the satellite");
 
         vm.prank(agent);
-        assertEq(
-            boundCompliance.requestTransferValidation(
-                parked.from, parked.to, parked.amount, parked.amount, "", held.salt
-            ),
-            id
-        );
-        boundCompliance.settleParkedLeg(id, polygon);
+        assertEq(boundCompliance.askToMove(parked.from, parked.to, parked.amount, parked.amount, "", held.salt), id);
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
     }
 
     /* ----- Case 3: the same id, another body ----- */
@@ -381,19 +376,19 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ///         settles as any other.
     function test_reorg_Success_WhenTheCanonicalBodyReplacesTheOrphanedOneBeforeExecution() public {
         bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 80, 100).validationId;
-        assertEq(polygonLite.validationOf(id).amountMin, 80);
+        bytes32 id = _orphanedIssuance(salt, bobSat, 80, 100).ticketId;
+        assertEq(polygonLite.ticketOf(id).amountMin, 80);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
         _relayAll(polygonGateway);
-        assertEq(polygonLite.validationOf(id).amountMin, 90, "the later body replaced the orphaned one");
-        assertEq(polygonLite.hashOf(id), boundCompliance.validationOf(id).hash);
+        assertEq(polygonLite.ticketOf(id).amountMin, 90, "the later body replaced the orphaned one");
+        assertEq(polygonLite.hashOf(id), boundCompliance.ticketOf(id).hash);
 
         _execute(id, 95);
         _relayAll(polygonGateway);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertFalse(token.isInboundPaused(polygon));
     }
 
@@ -401,43 +396,43 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ///         settles, with the divergence on record.
     function test_reorg_Success_WhenTheLegExecutedUnderAnotherBodyFitsTheIssuedTerms() public {
         bytes32 salt = _salt();
-        MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobSat, 80, 100);
-        bytes32 id = orphaned.validationId;
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 80, 100);
+        bytes32 id = orphaned.ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.SettlementBodyDiverged(id, polygon, MessageTypesLib.hashValidation(orphaned));
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ParkedLegSettled(id, polygon);
-        boundCompliance.settleParkedLeg(id, polygon);
+        emit EventsLib.WaitingReceiptApplied(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
-        assertTrue(boundCompliance.validationOf(id).hash != MessageTypesLib.hashValidation(orphaned));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
+        assertTrue(boundCompliance.ticketOf(id).hash != MessageTypesLib.hashValidation(orphaned));
     }
 
     /// @notice A resend repeats the issuance byte for byte: the Lite ignores it, and so does a Lite that already
     ///         consumed the id whatever body arrives under it.
     function test_reorg_Success_WhenALaterBodyUnderAConsumedIdIsIgnored() public {
         bytes32 salt = _salt();
-        MessageTypesLib.ComplianceValidation memory orphaned = _orphanedIssuance(salt, bobSat, 80, 100);
-        bytes32 id = orphaned.validationId;
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 80, 100);
+        bytes32 id = orphaned.ticketId;
         bytes32 executedUnder = MessageTypesLib.hashValidation(orphaned);
         _execute(id, 95);
 
         // `orphaned` is a memory reference: `later` is the same body, narrowed in place, so the Lite sees another
         // body under the id it already consumed.
-        MessageTypesLib.ComplianceValidation memory later = orphaned;
+        MessageTypesLib.TicketMessage memory later = orphaned;
         later.amountMin = 90;
         _deliverToLite(polygonGateway, polygonLite, later);
 
-        assertEq(polygonLite.validationOf(id).amountMin, 80, "consumed: the body held is the one executed");
+        assertEq(polygonLite.ticketOf(id).amountMin, 80, "consumed: the body held is the one executed");
         assertEq(polygonLite.hashOf(id), executedUnder);
     }
 
@@ -461,7 +456,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         polygonLite.execute(id, amount);
     }
 
-    function _status(bytes32 id) private view returns (ITransferValidation.ValidationStatus) {
+    function _status(bytes32 id) private view returns (ITickets.TicketStatus) {
         return boundCompliance.statusOf(id);
     }
 
@@ -470,10 +465,10 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ///      attributes it. Nothing is recorded on this chain for it.
     function _orphanedIssuance(bytes32 salt, bytes memory to, uint256 amountMin, uint256 amountMax)
         private
-        returns (MessageTypesLib.ComplianceValidation memory body)
+        returns (MessageTypesLib.TicketMessage memory body)
     {
-        body = MessageTypesLib.ComplianceValidation({
-            validationId: _validationId(aliceSat, salt),
+        body = MessageTypesLib.TicketMessage({
+            ticketId: _validationId(aliceSat, salt),
             salt: salt,
             from: aliceSat,
             to: to,
@@ -481,7 +476,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
             amountMin: amountMin,
             amountMax: amountMax,
             token: address(token),
-            expiry: uint64(block.timestamp) + VALIDITY_WINDOW,
+            validUntil: uint64(block.timestamp) + VALIDITY_WINDOW,
             reconciliationWindow: POLYGON_WINDOW
         });
         _deliverToLite(polygonGateway, polygonLite, body);
@@ -490,7 +485,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     function _deliverToLite(
         ERC7786GatewayMock gateway,
         SatelliteLiteMock lite,
-        MessageTypesLib.ComplianceValidation memory body
+        MessageTypesLib.TicketMessage memory body
     ) private {
         bytes memory recipient = InteroperableAddress.formatEvmV1(gateway.originChainId(), address(lite));
         vm.prank(address(token));

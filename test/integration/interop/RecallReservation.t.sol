@@ -51,7 +51,7 @@ contract RecallReservationTest is InteropSuiteTest {
         _recall(aliceSat, alice, 200);
 
         assertEq(token.availableOf(aliceSat), POSITION - 200, "the recalled amount is held back");
-        assertEq(token.bridgedBalanceOf(aliceSat), POSITION, "nothing moves until the proof");
+        assertEq(token.awayBalanceOf(aliceSat), POSITION, "nothing moves until the proof");
         assertEq(token.reservedOf(aliceSat), 0, "validation reservations are untouched");
         assertEq(token.availableOf(bobSat), POSITION, "another wallet is untouched");
     }
@@ -62,7 +62,7 @@ contract RecallReservationTest is InteropSuiteTest {
 
         bytes32 id = _aliceRequests(1, POSITION);
 
-        assertEq(boundCompliance.validationOf(id).amountMax, POSITION - 200, "capped below the recalled amount");
+        assertEq(boundCompliance.ticketOf(id).amountMax, POSITION - 200, "capped below the recalled amount");
         assertEq(token.reservedOf(aliceSat), POSITION - 200);
         assertEq(token.availableOf(aliceSat), 0);
     }
@@ -109,10 +109,10 @@ contract RecallReservationTest is InteropSuiteTest {
 
         _prove(recallId, aliceSat, 200);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), POSITION - 200);
+        assertEq(token.awayBalanceOf(aliceSat), POSITION - 200);
         assertEq(token.availableOf(aliceSat), POSITION - 200, "what is left is free again");
         bytes32 id = _aliceRequests(1, POSITION);
-        assertEq(boundCompliance.validationOf(id).amountMax, POSITION - 200);
+        assertEq(boundCompliance.ticketOf(id).amountMax, POSITION - 200);
     }
 
     /// @dev The satellite burned less than instructed: the proof closes the recall, so the whole remainder is
@@ -122,7 +122,7 @@ contract RecallReservationTest is InteropSuiteTest {
 
         _prove(recallId, aliceSat, 150);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), POSITION - 150);
+        assertEq(token.awayBalanceOf(aliceSat), POSITION - 150);
         assertEq(token.availableOf(aliceSat), POSITION - 150);
     }
 
@@ -156,8 +156,8 @@ contract RecallReservationTest is InteropSuiteTest {
         _prove(recallId, aliceSat, 200);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, POSITION - 200)));
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 0);
-        assertEq(token.bridgedBalanceOf(bobSat), POSITION + POSITION - 200);
+        assertEq(token.awayBalanceOf(aliceSat), 0);
+        assertEq(token.awayBalanceOf(bobSat), POSITION + POSITION - 200);
         assertEq(token.availableOf(aliceSat), 0);
         assertEq(token.reservedOf(aliceSat), 0);
         assertFalse(token.paused());

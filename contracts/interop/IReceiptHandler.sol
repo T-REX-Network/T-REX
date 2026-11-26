@@ -62,14 +62,14 @@ pragma solidity 0.8.30;
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 
 /**
- * @title ISettlementHandler
+ * @title IReceiptHandler
  * @dev The compliance contract's inbound entry point for satellite settlements.
  *
  * A settlement notification arrives at the token, which proves who sent it and forwards the body here
  * untouched.
  * The processing itself belongs to the compliance-slot lifecycle; only the entry point lives here.
  */
-interface ISettlementHandler {
+interface IReceiptHandler {
 
     /// @dev What the token does once a handler has judged an inbound message it could not apply.
     enum Verdict {
@@ -78,7 +78,7 @@ interface ISettlementHandler {
         /// The message reports something this chain cannot account for, so that chain's reports can no longer be
         /// trusted: the token pauses its inbound from that chain only. For a settlement that is a leg already
         /// accounted for, a leg under an id nothing is issued under, which is parked, and a leg outside the issued
-        /// terms, which is rejected or orphans its validation, see {handleSettlement}.
+        /// terms, which is rejected or orphans its validation, see {receiveReceipt}.
         PauseChain,
         /// The message names a recall the token never issued. The transport says which chain sent it, but not why
         /// the id is unknown: a peer inventing ids, or the token's own records no longer matching what it dispatched
@@ -86,7 +86,7 @@ interface ISettlementHandler {
         /// and the message cannot tell the two apart, so the token pauses itself. The price, accepted: a trusted
         /// peer can halt the token with one such proof; the remedy is to distrust its gateway. A settlement never
         /// returns this: a validation id is a function of the request, so an unknown one is the leg's chain's
-        /// problem, see {handleSettlement}.
+        /// problem, see {receiveReceipt}.
         HaltToken
     }
 
@@ -101,7 +101,7 @@ interface ISettlementHandler {
     /// The notification is decoded and passed on as is; classifying it is this handler's job, against the
     /// validation it issued. The gate is substantive: the wallets must be the issued ones, the leg must come from
     /// the chain recorded for its side, and the amount must sit inside the issued bounds. A leg that passes it for
-    /// a `Pending` validation settles it, whatever the clock says; one for a `Discarded` validation reconciles it
+    /// an `Open` validation settles it, whatever the clock says; one for a `Cancelled` validation reconciles it
     /// late: applied anyway, since the satellite execution is final, the modules caught up with no live
     /// reservation, `LateReconciliation` emitted and the leg's chain paused for issuance until the manager
     /// unpauses it. The hash the leg carries is evidence, never the gate: a leg inside the terms settles whatever
@@ -114,20 +114,20 @@ interface ISettlementHandler {
     /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. One case
     /// comes before these and returns `None` without applying anything:
     /// - A delivery already consumed from that chain, whatever it came to, delivered again byte for byte under
-    ///   another receive id (`SettlementDuplicate`), as a gateway redelivery or a Lite resending its settlement
+    ///   another receive id (`ReceiptDuplicate`), as a gateway redelivery or a Lite resending its settlement
     ///   produces. It is consumed and pauses nothing, so a chain reopened after an investigation is not paused
     ///   again by a copy of the leg that paused it.
     ///
     /// Any other leg the token cannot account for is one of four cases:
-    /// - An id with no issued body: the leg is parked under its id and origin chain (`SettlementParked`), so the
-    ///   request, sent again with the same salt, issues the same id, and `settleParkedLeg` then judges it as any
+    /// - An id with no issued body: the leg is parked under its id and origin chain (`ReceiptWaiting`), so the
+    ///   request, sent again with the same salt, issues the same id, and `applyWaitingReceipt` then judges it as any
     ///   leg. A second, different leg from the same chain for a parked id is a replay.
     /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
     ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
     /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
-    ///   issued (`SettlementRejected`); the validation stands, the discard and resolution paths still apply.
+    ///   issued (`ReceiptRefused`); the validation stands, the discard and resolution paths still apply.
     /// - A leg outside the issued terms carrying another hash, from a chain the validation involves: the satellite
-    ///   executed a body this chain never canonically issued (`ValidationOrphaned`). While `Pending` the validation
+    ///   executed a body this chain never canonically issued (`ValidationOrphaned`). While `Open` the validation
     ///   ends `Orphaned` and its reservation is released; otherwise it stands. From any other chain the leg is
     ///   rejected whatever hash it names: that chain could not have executed anything under the id.
     /// A revert, from a tracker module for instance, leaves the message deliverable again; a silent failure would
@@ -136,7 +136,7 @@ interface ISettlementHandler {
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
     /// @return verdict `None` when applied or a duplicate, `PauseChain` on every leg the token could not account
     ///  for.
-    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+    function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata notification)
         external
         returns (Verdict verdict);
 

@@ -11,10 +11,10 @@ reference chain against it.
 
 | Direction | Type | Body | What the Lite does |
 |---|---|---|---|
-| in | `COMPLIANCE_VALIDATION` | `ComplianceValidation { validationId, salt, from, to, spender, amountMin, amountMax, token, expiry, reconciliationWindow }` | stores it under `validationId`, with `hashValidation` of it |
-| in | `MINT_INSTRUCTION` | `MintInstruction { delegationId, toWallet, amount, holder }` | mints `amount` to `toWallet`, once per `delegationId` |
-| in | `RECALL_INSTRUCTION` | `RecallInstruction { recallId, wallet, amount, nativeWallet }` | burns up to `amount` of `wallet` once, answers with a `BurnProof` |
-| out | `SETTLEMENT_NOTIFICATION` | `SettlementNotification { validationId, from, to, amount, hash }` | one per leg it executed, `hash` being the hash of the body it executed under |
+| in | `TICKET` | `TicketMessage { ticketId, salt, from, to, spender, amountMin, amountMax, token, validUntil, reconciliationWindow }` | stores it under `ticketId`, with `hashValidation` of it |
+| in | `MOVE_OUT` | `MoveOutMessage { delegationId, toWallet, amount, holder }` | mints `amount` to `toWallet`, once per `delegationId` |
+| in | `BRING_HOME` | `BringHomeMessage { recallId, wallet, amount, nativeWallet }` | burns up to `amount` of `wallet` once, answers with a `BurnProof` |
+| out | `RECEIPT` | `ReceiptMessage { ticketId, from, to, amount, hash }` | one per leg it executed, `hash` being the hash of the body it executed under |
 | out | `BURN_PROOF` | `BurnProof { recallId, burnedWallet, amount }` | one per recall id, resent unchanged on request |
 
 Every message travels through a gateway the network's `TrustedGatewayRegistry` trusts. The token accepts a settlement
@@ -26,14 +26,14 @@ that recall was dispatched to.
 ### Transport
 
 1. **Act on each delivery once.** A gateway may redeliver; the Lite dedupes on a nonzero receive id, and also on
-   the operation id, since a resend arrives under a new receive id: `validationId` for a validation, see rule 3 for
+   the operation id, since a resend arrives under a new receive id: `ticketId` for a validation, see rule 3 for
    what a second body under a known id means, and the instruction ids of rules 9 and 10. A zero receive id names
    no delivery (ERC-7786 allows it) and is never recorded, or the first one would refuse every later message.
 2. **Accept only the reference token as author**, through its own gateway.
 2a. **Send every report on the final route.** A chain may have two routes on the reference side: a fast one, set
-   with `setFastRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
-   `setRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
-   token refuses a delivery from the fast route with `GatewayIsFastRoute`, and pins each validation leg to the final
+   with `setTicketRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
+   `setReceiptRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
+   token refuses a delivery from the fast route with `WrongRoute`, and pins each validation leg to the final
    route of the moment (`pinnedRouteFor`), so a validation that arrived on the fast gateway is settled through the
    final one, not back through the gateway that delivered it.
 
@@ -43,13 +43,13 @@ that recall was dispatched to.
    same `hashValidation` is a resend, ignored. One with another hash, while the id is not yet consumed, replaces
    what the Lite holds: the reference chain re-issued it after a reorg, and the later body is the canonical one.
    Once consumed, nothing changes whatever arrives: the report already names the hash executed under.
-4. Execute strictly before `expiry`.
+4. Execute strictly before `validUntil`.
 5. Execute an amount inside `[amountMin, amountMax]`.
 6. Execute only for the named wallets, by `from` or by the named `spender`.
 7. Report every leg it executed, exactly once, carrying the `hashValidation` of the body it executed under. One-leg
    movements carry both wallets; on a two-leg movement the sending Lite reports the burn leg with `to` empty, the
    receiving Lite the mint leg with `from` empty. A report lost on the way may be sent again byte for byte: the
-   reference chain recognises a leg it already consumed (`SettlementDuplicate`) and changes nothing.
+   reference chain recognises a leg it already consumed (`ReceiptDuplicate`) and changes nothing.
 
 ### The two-leg invariant
 
@@ -82,35 +82,35 @@ depends on which block, or in which order, its transaction landed. That holds fo
 
 | Type | Lane | Why |
 |---|---|---|
-| `COMPLIANCE_VALIDATION` | may ride before finality | `validationId` is `keccak256(canonicalKey(from), salt)`, a function of the request and never of the chain's ordering or clock; the settlement path never halts the token. A validation issued by an approval SHOULD wait for finality all the same: a reorg can drop the approval and the approver answer otherwise, which leaves the executed leg parked. Which route a validation takes is the token's routing, not this table's |
-| `SETTLEMENT_NOTIFICATION`, `BURN_PROOF` | MUST wait for the satellite chain's finality | the reference chain applies a report once and cannot take it back; a leg or a burn its chain later reorgs away would stay on the ledger for a movement that never happened |
-| `MINT_INSTRUCTION`, `RECALL_INSTRUCTION` | MUST wait for finality | `delegationId` and `recallId` are counters, assigned by inclusion order; a reorg can give the same id to another instruction |
+| `TICKET` | may ride before finality | `ticketId` is `keccak256(canonicalKey(from), salt)`, a function of the request and never of the chain's ordering or clock; the settlement path never halts the token. A validation issued by an approval SHOULD wait for finality all the same: a reorg can drop the approval and the approver answer otherwise, which leaves the executed leg parked. Which route a validation takes is the token's routing, not this table's |
+| `RECEIPT`, `BURN_PROOF` | MUST wait for the satellite chain's finality | the reference chain applies a report once and cannot take it back; a leg or a burn its chain later reorgs away would stay on the ledger for a movement that never happened |
+| `MOVE_OUT`, `BRING_HOME` | MUST wait for finality | `delegationId` and `recallId` are counters, assigned by inclusion order; a reorg can give the same id to another instruction |
 
 A Lite that executes a validation before finality owns the reorg exposure, and the reference chain bounds it to
 that chain. Three things can happen to an issuance after the Lite acted on it, and each has one outcome:
 
 - **Re-included in another order.** The id is the same, since it never depended on the order. Nothing to do.
 - **Dropped.** The leg reaches the reference chain under an id nothing is issued under: the leg is parked
-  (`SettlementParked`, `parkedLegOf`) and the chain's inbound is paused. Neither the request sent again nor
-  `settleParkedLeg` goes through while that pause stands. Once the pause is lifted, the request
+  (`ReceiptWaiting`, `waitingReceiptOf`) and the chain's inbound is paused. Neither the request sent again nor
+  `applyWaitingReceipt` goes through while that pause stands. Once the pause is lifted, the request
   sent again with the same `salt` issues the same id and sends no leg to the chain that already executed; the body
   carries the `salt`, so an agent can send it on the requester's behalf from the Lite's copy. Anyone then calls
-  `settleParkedLeg(validationId, chainKey)`, which judges the leg as a delivery would (`ParkedLegSettled`, or one
+  `applyWaitingReceipt(ticketId, chainKey)`, which judges the leg as a delivery would (`WaitingReceiptApplied`, or one
   of the outcomes below); a leg that reverts there stays parked and is tried again, and once the keeper resolved
   the pair it ends as a replay. While a leg is parked under an id its validation is not discarded
-  (`ParkedLegAwaitsSettlement`): the report is already here and is settled first. When the request can no longer be issued, because a rule that allowed it now
+  (`ApplyWaitingReceiptFirst`): the report is already here and is settled first. When the request can no longer be issued, because a rule that allowed it now
   refuses it or an `APPROVAL` module refuses it this time, the leg stays parked and readable through
-  `parkedLegOf`: nothing is applied and the ledger does not follow what the Lite executed. No function takes
+  `waitingReceiptOf`: nothing is applied and the ledger does not follow what the Lite executed. No function takes
   such a leg in or sends it back today: that exit needs a contract change.
 - **Re-issued with another body.** The hash in the report tells the two cases apart. A leg inside the issued terms
   settles whatever hash it carries (`SettlementBodyDiverged` when it is not the issued one). A leg outside the
-  terms with the issued hash is a Lite that broke rule 5 or 6 (`SettlementRejected`); one with another hash, from
+  terms with the issued hash is a Lite that broke rule 5 or 6 (`ReceiptRefused`); one with another hash, from
   a chain the validation involves, executed a body this chain never canonically issued (`ValidationOrphaned`):
-  while `Pending` the validation ends `Orphaned` and its reservation is released, otherwise it stands. A leg from
+  while `Open` the validation ends `Orphaned` and its reservation is released, otherwise it stands. A leg from
   any other chain is rejected whatever hash it names, since that chain could not have executed anything under the
   id. Nothing is applied either way, and the chain is paused.
 
-The hash commits to the terms alone, the id, the wallets, the spender, the range and the token: `expiry` and
+The hash commits to the terms alone, the id, the wallets, the spender, the range and the token: `validUntil` and
 `reconciliationWindow` are read off the issuing block's clock and are left out, so a body re-issued after a drop
 with the same terms hashes the same.
 
@@ -120,7 +120,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes out as the issuance did, on the fast route when one is set and on the final route otherwise, and only while the final route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
+| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `sendTicket(ticketId, chainKey, to, spender)`: either leg while `Open` and before `validUntil`; the receiving chain's leg also once the burn landed, before `waitingEndsAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes out as the issuance did, on the fast route when one is set and on the final route otherwise, and only while the final route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -129,8 +129,8 @@ Nothing is written off; a lost message is sent again.
 A resend never retargets: it is refused (`PeerChanged`) once the chain's peer is no longer the one the instruction
 was addressed to. A resend after a route switch is the expected way to recover a recall whose original gateway is gone.
 A validation leg is the exception: its settlement is matched against the gateway and the peer it was pinned to, so
-after a route switch or a peer change the leg is not resent (`ValidationAlreadyRouted`). While `Pending`, the
-reservation comes back through discard at `releaseAt` and a new validation is requested. Once the burn landed, the
+after a route switch or a peer change the leg is not resent (`ValidationAlreadyRouted`). While `Open`, the
+reservation comes back through discard at `waitingEndsAt` and a new validation is requested. Once the burn landed, the
 pair cannot be discarded: its exit is `resolveStuckValidation` after the second window, which returns the burned
 amount to the sender. The leg already sent keeps settling from the peer it was sent to.
 
@@ -139,9 +139,9 @@ amount to the sender. The leg already sent keeps settling from the peer it was s
 | Broken rule | Reference-chain reaction |
 |---|---|
 | 3, 7: a settlement leg for a validation already settled, other than the applied leg itself, a leg for a pair the keeper already resolved, or a second, different leg from one chain for a parked id | `ReplayedSettlement`, the token stops taking that chain's messages (`setInboundPaused`) |
-| a leg already consumed, whether applied, parked or refused, delivered again byte for byte (a gateway redelivery, or the Lite resending its settlement) | `SettlementDuplicate`, consumed, nothing applied, nothing paused; a chain paused over the first delivery and reopened stays open |
-| a settlement for a validation never issued, or recorded but never sent | `SettlementParked`, the leg kept under its id, the token stops taking that chain's messages; once the request is sent again with the same salt, `settleParkedLeg` settles it |
-| 5, 6: amount outside the range, wrong wallets or chain, under the issued hash | `SettlementRejected`, consumed, the token stops taking that chain's messages; the validation stands |
+| a leg already consumed, whether applied, parked or refused, delivered again byte for byte (a gateway redelivery, or the Lite resending its settlement) | `ReceiptDuplicate`, consumed, nothing applied, nothing paused; a chain paused over the first delivery and reopened stays open |
+| a settlement for a validation never issued, or recorded but never sent | `ReceiptWaiting`, the leg kept under its id, the token stops taking that chain's messages; once the request is sent again with the same salt, `applyWaitingReceipt` settles it |
+| 5, 6: amount outside the range, wrong wallets or chain, under the issued hash | `ReceiptRefused`, consumed, the token stops taking that chain's messages; the validation stands |
 | 5, 6 under another hash: a body the reference chain never canonically issued | `ValidationOrphaned`, consumed, the token stops taking that chain's messages; `Orphaned` while no leg had landed |
 | 8: two legs with two amounts | `SettlementAmountMismatch` on the second; the keeper resolves the pair after the second window |
 | 10: proof above the instruction | `RecallAmountExceeded`, stays deliverable |
@@ -155,7 +155,7 @@ delivery, from a tracker module for instance, can be redelivered once the cause 
 that the ERC-7786 gateway keeps a reverted execution retryable; a gateway that marks it failed for good loses the
 message, and its author has to send it again. Either pause is lifted by the pauser after an investigation:
 `setInboundPaused(chainKey, false)` for one chain, `unpause` for the token. While a chain's inbound is paused its deliveries revert with
-`ChainInboundPaused` and wait at the gateway; a delegation toward it is refused, and the compliance neither issues a
+`AwayChainBlocked` and wait at the gateway; a delegation toward it is refused, and the compliance neither issues a
 validation toward it nor resends one, nor discards or resolves a validation still awaiting that chain's leg, since
 the held reports may answer it and acting on their absence would release or return what they move. Native transfers,
 every other chain, and recall instructions and instruction resends toward the paused chain are unaffected; the proof
@@ -180,7 +180,7 @@ and must not keep running. The remedy against a peer abusing either is to distru
 | token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof; new validations, approvals into issuance and validation resends; discards and resolutions of validations that may have a leg waiting | the pauser; the token itself on a proof for a recall it never issued | the pauser, `unpause` |
 | chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new validations and validation resends toward it; discards and resolutions of validations still awaiting its leg | the pauser; the token itself on every settlement leg from that chain it cannot account for (replayed, parked, rejected, orphaned) and on a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
 | chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
-| route close, `setRoute(..., 0)` | every send toward one chain and every message from it, a settlement of a validation already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again | the identity manager | the identity manager, with a trusted gateway |
+| route close, `setReceiptRoute(..., 0)` | every send toward one chain and every message from it, a settlement of a validation already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again | the identity manager | the identity manager, with a trusted gateway |
 | gateway distrust, `TrustedGatewayRegistry` | every message through that gateway, pinned or not, for every token | the registry's owner | the registry's owner |
 
 Before lifting the token pause or a chain pause, the operator has the gateway discard the deliveries refused while

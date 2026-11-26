@@ -164,19 +164,19 @@ investor's holdings across every asset for instance, or the rule may be computed
 result in a later transaction, through its decryption callback. `checkTransfer` is a view and cannot wait, so
 the compliance has a waiting state for cross-chain requests, and a module of type `APPROVAL` decides them.
 
-While an `APPROVAL` module is bound (one at most), `requestTransferValidation` does everything it does today,
+While an `APPROVAL` module is bound (one at most), `askToMove` does everything it does today,
 resolving the route, narrowing the range by every rule and reserving it, but records the validation as
-`AwaitingApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
-`approvalRequested`. The request's `expiry`, the validity window from now, is both the deadline for the answer
+`WaitingForApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
+`approvalRequested`. The request's `validUntil`, the validity window from now, is both the deadline for the answer
 and, once issued, the satellite's deadline: the time spent waiting comes out of the time to execute, so the
 rules are never older than one validity window when the satellite executes.
 
-Only the module answers, with `answerApproval(bytes32 validationId, approvedMax)`, before the deadline. An approval
+Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
 lowers the maximum when the answer is lower, releases the difference and sends the legs; no rule runs again,
 since every rule ran and the room was reserved at the request, but the chains are checked again, as one may
 have been paused while the request waited. An answer below the requested minimum is a refusal, which releases
-the reservation and ends the validation `Discarded`. A request nobody answered is discarded past its deadline
-with `discardExpiredValidations`, by anyone, since nothing was sent for it; `statusOf` reads it `Expired` from
+the reservation and ends the validation `Cancelled`. A request nobody answered is discarded past its deadline
+with `cancelTickets`, by anyone, since nothing was sent for it; `statusOf` reads it `Expired` from
 then on. A settlement for a validation that was never sent (still waiting, refused or unanswered) halts the
 token, as one for an id never taken does: no satellite could have executed it.
 

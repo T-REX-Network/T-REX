@@ -60,7 +60,7 @@
 pragma solidity 0.8.30;
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 
 /// @title IToken
@@ -73,15 +73,10 @@ interface IToken is IERC3643 {
 
     event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
     event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
-    event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed validationId, bytes wallet, uint256 amount);
-    event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed validationId, bytes fromWallet, uint256 amount);
+    event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed ticketId, bytes wallet, uint256 amount);
+    event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed ticketId, bytes fromWallet, uint256 amount);
     event BridgedTransfer(
-        bytes32 indexed fromKey,
-        bytes32 indexed toKey,
-        bytes32 indexed validationId,
-        bytes from,
-        bytes to,
-        uint256 amount
+        bytes32 indexed fromKey, bytes32 indexed toKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
 
     event DelegatedOut(
@@ -107,9 +102,9 @@ interface IToken is IERC3643 {
     error UnverifiedWallet(bytes wallet);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error NotASatelliteWallet(bytes wallet);
-    error NothingInTransit(bytes32 validationId);
-    error TransitAlreadyHeld(bytes32 validationId);
-    error TransitAmountMismatch(bytes32 validationId, uint256 held, uint256 amount);
+    error NothingInTransit(bytes32 ticketId);
+    error TransitAlreadyHeld(bytes32 ticketId);
+    error TransitAmountMismatch(bytes32 ticketId, uint256 held, uint256 amount);
     error NoTokenToRecover();
     error RecoveryNotPossible();
     error SameWalletRecovery();
@@ -125,23 +120,23 @@ interface IToken is IERC3643 {
     /// @notice Returns the position delegated to a satellite wallet.
     /// @dev A non-canonical envelope reverts rather than reading a key no transition ever wrote.
     /// @param wallet the ERC-7930 envelope of the satellite wallet
-    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256);
+    function awayBalanceOf(bytes calldata wallet) external view returns (uint256);
 
     /// @notice Returns the sum of every bridged position, the in-transit holds included: the part of
     ///  `totalSupply` active on satellites. The native float, what the ERC-20 balances on this chain add up to,
-    ///  is `totalSupply() - totalBridged()`.
-    function totalBridged() external view returns (uint256);
+    ///  is `totalSupply() - totalAwayBalance()`.
+    function totalAwayBalance() external view returns (uint256);
 
     /// @notice Returns the amount held in transit against a cross-chain validation: its burn leg landed, its mint
     ///  leg has not. Zero once settled, or for a validation that never held anything.
-    /// @param validationId the validation the burn leg consumed
-    function inTransitOf(bytes32 validationId) external view returns (uint256);
+    /// @param ticketId the validation the burn leg consumed
+    function onHoldOf(bytes32 ticketId) external view returns (uint256);
 
-    /// @notice Returns the sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
-    function totalInTransit() external view returns (uint256);
+    /// @notice Returns the sum of every in-transit hold: the part of `totalAwayBalance` no wallet currently holds.
+    function totalOnHold() external view returns (uint256);
 
     /// @notice Applies a settled validation to the ledger, once, by the shape of its wallets: a native `to` lands
-    ///  on that holder's free balance, two satellite wallets are a bridged transfer, both under `validationId`.
+    ///  on that holder's free balance, two satellite wallets are a bridged transfer, both under `ticketId`.
     ///  `from` is always a satellite wallet, the compliance refusing to issue a validation out of a native one, so
     ///  the position a settlement debits is one the executing satellite held all along.
     /// @dev Callable by the bound compliance only, which classified the settlement against the validation it
@@ -152,13 +147,13 @@ interface IToken is IERC3643 {
     /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param to the ERC-7930 envelope of the recipient
     /// @param amount the exact amount the satellite executed
-    /// @param validationId the validation the settlement consumed
-    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) external;
+    /// @param ticketId the validation the settlement consumed
+    function finishMove(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId) external;
 
-    /// @notice Debits `amount` from `from`'s bridged position and holds it in transit against `validationId`:
+    /// @notice Debits `amount` from `from`'s bridged position and holds it in transit against `ticketId`:
     ///  the burn leg of a cross-chain validation landed and proves the satellite burned it, so the wallet must
-    ///  not be issued or recalled against it while the mint leg is in flight. `totalBridged` and `totalSupply`
-    ///  do not move; the amount is still bridged and still the sender's. `settleValidation` for the same id
+    ///  not be issued or recalled against it while the mint leg is in flight. `totalAwayBalance` and `totalSupply`
+    ///  do not move; the amount is still bridged and still the sender's. `finishMove` for the same id
     ///  later credits the recipient from the hold instead of debiting `from` again.
     /// @dev Callable by the bound compliance only; reverts with `OnlyBoundCompliance` otherwise. Reverts with
     ///  `TransitAlreadyHeld` when the validation already holds an amount, and with `InsufficientBridgedBalance`
@@ -166,17 +161,17 @@ interface IToken is IERC3643 {
     ///  with `EnforcedPause` while the token is paused.
     /// @param from the ERC-7930 envelope of the sender, a satellite wallet
     /// @param amount the exact amount the satellite burned
-    /// @param validationId the validation the burn leg consumed
-    function holdInTransit(bytes calldata from, uint256 amount, bytes32 validationId, uint256 reserved) external;
+    /// @param ticketId the validation the burn leg consumed
+    function putOnHold(bytes calldata from, uint256 amount, bytes32 ticketId, uint256 reserved) external;
 
-    /// @dev Puts the amount held for `validationId` back on `to`, the satellite wallet it was burned from,
+    /// @dev Puts the amount held for `ticketId` back on `to`, the satellite wallet it was burned from,
     ///  because the other leg never arrived and the compliance gave up on the pair. Callable by the bound
     ///  compliance alone.
-    function returnHeldInTransit(bytes calldata to, bytes32 validationId) external;
+    function returnHeldInTransit(bytes calldata to, bytes32 ticketId) external;
 
     /// @dev What open validations may still draw from `wallet`. The compliance reserves this at issuance and
     ///  gives it back when the validation settles or is discarded. The amount of an open recall is not part of
-    ///  it: {availableOf} subtracts both, so `bridgedBalanceOf - reservedOf` overstates what the wallet can send
+    ///  it: {availableOf} subtracts both, so `awayBalanceOf - reservedOf` overstates what the wallet can send
     ///  while a recall is open.
     /// @param wallet the satellite wallet, ERC-7930
     function reservedOf(bytes calldata wallet) external view returns (uint256);
@@ -191,10 +186,10 @@ interface IToken is IERC3643 {
 
     /// @dev Reserves `amount` of `wallet`'s bridged balance for a validation being issued. Callable by the
     ///  bound compliance alone.
-    function reserveForValidation(bytes calldata wallet, uint256 amount) external;
+    function reserveForTicket(bytes calldata wallet, uint256 amount) external;
 
     /// @dev Gives back `amount` of what was reserved against `wallet`. Callable by the bound compliance alone.
-    function releaseFromValidation(bytes calldata wallet, uint256 amount) external;
+    function releaseFromTicket(bytes calldata wallet, uint256 amount) external;
 
     /// @dev Initializes a token behind its beacon proxy. Called once, by the factory.
     function init(
@@ -209,27 +204,27 @@ interface IToken is IERC3643 {
     ) external;
 
     /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled by
-    ///  `settleParkedLeg` once that id is issued, gets the same brake it would have got at delivery, see
-    ///  {ISettlementHandler-Verdict}. Callable by the bound compliance alone.
+    ///  `applyWaitingReceipt` once that id is issued, gets the same brake it would have got at delivery, see
+    ///  {IReceiptHandler-Verdict}. Callable by the bound compliance alone.
     /// @param chainKey the chain the judged leg came from
     /// @param verdict what to apply; `None` applies nothing
-    function applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) external;
+    function applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) external;
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
-    function dispatchComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes calldata body)
+    function dispatchComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes calldata body)
         external
         returns (bytes32);
 
     /// @notice Moves `amount` of `holder`'s free balance onto `toWallet`, a satellite wallet of the same identity: the
     ///  native balance is burned (`Transfer(holder, 0x0)`), the bridged position credited, `totalSupply` unchanged,
-    ///  and a `MINT_INSTRUCTION` carrying a fresh delegation id sent to the Lite on `toWallet`'s chain. Location
+    ///  and a `MOVE_OUT` carrying a fresh delegation id sent to the Lite on `toWallet`'s chain. Location
     ///  moves, ownership does not, so no distribution rule is asked; the compliance is told, as a `DELEGATION`, so
     ///  its ledger follows a registry relink of `holder`. A lost instruction is sent again with {resend}. The way
     ///  back is a validation to a native wallet through the compliance, or an agent's {instructRecall}.
     /// @dev Callable by `holder`, by the identity `holder` is linked to, or by an address the AccessManager authorises
     ///  for this selector; otherwise reverts with `AccessManagedUnauthorized`. Reverts with `EnforcedPause`,
     ///  `FrozenWallet`, `ZeroValue`, `WalletsNotLinked`, `UnverifiedWallet`, `NotASatelliteWallet`,
-    ///  `ERC20InsufficientBalance`, `ChainInboundPaused` and `ChainNotOpen`; nothing moves in any of these cases.
+    ///  `ERC20InsufficientBalance`, `AwayChainBlocked` and `ChainNotOpen`; nothing moves in any of these cases.
     ///  Emits `Transfer`,
     ///  `DelegatedOut` and `ProtocolMessageSent`.
     /// @param holder the native wallet the tokens leave

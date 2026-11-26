@@ -43,10 +43,10 @@ import { Vm } from "@forge-std/Vm.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -62,7 +62,7 @@ import {
 } from "test/integration/mocks/CapabilityModules.sol";
 import { TokenReservationStub } from "test/unit/compliance/helpers/TokenReservationStub.sol";
 
-contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
+contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     uint256 internal constant POLYGON = 137;
     uint256 internal constant OPTIMISM = 10;
@@ -97,8 +97,8 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bobId = bobIdentity;
 
         mc.setDefaultValidityWindow(VALIDITY_WINDOW);
-        mc.setReconciliationWindow(polygon, POLYGON_WINDOW);
-        mc.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
+        mc.setWaitingTime(polygon, POLYGON_WINDOW);
+        mc.setWaitingTime(optimism, OPTIMISM_WINDOW);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         // The wallet's room lives on the token now, so the mocked token address gets a stub with real
@@ -107,8 +107,8 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
         vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
-        vm.mockCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), "");
-        vm.mockCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), "");
+        vm.mockCall(token, abi.encodeWithSelector(IToken.finishMove.selector), "");
+        vm.mockCall(token, abi.encodeWithSelector(IToken.putOnHold.selector), "");
         vm.mockCall(token, abi.encodeWithSelector(IToken.applyVerdict.selector), "");
         vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(false));
         _bind(fromSat, aliceIdentity);
@@ -128,7 +128,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(stranger);
         vm.expectRevert(ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
     }
 
     /* ----- Leg matching: a leg outside the issued terms is consumed with a verdict, never left deliverable ----- */
@@ -177,15 +177,15 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 orphaned = keccak256("the wider body a reorg dropped");
         assertEq(mc.pendingInOf(bobId), 90, "reserved at issuance");
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationOrphaned(id, polygon, 95, orphaned);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 95, orphaned));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 95, orphaned));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
-        assertEq(mc.validationOf(id).executedAmount, 0, "nothing applied");
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Orphaned));
+        assertEq(mc.ticketOf(id).moved, 0, "nothing applied");
         assertEq(mc.pendingInOf(bobId), 0, "the reservation is released");
         assertEq(mc.pendingOutOf(aliceId), 0);
         assertEq(TokenReservationStub(token).reservedOf(fromSat), 0);
@@ -195,8 +195,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
         assertEq(
-            uint8(mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50))),
-            uint8(ISettlementHandler.Verdict.PauseChain)
+            uint8(mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50))), uint8(IReceiptHandler.Verdict.PauseChain)
         );
     }
 
@@ -225,11 +224,11 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         emit EventsLib.ValidationOrphaned(id, polygon, 95, keccak256("orphaned"));
         vm.prank(token);
         assertEq(
-            uint8(mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 95, keccak256("orphaned")))),
-            uint8(ISettlementHandler.Verdict.PauseChain)
+            uint8(mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 95, keccak256("orphaned")))),
+            uint8(IReceiptHandler.Verdict.PauseChain)
         );
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(mc.pendingInOf(bobId), 0, "nothing released twice");
         assertEq(TokenReservationStub(token).reservedOf(fromSat), 0);
     }
@@ -239,17 +238,17 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     function test_handleSettlement_Success_WhenAnOrphanedBodyWasExecutedAfterALegLanded() public {
         bytes32 id = _issueCrossChain();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
         bytes32 orphaned = keccak256("another body");
 
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationOrphaned(id, optimism, 95, orphaned);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(optimism, _legUnder(id, "", toOptimism, 95, orphaned));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(optimism, _legUnder(id, "", toOptimism, 95, orphaned));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(mc.ticketOf(id).moved, 50);
     }
 
     /// @notice A leg inside the terms under another hash settles: the hash is evidence, the terms are the gate.
@@ -261,10 +260,10 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.SettlementBodyDiverged(id, polygon, diverged);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, diverged));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, diverged));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.positionOf(bobId), 50);
     }
 
@@ -278,19 +277,19 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         // Bound after issuance: Bob may receive 40 at most now, and the discarded validation settles at 50.
         _bindCappedModule(40);
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toSat, 50, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toSat, 50, id)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ValidationSettled(id, polygon, 50);
+        emit EventsLib.ReceiptApplied(id, polygon, 50);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.LateReconciliation(id, polygon);
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.ValidationIssuancePaused(polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
-        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.LateReconciled));
+        assertEq(mc.ticketOf(id).moved, 50);
         assertTrue(mc.isIssuancePaused(polygon));
         assertEq(mc.positionOf(bobId), 50, "the settlement is applied anyway");
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE - 50);
@@ -306,10 +305,10 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.LateReconciliation(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.LateReconciled));
         assertFalse(mc.isIssuancePaused(polygon), "a late delivery is cheap to force; pausing on it would be a DoS");
         assertEq(mc.positionOf(bobId), 50);
         assertEq(mc.pendingInOf(bobId), 0);
@@ -324,9 +323,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _discard(id);
 
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.LateReconciled));
         assertFalse(mc.isIssuancePaused(polygon), "a relocation asks no rule");
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE, "a relocation moves no position");
     }
@@ -336,16 +335,16 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
         _discard(id);
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 60));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 60));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.LateReconciled));
     }
 
     function test_handleSettlement_Success_WhenTheChainIsAlreadyPausedOnALateLeg() public {
@@ -356,9 +355,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.recordLogs();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.LateReconciled));
         assertTrue(mc.isIssuancePaused(polygon));
         assertEq(_countTopic(EventsLib.LateReconciliation.selector), 1);
         assertEq(_countTopic(EventsLib.ValidationIssuancePaused.selector), 0, "already paused: no second pause");
@@ -371,35 +370,35 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _discard(id);
 
         // The discard already gave the wallet its room back, so the late burn leg's hold releases nothing more.
-        vm.expectCall(token, abi.encodeCall(IToken.holdInTransit, (fromSat, 50, id, 0)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.putOnHold, (fromSat, 50, id, 0)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.LateReconciliation(id, polygon);
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
         assertEq(
             uint8(mc.statusOf(id)),
-            uint8(ITransferValidation.ValidationStatus.DiscardedAwaitingMint),
+            uint8(ITickets.TicketStatus.DiscardedAwaitingMint),
             "still discarded, now owed its mint leg"
         );
-        ITransferValidation.Validation memory state = mc.validationOf(id);
-        assertEq(state.executedAmount, 50);
+        ITickets.Ticket memory state = mc.ticketOf(id);
+        assertEq(state.moved, 50);
         assertFalse(mc.isIssuancePaused(polygon), "a first leg settles nothing, so it breaches nothing");
         assertFalse(mc.isIssuancePaused(optimism));
         assertEq(RecordingModule(recorder).transferActionCalls(), 0, "nothing moved on the first leg");
         assertEq(mc.positionOf(bobId), 0);
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toOptimism, 50, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toOptimism, 50, id)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ValidationSettled(id, optimism, 50);
+        emit EventsLib.ReceiptApplied(id, optimism, 50);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.LateReconciliation(id, optimism);
         vm.prank(token);
-        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+        mc.receiveReceipt(optimism, _leg(id, "", toOptimism, 50));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.LateReconciled));
         assertFalse(mc.isIssuancePaused(optimism), "the pair breached nothing on the way in");
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
         assertEq(RecordingModule(recorder).lastAmount(), 50);
@@ -410,19 +409,17 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issueCrossChain();
         _discard(id);
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeperAccount);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotDiscardable.selector,
-                id,
-                uint8(ITransferValidation.ValidationStatus.DiscardedAwaitingMint)
+                ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.DiscardedAwaitingMint)
             )
         );
-        mc.discardExpiredValidations(ids);
+        mc.cancelTickets(ids);
     }
 
     /* ----- Timely settlement ----- */
@@ -434,20 +431,20 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
         assertEq(mc.pendingInOf(bobId), 90, "reserved at the maximum");
         assertEq(mc.pendingOutOf(aliceId), 90);
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending), "reserved while pending");
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open), "reserved while pending");
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toSat, 50, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toSat, 50, id)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.SettlementNotified(polygon, id, fromSat, toSat, 50);
+        emit EventsLib.ReceiptReceived(polygon, id, fromSat, toSat, 50);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ValidationSettled(id, polygon, 50);
+        emit EventsLib.ReceiptApplied(id, polygon, 50);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        ITransferValidation.Validation memory state = mc.validationOf(id);
-        assertEq(state.executedAmount, 50);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        ITickets.Ticket memory state = mc.ticketOf(id);
+        assertEq(state.moved, 50);
 
         assertEq(mc.pendingInOf(bobId), 0, "the whole reservation is released");
         assertEq(mc.pendingOutOf(aliceId), 0);
@@ -464,7 +461,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
         (
             address compliance,
@@ -494,14 +491,14 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
         bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
         vm.prank(aliceIdentity);
-        bytes32 id = mc.requestTransferValidation(fromSat, toSat, 10, 90, spender, _salt());
+        bytes32 id = mc.askToMove(fromSat, toSat, 10, 90, spender, _salt());
 
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
         (,,,,,,,,, bytes memory recorded,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(recorded, spender);
-        assertEq(mc.validationOf(id).spender, spender);
+        assertEq(mc.ticketOf(id).spender, spender);
     }
 
     /// @notice A settlement always moves the positions, and always tells the trackers. There is no mode in
@@ -512,9 +509,9 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.positionOf(bobId), 50, "the recipient now holds what was executed");
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE - 50, "and the sender that much less");
         assertEq(RecordingModule(recorder).transferActionCalls(), 1, "the trackers are told");
@@ -527,29 +524,29 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         // The first validation reserved its maximum against the sending wallet, so the second can only be
         // issued for what is left of it.
         bytes32 second = _issue();
-        uint256 secondMax = mc.validationOf(second).amountMax;
+        uint256 secondMax = mc.ticketOf(second).amountMax;
 
         vm.startPrank(token);
-        mc.handleSettlement(polygon, _leg(first, fromSat, toSat, mc.validationOf(first).amountMin));
-        mc.handleSettlement(polygon, _leg(second, fromSat, toSat, secondMax));
+        mc.receiveReceipt(polygon, _leg(first, fromSat, toSat, mc.ticketOf(first).amountMin));
+        mc.receiveReceipt(polygon, _leg(second, fromSat, toSat, secondMax));
         vm.stopPrank();
 
-        assertEq(mc.validationOf(first).executedAmount, 10, "settled at its minimum");
-        assertEq(mc.validationOf(second).executedAmount, secondMax, "settled at its maximum");
+        assertEq(mc.ticketOf(first).moved, 10, "settled at its minimum");
+        assertEq(mc.ticketOf(second).moved, secondMax, "settled at its maximum");
     }
 
     function test_handleSettlement_Success_WhenTheNativeSideIsTheRecipient() public {
         _track();
         address recorder = _bindAfterTransferModule();
         vm.prank(aliceIdentity);
-        bytes32 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "", _salt());
+        bytes32 id = mc.askToMove(fromSat, nativeBob, 10, 40, "", _salt());
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, nativeBob, 40, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, nativeBob, 40, id)), 1);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, nativeBob, 40));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, nativeBob, 40));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.positionOf(bobId), 40);
         (,,,, bytes32 toWallet,,,,,,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(toWallet, bytes32(uint256(uint160(bob))), "a native wallet is its padded address");
@@ -557,7 +554,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     function test_handleSettlement_Success_WhenTheLegClaimsTheReferenceChain() public {
         vm.prank(aliceIdentity);
-        bytes32 id = mc.requestTransferValidation(fromSat, nativeBob, 10, 40, "", _salt());
+        bytes32 id = mc.askToMove(fromSat, nativeBob, 10, 40, "", _salt());
 
         vm.prank(token);
         _assertRejected(id, _evmChainKey(block.chainid), _leg(id, fromSat, nativeBob, 40));
@@ -569,13 +566,13 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issue();
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
 
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertFalse(mc.isIssuancePaused(polygon));
         assertEq(mc.pendingInOf(bobId), 0, "the reservation was still live and is released");
         assertEq(mc.positionOf(bobId), 50);
@@ -587,7 +584,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
 
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
         (, address fromIdentity, address toIdentity,,,,,,,,) = TrackerOnlyModule(recorder).lastContext();
@@ -604,17 +601,17 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 60));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 60));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(mc.ticketOf(id).moved, 50);
         assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
         assertEq(mc.positionOf(bobId), 50);
     }
@@ -626,17 +623,17 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.SettlementDuplicate(id, polygon);
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(mc.ticketOf(id).moved, 50);
         assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
         assertEq(mc.positionOf(bobId), 50);
     }
@@ -645,15 +642,15 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     ///         chain, it is a duplicate: not judged again, nothing announced twice, nothing paused.
     function test_handleSettlement_Success_WhenARejectedLegIsDeliveredAgain() public {
         bytes32 id = _issue();
-        MessageTypesLib.SettlementNotification memory leg = _leg(id, fromSat, toSat, 91);
+        MessageTypesLib.ReceiptMessage memory leg = _leg(id, fromSat, toSat, 91);
         vm.prank(token);
         _assertRejected(id, polygon, leg);
 
         vm.recordLogs();
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, leg);
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
         _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
         _assertUntouched(id);
     }
@@ -662,19 +659,19 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     ///         emitted a second time and the chain is not paused a second time.
     function test_handleSettlement_Success_WhenAnOrphanedLegIsDeliveredAgain() public {
         bytes32 id = _issue();
-        MessageTypesLib.SettlementNotification memory leg =
+        MessageTypesLib.ReceiptMessage memory leg =
             _legUnder(id, fromSat, toSat, 95, keccak256("a body this chain never issued"));
         vm.prank(token);
-        assertEq(uint8(mc.handleSettlement(polygon, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+        assertEq(uint8(mc.receiveReceipt(polygon, leg)), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Orphaned));
 
         vm.recordLogs();
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, leg);
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
         _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Orphaned));
     }
 
     /// @notice A conflicting body under a settled id pauses its chain once; that same body again is a duplicate,
@@ -683,18 +680,18 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
-        MessageTypesLib.SettlementNotification memory conflicting = _leg(id, fromSat, toSat, 60);
+        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        MessageTypesLib.ReceiptMessage memory conflicting = _leg(id, fromSat, toSat, 60);
         vm.prank(token);
-        assertEq(uint8(mc.handleSettlement(polygon, conflicting)), uint8(ISettlementHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.receiveReceipt(polygon, conflicting)), uint8(IReceiptHandler.Verdict.PauseChain));
 
         vm.recordLogs();
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, conflicting);
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, conflicting);
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
         _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
-        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(mc.ticketOf(id).moved, 50);
     }
 
     /// @notice A duplicate is per chain: the burn leg polygon reported, arriving from optimism, was never consumed
@@ -703,16 +700,16 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issueCrossChain();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
         vm.prank(token);
-        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+        mc.receiveReceipt(optimism, _leg(id, "", toOptimism, 50));
 
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(optimism, _leg(id, fromSat, "", 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(optimism, _leg(id, fromSat, "", 50));
 
         assertEq(
             uint8(verdict),
-            uint8(ISettlementHandler.Verdict.PauseChain),
+            uint8(IReceiptHandler.Verdict.PauseChain),
             "never a duplicate from a chain that did not send it"
         );
     }
@@ -722,61 +719,61 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     /// @notice The parked leg delivered again is a duplicate: no second pause, the first leg stays parked as is.
     function test_handleSettlement_Success_WhenTheParkedLegIsDeliveredAgain() public {
         bytes32 unknown = keccak256("an id this compliance never issued");
-        MessageTypesLib.SettlementNotification memory leg = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
+        MessageTypesLib.ReceiptMessage memory leg = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
         vm.prank(token);
-        mc.handleSettlement(polygon, leg);
+        mc.receiveReceipt(polygon, leg);
 
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.SettlementDuplicate(unknown, polygon);
+        emit EventsLib.ReceiptDuplicate(unknown, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, leg);
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(mc.parkedLegOf(unknown, polygon).amount, 50);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(mc.waitingReceiptOf(unknown, polygon).amount, 50);
     }
 
     /// @notice A leg for an id with no issued body is parked under its id and chain, the chain paused, and
     ///         nothing recorded under the id. A second, different leg from the same chain is a replay.
     function test_handleSettlement_Success_WhenTheIdWasNeverIssued() public {
         bytes32 unknown = keccak256("an id this compliance never issued");
-        MessageTypesLib.SettlementNotification memory leg = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
+        MessageTypesLib.ReceiptMessage memory leg = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.SettlementParked(unknown, polygon, 50, leg.hash);
+        emit EventsLib.ReceiptWaiting(unknown, polygon, 50, leg.hash);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, leg);
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
-        ITransferValidation.ParkedLeg memory parked = mc.parkedLegOf(unknown, polygon);
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        ITickets.WaitingReceipt memory parked = mc.waitingReceiptOf(unknown, polygon);
         assertTrue(parked.exists);
         assertEq(parked.from, fromSat);
         assertEq(parked.to, toSat);
         assertEq(parked.amount, 50);
         assertEq(parked.hash, leg.hash);
-        assertEq(mc.validationOf(unknown).fromIdentity, address(0), "the unknown id recorded nothing");
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, unknown));
+        assertEq(mc.ticketOf(unknown).fromIdentity, address(0), "the unknown id recorded nothing");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
         mc.statusOf(unknown);
 
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(unknown, polygon);
         vm.prank(token);
         assertEq(
-            uint8(mc.handleSettlement(polygon, _legUnder(unknown, fromSat, toSat, 60, keccak256("body")))),
-            uint8(ISettlementHandler.Verdict.PauseChain)
+            uint8(mc.receiveReceipt(polygon, _legUnder(unknown, fromSat, toSat, 60, keccak256("body")))),
+            uint8(IReceiptHandler.Verdict.PauseChain)
         );
-        assertEq(mc.parkedLegOf(unknown, polygon).amount, 50, "the first leg stays");
+        assertEq(mc.waitingReceiptOf(unknown, polygon).amount, 50, "the first leg stays");
 
         // The other chain of a pair parks its own leg.
         vm.prank(token);
-        mc.handleSettlement(optimism, _legUnder(unknown, "", toOptimism, 50, keccak256("body")));
-        assertTrue(mc.parkedLegOf(unknown, optimism).exists);
+        mc.receiveReceipt(optimism, _legUnder(unknown, "", toOptimism, 50, keccak256("body")));
+        assertTrue(mc.waitingReceiptOf(unknown, optimism).exists);
 
         // The zero id is no exception.
         vm.prank(token);
         assertEq(
-            uint8(mc.handleSettlement(polygon, _legUnder(bytes32(0), fromSat, toSat, 50, bytes32(0)))),
-            uint8(ISettlementHandler.Verdict.PauseChain)
+            uint8(mc.receiveReceipt(polygon, _legUnder(bytes32(0), fromSat, toSat, 50, bytes32(0)))),
+            uint8(IReceiptHandler.Verdict.PauseChain)
         );
     }
 
@@ -788,25 +785,25 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _validationId(fromSat, salt);
         bytes32 executedUnder = keccak256("the body the dropped issuance sent");
         vm.prank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, executedUnder));
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, executedUnder));
 
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 0);
         vm.prank(aliceIdentity);
-        assertEq(mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt), id);
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertTrue(mc.parkedLegOf(id, polygon).exists, "still parked: the issuance settles nothing");
+        assertEq(mc.askToMove(fromSat, toSat, 10, 90, "", salt), id);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertTrue(mc.waitingReceiptOf(id, polygon).exists, "still parked: the issuance settles nothing");
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.applyVerdict.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.SettlementBodyDiverged(id, polygon, executedUnder);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ParkedLegSettled(id, polygon);
+        emit EventsLib.WaitingReceiptApplied(id, polygon);
         vm.prank(stranger);
-        mc.settleParkedLeg(id, polygon);
+        mc.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(mc.validationOf(id).executedAmount, 50);
-        assertFalse(mc.parkedLegOf(id, polygon).exists);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(mc.ticketOf(id).moved, 50);
+        assertFalse(mc.waitingReceiptOf(id, polygon).exists);
         assertEq(mc.positionOf(bobId), 50);
         assertEq(mc.pendingInOf(bobId), 0);
     }
@@ -818,17 +815,17 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _validationId(fromSat, salt);
         bytes32 executedUnder = keccak256("a wider body");
         vm.prank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 95, executedUnder));
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 95, executedUnder));
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+        mc.askToMove(fromSat, toSat, 10, 90, "", salt);
 
-        vm.expectCall(token, abi.encodeCall(IToken.applyVerdict, (polygon, ISettlementHandler.Verdict.PauseChain)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.applyVerdict, (polygon, IReceiptHandler.Verdict.PauseChain)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationOrphaned(id, polygon, 95, executedUnder);
-        mc.settleParkedLeg(id, polygon);
+        mc.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
-        assertFalse(mc.parkedLegOf(id, polygon).exists);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Orphaned));
+        assertFalse(mc.waitingReceiptOf(id, polygon).exists);
         assertEq(mc.pendingInOf(bobId), 0, "released");
         assertEq(TokenReservationStub(token).reservedOf(fromSat), 0);
     }
@@ -838,19 +835,19 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         vm.prank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
 
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, optimism, id), 1);
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", salt);
+        mc.askToMove(fromSat, toOptimism, 10, 90, "", salt);
 
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ParkedLegSettled(id, polygon);
-        mc.settleParkedLeg(id, polygon);
+        emit EventsLib.WaitingReceiptApplied(id, polygon);
+        mc.applyWaitingReceipt(id, polygon);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(mc.ticketOf(id).moved, 50);
     }
 
     /// @notice Both legs of a pair parked at different amounts: the second refuses, as it would at delivery, and
@@ -859,37 +856,37 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         vm.startPrank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
-        mc.handleSettlement(optimism, _legUnder(id, "", toOptimism, 51, keccak256("body")));
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
+        mc.receiveReceipt(optimism, _legUnder(id, "", toOptimism, 51, keccak256("body")));
         vm.stopPrank();
 
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 0);
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", salt);
+        mc.askToMove(fromSat, toOptimism, 10, 90, "", salt);
 
-        mc.settleParkedLeg(id, polygon);
+        mc.applyWaitingReceipt(id, polygon);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementAmountMismatch.selector, id, 50, 51));
-        mc.settleParkedLeg(id, optimism);
+        mc.applyWaitingReceipt(id, optimism);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertTrue(mc.parkedLegOf(id, optimism).exists, "still parked, to be tried again or resolved");
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertTrue(mc.waitingReceiptOf(id, optimism).exists, "still parked, to be tried again or resolved");
     }
 
     function test_settleParkedLeg_RevertWhen_NothingIsParkedOrNothingIsIssued() public {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, polygon));
-        mc.settleParkedLeg(id, polygon);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
+        mc.applyWaitingReceipt(id, polygon);
 
         vm.prank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, polygon));
-        mc.settleParkedLeg(id, polygon);
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
+        mc.applyWaitingReceipt(id, polygon);
 
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegNotSettleable.selector, id, optimism));
-        mc.settleParkedLeg(id, optimism);
+        mc.askToMove(fromSat, toSat, 10, 90, "", salt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, optimism));
+        mc.applyWaitingReceipt(id, optimism);
     }
 
     /// @notice The pause the parking set is the pauser's to lift: under it the parked leg waits, as a leg at the
@@ -899,32 +896,32 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         vm.prank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+        mc.askToMove(fromSat, toSat, 10, 90, "", salt);
 
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isInboundPaused, (polygon)), abi.encode(true));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
-        mc.settleParkedLeg(id, polygon);
-        assertTrue(mc.parkedLegOf(id, polygon).exists);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        mc.applyWaitingReceipt(id, polygon);
+        assertTrue(mc.waitingReceiptOf(id, polygon).exists);
 
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isInboundPaused, (polygon)), abi.encode(false));
-        mc.settleParkedLeg(id, polygon);
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        mc.applyWaitingReceipt(id, polygon);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     function test_settleParkedLeg_RevertWhen_TheTokenIsPaused() public {
         bytes32 salt = _salt();
         bytes32 id = _validationId(fromSat, salt);
         vm.prank(token);
-        mc.handleSettlement(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
+        mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
         vm.prank(aliceIdentity);
-        mc.requestTransferValidation(fromSat, toSat, 10, 90, "", salt);
+        mc.askToMove(fromSat, toSat, 10, 90, "", salt);
 
         vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(true));
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        mc.settleParkedLeg(id, polygon);
-        assertTrue(mc.parkedLegOf(id, polygon).exists);
+        mc.applyWaitingReceipt(id, polygon);
+        assertTrue(mc.waitingReceiptOf(id, polygon).exists);
     }
 
     /* ----- Two legs ----- */
@@ -934,29 +931,29 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
         bytes32 id = _issueCrossChain();
 
-        vm.expectCall(token, abi.encodeCall(IToken.holdInTransit, (fromSat, 50, id, 90)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.putOnHold, (fromSat, 50, id, 90)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, polygon, 50);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
         assertEq(RecordingModule(recorder).transferActionCalls(), 0, "nothing moved on the first leg");
         assertEq(mc.pendingInOf(bobId), 90, "the reservation stays live");
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        ITransferValidation.Validation memory state = mc.validationOf(id);
-        assertEq(state.executedAmount, 50);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        ITickets.Ticket memory state = mc.ticketOf(id);
+        assertEq(state.moved, 50);
         assertEq(state.legWallet, fromSat);
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toOptimism, 50, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toOptimism, 50, id)), 1);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ValidationSettled(id, optimism, 50);
+        emit EventsLib.ReceiptApplied(id, optimism, 50);
         vm.prank(token);
-        verdict = mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+        verdict = mc.receiveReceipt(optimism, _leg(id, "", toOptimism, 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
         assertEq(mc.pendingInOf(bobId), 0);
         assertEq(mc.positionOf(bobId), 50);
@@ -967,47 +964,47 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issueCrossChain();
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.putOnHold.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ValidationLegConfirmed(id, optimism, 60);
         vm.prank(token);
-        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 60));
+        mc.receiveReceipt(optimism, _leg(id, "", toOptimism, 60));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingBurn));
-        ITransferValidation.Validation memory state = mc.validationOf(id);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingBurn));
+        ITickets.Ticket memory state = mc.ticketOf(id);
         assertEq(state.legWallet, toOptimism);
 
-        vm.expectCall(token, abi.encodeCall(IToken.settleValidation, (fromSat, toOptimism, 60, id)), 1);
+        vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toOptimism, 60, id)), 1);
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 60));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 60));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(mc.validationOf(id).executedAmount, 60);
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(mc.ticketOf(id).moved, 60);
     }
 
     function test_handleSettlement_Success_WhenAwaitingTheMintLegNeverDerivesExpired() public {
         bytes32 id = _issueCrossChain();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + OPTIMISM_WINDOW + 30 days);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
     }
 
     function test_handleSettlement_Success_WhenAConsumedLegOfTwoIsReplayed() public {
         bytes32 id = _issueCrossChain();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 60));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, "", 60));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
     }
 
     /// @notice The burn leg delivered again is a duplicate: no second hold, and the pair still settles.
@@ -1015,32 +1012,32 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issueCrossChain();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
-        vm.expectCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), 0);
+        vm.expectCall(token, abi.encodeWithSelector(IToken.putOnHold.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.SettlementDuplicate(id, polygon);
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
-        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
         vm.prank(token);
-        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        mc.receiveReceipt(optimism, _leg(id, "", toOptimism, 50));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     function test_handleSettlement_RevertWhen_TheSecondLegCarriesAnotherAmount() public {
         bytes32 id = _issueCrossChain();
         vm.prank(token);
-        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        mc.receiveReceipt(polygon, _leg(id, fromSat, "", 50));
 
         vm.prank(token);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SettlementAmountMismatch.selector, id, 50, 51));
-        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 51));
+        mc.receiveReceipt(optimism, _leg(id, "", toOptimism, 51));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
     }
 
     function test_handleSettlement_Success_WhenATwoLegValidationGetsAMismatchedLeg() public {
@@ -1062,7 +1059,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeperAccount);
-        mc.discardExpiredValidations(ids);
+        mc.cancelTickets(ids);
     }
 
     function _discard(bytes32 id) private {
@@ -1070,7 +1067,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeperAccount);
-        mc.discardExpiredValidations(ids);
+        mc.cancelTickets(ids);
     }
 
     function _countTopic(bytes32 topic) private returns (uint256 count) {
@@ -1082,19 +1079,19 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     function _issueCrossChain() private returns (bytes32 id) {
         vm.prank(aliceIdentity);
-        id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
+        id = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
     }
 
     function _issue() private returns (bytes32 id) {
         vm.prank(aliceIdentity);
-        id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
+        id = mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
     }
 
     /// @dev A leg carrying the issued hash: what a Lite that executed the issued body reports.
     function _leg(bytes32 id, bytes memory from, bytes memory to, uint256 amount)
         private
         view
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
         return _legUnder(id, from, to, amount, _issuedHash(id));
     }
@@ -1103,32 +1100,30 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
     function _legUnder(bytes32 id, bytes memory from, bytes memory to, uint256 amount, bytes32 hash)
         private
         pure
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return MessageTypesLib.SettlementNotification({
-            validationId: id, from: from, to: to, amount: amount, hash: hash
-        });
+        return MessageTypesLib.ReceiptMessage({ ticketId: id, from: from, to: to, amount: amount, hash: hash });
     }
 
     /// @dev A leg outside the issued terms under the issued hash: rejected with the chain paused. Runs under the
     ///  caller's prank.
-    function _assertRejected(bytes32 id, bytes32 chainKey, MessageTypesLib.SettlementNotification memory leg) private {
+    function _assertRejected(bytes32 id, bytes32 chainKey, MessageTypesLib.ReceiptMessage memory leg) private {
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.SettlementRejected(id, chainKey, leg.amount, leg.hash);
-        assertEq(uint8(mc.handleSettlement(chainKey, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
+        emit EventsLib.ReceiptRefused(id, chainKey, leg.amount, leg.hash);
+        assertEq(uint8(mc.receiveReceipt(chainKey, leg)), uint8(IReceiptHandler.Verdict.PauseChain));
     }
 
-    /// @dev A duplicate delivery emits its notification and `SettlementDuplicate`, and nothing a judged leg emits.
+    /// @dev A duplicate delivery emits its notification and `ReceiptDuplicate`, and nothing a judged leg emits.
     function _assertOnlyADuplicateWasAnnounced(Vm.Log[] memory logs) private pure {
         assertEq(logs.length, 2, "the notification and the duplicate, nothing judged again");
-        assertEq(logs[0].topics[0], EventsLib.SettlementNotified.selector);
-        assertEq(logs[1].topics[0], EventsLib.SettlementDuplicate.selector);
+        assertEq(logs[0].topics[0], EventsLib.ReceiptReceived.selector);
+        assertEq(logs[1].topics[0], EventsLib.ReceiptDuplicate.selector);
     }
 
     function _assertUntouched(bytes32 id) private view {
-        ITransferValidation.Validation memory state = mc.validationOf(id);
-        assertEq(uint8(state.status), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(state.executedAmount, 0);
+        ITickets.Ticket memory state = mc.ticketOf(id);
+        assertEq(uint8(state.status), uint8(ITickets.TicketStatus.Open));
+        assertEq(state.moved, 0);
     }
 
     function _bind(bytes memory wallet, address identity) private {

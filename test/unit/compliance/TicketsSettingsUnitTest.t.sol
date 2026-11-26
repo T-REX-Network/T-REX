@@ -43,13 +43,13 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 /// @dev The COMPLIANCE_MANAGER surface of the validation layer: the five setters, their events and their
 ///      guards, plus the late-reconciliation hook that pauses a chain on its own.
-contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
+contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     bytes32 internal constant POLYGON = keccak256(abi.encodePacked(bytes2(0x0000), hex"89"));
     bytes32 internal constant OPTIMISM = keccak256(abi.encodePacked(bytes2(0x0000), hex"0a"));
@@ -77,26 +77,26 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
         mc.setDefaultValidityWindow(1 hours);
     }
 
-    // ==== .setReconciliationWindow Tests ====
+    // ==== .setWaitingTime Tests ====
 
     function test_setReconciliationWindow_Success_WhenCalledByManager() public {
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ReconciliationWindowSet(POLYGON, 30 minutes);
-        mc.setReconciliationWindow(POLYGON, 30 minutes);
+        emit EventsLib.WaitingTimeSet(POLYGON, 30 minutes);
+        mc.setWaitingTime(POLYGON, 30 minutes);
 
-        assertEq(mc.reconciliationWindowOf(POLYGON), 30 minutes);
-        assertEq(mc.reconciliationWindowOf(OPTIMISM), 0);
+        assertEq(mc.waitingTimeOf(POLYGON), 30 minutes);
+        assertEq(mc.waitingTimeOf(OPTIMISM), 0);
     }
 
     function test_setReconciliationWindow_RevertWhen_DurationIsZero() public {
         vm.expectRevert(ErrorsLib.ZeroDuration.selector);
-        mc.setReconciliationWindow(POLYGON, 0);
+        mc.setWaitingTime(POLYGON, 0);
     }
 
     function test_setReconciliationWindow_RevertWhen_CallerIsNotManager() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setReconciliationWindow(POLYGON, 30 minutes);
+        mc.setWaitingTime(POLYGON, 30 minutes);
     }
 
     // ==== .setIssuancePaused Tests ====
@@ -166,7 +166,7 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
     // ==== automatic pause Tests ====
 
     /// @notice Only the manager lifts a pause, whoever set it. A late settlement that breached a rule closes
-    ///         the chain from inside `handleSettlement`; `LateReconciliation.t.sol` covers that path end to
+    ///         the chain from inside `receiveReceipt`; `LateReconciliation.t.sol` covers that path end to
     ///         end, and this pins that the lift is a manager action and not automatic.
     function test_setIssuancePaused_Success_WhenTheManagerLiftsAnAutomaticPause() public {
         mc.setIssuancePaused(POLYGON, true);
@@ -184,7 +184,7 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
     // ==== .supportsInterface and storage Tests ====
 
     function test_supportsInterface_Success_WhenQueriedForITransferValidation() public view {
-        assertTrue(mc.supportsInterface(type(ITransferValidation).interfaceId));
+        assertTrue(mc.supportsInterface(type(ITickets).interfaceId));
     }
 
     /// @notice The compliance advertises the ledger, which is how a module finds the four numbers it reads.
@@ -205,10 +205,10 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_views_Success_WhenNothingWasIssued() public view {
-        ITransferValidation.Validation memory record = mc.validationOf(bytes32(uint256(1)));
+        ITickets.Ticket memory record = mc.ticketOf(bytes32(uint256(1)));
         assertEq(record.hash, bytes32(0));
-        assertEq(record.expiry, 0);
-        assertEq(record.releaseAt, 0);
+        assertEq(record.validUntil, 0);
+        assertEq(record.waitingEndsAt, 0);
     }
 
 }

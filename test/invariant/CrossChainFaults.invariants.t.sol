@@ -231,7 +231,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
     function invariant_MF2_noSatelliteHoldsWhatTheReferenceChainDoesNotCount() public view {
         for (uint256 i = 0; i < ACTORS; i++) {
-            assertLe(lite.balanceOf(satellites[i]), token.bridgedBalanceOf(satellites[i]), "MF-2");
+            assertLe(lite.balanceOf(satellites[i]), token.awayBalanceOf(satellites[i]), "MF-2");
         }
     }
 
@@ -258,7 +258,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         _reorg();
 
         assertFalse(reorgMissedTheFinalState);
-        assertEq(token.bridgedBalanceOf(satellites[0]), 0, "the reference chain no longer counts the delegation");
+        assertEq(token.awayBalanceOf(satellites[0]), 0, "the reference chain no longer counts the delegation");
         assertEq(lite.balanceOf(satellites[0]), 100, "the satellite still holds it");
         vm.expectRevert();
         this.invariant_MF2_noSatelliteHoldsWhatTheReferenceChainDoesNotCount();
@@ -280,7 +280,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
         assertFalse(reorgMissedTheFinalState);
         assertEq(token.balanceOf(bob), bobBalance, "the reorg went back: what the reference chain did since is gone");
-        assertEq(token.bridgedBalanceOf(satellites[0]), 100);
+        assertEq(token.awayBalanceOf(satellites[0]), 100);
         assertEq(lite.balanceOf(satellites[0]), 100, "replayed on the satellite after the reorg");
         assertEq(gateway.queuedMessage(delegation).deliveries, 1, "replayed from its own entry, delivered once");
         invariant_MF1_eachHolderIsTheReferenceSatelliteAndHeldAmounts();
@@ -296,15 +296,15 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         this.finalize();
         this.relay(gateway.queueLength() - 1);
         this.relay(gateway.queueLength() - 1);
-        assertEq(token.bridgedBalanceOf(satellites[0]), 60, "the proof settled");
+        assertEq(token.awayBalanceOf(satellites[0]), 60, "the proof settled");
 
         _reorg();
 
         assertFalse(reorgMissedTheFinalState);
-        assertEq(token.bridgedBalanceOf(satellites[0]), 100, "the settlement was in the reorged window");
+        assertEq(token.awayBalanceOf(satellites[0]), 100, "the settlement was in the reorged window");
         assertEq(lite.balanceOf(satellites[0]), 60, "the satellite burn stands");
         this.relay(gateway.queueLength() - 1);
-        assertEq(token.bridgedBalanceOf(satellites[0]), 60, "settled again from the replayed proof");
+        assertEq(token.awayBalanceOf(satellites[0]), 60, "settled again from the replayed proof");
         invariant_MF1_eachHolderIsTheReferenceSatelliteAndHeldAmounts();
     }
 
@@ -327,7 +327,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         assertFalse(reorgMissedTheFinalState);
         assertEq(faults.reorgs, 3);
         assertEq(token.balanceOf(bob), 1000);
-        assertEq(token.bridgedBalanceOf(satellites[0]), 100);
+        assertEq(token.awayBalanceOf(satellites[0]), 100);
         assertEq(lite.balanceOf(satellites[0]), 100);
         invariant_MF1_eachHolderIsTheReferenceSatelliteAndHeldAmounts();
         invariant_MF2_noSatelliteHoldsWhatTheReferenceChainDoesNotCount();
@@ -448,8 +448,8 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         print = keccak256(
             abi.encode(
                 token.totalSupply(),
-                token.totalBridged(),
-                token.totalInTransit(),
+                token.totalAwayBalance(),
+                token.totalOnHold(),
                 token.paused(),
                 token.isInboundPaused(polygon),
                 lite.mints(),
@@ -461,7 +461,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
                 abi.encode(
                     print,
                     token.balanceOf(actors[i]),
-                    token.bridgedBalanceOf(satellites[i]),
+                    token.awayBalanceOf(satellites[i]),
                     ledger.positionOf(address(identities[i])),
                     lite.balanceOf(satellites[i])
                 )

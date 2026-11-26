@@ -64,18 +64,18 @@ import { IModule } from "./IModule.sol";
 /**
  * @title IApprovalModule
  * @dev What a module naming `APPROVAL` adds to {IModule}. While one is bound, a cross-chain request is not
- * issued at once: the compliance records and reserves it as `AwaitingApproval`, tells this module, and waits for
+ * issued at once: the compliance records and reserves it as `WaitingForApproval`, tells this module, and waits for
  * `answerApproval`. Who decides, how many decide and in which order is the module's own business.
  */
 interface IApprovalModule {
 
     /// @dev A validation was requested and waits for this module's answer. Called by the compliance inside
-    ///  `requestTransferValidation`, once the range was narrowed by every rule and reserved; reverting refuses
+    ///  `askToMove`, once the range was narrowed by every rule and reserved; reverting refuses
     ///  the request. The module answers later, before `deadline`, with `answerApproval` on the compliance; it
-    ///  may also answer at once, from inside this call, since the validation is already `AwaitingApproval`.
-    /// @param validationId the validation awaiting approval
+    ///  may also answer at once, from inside this call, since the validation is already `WaitingForApproval`.
+    /// @param ticketId the validation awaiting approval
     /// @param ctx the movement, as the rules saw it at the request, with the narrowed range
     /// @param deadline the last moment, exclusive, an answer from this module is taken
-    function approvalRequested(bytes32 validationId, IModule.TransferContext calldata ctx, uint64 deadline) external;
+    function approvalRequested(bytes32 ticketId, IModule.TransferContext calldata ctx, uint64 deadline) external;
 
 }

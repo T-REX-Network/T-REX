@@ -72,7 +72,7 @@ TRUSTED_GATEWAY_REGISTRY=$(addr_for TrustedGatewayRegistry)
 TREX_FACTORY=$(addr_for TREXFactory)
 
 # Token is linked against TREXMessagingLib, TokenDelegationLib, TokenLedgerLib, TokenRecoveryLib and
-# TokenGuardsLib; ModularCompliance against ModuleSetLib, TransferValidationLib and TransferSettlementLib
+# TokenGuardsLib; ModularCompliance against ModuleSetLib, TicketLib and ReceiptLib
 # (ComplianceLedgerLib is internal and never deployed). forge deploys each library ahead of the script's own
 # transactions and records it under "libraries" as "<source>:<name>:<address>".
 lib_addr() {
@@ -92,8 +92,8 @@ LEDGER_LIB=$(lib_addr TokenLedgerLib)
 RECOVERY_LIB=$(lib_addr TokenRecoveryLib)
 GUARDS_LIB=$(lib_addr TokenGuardsLib)
 MODULE_SET_LIB=$(lib_addr ModuleSetLib)
-TRANSFER_VALIDATION_LIB=$(lib_addr TransferValidationLib)
-TRANSFER_SETTLEMENT_LIB=$(lib_addr TransferSettlementLib)
+TRANSFER_VALIDATION_LIB=$(lib_addr TicketLib)
+TRANSFER_SETTLEMENT_LIB=$(lib_addr ReceiptLib)
 
 # beacons() returns a SuiteBeacons tuple (token, registry, irs, mc, accessManager) - fetch
 # post-hoc, they're not top-level CREATEs.

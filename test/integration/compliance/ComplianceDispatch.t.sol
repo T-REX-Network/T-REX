@@ -457,7 +457,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertEq(token.balanceOf(bob), 100);
     }
 
-    // ==== .requestTransferValidation routing Tests ====
+    // ==== .askToMove routing Tests ====
 
     /// @notice Issuance asks every rule for an amount, and touches no tracker: nothing has moved yet.
     function test_requestTransferValidation_Success_WhenEveryRuleIsAsked() public {
@@ -505,7 +505,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
         bytes32 id = _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
-        assertEq(mc.validationOf(id).amountMax, 40, "narrowed to what the rule allows");
+        assertEq(mc.ticketOf(id).amountMax, 40, "narrowed to what the rule allows");
         assertEq(tracker.totalHookCalls(), 0);
     }
 

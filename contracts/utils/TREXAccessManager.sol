@@ -70,7 +70,7 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
-import { ITransferValidation } from "../compliance/modular/ITransferValidation.sol";
+import { ITickets } from "../compliance/modular/ITickets.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
@@ -273,8 +273,8 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(token, IERC3643.setOnchainID.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setIdentityRegistry.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setCompliance.selector, identityManagerRole);
-        _setTargetFunctionRole(token, ITREXMessaging.setRoute.selector, identityManagerRole);
-        _setTargetFunctionRole(token, ITREXMessaging.setFastRoute.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.setReceiptRoute.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.setTicketRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
 
         // Cross-chain instructions.
@@ -386,19 +386,19 @@ contract TREXAccessManager is AccessManagerUpgradeable {
 
         // Cross-chain validation policy.
         uint64 complianceManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER);
-        _setTargetFunctionRole(compliance, ITransferValidation.setDefaultValidityWindow.selector, complianceManagerRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.setReconciliationWindow.selector, complianceManagerRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.setIssuancePaused.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setDefaultValidityWindow.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setWaitingTime.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setIssuancePaused.selector, complianceManagerRole);
 
         // Issuing a validation, and sending a lost leg of one again.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-        _setTargetFunctionRole(compliance, ITransferValidation.requestTransferValidation.selector, agentRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.resendValidation.selector, agentRole);
+        _setTargetFunctionRole(compliance, ITickets.askToMove.selector, agentRole);
+        _setTargetFunctionRole(compliance, ITickets.sendTicket.selector, agentRole);
 
         // Cleaning up expired or stuck validations.
         uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);
-        _setTargetFunctionRole(compliance, ITransferValidation.discardExpiredValidations.selector, validationKeeperRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.resolveStuckValidation.selector, validationKeeperRole);
+        _setTargetFunctionRole(compliance, ITickets.cancelTickets.selector, validationKeeperRole);
+        _setTargetFunctionRole(compliance, ITickets.resolveStuckValidation.selector, validationKeeperRole);
     }
 
     /// @dev Who hands out which role. The key that appoints never acts: `AGENT_ADMIN` and `SUITE_ADMIN` open

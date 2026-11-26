@@ -286,7 +286,7 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:pause().selector
     || f.selector == sig:unpause().selector
     || f.selector == sig:setInboundPaused(bytes32,bool).selector
-    || f.selector == sig:setRoute(bytes2,bytes,address).selector
+    || f.selector == sig:setReceiptRoute(bytes2,bytes,address).selector
     || f.selector == sig:setPeer(bytes32,bytes).selector
     || f.selector == sig:instructRecall(bytes,uint256,address).selector
     || f.selector == sig:resend(uint8,uint256,bytes).selector;

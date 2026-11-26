@@ -52,7 +52,7 @@ import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedge
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -145,11 +145,11 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     }
 
     function _assertPartition() private view {
-        uint256 bridged = token.bridgedBalanceOf(aliceSat) + token.bridgedBalanceOf(bobSat)
-            + token.bridgedBalanceOf(aliceOptimism) + token.totalInTransit();
+        uint256 bridged = token.awayBalanceOf(aliceSat) + token.awayBalanceOf(bobSat)
+            + token.awayBalanceOf(aliceOptimism) + token.totalOnHold();
         assertEq(token.balanceOf(alice) + token.balanceOf(bob) + bridged, MINTED, "buckets do not sum to the supply");
         assertEq(token.totalSupply(), MINTED, "the supply moved");
-        assertEq(token.totalBridged(), bridged, "totalBridged drifted");
+        assertEq(token.totalAwayBalance(), bridged, "totalAwayBalance drifted");
     }
 
     /* ----- delegateOut ----- */
@@ -165,23 +165,21 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.DelegatedOut(alice, keccak256(aliceSat), 1, aliceSat, 400);
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ProtocolMessageSent(
-            MessageTypesLib.Message.MINT_INSTRUCTION, polygon, polygonGateway.receiveIdFor(0)
-        );
+        emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.MOVE_OUT, polygon, polygonGateway.receiveIdFor(0));
 
         bytes32 sendId = _delegate(alice, 400);
 
         assertEq(sendId, polygonGateway.receiveIdFor(0));
         assertEq(token.balanceOf(alice), MINTED - 400);
-        assertEq(token.bridgedBalanceOf(aliceSat), 400);
-        assertEq(token.totalBridged(), 400);
+        assertEq(token.awayBalanceOf(aliceSat), 400);
+        assertEq(token.totalAwayBalance(), 400);
         assertEq(ledger.positionOf(address(aliceIdentity)), MINTED, "location moved, ownership did not");
         _assertPartition();
 
         (uint8 messageType,, bytes memory body) =
             abi.decode(polygonGateway.queuedMessage(0).payload, (uint8, uint8, bytes));
-        assertEq(messageType, uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
-        MessageTypesLib.MintInstruction memory instruction = MessageTypesLib.decodeMintInstruction(body);
+        assertEq(messageType, uint8(MessageTypesLib.Message.MOVE_OUT));
+        MessageTypesLib.MoveOutMessage memory instruction = MessageTypesLib.decodeMintInstruction(body);
         assertEq(instruction.delegationId, 1);
         assertEq(instruction.toWallet, aliceSat);
         assertEq(instruction.amount, 400);
@@ -191,13 +189,13 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     function test_delegateOut_Success_WhenTheIdentityDelegatesForItsWallet() public {
         _delegate(address(aliceIdentity), 100);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 100);
+        assertEq(token.awayBalanceOf(aliceSat), 100);
     }
 
     function test_delegateOut_Success_WhenAnAgentDelegatesForTheHolder() public {
         _delegate(agent, 100);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 100);
+        assertEq(token.awayBalanceOf(aliceSat), 100);
     }
 
     /// @notice A change of the holder's owner is followed by the delegation hook, which adds the burned amount
@@ -239,14 +237,14 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.prank(agent);
         token.setInboundPaused(polygon, true);
         uint256 nativeBefore = token.balanceOf(alice);
-        uint256 bridgedBefore = token.bridgedBalanceOf(aliceSat);
+        uint256 bridgedBefore = token.awayBalanceOf(aliceSat);
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         token.delegateOut(alice, aliceSat, 1);
 
         assertEq(token.balanceOf(alice), nativeBefore);
-        assertEq(token.bridgedBalanceOf(aliceSat), bridgedBefore);
+        assertEq(token.awayBalanceOf(aliceSat), bridgedBefore);
     }
 
     function test_delegateOut_RevertWhen_TheHolderIsFrozen() public {
@@ -303,7 +301,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         token.delegateOut(alice, aliceOptimism, 100);
 
         assertEq(token.balanceOf(alice), MINTED);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.totalAwayBalance(), 0);
     }
 
     function test_delegateOut_RevertWhen_TheWalletIsNative() public {
@@ -322,9 +320,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.RecallInstructed(1, keccak256(aliceSat), alice, aliceSat, 200);
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ProtocolMessageSent(
-            MessageTypesLib.Message.RECALL_INSTRUCTION, polygon, polygonGateway.receiveIdFor(1)
-        );
+        emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.BRING_HOME, polygon, polygonGateway.receiveIdFor(1));
 
         uint256 recallId = _instruct(200);
 
@@ -339,15 +335,15 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         (uint8 messageType,, bytes memory body) =
             abi.decode(polygonGateway.queuedMessage(1).payload, (uint8, uint8, bytes));
-        assertEq(messageType, uint8(MessageTypesLib.Message.RECALL_INSTRUCTION));
-        MessageTypesLib.RecallInstruction memory instruction = MessageTypesLib.decodeRecallInstruction(body);
+        assertEq(messageType, uint8(MessageTypesLib.Message.BRING_HOME));
+        MessageTypesLib.BringHomeMessage memory instruction = MessageTypesLib.decodeRecallInstruction(body);
         assertEq(instruction.recallId, 1);
         assertEq(instruction.wallet, aliceSat);
         assertEq(instruction.amount, 200);
         assertEq(instruction.nativeWallet, alice);
 
         assertEq(token.balanceOf(alice), MINTED - 500, "an instruction moves nothing");
-        assertEq(token.bridgedBalanceOf(aliceSat), 500);
+        assertEq(token.awayBalanceOf(aliceSat), 500);
     }
 
     function test_instructRecall_RevertWhen_TheCallerIsNotAnAgent() public {
@@ -386,17 +382,17 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     ///         then exceeds the position until the validation is discarded, and every read of the gap floors at zero.
     function test_instructRecall_Success_WhenPartOfThePositionIsReserved() public {
         _delegate(alice, 500);
-        bytes32 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 1, 300);
+        bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 1, 300);
         assertEq(token.availableOf(aliceSat), 200);
         uint256 recallId = _instruct(500);
         assertEq(recallId, 1);
 
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 500));
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 0);
+        assertEq(token.awayBalanceOf(aliceSat), 0);
         assertEq(token.reservedOf(aliceSat), 300, "the reservation outlives the position");
         assertEq(token.availableOf(aliceSat), 0);
-        uint256 settlement = _liteSettles(polygonGateway, token, _settlement(validationId, aliceSat, bobSat, 100));
+        uint256 settlement = _liteSettles(polygonGateway, token, _settlement(ticketId, aliceSat, bobSat, 100));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, aliceSat, 0, 100));
         polygonGateway.relay(settlement);
         _assertPartition();
@@ -454,7 +450,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId, aliceSat, 200);
 
-        vm.expectCall(address(boundCompliance), abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 0);
+        vm.expectCall(address(boundCompliance), abi.encodeWithSelector(IReceiptHandler.receiveReceipt.selector), 0);
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.BurnProofReceived(polygon, recallId, aliceSat, 200);
         vm.expectEmit(true, true, false, true, address(token));
@@ -464,8 +460,8 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 200);
-        assertEq(token.bridgedBalanceOf(aliceSat), 300);
-        assertEq(token.totalBridged(), 300);
+        assertEq(token.awayBalanceOf(aliceSat), 300);
+        assertEq(token.totalAwayBalance(), 300);
         assertEq(ledger.positionOf(address(aliceIdentity)), MINTED, "location moved, ownership did not");
         uint256 amount = token.pendingRecall(recallId).amount;
         assertEq(amount, 0, "the instruction is consumed");
@@ -480,7 +476,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 150));
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 150);
-        assertEq(token.bridgedBalanceOf(aliceSat), 350);
+        assertEq(token.awayBalanceOf(aliceSat), 350);
         uint256 amount = token.pendingRecall(recallId).amount;
         assertEq(amount, 0, "one proof closes the instruction whatever it proved");
         _assertPartition();
@@ -508,7 +504,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(alice), MINTED - 500, "nothing credited");
-        assertEq(token.bridgedBalanceOf(aliceSat), 500, "nothing debited");
+        assertEq(token.awayBalanceOf(aliceSat), 500, "nothing debited");
         uint256 amount = token.pendingRecall(recallId).amount;
         assertEq(amount, 0, "the instruction is closed");
         assertFalse(token.paused());
@@ -524,7 +520,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         assertTrue(token.paused());
         assertEq(token.balanceOf(alice), MINTED - 500, "nothing minted");
-        assertEq(token.bridgedBalanceOf(aliceSat), 500, "nothing debited");
+        assertEq(token.awayBalanceOf(aliceSat), 500, "nothing debited");
     }
 
     /// @notice A consumed instruction answered again, under a fresh transport id, is the replay emergency.
@@ -658,10 +654,10 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     ///         could not have drawn on the recalled amount, see `RecallReservation.t.sol`.
     function test_handleBurnProof_RevertWhen_TheBridgedPositionNoLongerCovers_ThenAppliesForWhatIsLeft() public {
         _delegate(alice, 500);
-        bytes32 validationId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
+        bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
         uint256 recallId = _instruct(200);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, aliceSat, bobSat, 400)));
-        assertEq(token.bridgedBalanceOf(aliceSat), 100);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(ticketId, aliceSat, bobSat, 400)));
+        assertEq(token.awayBalanceOf(aliceSat), 100);
         uint256 tooMuch = _proof(polygonGateway, recallId, aliceSat, 200);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, aliceSat, 100, 200));
@@ -671,7 +667,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 100));
 
         assertEq(token.balanceOf(alice), MINTED - 500 + 100);
-        assertEq(token.bridgedBalanceOf(aliceSat), 0);
+        assertEq(token.awayBalanceOf(aliceSat), 0);
         _assertPartition();
 
         vm.expectEmit(true, true, false, true, address(token));
@@ -702,7 +698,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload, "byte for byte");
         assertEq(vm.load(address(token), commitmentSlot), commitment, "commitment unchanged");
         assertEq(token.balanceOf(alice), MINTED - 400, "debited once");
-        assertEq(token.bridgedBalanceOf(aliceSat), 400);
+        assertEq(token.awayBalanceOf(aliceSat), 400);
     }
 
     function test_resend_RevertWhen_TheDelegationFieldsDiffer() public {
@@ -929,7 +925,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         assertEq(token.balanceOf(bob), 500);
         assertEq(module.recorded(bobKey), token.balanceOf(bob), "the record equals the live balance");
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
+        assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
     /// @notice A cap kept in a module's own ledger holds across the satellite: Charlie delegates out, hands the
@@ -945,8 +941,8 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         token.mint(charlie, 100);
         vm.prank(charlie);
         token.delegateOut(charlie, charlieSat, 100);
-        bytes32 validationId = _requestValidation(address(charlieIdentity), charlieSat, bobSat, 100, 100);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, charlieSat, bobSat, 100)));
+        bytes32 ticketId = _requestValidation(address(charlieIdentity), charlieSat, bobSat, 100, 100);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(ticketId, charlieSat, bobSat, 100)));
         vm.prank(agent);
         uint256 recallId = token.instructRecall(bobSat, 100, bob);
 
@@ -1015,7 +1011,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         uint256 index = _proof(newGateway, recallId, aliceSat, 200);
 
         vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.GatewayNotPinned.selector, address(newGateway), recallId, polygon)
+            abi.encodeWithSelector(ErrorsLib.BridgeNotPinned.selector, address(newGateway), recallId, polygon)
         );
         newGateway.relay(index);
     }

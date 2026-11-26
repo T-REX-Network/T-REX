@@ -46,7 +46,7 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -111,19 +111,19 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.BridgedTransfer(keccak256(aliceSat), keccak256(bobSat), id, aliceSat, bobSat, 95);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationSettled(id, polygon, 95);
+        emit EventsLib.ReceiptApplied(id, polygon, 95);
         polygonGateway.relay(index);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95);
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
-        assertEq(token.totalBridged(), BALANCE);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95);
+        assertEq(token.awayBalanceOf(bobSat), 95);
+        assertEq(token.totalAwayBalance(), BALANCE);
         assertEq(token.totalSupply(), BALANCE + NATIVE_BALANCE);
         IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
         assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "released once settled");
         assertEq(ledger.positionOf(address(bobIdentity)), 95, "and became a position");
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
-        assertEq(state.executedAmount, 95);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        ITickets.Ticket memory state = boundCompliance.ticketOf(id);
+        assertEq(state.moved, 95);
         assertFalse(token.paused());
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
     }
@@ -139,10 +139,10 @@ contract ValidationSettlementTest is InteropSuiteTest {
         polygonGateway.relay(index);
 
         assertEq(token.balanceOf(bob), 40);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 40);
-        assertEq(token.totalBridged(), BALANCE - 40);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 40);
+        assertEq(token.totalAwayBalance(), BALANCE - 40);
         assertEq(token.totalSupply(), BALANCE + NATIVE_BALANCE);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     /// @notice A native recipient relinked between issuance and settlement is credited to the identity the registry
@@ -173,19 +173,19 @@ contract ValidationSettlementTest is InteropSuiteTest {
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95));
 
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1 days);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
 
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
         assertFalse(boundCompliance.isIssuancePaused(polygon));
     }
 
     // ==== mismatch Tests: the leg is consumed, nothing moves, and the chain that executed it is paused ====
 
     /// @notice A leg outside the issued bounds, carrying the issued hash, is rejected: the validation stays
-    ///         `Pending`, nothing moves, and the chain that executed it is paused. Once lifted, the next
+    ///         `Open`, nothing moves, and the chain that executed it is paused. Once lifted, the next
     ///         out-of-bounds leg is rejected the same way.
     function test_handleSettlement_Success_WhenAmountIsOutsideTheBoundsTheLegIsRejected() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
@@ -194,7 +194,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         _relayRejected(polygonGateway, polygon, below, id, 80);
 
         uint256 above = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 101));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         polygonGateway.relay(above);
         _assertNothingApplied(polygonGateway, above);
 
@@ -202,13 +202,13 @@ contract ValidationSettlementTest is InteropSuiteTest {
         token.setInboundPaused(polygon, false);
         _relayRejected(polygonGateway, polygon, above, id, 101);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
     /// @notice A leg naming a wallet other than the issued ones, or leaving one empty on a same-chain validation,
-    ///         is rejected under the issued hash: the validation stays `Pending` and the chain is paused.
+    ///         is rejected under the issued hash: the validation stays `Open` and the chain is paused.
     function test_handleSettlement_Success_WhenAWalletIsNotTheIssuedOneTheLegIsRejected() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         bytes memory carolSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("carolOnPolygon"));
@@ -225,14 +225,14 @@ contract ValidationSettlementTest is InteropSuiteTest {
         token.setInboundPaused(polygon, false);
         _relayRejected(polygonGateway, polygon, emptyTo, id, 95);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
-        assertEq(token.bridgedBalanceOf(carolSat), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(bobSat), 0);
+        assertEq(token.awayBalanceOf(carolSat), 0);
     }
 
     /// @notice A leg from a chain neither wallet lives on is rejected: that chain's inbound is paused, the
-    ///         sender's chain is untouched and the validation stays `Pending`.
+    ///         sender's chain is untouched and the validation stays `Open`.
     function test_handleSettlement_Success_WhenTheLegComesFromAnotherChainItIsRejected() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         uint256 index = _liteSettles(optimismGateway, token, _settlement(id, aliceSat, bobSat, 95));
@@ -240,8 +240,8 @@ contract ValidationSettlementTest is InteropSuiteTest {
         _relayRejected(optimismGateway, optimism, index, id, 95);
 
         assertFalse(token.isInboundPaused(polygon));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
     /// @notice A leg outside the bounds under a hash this chain never issued is the trace of a body a reorg
@@ -264,12 +264,12 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
         assertTrue(token.isInboundPaused(polygon));
         assertFalse(token.paused());
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Orphaned));
         assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "the recipient's reservation is released");
         assertEq(token.reservedOf(aliceSat), 0, "and so is the sender's hold");
-        assertEq(boundCompliance.validationOf(id).executedAmount, 0);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
+        assertEq(boundCompliance.ticketOf(id).moved, 0);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
     /// @notice A leg inside the issued terms under another hash settles as any other, and says so: the body the
@@ -282,13 +282,13 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.SettlementBodyDiverged(id, polygon, otherHash);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationSettled(id, polygon, 95);
+        emit EventsLib.ReceiptApplied(id, polygon, 95);
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(boundCompliance.validationOf(id).executedAmount, 95);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95);
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(boundCompliance.ticketOf(id).moved, 95);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95);
+        assertEq(token.awayBalanceOf(bobSat), 95);
         assertFalse(token.isInboundPaused(polygon));
         assertFalse(token.paused());
     }
@@ -312,8 +312,8 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertTrue(token.isInboundPaused(polygon));
         assertFalse(token.paused());
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(replay)));
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.awayBalanceOf(bobSat), 95);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     /// @notice Once a chain's inbound is paused its next leg is refused and stays deliverable; the pauser lifts
@@ -324,10 +324,10 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.prank(agent);
         token.setInboundPaused(polygon, true);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         polygonGateway.relay(index);
         _assertNothingApplied(polygonGateway, index);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundUnpaused(polygon);
@@ -335,7 +335,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         token.setInboundPaused(polygon, false);
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     /// @notice A notification for an id never issued applies nothing to the ledger: the leg is parked under its
@@ -347,7 +347,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         uint256 index = _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 95, hash));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementParked(unknown, polygon, 95, hash);
+        emit EventsLib.ReceiptWaiting(unknown, polygon, 95, hash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(index);
@@ -355,16 +355,16 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
         assertFalse(token.paused());
         assertTrue(token.isInboundPaused(polygon));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
-        ITransferValidation.ParkedLeg memory parked = boundCompliance.parkedLegOf(unknown, polygon);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(bobSat), 0);
+        ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(unknown, polygon);
         assertTrue(parked.exists);
         assertEq(parked.amount, 95);
         assertEq(parked.hash, hash);
         assertEq(parked.from, aliceSat);
         assertEq(parked.to, bobSat);
-        assertEq(boundCompliance.validationOf(unknown).executedAmount, 0);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, unknown));
+        assertEq(boundCompliance.ticketOf(unknown).moved, 0);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
         boundCompliance.statusOf(unknown);
 
         uint256 replay = _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 94, hash));
@@ -376,7 +376,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(replay);
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(replay)));
-        assertEq(boundCompliance.parkedLegOf(unknown, polygon).amount, 95, "the first leg stays parked");
+        assertEq(boundCompliance.waitingReceiptOf(unknown, polygon).amount, 95, "the first leg stays parked");
     }
 
     /// @notice While the token is paused a valid leg is refused and stays deliverable; once unpaused it settles.
@@ -394,7 +394,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         token.unpause();
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     /// @notice Only the pauser lifts a halt.
@@ -425,14 +425,14 @@ contract ValidationSettlementTest is InteropSuiteTest {
         polygonGateway.relay(outer);
 
         _assertNestedRelayRejected(attacker, nested);
-        assertEq(uint8(boundCompliance.statusOf(first)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(uint8(boundCompliance.statusOf(second)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(bobSat), 40);
+        assertEq(uint8(boundCompliance.statusOf(first)), uint8(ITickets.TicketStatus.Done));
+        assertEq(uint8(boundCompliance.statusOf(second)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(bobSat), 40);
 
         polygonGateway.relay(nested);
 
-        assertEq(uint8(boundCompliance.statusOf(second)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 90);
+        assertEq(uint8(boundCompliance.statusOf(second)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 90);
     }
 
     function test_handleSettlement_RevertWhen_ATrackerRelaysASettlementFromATransferHook() public {
@@ -446,8 +446,8 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         _assertNestedRelayRejected(attacker, nested);
         assertEq(token.balanceOf(bob), 10);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(bobSat), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
     function _bindReentrantModule() private returns (ReentrantModule attacker) {
@@ -481,7 +481,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         private
     {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementRejected(id, chainKey, amount, boundCompliance.validationOf(id).hash);
+        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).hash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(chainKey);
         gateway.relay(index);

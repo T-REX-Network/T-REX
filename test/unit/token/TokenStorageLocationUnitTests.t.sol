@@ -99,7 +99,7 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(storedCompliance, address(token.compliance()), "Compliance slot mismatch");
     }
 
-    /// @dev The ledger fields follow `decimals` in the T-REX namespace: bridgedBalance at 1, totalBridged
+    /// @dev The ledger fields follow `decimals` in the T-REX namespace: awayBalance at 1, totalAwayBalance
     ///      at 2. The native balance mapping lives in OpenZeppelin's own namespace and is not touched.
     function testTREXTokenStorageBridgedBalance() public {
         bytes memory wallet = InteroperableAddress.formatEvmV1(8453, user1);
@@ -107,7 +107,7 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         bytes32 entry = keccak256(abi.encode(keccak256(wallet), bridgedSlot));
 
         vm.store(address(token), entry, bytes32(uint256(77)));
-        assertEq(token.bridgedBalanceOf(wallet), 77, "bridgedBalance is not at offset 1");
+        assertEq(token.awayBalanceOf(wallet), 77, "awayBalance is not at offset 1");
     }
 
     function testTREXTokenStorageTotalBridged() public {
@@ -115,11 +115,11 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(uint256(vm.load(address(token), totalBridgedSlot)), 0);
 
         vm.store(address(token), totalBridgedSlot, bytes32(uint256(55)));
-        assertEq(token.totalBridged(), 55, "totalBridged is not at offset 2");
+        assertEq(token.totalAwayBalance(), 55, "totalAwayBalance is not at offset 2");
         assertEq(token.totalSupply(), 55, "totalSupply does not count the bridged total");
     }
 
-    /// @dev The delegation and recall fields were appended after `reservedForValidations` (5): `recalls` at 6,
+    /// @dev The delegation and recall fields were appended after `reservedForTickets` (5): `recalls` at 6,
     ///      `lastRecallId` 7, `openRecall` 8, `settledProofs` 9, `lastDelegationId` 10, `delegations` 11. Inside a
     ///      `PendingRecall`, `amount` is the fourth slot and `gateway` and `peerKey` the fifth and sixth.
     function testTREXTokenStoragePendingRecall() public {

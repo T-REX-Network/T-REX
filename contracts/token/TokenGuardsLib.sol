@@ -66,7 +66,7 @@ import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC16
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 
@@ -138,7 +138,7 @@ library TokenGuardsLib {
         bytes4[] memory calledInterfaces = new bytes4[](3);
         calledInterfaces[0] = type(IERC3643Compliance).interfaceId;
         calledInterfaces[1] = type(IModularCompliance).interfaceId;
-        calledInterfaces[2] = type(ISettlementHandler).interfaceId;
+        calledInterfaces[2] = type(IReceiptHandler).interfaceId;
         require(ERC165Checker.supportsAllInterfaces(complianceAddress, calledInterfaces), ErrorsLib.InvalidCompliance());
 
         address boundToken = IModularCompliance(complianceAddress).getTokenBound();

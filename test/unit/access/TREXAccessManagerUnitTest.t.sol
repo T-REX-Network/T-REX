@@ -54,7 +54,7 @@ import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityReg
 import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -479,7 +479,7 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, IERC3643.setOnchainID.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.setIdentityRegistry.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.setCompliance.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
-        _assertRow(target, token, ITREXMessaging.setRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
+        _assertRow(target, token, ITREXMessaging.setReceiptRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, ITREXMessaging.setPeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IToken.delegateOut.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, token, IToken.instructRecall.selector, domainId, RolesLib.Role.AGENT);
@@ -584,43 +584,15 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, compliance, IERC3643Compliance.bindToken.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IERC3643Compliance.unbindToken.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(
-            target,
-            compliance,
-            ITransferValidation.setDefaultValidityWindow.selector,
-            domainId,
-            RolesLib.Role.COMPLIANCE_MANAGER
+            target, compliance, ITickets.setDefaultValidityWindow.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER
         );
+        _assertRow(target, compliance, ITickets.setWaitingTime.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setIssuancePaused.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.askToMove.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITickets.sendTicket.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITickets.cancelTickets.selector, domainId, RolesLib.Role.VALIDATION_KEEPER);
         _assertRow(
-            target,
-            compliance,
-            ITransferValidation.setReconciliationWindow.selector,
-            domainId,
-            RolesLib.Role.COMPLIANCE_MANAGER
-        );
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.setIssuancePaused.selector,
-            domainId,
-            RolesLib.Role.COMPLIANCE_MANAGER
-        );
-        _assertRow(
-            target, compliance, ITransferValidation.requestTransferValidation.selector, domainId, RolesLib.Role.AGENT
-        );
-        _assertRow(target, compliance, ITransferValidation.resendValidation.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.discardExpiredValidations.selector,
-            domainId,
-            RolesLib.Role.VALIDATION_KEEPER
-        );
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.resolveStuckValidation.selector,
-            domainId,
-            RolesLib.Role.VALIDATION_KEEPER
+            target, compliance, ITickets.resolveStuckValidation.selector, domainId, RolesLib.Role.VALIDATION_KEEPER
         );
         // Who hands out which role
         _assertAdmin(target, domainId, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);

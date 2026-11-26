@@ -66,7 +66,7 @@ import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 import { TokenLedgerLib } from "../token/TokenLedgerLib.sol";
-import { ISettlementHandler } from "./ISettlementHandler.sol";
+import { IReceiptHandler } from "./IReceiptHandler.sol";
 import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
 
 /**
@@ -100,7 +100,7 @@ library TREXMessagingLib {
         ITrustedGatewayRegistry registry;
 
         /// The gateway carrying this token's traffic, per chain. Zero closes the chain.
-        mapping(bytes32 chainKey => address gateway) routes;
+        mapping(bytes32 chainKey => address gateway) receiptRoutes;
 
         /// This token's Lite on each chain, ERC-7930. Empty falls back to the token's own address.
         mapping(bytes32 chainKey => bytes peer) peers;
@@ -112,17 +112,17 @@ library TREXMessagingLib {
         mapping(bytes32 chainKey => ChainPrefix) chains;
 
         /// The gateway each validation leg went out through, snapshot at dispatch and never rewritten.
-        mapping(bytes32 validationId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
+        mapping(bytes32 ticketId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
 
         /// `keccak256` of the peer each validation leg was sent to, snapshot with its gateway.
-        mapping(bytes32 validationId => mapping(bytes32 chainKey => bytes32 peerKey)) pinnedPeers;
+        mapping(bytes32 ticketId => mapping(bytes32 chainKey => bytes32 peerKey)) pinnedPeers;
 
         /// Chains whose messages are refused, and left deliverable, until the pauser lifts it.
         mapping(bytes32 chainKey => bool paused) inboundPaused;
 
         /// The gateway carrying validations only, per chain, ahead of the chain's finality. Zero sends them on
-        /// `routes`. Never carries an instruction, and never delivers anything to this token.
-        mapping(bytes32 chainKey => address gateway) fastRoutes;
+        /// `receiptRoutes`. Never carries an instruction, and never delivers anything to this token.
+        mapping(bytes32 chainKey => address gateway) ticketRoutes;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
@@ -161,7 +161,7 @@ library TREXMessagingLib {
     /// @dev See {ITREXMessaging-isChainOpen}.
     function isChainOpen(bytes32 chainKey) external view returns (bool) {
         MessagingStorage storage s = layout();
-        address gateway = s.routes[chainKey];
+        address gateway = s.receiptRoutes[chainKey];
 
         return gateway != address(0) && s.registry.isTrusted(gateway) && peerFor(chainKey).length > 0;
     }
@@ -178,31 +178,31 @@ library TREXMessagingLib {
         emit EventsLib.TrustedGatewayRegistrySet(registry);
     }
 
-    /// @dev See {ITREXMessaging-setRoute}. Authorization is the caller's.
-    function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external {
+    /// @dev See {ITREXMessaging-setReceiptRoute}. Authorization is the caller's.
+    function setReceiptRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external {
         MessagingStorage storage s = layout();
 
         // The zero gateway is how an issuer closes a chain, so it is the one value not vetted.
-        require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.GatewayNotTrusted(gateway));
+        require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.BridgeNotTrusted(gateway));
 
         bytes32 chainKey = _registerChain(s, chainType, chainReference);
-        _requireDistinctRoutes(chainKey, gateway, s.fastRoutes[chainKey]);
-        s.routes[chainKey] = gateway;
+        _requireDistinctRoutes(chainKey, gateway, s.ticketRoutes[chainKey]);
+        s.receiptRoutes[chainKey] = gateway;
 
-        emit EventsLib.RouteSet(chainKey, gateway);
+        emit EventsLib.ReceiptRouteSet(chainKey, gateway);
     }
 
-    /// @dev See {ITREXMessaging-setFastRoute}. Authorization is the caller's.
-    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external {
+    /// @dev See {ITREXMessaging-setTicketRoute}. Authorization is the caller's.
+    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external {
         MessagingStorage storage s = layout();
 
-        require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.GatewayNotTrusted(gateway));
+        require(gateway == address(0) || s.registry.isTrusted(gateway), ErrorsLib.BridgeNotTrusted(gateway));
 
         bytes32 chainKey = _registerChain(s, chainType, chainReference);
-        _requireDistinctRoutes(chainKey, gateway, s.routes[chainKey]);
-        s.fastRoutes[chainKey] = gateway;
+        _requireDistinctRoutes(chainKey, gateway, s.receiptRoutes[chainKey]);
+        s.ticketRoutes[chainKey] = gateway;
 
-        emit EventsLib.FastRouteSet(chainKey, gateway);
+        emit EventsLib.TicketRouteSet(chainKey, gateway);
     }
 
     /// @dev See {ITREXMessaging-setPeer}. Authorization is the caller's.
@@ -255,36 +255,36 @@ library TREXMessagingLib {
     /// its settlement legs from that chain are then matched against those alone, so a later peer change does not
     /// strand them. A re-dispatch is allowed while the final route and the peer are still the pinned ones, so a
     /// lost message can be re-sent.
-    function sendComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes memory body)
+    function sendComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes memory body)
         external
         returns (bytes32 sendId)
     {
         MessagingStorage storage s = layout();
         (address finalRoute, bytes memory peer) = _openRoute(s, chainKey);
 
-        address pinned = s.pinnedRoutes[validationId][chainKey];
+        address pinned = s.pinnedRoutes[ticketId][chainKey];
         if (pinned == address(0)) {
-            s.pinnedRoutes[validationId][chainKey] = finalRoute;
-            s.pinnedPeers[validationId][chainKey] = keccak256(peer);
+            s.pinnedRoutes[ticketId][chainKey] = finalRoute;
+            s.pinnedPeers[ticketId][chainKey] = keccak256(peer);
 
-            emit EventsLib.ValidationRoutePinned(validationId, chainKey, finalRoute);
+            emit EventsLib.HalfPinned(ticketId, chainKey, finalRoute);
         } else {
             bool sameFinalRoute = pinned == finalRoute;
-            bool samePeer = s.pinnedPeers[validationId][chainKey] == keccak256(peer);
-            require(sameFinalRoute, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
-            require(samePeer, ErrorsLib.ValidationAlreadyRouted(validationId, chainKey, pinned));
+            bool samePeer = s.pinnedPeers[ticketId][chainKey] == keccak256(peer);
+            require(sameFinalRoute, ErrorsLib.ValidationAlreadyRouted(ticketId, chainKey, pinned));
+            require(samePeer, ErrorsLib.ValidationAlreadyRouted(ticketId, chainKey, pinned));
         }
 
         // A validation moves nothing on its own: sending it ahead of finality risks a validation the satellite
         // executes and this chain then loses to a reorg. Its settlement is then never applied: the settlement
         // intake finds no such validation and treats it as an emergency, see
-        // {ISettlementHandler-handleSettlement}. A fast gateway the registry dropped falls back to the final
+        // {IReceiptHandler-receiveReceipt}. A fast gateway the registry dropped falls back to the final
         // route rather than stranding issuance.
-        address fastRoute = s.fastRoutes[chainKey];
+        address fastRoute = s.ticketRoutes[chainKey];
         bool fastRouteUsable = fastRoute != address(0) && s.registry.isTrusted(fastRoute);
         address sendingGateway = fastRouteUsable ? fastRoute : finalRoute;
 
-        sendId = _send(sendingGateway, peer, chainKey, MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
+        sendId = _send(sendingGateway, peer, chainKey, MessageTypesLib.Message.TICKET, body);
     }
 
     /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current final route. The
@@ -315,7 +315,7 @@ library TREXMessagingLib {
     /// the revert undoes the replay guard's record and the delivery stays deliverable. Acting on the message is
     /// left to the token, since only it knows its compliance and its pause. The gateway's trust is the caller's check, made before this is reached, so a gateway the registry
     /// no longer trusts is refused even when pinned.
-    /// @return messageType `SETTLEMENT_NOTIFICATION` or `BURN_PROOF`; anything else reverts.
+    /// @return messageType `RECEIPT` or `BURN_PROOF`; anything else reverts.
     /// @return chainKey The chain the message is attributed to.
     /// @return body The still-encoded body, of the type `messageType` names.
     function acceptMessage(address gateway, bytes32 receiveId, bytes calldata sender, bytes calldata payload)
@@ -338,17 +338,17 @@ library TREXMessagingLib {
         }
 
         // Everything a token receives reports value that moved, so it is taken from a final route only.
-        require(s.fastRoutes[chainKey] != gateway, ErrorsLib.GatewayIsFastRoute(gateway, chainKey));
+        require(s.ticketRoutes[chainKey] != gateway, ErrorsLib.WrongRoute(gateway, chainKey));
 
-        if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
-            _requireExpectedOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeSettlement(body).validationId);
+        if (messageType == MessageTypesLib.Message.RECEIPT) {
+            _requireExpectedOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeSettlement(body).ticketId);
         } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
             _requireRecallOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeBurnProof(body).recallId);
         } else {
             revert ErrorsLib.MessageTypeNotInbound(messageType);
         }
 
-        require(!s.inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
+        require(!s.inboundPaused[chainKey], ErrorsLib.AwayChainBlocked(chainKey));
     }
 
     /// @dev Hands an admitted settlement to `handler`, decoded, and reports the handler's verdict.
@@ -360,9 +360,9 @@ library TREXMessagingLib {
     /// @return verdict `None`, or the pause the handler asks for on a replayed or never-issued settlement.
     function forwardSettlement(address handler, bytes32 chainKey, bytes memory body)
         external
-        returns (ISettlementHandler.Verdict verdict)
+        returns (IReceiptHandler.Verdict verdict)
     {
-        return ISettlementHandler(handler).handleSettlement(chainKey, MessageTypesLib.decodeSettlement(body));
+        return IReceiptHandler(handler).receiveReceipt(chainKey, MessageTypesLib.decodeSettlement(body));
     }
 
     /* ----- Storage ----- */
@@ -416,14 +416,14 @@ library TREXMessagingLib {
         view
         returns (address gateway, bytes memory peer)
     {
-        gateway = s.routes[chainKey];
+        gateway = s.receiptRoutes[chainKey];
         require(gateway != address(0) && s.registry.isTrusted(gateway), ErrorsLib.ChainNotOpen(chainKey));
 
         peer = peerFor(chainKey);
         require(peer.length > 0, ErrorsLib.ChainNotOpen(chainKey));
     }
 
-    /// @dev The pinned peer and gateway when this token dispatched `validationId` toward `chainKey`, else
+    /// @dev The pinned peer and gateway when this token dispatched `ticketId` toward `chainKey`, else
     ///  the current ones. A closed chain is refused first, pinned or not: closing it stops every settlement
     ///  from it, and reopening the route lets them be delivered again. An id this token never dispatched
     ///  there is not refused here: whether it was never issued, or issued from the reference side, is the
@@ -433,18 +433,18 @@ library TREXMessagingLib {
         address gateway,
         bytes32 chainKey,
         bytes calldata sender,
-        bytes32 validationId
+        bytes32 ticketId
     ) private view {
-        require(s.routes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
-        address pinned = s.pinnedRoutes[validationId][chainKey];
+        address pinned = s.pinnedRoutes[ticketId][chainKey];
         if (pinned == address(0)) {
             _requireCurrentPeer(chainKey, sender);
             _requireCurrentRoute(s, gateway, chainKey);
             return;
         }
-        require(keccak256(sender) == s.pinnedPeers[validationId][chainKey], ErrorsLib.SenderNotPeer(chainKey, sender));
-        require(pinned == gateway, ErrorsLib.GatewayNotPinned(gateway, validationId, chainKey));
+        require(keccak256(sender) == s.pinnedPeers[ticketId][chainKey], ErrorsLib.SenderNotPeer(chainKey, sender));
+        require(pinned == gateway, ErrorsLib.BridgeNotPinned(gateway, ticketId, chainKey));
     }
 
     function _requireCurrentPeer(bytes32 chainKey, bytes calldata sender) private view {
@@ -461,7 +461,7 @@ library TREXMessagingLib {
         bytes calldata sender,
         uint256 recallId
     ) private view {
-        require(s.routes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
         TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[recallId];
         if (recall.amount == 0) {
@@ -470,7 +470,7 @@ library TREXMessagingLib {
             return;
         }
         require(keccak256(sender) == recall.peerKey, ErrorsLib.SenderNotPeer(chainKey, sender));
-        require(recall.gateway == gateway, ErrorsLib.GatewayNotPinned(gateway, bytes32(recallId), chainKey));
+        require(recall.gateway == gateway, ErrorsLib.BridgeNotPinned(gateway, bytes32(recallId), chainKey));
     }
 
     /// @dev One gateway cannot be both routes of a chain, or the fast one would carry what must wait for finality.
@@ -482,7 +482,7 @@ library TREXMessagingLib {
     }
 
     function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {
-        require(s.routes[chainKey] == gateway, ErrorsLib.GatewayNotRouted(gateway, chainKey));
+        require(s.receiptRoutes[chainKey] == gateway, ErrorsLib.BridgeNotOnRoute(gateway, chainKey));
     }
 
 }

@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -44,7 +44,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
     function _setFastRoute(uint256 chainId, address gateway) private {
         (bytes2 chainType, bytes memory chainReference) = _evmChain(chainId);
         vm.prank(deployer);
-        token.setFastRoute(chainType, chainReference, gateway);
+        token.setTicketRoute(chainType, chainReference, gateway);
     }
 
     function _issue() private returns (bytes32) {
@@ -61,19 +61,19 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         ERC7786GatewayMock other = _newTrustedGateway(POLYGON);
 
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.FastRouteSet(polygon, address(other));
+        emit EventsLib.TicketRouteSet(polygon, address(other));
         _setFastRoute(POLYGON, address(other));
 
-        assertEq(token.fastRouteFor(polygon), address(other));
-        assertEq(token.routeFor(polygon), address(finalGateway), "the final route is untouched");
-        assertEq(token.fastRouteFor(optimism), address(0), "another chain is untouched");
-        assertEq(token.routeFor(optimism), address(optimismGateway));
+        assertEq(token.ticketRouteFor(polygon), address(other));
+        assertEq(token.receiptRouteFor(polygon), address(finalGateway), "the final route is untouched");
+        assertEq(token.ticketRouteFor(optimism), address(0), "another chain is untouched");
+        assertEq(token.receiptRouteFor(optimism), address(optimismGateway));
     }
 
     function test_setFastRoute_Success_WhenZeroUnsetsIt() public {
         _setFastRoute(POLYGON, address(0));
 
-        assertEq(token.fastRouteFor(polygon), address(0));
+        assertEq(token.ticketRouteFor(polygon), address(0));
         assertTrue(token.isChainOpen(polygon), "the chain stays open on its final route");
     }
 
@@ -81,9 +81,9 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         address untrusted = address(new ERC7786GatewayMock(POLYGON));
         (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotTrusted.selector, untrusted));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotTrusted.selector, untrusted));
         vm.prank(deployer);
-        token.setFastRoute(chainType, chainReference, untrusted);
+        token.setTicketRoute(chainType, chainReference, untrusted);
     }
 
     function test_setFastRoute_RevertWhen_TheGatewayIsTheFinalRoute() public {
@@ -93,7 +93,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
             abi.encodeWithSelector(ErrorsLib.FastRouteIsFinalRoute.selector, polygon, address(finalGateway))
         );
         vm.prank(deployer);
-        token.setFastRoute(chainType, chainReference, address(finalGateway));
+        token.setTicketRoute(chainType, chainReference, address(finalGateway));
     }
 
     function test_setRoute_RevertWhen_TheGatewayIsTheFastRoute() public {
@@ -101,7 +101,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.FastRouteIsFinalRoute.selector, polygon, address(fastGateway)));
         vm.prank(deployer);
-        token.setRoute(chainType, chainReference, address(fastGateway));
+        token.setReceiptRoute(chainType, chainReference, address(fastGateway));
     }
 
     function test_setFastRoute_RevertWhen_TheCallerHasNoRole() public {
@@ -109,7 +109,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
         vm.prank(alice);
-        token.setFastRoute(chainType, chainReference, address(0));
+        token.setTicketRoute(chainType, chainReference, address(0));
     }
 
     /* ----- Validation ----- */
@@ -119,7 +119,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
 
         assertEq(fastGateway.queueLength(), 1, "the validation took the fast route");
         assertEq(finalGateway.queueLength(), 0);
-        assertEq(_decodeQueuedValidation(fastGateway, 0).validationId, id);
+        assertEq(_decodeQueuedValidation(fastGateway, 0).ticketId, id);
         assertEq(token.pinnedRouteFor(id, polygon), address(finalGateway), "its settlement comes back on final");
     }
 
@@ -157,7 +157,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         bytes32 id = _issue();
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(fastGateway.queueLength(), 2);
         assertEq(fastGateway.queuedMessage(1).payload, fastGateway.queuedMessage(0).payload);
@@ -173,7 +173,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         assertEq(finalGateway.queueLength(), 1);
         assertEq(fastGateway.queueLength(), 0, "never on the fast route");
         (MessageTypesLib.Message messageType,) = MessageTypesLib.decode(finalGateway.queuedMessage(0).payload);
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MOVE_OUT));
     }
 
     function test_mintInstruction_RevertWhen_OnlyTheFastRouteIsSet() public {
@@ -191,7 +191,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         assertEq(finalGateway.queueLength(), 1);
         assertEq(fastGateway.queueLength(), 0, "never on the fast route");
         (MessageTypesLib.Message messageType,) = MessageTypesLib.decode(finalGateway.queuedMessage(0).payload);
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.RECALL_INSTRUCTION));
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BRING_HOME));
     }
 
     function test_recallInstruction_RevertWhen_OnlyTheFastRouteIsSet() public {
@@ -209,19 +209,19 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
 
         finalGateway.relay(_liteSettles(finalGateway, token, _settlement(id, aliceSat, bobSat, 60)));
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 60);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 60);
     }
 
     function test_settlement_RevertWhen_FromTheFastRoute() public {
         bytes32 id = _issue();
         uint256 index = _liteSettles(fastGateway, token, _settlement(id, aliceSat, bobSat, 60));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(fastGateway), polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongRoute.selector, address(fastGateway), polygon));
         fastGateway.relay(index);
 
         assertFalse(token.messageReceived(address(fastGateway), fastGateway.receiveIdFor(index)));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
     /* ----- Burn proof ----- */
@@ -232,7 +232,7 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
 
         finalGateway.relay(_proof(finalGateway, recallId, 100));
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 900);
+        assertEq(token.awayBalanceOf(aliceSat), 900);
         assertEq(token.pendingRecall(recallId).amount, 0, "settled");
     }
 
@@ -241,10 +241,10 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         uint256 recallId = token.instructRecall(aliceSat, 100, alice);
         uint256 index = _proof(fastGateway, recallId, 100);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(fastGateway), polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongRoute.selector, address(fastGateway), polygon));
         fastGateway.relay(index);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 1000);
+        assertEq(token.awayBalanceOf(aliceSat), 1000);
     }
 
     /// @dev The fast route is judged at delivery: a final gateway that later became the fast route delivers
@@ -255,15 +255,15 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         _makeTheFinalGatewayTheFastRoute();
         uint256 index = _liteSettles(finalGateway, token, _settlement(id, aliceSat, bobSat, 60));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(finalGateway), polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongRoute.selector, address(finalGateway), polygon));
         finalGateway.relay(index);
         assertFalse(token.messageReceived(address(finalGateway), finalGateway.receiveIdFor(index)), "deliverable");
 
         _setFastRoute(POLYGON, address(0));
         finalGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 60);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 60);
     }
 
     /// @dev The same for an open recall: its proof is refused while the gateway it was dispatched through is the
@@ -274,14 +274,14 @@ contract FastAndFinalRoutesTest is InteropSuiteTest {
         _makeTheFinalGatewayTheFastRoute();
         uint256 index = _proof(finalGateway, recallId, 100);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayIsFastRoute.selector, address(finalGateway), polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongRoute.selector, address(finalGateway), polygon));
         finalGateway.relay(index);
         assertEq(token.pendingRecall(recallId).amount, 100, "still open");
 
         _setFastRoute(POLYGON, address(0));
         finalGateway.relay(index);
 
-        assertEq(token.bridgedBalanceOf(aliceSat), 900);
+        assertEq(token.awayBalanceOf(aliceSat), 900);
         assertEq(token.pendingRecall(recallId).amount, 0, "settled");
     }
 

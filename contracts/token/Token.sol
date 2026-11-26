@@ -74,7 +74,7 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
@@ -158,12 +158,12 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Interop Configuration ----- */
 
     /// @inheritdoc ITREXMessaging
-    function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
+    function setReceiptRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
         _setRoute(chainType, chainReference, gateway);
     }
 
     /// @inheritdoc ITREXMessaging
-    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
+    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
         _setFastRoute(chainType, chainReference, gateway);
     }
 
@@ -187,20 +187,20 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// The reference side has two contracts with something to say, the compliance and the token, but
     /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
     /// only ever has to trust a single reference address. A cross-chain validation is dispatched once
-    /// per involved chain, under the same `validationId`, and each leg pins its own route.
+    /// per involved chain, under the same `ticketId`, and each leg pins its own route.
     ///
     /// Callable by the bound compliance alone. No role opens this door: a validation body and the id it
     /// travels under are the compliance's to author, and a human holding the selector could otherwise
     /// forge either, or pin a route under an id the compliance has not reached yet. Reverts when the
     /// chain was never opened, or when this validation already went out toward `chainKey` through
     /// another gateway.
-    function dispatchComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes calldata body)
+    function dispatchComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes calldata body)
         external
         returns (bytes32)
     {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.SenderNotCompliance(_msgSender()));
 
-        return _sendComplianceValidation(chainKey, validationId, body);
+        return _sendComplianceValidation(chainKey, ticketId, body);
     }
 
     /// @inheritdoc IToken
@@ -244,28 +244,25 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId)
+    function finishMove(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId)
         external
         whenNotPaused
     {
         _requireBoundCompliance();
-        _settle(from, to, amount, validationId);
+        _settle(from, to, amount, ticketId);
     }
 
     /// @inheritdoc IToken
     /// @dev No pause guard: a brake is applied under any state, as it is at delivery.
-    function applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) external {
+    function applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) external {
         _requireBoundCompliance();
         _applyVerdict(chainKey, verdict);
     }
 
     /// @inheritdoc IToken
-    function holdInTransit(bytes calldata from, uint256 amount, bytes32 validationId, uint256 reserved)
-        external
-        whenNotPaused
-    {
+    function putOnHold(bytes calldata from, uint256 amount, bytes32 ticketId, uint256 reserved) external whenNotPaused {
         _requireBoundCompliance();
-        TokenLedgerLib.holdInTransit(from, amount, validationId, reserved);
+        TokenLedgerLib.putOnHold(from, amount, ticketId, reserved);
     }
 
     /* ----- Ledger Views ----- */
@@ -278,14 +275,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  The register reports the issuance, not the native float, and the events say so at the cost of one
     ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
     ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
-    ///  derived by summing `Transfer` events under-reports by `totalBridged`; `DelegatedOut`, `Recalled` and
+    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance`; `DelegatedOut`, `Recalled` and
     ///  `SettledToNative` are the reconciliation for anyone deriving it that way, and
-    ///  `totalSupply() - totalBridged()` is the native float. An escrow address holding the delegated float
+    ///  `totalSupply() - totalAwayBalance()` is the native float. An escrow address holding the delegated float
     ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
     ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
-    ///  `totalBridged` to the positions, whichever transition moved it.
+    ///  `totalAwayBalance` to the positions, whichever transition moved it.
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
-        return super.totalSupply() + TokenLedgerLib.layout().totalBridged;
+        return super.totalSupply() + TokenLedgerLib.layout().totalAwayBalance;
     }
 
     /// @inheritdoc IToken
@@ -294,14 +291,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256) {
-        return TokenLedgerLib.bridgedBalanceOf(wallet);
+    function awayBalanceOf(bytes calldata wallet) external view returns (uint256) {
+        return TokenLedgerLib.awayBalanceOf(wallet);
     }
 
     /// @inheritdoc IToken
-    function returnHeldInTransit(bytes calldata to, bytes32 validationId) external whenNotPaused {
+    function returnHeldInTransit(bytes calldata to, bytes32 ticketId) external whenNotPaused {
         _requireBoundCompliance();
-        TokenLedgerLib.returnHeldInTransit(to, validationId);
+        TokenLedgerLib.returnHeldInTransit(to, ticketId);
     }
 
     /// @inheritdoc IToken
@@ -318,32 +315,32 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @dev No pause guard: a reservation moves no tokens, it only records what a validation may later draw.
     ///  Issuance itself is allowed while the token is paused, and the reservation has to follow it, or a paused
     ///  token would issue validations with nothing held against the wallet they draw from.
-    function reserveForValidation(bytes calldata wallet, uint256 amount) external {
+    function reserveForTicket(bytes calldata wallet, uint256 amount) external {
         _requireBoundCompliance();
         TokenLedgerLib.reserve(wallet, amount);
     }
 
     /// @inheritdoc IToken
-    /// @dev No pause guard, for the reason `reserveForValidation` gives: a discard while the token is paused
+    /// @dev No pause guard, for the reason `reserveForTicket` gives: a discard while the token is paused
     ///  must still give the wallet its room back.
-    function releaseFromValidation(bytes calldata wallet, uint256 amount) external {
+    function releaseFromTicket(bytes calldata wallet, uint256 amount) external {
         _requireBoundCompliance();
         TokenLedgerLib.release(wallet, amount);
     }
 
     /// @inheritdoc IToken
-    function totalBridged() external view returns (uint256) {
-        return TokenLedgerLib.layout().totalBridged;
+    function totalAwayBalance() external view returns (uint256) {
+        return TokenLedgerLib.layout().totalAwayBalance;
     }
 
     /// @inheritdoc IToken
-    function inTransitOf(bytes32 validationId) external view returns (uint256) {
-        return TokenLedgerLib.layout().inTransit[validationId];
+    function onHoldOf(bytes32 ticketId) external view returns (uint256) {
+        return TokenLedgerLib.layout().inTransit[ticketId];
     }
 
     /// @inheritdoc IToken
-    function totalInTransit() external view returns (uint256) {
-        return TokenLedgerLib.layout().totalInTransit;
+    function totalOnHold() external view returns (uint256) {
+        return TokenLedgerLib.layout().totalOnHold;
     }
 
     /// @inheritdoc IToken
@@ -406,26 +403,26 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Ledger Transitions ----- */
 
     // Pause policy for everything below: the transitions move balances without {_update} and check no pause
-    // themselves; the entry points that reach them do. Those are `_handleSettlement`, `settleValidation`,
-    // `holdInTransit`, `delegateOut` and `_handleBurnProof`, each of which requires the token not to be paused,
+    // themselves; the entry points that reach them do. Those are `_handleSettlement`, `finishMove`,
+    // `putOnHold`, `delegateOut` and `_handleBurnProof`, each of which requires the token not to be paused,
     // so that the pause halts every movement between wallets, native or satellite, while mints and burns stay
     // allowed.
 
     /// @dev Applies the settled leg of a validation: `from`'s satellite position down, and either `to`'s free
     ///  balance up when `to` is on the reference chain (a native mint, `Transfer(0x0, to)`, and a distinct event
     ///  because ownership moves between identities), or `to`'s satellite position up otherwise (a bridged
-    ///  transfer, nothing native). `validationId` is the validation the settlement consumed. The calling flow
+    ///  transfer, nothing native). `ticketId` is the validation the settlement consumed. The calling flow
     ///  owns the lifecycle; the ledger checks the buckets and the envelopes only. There is no mirror leaving a
     ///  native wallet: the compliance issues no validation whose sender is native, so the satellite executing
-    ///  one always holds the position it moves. The one path every settlement takes, {settleValidation} adding
+    ///  one always holds the position it moves. The one path every settlement takes, {finishMove} adding
     ///  only the caller and pause checks.
-    function _settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) internal {
-        (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, validationId);
+    function _settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId) internal {
+        (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, ticketId);
         if (!toNative) return;
 
         ERC20Upgradeable._update(address(0), recipient, amount);
 
-        emit EventsLib.SettledToNative(fromKey, recipient, validationId, from, amount);
+        emit EventsLib.SettledToNative(fromKey, recipient, ticketId, from, amount);
     }
 
     /// @dev The ledger entry points only the bound compliance may call, which classified the movement first.
@@ -598,7 +595,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      chain's messages until an agent has investigated and called `setInboundPaused(chainKey, false)`. The
     ///      same brake answers every leg the compliance cannot account for, an id never issued included: a
     ///      validation id is a function of the request, so an unknown one is that chain's to explain, see
-    ///      {ISettlementHandler-handleSettlement}.
+    ///      {IReceiptHandler-receiveReceipt}.
     function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
         _applyVerdict(chainKey, TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body));
     }
@@ -620,9 +617,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
         nonReentrant
     {
-        (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount) =
+        (IReceiptHandler.Verdict verdict, address nativeWallet, uint256 amount) =
             TokenDelegationLib.consumeBurnProof(chainKey, body);
-        if (verdict != ISettlementHandler.Verdict.None) {
+        if (verdict != IReceiptHandler.Verdict.None) {
             _applyVerdict(chainKey, verdict);
             return;
         }
@@ -644,10 +641,10 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         IModularCompliance(address(_getCompliance())).agentTransferred(from, to, amount, kind);
     }
 
-    /// @dev The two brakes a handler can ask for, see {ISettlementHandler-Verdict}.
-    function _applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) private {
-        if (verdict == ISettlementHandler.Verdict.HaltToken) _pause();
-        else if (verdict == ISettlementHandler.Verdict.PauseChain) _setInboundPaused(chainKey, true);
+    /// @dev The two brakes a handler can ask for, see {IReceiptHandler-Verdict}.
+    function _applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) private {
+        if (verdict == IReceiptHandler.Verdict.HaltToken) _pause();
+        else if (verdict == IReceiptHandler.Verdict.PauseChain) _setInboundPaused(chainKey, true);
     }
 
     /// @inheritdoc ERC3643Token

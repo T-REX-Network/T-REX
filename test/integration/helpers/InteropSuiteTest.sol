@@ -77,8 +77,8 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         _grantValidationKeeperRole(keeper);
         vm.startPrank(deployer);
         boundCompliance.setDefaultValidityWindow(VALIDITY_WINDOW);
-        boundCompliance.setReconciliationWindow(polygon, POLYGON_WINDOW);
-        boundCompliance.setReconciliationWindow(optimism, OPTIMISM_WINDOW);
+        boundCompliance.setWaitingTime(polygon, POLYGON_WINDOW);
+        boundCompliance.setWaitingTime(optimism, OPTIMISM_WINDOW);
         vm.stopPrank();
     }
 
@@ -108,7 +108,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         returns (bytes32)
     {
         vm.prank(caller);
-        return boundCompliance.requestTransferValidation(from, to, min, max, "", _salt());
+        return boundCompliance.askToMove(from, to, min, max, "", _salt());
     }
 
     uint256 private _saltNonce;
@@ -128,16 +128,14 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
 
     /// @dev The request `from` sent with the last salt was refused: nothing was recorded under its id.
     function _assertNothingRecorded(bytes memory from) internal view {
-        assertEq(
-            boundCompliance.validationOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded"
-        );
+        assertEq(boundCompliance.ticketOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded");
     }
 
     /// @dev The validation a queued message carries, as the Lite would decode it.
     function _decodeQueuedValidation(ERC7786GatewayMock gateway, uint256 index)
         internal
         view
-        returns (MessageTypesLib.ComplianceValidation memory)
+        returns (MessageTypesLib.TicketMessage memory)
     {
         (, bytes memory body) = MessageTypesLib.decode(gateway.queuedMessage(index).payload);
         return MessageTypesLib.decodeValidation(body);
@@ -164,7 +162,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         (bytes2 chainType, bytes memory chainReference) = _evmChain(chainId);
 
         vm.prank(deployer);
-        _token.setRoute(chainType, chainReference, gateway);
+        _token.setReceiptRoute(chainType, chainReference, gateway);
     }
 
     /// @dev Queues `payload` for `_token` through `gateway`, authored by `author`, returning its index.
@@ -185,31 +183,29 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
 
     /// @dev A leg carrying the issued hash, as a Lite that executed the issued body reports it; zero when the
     ///  id was never issued here.
-    function _settlement(bytes32 validationId, bytes memory from, bytes memory to, uint256 amount)
+    function _settlement(bytes32 ticketId, bytes memory from, bytes memory to, uint256 amount)
         internal
         view
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return _settlementUnder(validationId, from, to, amount, boundCompliance.validationOf(validationId).hash);
+        return _settlementUnder(ticketId, from, to, amount, boundCompliance.ticketOf(ticketId).hash);
     }
 
     /// @dev A leg carrying `hash`: what a Lite that executed another body than the issued one reports.
-    function _settlementUnder(bytes32 validationId, bytes memory from, bytes memory to, uint256 amount, bytes32 hash)
+    function _settlementUnder(bytes32 ticketId, bytes memory from, bytes memory to, uint256 amount, bytes32 hash)
         internal
         pure
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return MessageTypesLib.SettlementNotification({
-            validationId: validationId, from: from, to: to, amount: amount, hash: hash
-        });
+        return MessageTypesLib.ReceiptMessage({ ticketId: ticketId, from: from, to: to, amount: amount, hash: hash });
     }
 
-    function _sameChainSettlement(bytes32 validationId, uint256 chainId, uint256 amount)
+    function _sameChainSettlement(bytes32 ticketId, uint256 chainId, uint256 amount)
         internal
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
         return _settlement(
-            validationId,
+            ticketId,
             InteroperableAddress.formatEvmV1(chainId, makeAddr("SatelliteFrom")),
             InteroperableAddress.formatEvmV1(chainId, makeAddr("SatelliteTo")),
             amount
@@ -217,30 +213,29 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
     }
 
     /// @dev Queues a settlement authored by `_token`'s Lite on `gateway`'s chain, returning its index.
-    function _liteSettles(
-        ERC7786GatewayMock gateway,
-        Token _token,
-        MessageTypesLib.SettlementNotification memory notification
-    ) internal returns (uint256) {
+    function _liteSettles(ERC7786GatewayMock gateway, Token _token, MessageTypesLib.ReceiptMessage memory notification)
+        internal
+        returns (uint256)
+    {
         return _liteSends(gateway, _token, MessageTypesLib.encodeSettlement(notification));
     }
 
     /// @dev The burn leg of a cross-chain validation: `to` is empty, by convention.
-    function _burnLeg(bytes32 validationId, Token _token, bytes memory from, uint256 amount)
+    function _burnLeg(bytes32 ticketId, Token _token, bytes memory from, uint256 amount)
         internal
         view
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return _settlement(validationId, from, "", amount);
+        return _settlement(ticketId, from, "", amount);
     }
 
     /// @dev The mint leg of a cross-chain validation: `from` is empty, by convention.
-    function _mintLeg(bytes32 validationId, Token _token, bytes memory to, uint256 amount)
+    function _mintLeg(bytes32 ticketId, Token _token, bytes memory to, uint256 amount)
         internal
         view
-        returns (MessageTypesLib.SettlementNotification memory)
+        returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return _settlement(validationId, "", to, amount);
+        return _settlement(ticketId, "", to, amount);
     }
 
     function _burnProof(uint256 recallId, bytes memory burnedWallet, uint256 amount)

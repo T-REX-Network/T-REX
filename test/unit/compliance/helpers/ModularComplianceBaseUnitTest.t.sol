@@ -43,17 +43,17 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
-import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
+import { TicketsHarness } from "test/integration/helpers/TicketsHarness.sol";
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
 /// @notice Base for the ModularCompliance unit suites: one compliance behind a beacon proxy and a real
 ///         AccessManager, its selectors wired through `AccessManagerSetupLib`, the token and the registry
 ///         replaced by addresses ready for `vm.mockCall`.
-/// @dev The implementation is {TransferValidationHarness}, a ModularCompliance that also exposes the validation
+/// @dev The implementation is {TicketsHarness}, a ModularCompliance that also exposes the validation
 ///      layer's internal hooks; suites that need none of them use it as a plain compliance.
 abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
 
-    TransferValidationHarness public mc;
+    TicketsHarness public mc;
     address public mcBeacon;
 
     address public token = makeAddr("Token");
@@ -62,8 +62,8 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
 
     function setUp() public virtual {
         _deploySuiteManager();
-        mcBeacon = BeaconProxyDeployer.newBeacon(address(new TransferValidationHarness()));
-        mc = TransferValidationHarness(
+        mcBeacon = BeaconProxyDeployer.newBeacon(address(new TicketsHarness()));
+        mc = TicketsHarness(
             BeaconProxyDeployer.newProxy(
                 mcBeacon,
                 abi.encodeCall(ModularCompliance.init, (token, address(suiteManager), new address[](0), new bytes[](0)))
@@ -104,7 +104,7 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
 
     /// @dev The request `from` sent with the last salt was refused: nothing was recorded under its id.
     function _assertNothingRecorded(bytes memory from) internal view {
-        assertEq(mc.validationOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded");
+        assertEq(mc.ticketOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded");
     }
 
 }

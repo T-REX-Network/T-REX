@@ -40,14 +40,14 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
-import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
+import { TicketsHarness } from "test/integration/helpers/TicketsHarness.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
@@ -89,24 +89,24 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
     function _deployImplementations() internal override {
         super._deployImplementations();
-        modularComplianceImplementation = ModularCompliance(address(new TransferValidationHarness()));
+        modularComplianceImplementation = ModularCompliance(address(new TicketsHarness()));
     }
 
     // ==== .statusOf Tests ====
 
-    /// @notice Pending until the release deadline passes, Expired after it, stored Pending throughout.
+    /// @notice Open until the release deadline passes, Expired after it, stored Open throughout.
     function test_statusOf_Success_WhenTheClockMovesPastTheDeadlines() public {
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.warp(issuedAt + VALIDITY_WINDOW + 1);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
-        assertEq(uint8(boundCompliance.validationOf(id).status), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(boundCompliance.ticketOf(id).status), uint8(ITickets.TicketStatus.Open));
     }
 
-    // ==== .discardExpiredValidations Tests ====
+    // ==== .cancelTickets Tests ====
 
     /// @notice The keeper releases the counter, marks the id, announces it, and the cap is available again.
     function test_discardExpiredValidations_Success_WhenExpiredAndReissued() public {
@@ -114,15 +114,15 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ValidationDiscarded(id);
+        emit EventsLib.TicketCancelled(id);
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 0);
 
         bytes32 next = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, CAP);
-        assertEq(boundCompliance.validationOf(next).amountMax, CAP);
+        assertEq(boundCompliance.ticketOf(next).amountMax, CAP);
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
@@ -134,17 +134,17 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
         vm.prank(agent);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
         vm.prank(makeAddr("stranger"));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
@@ -153,11 +153,11 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.warp(issuedAt + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ValidationDiscarded(id);
+        emit EventsLib.TicketCancelled(id);
         vm.prank(makeAddr("stranger"));
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 0);
     }
 
@@ -177,23 +177,23 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, later, laterPublicAt)
         );
-        boundCompliance.discardExpiredValidations(ids);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        boundCompliance.cancelTickets(ids);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
 
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
-        assertEq(uint8(boundCompliance.statusOf(later)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        boundCompliance.cancelTickets(ids);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
+        assertEq(uint8(boundCompliance.statusOf(later)), uint8(ITickets.TicketStatus.Cancelled));
     }
 
     /// @notice A validation still inside its reconciliation window is refused.
     function test_discardExpiredValidations_RevertWhen_NotYetReleasable() public {
-        uint64 releaseAt = uint64(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW);
-        vm.warp(releaseAt);
+        uint64 waitingEndsAt = uint64(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW);
+        vm.warp(waitingEndsAt);
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotReleasable.selector, id, releaseAt));
-        boundCompliance.discardExpiredValidations(_ids(id));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, waitingEndsAt));
+        boundCompliance.cancelTickets(_ids(id));
     }
 
     /// @notice A chain whose inbound is paused may hold the report that settles the validation at its gateway;
@@ -204,15 +204,15 @@ contract ValidationDiscardTest is InteropSuiteTest {
         token.setInboundPaused(polygon, true);
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
-        boundCompliance.discardExpiredValidations(_ids(id));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.cancelTickets(_ids(id));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
 
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(_ids(id));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        boundCompliance.cancelTickets(_ids(id));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
     }
 
     /// @notice One refused id reverts the whole batch and releases nothing.
@@ -228,10 +228,10 @@ contract ValidationDiscardTest is InteropSuiteTest {
         ids[0] = id;
         ids[1] = pending;
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotReleasable.selector, pending, pendingReleaseAt));
-        boundCompliance.discardExpiredValidations(ids);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, pending, pendingReleaseAt));
+        boundCompliance.cancelTickets(ids);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
@@ -239,24 +239,22 @@ contract ValidationDiscardTest is InteropSuiteTest {
     function test_discardExpiredValidations_RevertWhen_AlreadyDiscardedOrUnknown() public {
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
         vm.prank(keeper);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotDiscardable.selector, id, uint8(ITransferValidation.ValidationStatus.Discarded)
-            )
+            abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.Cancelled))
         );
-        boundCompliance.discardExpiredValidations(_ids(id));
+        boundCompliance.cancelTickets(_ids(id));
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, bytes32(uint256(999))));
-        boundCompliance.discardExpiredValidations(_ids(bytes32(uint256(999))));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, bytes32(uint256(999))));
+        boundCompliance.cancelTickets(_ids(bytes32(uint256(999))));
     }
 
     /// @notice A consumed leg pins the validation: no clock makes it discardable.
     function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLeg() public {
-        ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         _openEvmChain(token, OPTIMISM, address(_newTrustedGateway(OPTIMISM)));
         bytes memory bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
         // The validation from setUp already holds bob's whole cap, and the cap is per identity, not per
@@ -267,22 +265,20 @@ contract ValidationDiscardTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
         vm.warp(issuedAt + 100 * VALIDITY_WINDOW);
 
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.AwaitingMint));
         vm.prank(keeper);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotDiscardable.selector,
-                crossChain,
-                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
+                ErrorsLib.TicketNotCancellable.selector, crossChain, uint8(ITickets.TicketStatus.AwaitingMint)
             )
         );
-        boundCompliance.discardExpiredValidations(_ids(crossChain));
+        boundCompliance.cancelTickets(_ids(crossChain));
         assertEq(
             IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
             2 * CAP,
             "both validations toward bob are still outstanding"
         );
-        assertEq(token.inTransitOf(crossChain), CAP, "the burned amount stays in transit");
+        assertEq(token.onHoldOf(crossChain), CAP, "the burned amount stays in transit");
     }
 
     function _ids(bytes32 one) private pure returns (bytes32[] memory ids) {

@@ -67,7 +67,7 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Compliance } from "../../ERC-3643/base/ERC3643Compliance.sol";
-import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../../interop/IReceiptHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -78,19 +78,19 @@ import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnabl
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
-import { ITransferValidation } from "./ITransferValidation.sol";
+import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
+import { ReceiptLib } from "./ReceiptLib.sol";
+import { TicketLib } from "./TicketLib.sol";
+import { Tickets } from "./Tickets.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
-import { TransferSettlementLib } from "./TransferSettlementLib.sol";
-import { TransferValidation } from "./TransferValidation.sol";
-import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
 /// @dev {ERC3643Compliance} plus the module system that supplies the rules: the bound modules sorted by what
 /// they are, the dispatch implementing the base hooks over the ledger, the `canSpenderCall` check, the
-/// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
+/// cross-chain validation lifecycle of {Tickets} and AccessManager authorization.
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
 /// `TRANSFER_CHECK` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
@@ -99,9 +99,9 @@ import { IModule } from "./modules/IModule.sol";
 /// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
 contract ModularCompliance is
     IModularCompliance,
-    ISettlementHandler,
+    IReceiptHandler,
     ERC3643Compliance,
-    TransferValidation,
+    Tickets,
     AccessManagedOwnableUpgradeable
 {
 
@@ -180,13 +180,13 @@ contract ModularCompliance is
         ModuleSetLib.resyncModuleTypes(_module);
     }
 
-    /// @inheritdoc ISettlementHandler
-    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
+    /// @inheritdoc IReceiptHandler
+    function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata notification)
         external
         onlyBoundToken
-        returns (ISettlementHandler.Verdict verdict)
+        returns (IReceiptHandler.Verdict verdict)
     {
-        return TransferSettlementLib.handleSettlement(originChainKey, notification, _getTokenBound());
+        return ReceiptLib.receiveReceipt(originChainKey, notification, _getTokenBound());
     }
 
     /**
@@ -252,40 +252,40 @@ contract ModularCompliance is
 
     /* ----- Validation settings ----- */
 
-    /// @inheritdoc ITransferValidation
+    /// @inheritdoc ITickets
     function setDefaultValidityWindow(uint64 duration) external restricted {
         _setDefaultValidityWindow(duration);
     }
 
-    /// @inheritdoc ITransferValidation
-    function setReconciliationWindow(bytes32 chainKey, uint64 duration) external restricted {
+    /// @inheritdoc ITickets
+    function setWaitingTime(bytes32 chainKey, uint64 duration) external restricted {
         _setReconciliationWindow(chainKey, duration);
     }
 
-    /// @inheritdoc ITransferValidation
+    /// @inheritdoc ITickets
     function setIssuancePaused(bytes32 chainKey, bool paused) external restricted {
-        TransferValidationLib.setIssuancePaused(chainKey, paused);
+        TicketLib.setIssuancePaused(chainKey, paused);
     }
 
-    /// @inheritdoc ITransferValidation
-    function resolveStuckValidation(bytes32 validationId) external restricted {
-        TransferSettlementLib.resolveStuckValidation(validationId, _getTokenBound());
+    /// @inheritdoc ITickets
+    function resolveStuckValidation(bytes32 ticketId) external restricted {
+        ReceiptLib.resolveStuckValidation(ticketId, _getTokenBound());
     }
 
-    /// @inheritdoc ITransferValidation
+    /// @inheritdoc ITickets
     /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, and it is
     ///  judged as a delivery would be. The caller chooses when, as whoever relays a delivery does: a leg that is
     ///  refused pauses its chain's inbound at that moment, the verdict the delivery would have reached.
-    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external {
-        TransferSettlementLib.settleParkedLeg(validationId, chainKey, _getTokenBound());
+    function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey) external {
+        ReceiptLib.applyWaitingReceipt(ticketId, chainKey, _getTokenBound());
     }
 
-    /// @inheritdoc ITransferValidation
+    /// @inheritdoc ITickets
     /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
     ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
-    function discardExpiredValidations(bytes32[] calldata validationIds) external {
-        TransferSettlementLib.discardExpiredValidations(
-            validationIds, _getTokenBound(), _canCallSelector(msg.sender, this.discardExpiredValidations.selector)
+    function cancelTickets(bytes32[] calldata validationIds) external {
+        ReceiptLib.cancelTickets(
+            validationIds, _getTokenBound(), _canCallSelector(msg.sender, this.cancelTickets.selector)
         );
     }
 
@@ -294,10 +294,9 @@ contract ModularCompliance is
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId
-            || interfaceId == type(ISettlementHandler).interfaceId
-            || interfaceId == type(ITransferValidation).interfaceId
-            || interfaceId == type(IComplianceLedger).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IReceiptHandler).interfaceId
+            || interfaceId == type(ITickets).interfaceId || interfaceId == type(IComplianceLedger).interfaceId
+            || super.supportsInterface(interfaceId);
     }
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
@@ -334,7 +333,7 @@ contract ModularCompliance is
     ///  releases its reservation on the bound token. A compliance that must change under it is upgraded instead.
     function _requireBoundTokenCanLeave() private view {
         require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
-        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
+        require(_ledger().pendingTotal == 0, ErrorsLib.TicketsStillReserved());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -450,7 +449,7 @@ contract ModularCompliance is
 
     /* ----- What the validation layer needs ----- */
 
-    /// @inheritdoc TransferValidation
+    /// @inheritdoc Tickets
     function _boundToken() internal view override returns (IToken) {
         return IToken(_getTokenBound());
     }
@@ -460,12 +459,12 @@ contract ModularCompliance is
         return ITREXRegistry(address(IToken(token).identityRegistry()));
     }
 
-    /// @inheritdoc TransferValidation
+    /// @inheritdoc Tickets
     function _authority() internal view override returns (address) {
         return authority();
     }
 
-    /// @inheritdoc TransferValidation
+    /// @inheritdoc Tickets
     function _canCallSelector(address caller, bytes4 selector) internal view override returns (bool) {
         (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
         return immediate;

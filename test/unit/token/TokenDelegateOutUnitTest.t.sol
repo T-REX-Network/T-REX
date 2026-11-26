@@ -68,8 +68,8 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         assertEq(token.balanceOf(user1), 50);
         assertEq(token.freeBalanceOf(user1), 30);
         assertEq(token.getFrozenTokens(user1), 20);
-        assertEq(token.bridgedBalanceOf(satellite1), 50);
-        assertEq(token.totalBridged(), 50);
+        assertEq(token.awayBalanceOf(satellite1), 50);
+        assertEq(token.totalAwayBalance(), 50);
         assertEq(token.totalSupply(), 100, "the supply never moves on a delegation");
         _assertPartition();
     }
@@ -91,7 +91,7 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         assertEq(token.freeBalanceOf(user1), 0);
         assertEq(token.getFrozenTokens(user1), 20);
         assertEq(token.balanceOf(user1), 20);
-        assertEq(token.bridgedBalanceOf(satellite1), 80);
+        assertEq(token.awayBalanceOf(satellite1), 80);
         _assertPartition();
     }
 
@@ -102,7 +102,7 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         ledger.ledgerDelegateOut(user1, satellite1, 0);
 
         assertEq(token.balanceOf(user1), 100);
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
+        assertEq(token.awayBalanceOf(satellite1), 0);
     }
 
     function test_delegateOut_AccumulatesOnTheSameSatellite() public {
@@ -111,8 +111,8 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         ledger.ledgerDelegateOut(user1, satellite1, 20);
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 50);
-        assertEq(token.totalBridged(), 50);
+        assertEq(token.awayBalanceOf(satellite1), 50);
+        assertEq(token.totalAwayBalance(), 50);
         _assertPartition();
     }
 
@@ -122,9 +122,9 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         ledger.ledgerDelegateOut(user1, satellite3, 20);
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 30);
-        assertEq(token.bridgedBalanceOf(satellite3), 20);
-        assertEq(token.totalBridged(), 50);
+        assertEq(token.awayBalanceOf(satellite1), 30);
+        assertEq(token.awayBalanceOf(satellite3), 20);
+        assertEq(token.totalAwayBalance(), 50);
         assertEq(token.balanceOf(user1), 50);
         _assertPartition();
     }
@@ -143,7 +143,7 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         ledger.ledgerDelegateOut(user1, satellite1, 50);
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 50);
+        assertEq(token.awayBalanceOf(satellite1), 50);
     }
 
     function test_delegateOut_IsNotGatedByAddressFreeze() public {
@@ -152,7 +152,7 @@ contract TokenDelegateOutUnitTest is TokenLedgerBaseUnitTest {
         ledger.ledgerDelegateOut(user1, satellite1, 50);
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 50);
+        assertEq(token.awayBalanceOf(satellite1), 50);
     }
 
     function test_delegateOut_RevertWhen_FrozenTokensWouldMove() public {

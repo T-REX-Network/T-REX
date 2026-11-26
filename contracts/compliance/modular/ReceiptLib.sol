@@ -59,7 +59,7 @@
 
 pragma solidity 0.8.30;
 
-import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../../interop/IReceiptHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -67,17 +67,17 @@ import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
-import { ITransferValidation } from "./ITransferValidation.sol";
+import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
+import { TicketLib } from "./TicketLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
-import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /**
- * @title TransferSettlementLib
- * @dev How an issued validation ends, deployed once and linked: {handleSettlement} applies what a satellite
- * executed, or parks a leg reported under an id nothing is issued under, which {settleParkedLeg} settles once
- * that id is issued; {discardExpiredValidations} rolls back what a satellite never did;
+ * @title ReceiptLib
+ * @dev How an issued validation ends, deployed once and linked: {receiveReceipt} applies what a satellite
+ * executed, or parks a leg reported under an id nothing is issued under, which {applyWaitingReceipt} settles once
+ * that id is issued; {cancelTickets} rolls back what a satellite never did;
  * {resolveStuckValidation} closes a pair of which one leg never arrived. The states a validation moves through on the way, and what each move gives back,
  * are at the end of this file, in one place.
  *
@@ -87,7 +87,7 @@ import { IModule } from "./modules/IModule.sol";
  * the compliance's. Who the caller is stays the compliance's to establish: its entry points check it, or pass
  * what they found, before they reach this.
  */
-library TransferSettlementLib {
+library ReceiptLib {
 
     /// @dev A leg is one satellite chain's half of a movement, and the notification it sends back once it has
     ///  executed.
@@ -114,7 +114,7 @@ library TransferSettlementLib {
         Apply,
         /// Outside them: nothing is applied, the chain is paused, the validation stands.
         Refuse,
-        /// Outside them, under another hash, from a chain the validation involves, while `Pending`: nothing is
+        /// Outside them, under another hash, from a chain the validation involves, while `Open`: nothing is
         /// applied, the chain is paused, and the validation ends `Orphaned` with its reservation released.
         Orphan
     }
@@ -123,51 +123,50 @@ library TransferSettlementLib {
 
     /// @dev Classifies an attributed settlement against the stored validation and applies it when it fits. Nothing
     ///  here reverts on the leg itself: a leg the record cannot account for is consumed with a verdict, see
-    ///  {ISettlementHandler-handleSettlement} for the cases and {_classify} for the order they are told apart in.
+    ///  {IReceiptHandler-receiveReceipt} for the cases and {_classify} for the order they are told apart in.
     ///  The notification is announced first, whatever becomes of it. A delivery this chain has already consumed
     ///  from that chain, whatever its outcome was, is a duplicate and is told apart next, see {_recordDelivery}:
     ///  it is not classified again, so it applies nothing and pauses nothing. A leg parked earlier is not a
-    ///  delivery and goes straight to {_classify}, through {settleParkedLeg}.
+    ///  delivery and goes straight to {_classify}, through {applyWaitingReceipt}.
     /// @param token the token the compliance is bound to
-    function handleSettlement(
-        bytes32 originChainKey,
-        MessageTypesLib.SettlementNotification calldata notification,
-        address token
-    ) external returns (ISettlementHandler.Verdict verdict) {
-        emit EventsLib.SettlementNotified(
-            originChainKey, notification.validationId, notification.from, notification.to, notification.amount
+    function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata notification, address token)
+        external
+        returns (IReceiptHandler.Verdict verdict)
+    {
+        emit EventsLib.ReceiptReceived(
+            originChainKey, notification.ticketId, notification.from, notification.to, notification.amount
         );
-        if (_recordDelivery(originChainKey, notification)) return ISettlementHandler.Verdict.None;
+        if (_recordDelivery(originChainKey, notification)) return IReceiptHandler.Verdict.None;
         return _classify(originChainKey, notification, token);
     }
 
     /// @dev Records a settlement delivery before it is classified, and tells whether this very delivery, the same
     ///  leg byte for byte from the same chain, was consumed before: a gateway redelivery, or a Lite's resend, which
-    ///  repeats its settlement unchanged. A duplicate changes nothing and pauses nothing (`SettlementDuplicate`),
+    ///  repeats its settlement unchanged. A duplicate changes nothing and pauses nothing (`ReceiptDuplicate`),
     ///  whatever the first delivery came to: a chain paused over a leg and reopened by the pauser is not paused
     ///  again by a copy of that leg. The record is one write per consumed delivery, and a revert while the leg is
     ///  classified undoes it with the rest, so the message stays deliverable.
     /// @return duplicate whether the delivery was consumed before
-    function _recordDelivery(bytes32 chainKey, MessageTypesLib.SettlementNotification calldata notification)
+    function _recordDelivery(bytes32 chainKey, MessageTypesLib.ReceiptMessage calldata notification)
         private
         returns (bool duplicate)
     {
-        TransferValidationLib.ValidationStorage storage store = TransferValidationLib.layout();
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
         bytes32 deliveryKey = keccak256(abi.encode(chainKey, notification));
         duplicate = store.reportedLegs[deliveryKey];
-        if (duplicate) emit EventsLib.SettlementDuplicate(notification.validationId, chainKey);
+        if (duplicate) emit EventsLib.ReceiptDuplicate(notification.ticketId, chainKey);
         else store.reportedLegs[deliveryKey] = true;
     }
 
-    /// @dev See {ITransferValidation-settleParkedLeg}. The leg is judged as it would have been at delivery, and its
+    /// @dev See {ITickets-applyWaitingReceipt}. The leg is judged as it would have been at delivery, and its
     ///  verdict applied on the token as it would have been then: settled, it is announced; refused, the brake
     ///  reaches the token through {IToken-applyVerdict}. A revert anywhere below leaves the leg parked, as a
     ///  revert at delivery leaves the message deliverable; the next call tries again.
     /// @param token the token the compliance is bound to
-    function settleParkedLeg(bytes32 validationId, bytes32 chainKey, address token) external {
-        MessageTypesLib.SettlementNotification memory parked = _takeParkedLeg(validationId, chainKey, token);
-        ISettlementHandler.Verdict verdict = _classify(chainKey, parked, token);
-        if (verdict == ISettlementHandler.Verdict.None) emit EventsLib.ParkedLegSettled(validationId, chainKey);
+    function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey, address token) external {
+        MessageTypesLib.ReceiptMessage memory parked = _takeParkedLeg(ticketId, chainKey, token);
+        IReceiptHandler.Verdict verdict = _classify(chainKey, parked, token);
+        if (verdict == IReceiptHandler.Verdict.None) emit EventsLib.WaitingReceiptApplied(ticketId, chainKey);
         else IToken(token).applyVerdict(chainKey, verdict);
     }
 
@@ -175,32 +174,30 @@ library TransferSettlementLib {
     ///  is issued. In order: no body issued under the id, so the leg is parked; the substantive gate, wallets and
     ///  amount against the issued terms, failed, so the leg is refused with the hash as the evidence of why; a
     ///  leg already accounted for, so a replay; and only then the leg is applied, late or not.
-    function _classify(
-        bytes32 originChainKey,
-        MessageTypesLib.SettlementNotification memory notification,
-        address token
-    ) private returns (ISettlementHandler.Verdict) {
-        ITransferValidation.Validation storage validation =
-            TransferValidationLib.layout().validations[notification.validationId];
+    function _classify(bytes32 originChainKey, MessageTypesLib.ReceiptMessage memory notification, address token)
+        private
+        returns (IReceiptHandler.Verdict)
+    {
+        ITickets.Ticket storage validation = TicketLib.layout().validations[notification.ticketId];
         // The hash is written when a validation is issued and sent, so a record without one was never sent
         // anywhere: an id never taken, or a request still awaiting approval, refused, or left unanswered. The
         // satellite executed a body this chain did not issue, which a reorg explains as well as a hostile Lite.
         if (validation.hash == bytes32(0)) {
             _park(originChainKey, notification);
-            return ISettlementHandler.Verdict.PauseChain;
+            return IReceiptHandler.Verdict.PauseChain;
         }
 
         // 1. Which leg this is, and whether it sits inside the issued terms, see {_judge}.
         (Judgement judgement, Leg leg) = _judge(validation, originChainKey, notification);
         if (judgement != Judgement.Apply) {
             if (judgement == Judgement.Orphan) {
-                _moveTo(validation, ITransferValidation.ValidationStatus.Orphaned, false, token);
+                _moveTo(validation, ITickets.TicketStatus.Orphaned, false, token);
             }
-            return ISettlementHandler.Verdict.PauseChain;
+            return IReceiptHandler.Verdict.PauseChain;
         }
         if (_alreadyAccountedFor(validation.status, leg)) {
-            emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
-            return ISettlementHandler.Verdict.PauseChain;
+            emit EventsLib.ReplayedSettlement(notification.ticketId, originChainKey);
+            return IReceiptHandler.Verdict.PauseChain;
         }
 
         // 2. Take in what this chain reported: complete the movement, or wait for the other chain.
@@ -210,10 +207,10 @@ library TransferSettlementLib {
         // 3. A late leg always warns; the chain pauses only when the recorded state breaches a rule, since late
         //    delivery is cheap to force and pausing on it would be a denial of service.
         if (late) {
-            emit EventsLib.LateReconciliation(notification.validationId, originChainKey);
-            if (breachesRule) TransferValidationLib.setIssuancePaused(originChainKey, true);
+            emit EventsLib.LateReconciliation(notification.ticketId, originChainKey);
+            if (breachesRule) TicketLib.setIssuancePaused(originChainKey, true);
         }
-        return ISettlementHandler.Verdict.None;
+        return IReceiptHandler.Verdict.None;
     }
 
     /// @dev Takes in what one chain reported and moves the validation on.
@@ -225,17 +222,16 @@ library TransferSettlementLib {
     ///  Only the report that completes the movement consults the rules, so a validation can produce at most
     ///  one finding.
     function _applyChainReport(
-        ITransferValidation.Validation storage validation,
+        ITickets.Ticket storage validation,
         Leg leg,
-        MessageTypesLib.SettlementNotification memory notification,
+        MessageTypesLib.ReceiptMessage memory notification,
         bytes32 originChainKey,
         bool late,
         address token
     ) private returns (bool breachesRule) {
         bool isBurnLeg = leg == Leg.Burn;
         bool isSingleLeg = leg == Leg.Single;
-        (ITransferValidation.ValidationStatus next, bool completesMovement) =
-            _stateAfterLeg(validation.status, isBurnLeg, isSingleLeg);
+        (ITickets.TicketStatus next, bool completesMovement) = _stateAfterLeg(validation.status, isBurnLeg, isSingleLeg);
 
         if (!completesMovement) {
             _recordFirstLeg(
@@ -270,7 +266,7 @@ library TransferSettlementLib {
     ///  hash it names: rejected. The issued hash from an involved chain: the Lite broke rule 5 or 6 on the body
     ///  this chain issued; rejected, and the validation stands, so the discard and the resolution still have
     ///  their say. Another hash from an involved chain: the Lite executed a body this chain never canonically
-    ///  issued, which a reorg orphaned. While `Pending` the validation ends `Orphaned` and what it reserved comes
+    ///  issued, which a reorg orphaned. While `Open` the validation ends `Orphaned` and what it reserved comes
     ///  back, since the tokens moved under terms this chain never reserved for and the ledger cannot absorb an
     ///  amount outside them. In any other state it stands: a leg already landed and the keeper resolves the pair
     ///  after the second window, or the discard already gave the reservation back.
@@ -280,16 +276,16 @@ library TransferSettlementLib {
     ///  is paused for it. On a pair, the honest leg from the other chain then lands as a replay and pauses that
     ///  chain too: a hostile involved peer, answered as any hostile peer is, by distrusting its gateway.
     function _judge(
-        ITransferValidation.Validation storage validation,
+        ITickets.Ticket storage validation,
         bytes32 originChainKey,
-        MessageTypesLib.SettlementNotification memory notification
+        MessageTypesLib.ReceiptMessage memory notification
     ) private returns (Judgement judgement, Leg leg) {
         bool matches;
         (leg, matches) = _matchLeg(validation, originChainKey, notification);
         bool inRange = validation.amountMin <= notification.amount && notification.amount <= validation.amountMax;
         if (matches && inRange) {
             if (notification.hash != validation.hash) {
-                emit EventsLib.SettlementBodyDiverged(notification.validationId, originChainKey, notification.hash);
+                emit EventsLib.SettlementBodyDiverged(notification.ticketId, originChainKey, notification.hash);
             }
             return (Judgement.Apply, leg);
         }
@@ -301,15 +297,11 @@ library TransferSettlementLib {
         // issued and left its terms.
         bool noReorgExplainsTheLeg = !chainHoldsALeg || executedTheIssuedBody;
         if (noReorgExplainsTheLeg) {
-            emit EventsLib.SettlementRejected(
-                notification.validationId, originChainKey, notification.amount, notification.hash
-            );
+            emit EventsLib.ReceiptRefused(notification.ticketId, originChainKey, notification.amount, notification.hash);
             return (Judgement.Refuse, leg);
         }
-        emit EventsLib.ValidationOrphaned(
-            notification.validationId, originChainKey, notification.amount, notification.hash
-        );
-        bool pending = validation.status == ITransferValidation.ValidationStatus.Pending;
+        emit EventsLib.ValidationOrphaned(notification.ticketId, originChainKey, notification.amount, notification.hash);
+        bool pending = validation.status == ITickets.TicketStatus.Open;
         return (pending ? Judgement.Orphan : Judgement.Refuse, leg);
     }
 
@@ -318,9 +310,9 @@ library TransferSettlementLib {
     ///  from `from`'s chain, and the mint leg, `from` empty, from `to`'s chain; a leg carrying both wallets is
     ///  neither. Whether it matched is returned, not required: the caller decides what a mismatch means.
     function _matchLeg(
-        ITransferValidation.Validation storage validation,
+        ITickets.Ticket storage validation,
         bytes32 originChainKey,
-        MessageTypesLib.SettlementNotification memory notification
+        MessageTypesLib.ReceiptMessage memory notification
     ) private view returns (Leg leg, bool matches) {
         bool fromMatches = notification.from.length != 0 && keccak256(notification.from) == validation.fromKey;
         bool toMatches = notification.to.length != 0 && keccak256(notification.to) == validation.toKey;
@@ -339,14 +331,14 @@ library TransferSettlementLib {
     /* ----- Parked legs ----- */
 
     /// @dev Keeps a leg reported for an id nothing was issued under, one per origin chain, so that once the
-    ///  request is sent again with the same salt it can be settled, see {settleParkedLeg}. A second leg from the
+    ///  request is sent again with the same salt it can be settled, see {applyWaitingReceipt}. A second leg from the
     ///  same chain is a replay; the parked leg delivered again never reaches here, see {_recordDelivery}. Either
     ///  way the caller pauses the chain: it executed what this chain never sent.
-    function _park(bytes32 originChainKey, MessageTypesLib.SettlementNotification memory notification) private {
-        ITransferValidation.ParkedLeg storage parked =
-            TransferValidationLib.layout().parkedLegs[notification.validationId][originChainKey];
+    function _park(bytes32 originChainKey, MessageTypesLib.ReceiptMessage memory notification) private {
+        ITickets.WaitingReceipt storage parked =
+            TicketLib.layout().waitingReceipts[notification.ticketId][originChainKey];
         if (parked.exists) {
-            emit EventsLib.ReplayedSettlement(notification.validationId, originChainKey);
+            emit EventsLib.ReplayedSettlement(notification.ticketId, originChainKey);
             return;
         }
         parked.from = notification.from;
@@ -354,34 +346,30 @@ library TransferSettlementLib {
         parked.amount = notification.amount;
         parked.hash = notification.hash;
         parked.exists = true;
-        emit EventsLib.SettlementParked(
-            notification.validationId, originChainKey, notification.amount, notification.hash
-        );
+        emit EventsLib.ReceiptWaiting(notification.ticketId, originChainKey, notification.amount, notification.hash);
     }
 
-    /// @dev Takes the leg parked under `(validationId, chainKey)` out of storage and hands it back as the
-    ///  notification it was, to be judged and applied as a delivery, see {ITransferValidation-settleParkedLeg}
+    /// @dev Takes the leg parked under `(ticketId, chainKey)` out of storage and hands it back as the
+    ///  notification it was, to be judged and applied as a delivery, see {ITickets-applyWaitingReceipt}
     ///  for the requirements. A revert further on undoes the take.
-    function _takeParkedLeg(bytes32 validationId, bytes32 chainKey, address token)
+    function _takeParkedLeg(bytes32 ticketId, bytes32 chainKey, address token)
         private
-        returns (MessageTypesLib.SettlementNotification memory notification)
+        returns (MessageTypesLib.ReceiptMessage memory notification)
     {
-        TransferValidationLib.ValidationStorage storage store = TransferValidationLib.layout();
-        ITransferValidation.ParkedLeg memory parked = store.parkedLegs[validationId][chainKey];
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.WaitingReceipt memory parked = store.waitingReceipts[ticketId][chainKey];
         // A leg is parked under the id for this chain.
-        require(parked.exists, ErrorsLib.ParkedLegNotSettleable(validationId, chainKey));
+        require(parked.exists, ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
         // The id is issued: a record without a hash was never sent anywhere, and there is nothing to judge against.
-        require(
-            store.validations[validationId].hash != bytes32(0), ErrorsLib.ParkedLegNotSettleable(validationId, chainKey)
-        );
-        TransferValidationLib.requireTokenRunning(token);
+        require(store.validations[ticketId].hash != bytes32(0), ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
+        TicketLib.requireTokenRunning(token);
         // A delivered leg from a paused chain waits at the gateway; a parked one from it waits here, for the same
         // investigation. The re-request is refused under the pause too, see
-        // {TransferValidationLib-requireInboundOpen}.
-        TransferValidationLib.requireInboundOpen(token, chainKey);
-        delete store.parkedLegs[validationId][chainKey];
-        notification = MessageTypesLib.SettlementNotification({
-            validationId: validationId, from: parked.from, to: parked.to, amount: parked.amount, hash: parked.hash
+        // {TicketLib-requireInboundOpen}.
+        TicketLib.requireInboundOpen(token, chainKey);
+        delete store.waitingReceipts[ticketId][chainKey];
+        notification = MessageTypesLib.ReceiptMessage({
+            ticketId: ticketId, from: parked.from, to: parked.to, amount: parked.amount, hash: parked.hash
         });
     }
 
@@ -389,18 +377,18 @@ library TransferSettlementLib {
     ///  kept for the other one, and the validation is pinned. A first burn leg is proof the sender's satellite position is gone, so
     ///  the amount leaves that position and waits in transit on the ledger, and the wallet's pending amount stops
     ///  counting it; a first mint leg moves nothing until the burn leg lands, and the pair is then applied
-    ///  atomically. A late first leg stays `Discarded`, its flag set, and holds all the same: the burn is final
+    ///  atomically. A late first leg stays `Cancelled`, its flag set, and holds all the same: the burn is final
     ///  either way.
     function _recordFirstLeg(
-        ITransferValidation.Validation storage validation,
+        ITickets.Ticket storage validation,
         bytes memory wallet,
         bool burn,
-        MessageTypesLib.SettlementNotification memory notification,
+        MessageTypesLib.ReceiptMessage memory notification,
         bytes32 originChainKey,
-        ITransferValidation.ValidationStatus next,
+        ITickets.TicketStatus next,
         address token
     ) private {
-        validation.executedAmount = notification.amount;
+        validation.moved = notification.amount;
         validation.legWallet = wallet;
 
         // A burn leg takes the tokens out of the wallet, and the hold gives back whatever this validation had
@@ -414,10 +402,10 @@ library TransferSettlementLib {
         _moveTo(validation, next, releasedByTheHold > 0, token);
 
         if (burn) {
-            IToken(token).holdInTransit(wallet, notification.amount, notification.validationId, releasedByTheHold);
+            IToken(token).putOnHold(wallet, notification.amount, notification.ticketId, releasedByTheHold);
         }
 
-        emit EventsLib.ValidationLegConfirmed(notification.validationId, originChainKey, notification.amount);
+        emit EventsLib.ValidationLegConfirmed(notification.ticketId, originChainKey, notification.amount);
     }
 
     /// @dev The movement a settled validation turns out to be, as the modules are asked about it. Its own
@@ -428,7 +416,7 @@ library TransferSettlementLib {
     ///  registry; a wallet the registry no longer names keeps the identity it was issued to. The token has not
     ///  been credited yet at this point, which is why nothing is adjusted for this very movement.
     function _settledMovement(
-        ITransferValidation.Validation storage validation,
+        ITickets.Ticket storage validation,
         bytes memory from,
         bytes memory to,
         uint256 amount,
@@ -465,16 +453,16 @@ library TransferSettlementLib {
     ///  swallowing the revert would leave that module's counter silently wrong, which no later message can
     ///  repair, while a refused delivery is repaired by `forceRemoveModule` and a redelivery.
     function _settleValidation(
-        ITransferValidation.Validation storage validation,
+        ITickets.Ticket storage validation,
         bytes memory from,
         bytes memory to,
-        MessageTypesLib.SettlementNotification memory notification,
+        MessageTypesLib.ReceiptMessage memory notification,
         bytes32 originChainKey,
         bool late,
-        ITransferValidation.ValidationStatus next,
+        ITickets.TicketStatus next,
         address token
     ) private returns (bool breachesRule) {
-        validation.executedAmount = notification.amount;
+        validation.moved = notification.amount;
         _moveTo(validation, next, false, token);
 
         IModule.TransferContext memory ctx = _settledMovement(validation, from, to, notification.amount, token);
@@ -483,9 +471,9 @@ library TransferSettlementLib {
         ComplianceLedgerLib.movePosition(
             ctx.fromIdentity, ctx.toIdentity, ctx.fromWallet, ctx.toWallet, notification.amount
         );
-        IToken(token).settleValidation(from, to, notification.amount, notification.validationId);
+        IToken(token).finishMove(from, to, notification.amount, notification.ticketId);
 
-        emit EventsLib.ValidationSettled(notification.validationId, originChainKey, notification.amount);
+        emit EventsLib.ReceiptApplied(notification.ticketId, originChainKey, notification.amount);
         ModuleSetLib.callAfterTransfer(ctx);
     }
 
@@ -493,14 +481,12 @@ library TransferSettlementLib {
     ///  repeat it. A mismatch means the two chains executed different movements under one id, which no ledger
     ///  can reconcile, so it is refused.
     function _requireRepeatsFirstLeg(
-        ITransferValidation.Validation storage validation,
-        MessageTypesLib.SettlementNotification memory notification
+        ITickets.Ticket storage validation,
+        MessageTypesLib.ReceiptMessage memory notification
     ) private view {
         require(
-            notification.amount == validation.executedAmount,
-            ErrorsLib.SettlementAmountMismatch(
-                notification.validationId, validation.executedAmount, notification.amount
-            )
+            notification.amount == validation.moved,
+            ErrorsLib.SettlementAmountMismatch(notification.ticketId, validation.moved, notification.amount)
         );
     }
 
@@ -520,7 +506,7 @@ library TransferSettlementLib {
     /* ----- Discard ----- */
 
     /// @dev The way out of a pair of which one leg never arrived. The gate is a second reconciliation window
-    ///  past `releaseAt`, the same length as the first, so a leg that is merely slow still lands as a late
+    ///  past `waitingEndsAt`, the same length as the first, so a leg that is merely slow still lands as a late
     ///  reconciliation and never as a resolution.
     ///
     ///  When the burn leg is the one that landed, the tokens it burned are waiting in transit: they go back to
@@ -529,169 +515,152 @@ library TransferSettlementLib {
     ///  validation ends in `Resolved`, where any leg arriving afterwards pauses its chain's inbound. While the
     ///  chain owing the leg has its inbound paused on the token, or the token itself is paused, the leg may be
     ///  waiting at its gateway, so the pair is not resolved under the pause, see
-    ///  {TransferValidationLib-requireAwaitedInboundOpen}.
+    ///  {TicketLib-requireAwaitedInboundOpen}.
     /// @param token the token the compliance is bound to
-    function resolveStuckValidation(bytes32 validationId, address token) external {
-        TransferValidationLib.ValidationStorage storage store = TransferValidationLib.layout();
-        require(TransferValidationLib.isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
-        ITransferValidation.Validation storage validation = store.validations[validationId];
-        require(
-            _awaitingOtherLeg(validation.status), ErrorsLib.ValidationNotStuck(validationId, uint8(validation.status))
-        );
+    function resolveStuckValidation(bytes32 ticketId, address token) external {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
+        ITickets.Ticket storage validation = store.validations[ticketId];
+        require(_awaitingOtherLeg(validation.status), ErrorsLib.ValidationNotStuck(ticketId, uint8(validation.status)));
 
         uint64 resolvableAt = _secondWindowEnd(validation);
-        require(block.timestamp > resolvableAt, ErrorsLib.ValidationNotYetResolvable(validationId, resolvableAt));
-        TransferValidationLib.requireAwaitedInboundOpen(token, validation);
+        require(block.timestamp > resolvableAt, ErrorsLib.ValidationNotYetResolvable(ticketId, resolvableAt));
+        TicketLib.requireAwaitedInboundOpen(token, validation);
 
         uint256 returnedAmount = 0;
         if (_burnArrived(validation.status)) {
-            returnedAmount = validation.executedAmount;
+            returnedAmount = validation.moved;
             // A validation issued with a zero minimum may burn nothing, and a burn of nothing held nothing in
             // transit: there is nothing to give back, and the token refuses to return an empty hold.
-            if (returnedAmount != 0) IToken(token).returnHeldInTransit(validation.legWallet, validationId);
+            if (returnedAmount != 0) IToken(token).returnHeldInTransit(validation.legWallet, ticketId);
         } else {
-            TransferValidationLib.setIssuancePaused(validation.fromChainKey, true);
+            TicketLib.setIssuancePaused(validation.fromChainKey, true);
         }
 
-        _moveTo(validation, ITransferValidation.ValidationStatus.Resolved, false, token);
+        _moveTo(validation, ITickets.TicketStatus.Resolved, false, token);
 
-        emit EventsLib.ValidationResolved(validationId, returnedAmount);
+        emit EventsLib.ClosedByHand(ticketId, returnedAmount);
     }
 
-    /// @dev Each id must be stored `Pending` and past `releaseAt`; one still awaiting a leg is refused whatever
+    /// @dev Each id must be stored `Open` and past `waitingEndsAt`; one still awaiting a leg is refused whatever
     ///  the clock says. One refused id reverts the whole batch.
-    /// @dev Who may: the keeper from `releaseAt`, anyone from the end of the second window. A discard turns a
+    /// @dev Who may: the keeper from `waitingEndsAt`, anyone from the end of the second window. A discard turns a
     ///  leg that lands afterwards into a late reconciliation, which can pause its chain's issuance, so during the
     ///  first window the keeper alone judges that a leg is late rather than slow. Past the second window a pair
     ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
     ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token, or the token
     ///  itself is paused: its leg may be waiting at that gateway, see
-    ///  {TransferValidationLib-requireAwaitedInboundOpen}. Nor while a leg is parked
+    ///  {TicketLib-requireAwaitedInboundOpen}. Nor while a leg is parked
     ///  under its id: that report waits here instead, see {_requireNoParkedLeg}.
     /// @param token the token the compliance is bound to
     /// @param keeper whether the AccessManager binds the caller to this selector's role
-    function discardExpiredValidations(bytes32[] calldata validationIds, address token, bool keeper) external {
-        TransferValidationLib.ValidationStorage storage store = TransferValidationLib.layout();
+    function cancelTickets(bytes32[] calldata validationIds, address token, bool keeper) external {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
         for (uint256 i = 0; i < validationIds.length; i++) {
-            bytes32 validationId = validationIds[i];
-            require(TransferValidationLib.isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
-            ITransferValidation.Validation storage validation = store.validations[validationId];
+            bytes32 ticketId = validationIds[i];
+            require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
+            ITickets.Ticket storage validation = store.validations[ticketId];
             // Nothing was sent for a validation still awaiting approval, so no leg can be in flight: anyone may
             // discard it once its deadline passed, and the reservation comes back.
-            if (validation.status == ITransferValidation.ValidationStatus.AwaitingApproval) {
-                TransferValidationLib.discardUnanswered(validationId, token);
+            if (validation.status == ITickets.TicketStatus.WaitingForApproval) {
+                TicketLib.discardUnanswered(ticketId, token);
                 continue;
             }
             require(
-                validation.status == ITransferValidation.ValidationStatus.Pending,
-                ErrorsLib.ValidationNotDiscardable(validationId, uint8(validation.status))
+                validation.status == ITickets.TicketStatus.Open,
+                ErrorsLib.TicketNotCancellable(ticketId, uint8(validation.status))
             );
             require(
-                block.timestamp > validation.releaseAt,
-                ErrorsLib.ValidationNotReleasable(validationId, validation.releaseAt)
+                block.timestamp > validation.waitingEndsAt, ErrorsLib.CancelNotDue(ticketId, validation.waitingEndsAt)
             );
             if (!keeper) {
                 uint64 publicAt = _secondWindowEnd(validation);
-                require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(validationId, publicAt));
+                require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(ticketId, publicAt));
             }
-            TransferValidationLib.requireAwaitedInboundOpen(token, validation);
-            _requireNoParkedLeg(store, validationId, validation.fromChainKey);
-            if (validation.twoLegs) _requireNoParkedLeg(store, validationId, validation.toChainKey);
+            TicketLib.requireAwaitedInboundOpen(token, validation);
+            _requireNoParkedLeg(store, ticketId, validation.fromChainKey);
+            if (validation.twoLegs) _requireNoParkedLeg(store, ticketId, validation.toChainKey);
 
-            _moveTo(validation, ITransferValidation.ValidationStatus.Discarded, false, token);
+            _moveTo(validation, ITickets.TicketStatus.Cancelled, false, token);
 
-            emit EventsLib.ValidationDiscarded(validationId);
+            emit EventsLib.TicketCancelled(ticketId);
         }
     }
 
     /// @dev A validation is not discarded over a leg parked under its id. The leg was reported while nothing was
-    ///  issued and waits for {settleParkedLeg}; discarding first would release the reservation of a movement this
-    ///  chain already holds the report of, and turn that report into a late reconciliation. From `Pending` the
+    ///  issued and waits for {applyWaitingReceipt}; discarding first would release the reservation of a movement this
+    ///  chain already holds the report of, and turn that report into a late reconciliation. From `Open` the
     ///  parked leg is always consumed, applied or refused, so this never leaves a validation without a way out.
-    function _requireNoParkedLeg(
-        TransferValidationLib.ValidationStorage storage store,
-        bytes32 validationId,
-        bytes32 chainKey
-    ) private view {
+    function _requireNoParkedLeg(TicketLib.ValidationStorage storage store, bytes32 ticketId, bytes32 chainKey)
+        private
+        view
+    {
         require(
-            !store.parkedLegs[validationId][chainKey].exists,
-            ErrorsLib.ParkedLegAwaitsSettlement(validationId, chainKey)
+            !store.waitingReceipts[ticketId][chainKey].exists, ErrorsLib.ApplyWaitingReceiptFirst(ticketId, chainKey)
         );
     }
 
-    /// @dev The end of the second reconciliation window: one more window past `releaseAt`, the same length as
+    /// @dev The end of the second reconciliation window: one more window past `waitingEndsAt`, the same length as
     ///  the first. Resolution and the public discard both open here.
-    function _secondWindowEnd(ITransferValidation.Validation storage validation) private view returns (uint64) {
-        return validation.releaseAt + (validation.releaseAt - validation.expiry);
+    function _secondWindowEnd(ITickets.Ticket storage validation) private view returns (uint64) {
+        return validation.waitingEndsAt + (validation.waitingEndsAt - validation.validUntil);
     }
 
     /* ----- The lifecycle, in one place ----- */
 
     /// @dev Whether the burn leg has arrived in this state.
-    function _burnArrived(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.AwaitingMint
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint
-            || status == ITransferValidation.ValidationStatus.Settled
-            || status == ITransferValidation.ValidationStatus.LateReconciled;
+    function _burnArrived(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.AwaitingMint || status == ITickets.TicketStatus.DiscardedAwaitingMint
+            || status == ITickets.TicketStatus.Done || status == ITickets.TicketStatus.LateReconciled;
     }
 
     /// @dev Whether the mint leg has arrived in this state.
-    function _mintArrived(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.AwaitingBurn
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingBurn
-            || status == ITransferValidation.ValidationStatus.Settled
-            || status == ITransferValidation.ValidationStatus.LateReconciled;
+    function _mintArrived(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.AwaitingBurn || status == ITickets.TicketStatus.DiscardedAwaitingBurn
+            || status == ITickets.TicketStatus.Done || status == ITickets.TicketStatus.LateReconciled;
     }
 
     /// @dev Whether this leg has nothing left to do: either its own half already arrived, the keeper gave up
     ///  on the pair and sent the tokens back, or the validation ended `Orphaned` on a leg this chain could not
     ///  account for. All mean the amount it carries is already accounted for somewhere else, or never can be,
     ///  so applying it would move tokens twice. The caller pauses the leg's chain.
-    function _alreadyAccountedFor(ITransferValidation.ValidationStatus status, Leg leg) private pure returns (bool) {
-        if (
-            status == ITransferValidation.ValidationStatus.Resolved
-                || status == ITransferValidation.ValidationStatus.Orphaned
-        ) return true;
+    function _alreadyAccountedFor(ITickets.TicketStatus status, Leg leg) private pure returns (bool) {
+        if (status == ITickets.TicketStatus.Resolved || status == ITickets.TicketStatus.Orphaned) return true;
         if (leg == Leg.Mint) return _mintArrived(status);
         return _burnArrived(status);
     }
 
     /// @dev Whether the keeper has given up on this validation, in any of the states that say so.
-    function _wasDiscarded(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.Discarded
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingBurn;
+    function _wasDiscarded(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.Cancelled || status == ITickets.TicketStatus.DiscardedAwaitingMint
+            || status == ITickets.TicketStatus.DiscardedAwaitingBurn;
     }
 
     /// @dev Whether exactly one leg of a pair has arrived and the other is still owed. Such a validation can be
     ///  neither discarded nor derived `Expired`: one satellite has already executed irreversibly.
-    function _awaitingOtherLeg(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.AwaitingMint
-            || status == ITransferValidation.ValidationStatus.AwaitingBurn
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingBurn;
+    function _awaitingOtherLeg(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.AwaitingMint || status == ITickets.TicketStatus.AwaitingBurn
+            || status == ITickets.TicketStatus.DiscardedAwaitingMint
+            || status == ITickets.TicketStatus.DiscardedAwaitingBurn;
     }
 
     /// @dev Whether the validation still counts in the ledger's pending amounts in this state: the total for
     ///  every validation, the identities' rows for every one that is not a relocation.
-    function _stillReservesPending(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.Pending
-            || status == ITransferValidation.ValidationStatus.AwaitingMint
-            || status == ITransferValidation.ValidationStatus.AwaitingBurn
-            || status == ITransferValidation.ValidationStatus.AwaitingApproval;
+    function _stillReservesPending(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.Open || status == ITickets.TicketStatus.AwaitingMint
+            || status == ITickets.TicketStatus.AwaitingBurn || status == ITickets.TicketStatus.WaitingForApproval;
     }
 
     /// @dev Whether the sender wallet's pending amount is still reserved in this state. Once the burn leg has
     ///  arrived the tokens are in transit, so the wallet's cap must stop counting them.
-    function _stillReservesWallet(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.Pending
-            || status == ITransferValidation.ValidationStatus.AwaitingBurn
-            || status == ITransferValidation.ValidationStatus.AwaitingApproval;
+    function _stillReservesWallet(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.Open || status == ITickets.TicketStatus.AwaitingBurn
+            || status == ITickets.TicketStatus.WaitingForApproval;
     }
 
     /// @dev Where a validation goes when a leg lands on it, and whether that leg completes the movement.
     ///
-    ///  A single-leg validation settles outright. A pair in `Pending` records the first leg and waits for the
+    ///  A single-leg validation settles outright. A pair in `Open` records the first leg and waits for the
     ///  other; the same pair already discarded waits in the matching `Discarded*` state instead, so that when
     ///  the second leg lands it reconciles late rather than settling. Any state this is not called for is a leg
     ///  for a leg already arrived, which the caller has refused as a replay.
@@ -701,59 +670,39 @@ library TransferSettlementLib {
     /// @param singleLeg the validation expects one leg, not two
     /// @return next where it stands afterwards
     /// @return completesMovement whether the movement is now complete, so positions move and rules are asked
-    function _stateAfterLeg(ITransferValidation.ValidationStatus status, bool burnLeg, bool singleLeg)
+    function _stateAfterLeg(ITickets.TicketStatus status, bool burnLeg, bool singleLeg)
         private
         pure
-        returns (ITransferValidation.ValidationStatus next, bool completesMovement)
+        returns (ITickets.TicketStatus next, bool completesMovement)
     {
         bool discarded = _wasDiscarded(status);
 
         if (singleLeg) {
-            return (
-                discarded
-                    ? ITransferValidation.ValidationStatus.LateReconciled
-                    : ITransferValidation.ValidationStatus.Settled,
-                true
-            );
+            return (discarded ? ITickets.TicketStatus.LateReconciled : ITickets.TicketStatus.Done, true);
         }
-        if (status == ITransferValidation.ValidationStatus.Pending) {
-            return (
-                burnLeg
-                    ? ITransferValidation.ValidationStatus.AwaitingMint
-                    : ITransferValidation.ValidationStatus.AwaitingBurn,
-                false
-            );
+        if (status == ITickets.TicketStatus.Open) {
+            return (burnLeg ? ITickets.TicketStatus.AwaitingMint : ITickets.TicketStatus.AwaitingBurn, false);
         }
-        if (status == ITransferValidation.ValidationStatus.Discarded) {
+        if (status == ITickets.TicketStatus.Cancelled) {
             return (
-                burnLeg
-                    ? ITransferValidation.ValidationStatus.DiscardedAwaitingMint
-                    : ITransferValidation.ValidationStatus.DiscardedAwaitingBurn,
+                burnLeg ? ITickets.TicketStatus.DiscardedAwaitingMint : ITickets.TicketStatus.DiscardedAwaitingBurn,
                 false
             );
         }
         // One leg was already in and the other has now landed: the pair is complete.
-        return (
-            discarded
-                ? ITransferValidation.ValidationStatus.LateReconciled
-                : ITransferValidation.ValidationStatus.Settled,
-            true
-        );
+        return (discarded ? ITickets.TicketStatus.LateReconciled : ITickets.TicketStatus.Done, true);
     }
 
     /// @dev Moves a validation to `next` and gives back whatever `next` no longer reserves. Because the
     ///  reservations are read off the status, a release happens exactly when the move stops reserving something,
-    ///  and arriving twice at the same state gives nothing back twice. A validation `AwaitingApproval` is
-    ///  released in `TransferValidationLib._release` instead, which mirrors this: keep the two in step.
+    ///  and arriving twice at the same state gives nothing back twice. A validation `WaitingForApproval` is
+    ///  released in `TicketLib._release` instead, which mirrors this: keep the two in step.
     /// @param heldByTheHold true when the caller is about to take an in-transit hold, which gives the wallet's
     ///  reservation back itself; this function then leaves that half alone rather than releasing it twice.
-    function _moveTo(
-        ITransferValidation.Validation storage validation,
-        ITransferValidation.ValidationStatus next,
-        bool heldByTheHold,
-        address token
-    ) private {
-        ITransferValidation.ValidationStatus current = validation.status;
+    function _moveTo(ITickets.Ticket storage validation, ITickets.TicketStatus next, bool heldByTheHold, address token)
+        private
+    {
+        ITickets.TicketStatus current = validation.status;
 
         if (_stillReservesPending(current) && !_stillReservesPending(next)) {
             ComplianceLedgerLib.releasePendingTotal(validation.amountMax);
@@ -766,7 +715,7 @@ library TransferSettlementLib {
             }
         }
         if (_stillReservesWallet(current) && !_stillReservesWallet(next) && !heldByTheHold) {
-            IToken(token).releaseFromValidation(validation.fromWallet, validation.amountMax);
+            IToken(token).releaseFromTicket(validation.fromWallet, validation.amountMax);
         }
 
         validation.status = next;

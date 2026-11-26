@@ -40,7 +40,7 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -52,7 +52,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///      burned are real and gone, and rolling the reservation back would invent supply. So such a pair used to
 ///      have no exit at all, and its tokens waited in transit for a leg that was never coming.
 ///
-///      `resolveStuckValidation` is that exit, gated a second reconciliation window past `releaseAt` so a leg
+///      `resolveStuckValidation` is that exit, gated a second reconciliation window past `waitingEndsAt` so a leg
 ///      that is merely slow still reconciles late instead of being written off.
 contract StuckValidationTest is InteropSuiteTest {
 
@@ -65,7 +65,7 @@ contract StuckValidationTest is InteropSuiteTest {
     bytes internal bobOptimism;
     uint256 internal issuedAt;
     bytes32 internal id;
-    /// Past `releaseAt` plus one more reconciliation window; the pair spans both chains, so it is the longer.
+    /// Past `waitingEndsAt` plus one more reconciliation window; the pair spans both chains, so it is the longer.
     uint256 internal resolvableAt;
 
     function setUp() public override {
@@ -91,18 +91,18 @@ contract StuckValidationTest is InteropSuiteTest {
     ///         in `Resolved`.
     function test_resolveStuckValidation_Success_WhenTheMintNeverCame() public {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
-        assertEq(token.inTransitOf(id), EXECUTED, "the burned amount waits in transit");
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - EXECUTED, "and has left the wallet");
+        assertEq(token.onHoldOf(id), EXECUTED, "the burned amount waits in transit");
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - EXECUTED, "and has left the wallet");
 
         vm.warp(resolvableAt + 1);
         vm.expectEmit(address(boundCompliance));
-        emit EventsLib.ValidationResolved(id, EXECUTED);
+        emit EventsLib.ClosedByHand(id, EXECUTED);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
-        assertEq(token.inTransitOf(id), 0, "nothing waits in transit any more");
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "the wallet has its tokens back");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
+        assertEq(token.onHoldOf(id), 0, "nothing waits in transit any more");
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE, "the wallet has its tokens back");
         assertEq(token.reservedOf(aliceSat), 0, "and its room back");
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 0, "released");
         assertEq(IComplianceLedger(address(boundCompliance)).pendingOutOf(address(aliceIdentity)), 0, "released");
@@ -121,8 +121,8 @@ contract StuckValidationTest is InteropSuiteTest {
         assertTrue(token.isInboundPaused(optimism), "the chain that minted against nothing is paused");
         assertFalse(token.isInboundPaused(polygon));
         assertFalse(token.paused(), "the token is not");
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0, "nothing was credited");
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.awayBalanceOf(bobOptimism), 0, "nothing was credited");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
     }
 
     /// @notice While the chain owing the mint has its inbound paused, its report may be waiting at the gateway;
@@ -134,15 +134,15 @@ contract StuckValidationTest is InteropSuiteTest {
         vm.warp(resolvableAt + 1);
 
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, optimism));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
         boundCompliance.resolveStuckValidation(id);
-        assertEq(token.inTransitOf(id), EXECUTED, "the hold stays where it is");
+        assertEq(token.onHoldOf(id), EXECUTED, "the hold stays where it is");
 
         vm.prank(agent);
         token.setInboundPaused(optimism, false);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
     }
 
     /// @notice The token's own pause holds every chain's reports, the owed leg's among them, so the pair is not
@@ -156,13 +156,13 @@ contract StuckValidationTest is InteropSuiteTest {
         vm.prank(keeper);
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
         boundCompliance.resolveStuckValidation(id);
-        assertEq(token.inTransitOf(id), EXECUTED, "the hold stays where it is");
+        assertEq(token.onHoldOf(id), EXECUTED, "the hold stays where it is");
 
         vm.prank(agent);
         token.unpause();
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
     }
 
     /// @notice The chain whose leg already landed has nothing left to say about the pair, so its pause does not
@@ -176,8 +176,8 @@ contract StuckValidationTest is InteropSuiteTest {
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
     }
 
     /// @notice A pair discarded before its late burn leg landed is stuck in the same way, and resolves the same
@@ -188,18 +188,18 @@ contract StuckValidationTest is InteropSuiteTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
 
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
-        assertEq(token.inTransitOf(id), EXECUTED);
+        assertEq(token.onHoldOf(id), EXECUTED);
 
         vm.warp(resolvableAt + 1);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
 
-        assertEq(token.inTransitOf(id), 0);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.onHoldOf(id), 0);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
     }
 
     /// @notice A validation issued with a zero minimum may burn nothing. That burn held nothing in transit, so the
@@ -207,16 +207,16 @@ contract StuckValidationTest is InteropSuiteTest {
     function test_resolveStuckValidation_Success_WhenTheBurnMovedNothing() public {
         bytes32 zeroMinimum = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 0, 100);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(zeroMinimum, token, aliceSat, 0)));
-        assertEq(token.inTransitOf(zeroMinimum), 0, "a burn of nothing holds nothing");
+        assertEq(token.onHoldOf(zeroMinimum), 0, "a burn of nothing holds nothing");
 
         vm.warp(resolvableAt + 1);
         vm.expectEmit(address(boundCompliance));
-        emit EventsLib.ValidationResolved(zeroMinimum, 0);
+        emit EventsLib.ClosedByHand(zeroMinimum, 0);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(zeroMinimum);
 
-        assertEq(uint8(boundCompliance.statusOf(zeroMinimum)), uint8(ITransferValidation.ValidationStatus.Resolved));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "nothing left the wallet");
+        assertEq(uint8(boundCompliance.statusOf(zeroMinimum)), uint8(ITickets.TicketStatus.Resolved));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE, "nothing left the wallet");
         assertEq(token.reservedOf(aliceSat), 100, "only the first validation still reserves the wallet");
         assertEq(
             IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
@@ -241,12 +241,12 @@ contract StuckValidationTest is InteropSuiteTest {
 
         vm.warp(resolvableAt + 1);
         vm.expectEmit(address(boundCompliance));
-        emit EventsLib.ValidationResolved(id, 0);
+        emit EventsLib.ClosedByHand(id, 0);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
 
         assertTrue(boundCompliance.isIssuancePaused(polygon), "no more issuance toward the chain that owes");
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Resolved));
         assertFalse(token.paused());
     }
 
@@ -267,9 +267,7 @@ contract StuckValidationTest is InteropSuiteTest {
         vm.warp(resolvableAt + 1);
         vm.prank(keeper);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotStuck.selector, id, uint8(ITransferValidation.ValidationStatus.Pending)
-            )
+            abi.encodeWithSelector(ErrorsLib.ValidationNotStuck.selector, id, uint8(ITickets.TicketStatus.Open))
         );
         boundCompliance.resolveStuckValidation(id);
 
@@ -277,9 +275,7 @@ contract StuckValidationTest is InteropSuiteTest {
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, EXECUTED)));
         vm.prank(keeper);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotStuck.selector, id, uint8(ITransferValidation.ValidationStatus.Settled)
-            )
+            abi.encodeWithSelector(ErrorsLib.ValidationNotStuck.selector, id, uint8(ITickets.TicketStatus.Done))
         );
         boundCompliance.resolveStuckValidation(id);
     }
@@ -291,9 +287,7 @@ contract StuckValidationTest is InteropSuiteTest {
         vm.startPrank(keeper);
         boundCompliance.resolveStuckValidation(id);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotStuck.selector, id, uint8(ITransferValidation.ValidationStatus.Resolved)
-            )
+            abi.encodeWithSelector(ErrorsLib.ValidationNotStuck.selector, id, uint8(ITickets.TicketStatus.Resolved))
         );
         boundCompliance.resolveStuckValidation(id);
         vm.stopPrank();

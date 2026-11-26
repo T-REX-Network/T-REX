@@ -40,7 +40,7 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
@@ -93,7 +93,7 @@ contract PendingReservationTest is InteropSuiteTest {
     function test_requestTransferValidation_Success_WhenTheFirstValidationReservesItsMaximum() public {
         bytes32 id = _issue(10, 60);
 
-        assertEq(boundCompliance.validationOf(id).fromIdentity, address(aliceIdentity));
+        assertEq(boundCompliance.ticketOf(id).fromIdentity, address(aliceIdentity));
         assertEq(_max(id), 60);
         assertEq(_pendingIn(), 60, "counted at the maximum it may execute");
         assertEq(_pendingOut(address(aliceIdentity)), 60, "and against the sender too");
@@ -116,7 +116,7 @@ contract PendingReservationTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "", _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 1, 1, "", _salt());
 
         _assertNothingRecorded(aliceSat);
     }
@@ -143,9 +143,9 @@ contract PendingReservationTest is InteropSuiteTest {
         bytes memory aliceOther = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOtherOnPolygon"));
 
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, CAP, "", _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, aliceOther, 10, CAP, "", _salt());
 
-        assertTrue(boundCompliance.validationOf(id).relocation, "no reservation against the identity");
+        assertTrue(boundCompliance.ticketOf(id).relocation, "no reservation against the identity");
         assertEq(_pendingIn(address(aliceIdentity)), 0, "alice's own room is untouched");
         assertEq(_pendingOut(address(aliceIdentity)), 0);
         assertEq(_max(_issue(10, CAP)), CAP, "a third party can still acquire the whole cap");
@@ -156,7 +156,7 @@ contract PendingReservationTest is InteropSuiteTest {
     /// @notice A settlement releases the whole reservation and applies what was executed, so the room the
     ///         validation did not use comes back.
     function test_handleSettlement_Success_WhenSettlingBelowTheReservation() public {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 first = _issue(10, 60);
         _issue(10, 40);
         assertEq(_pendingIn(), CAP);
@@ -181,7 +181,7 @@ contract PendingReservationTest is InteropSuiteTest {
     /// @notice A late settlement is applied anyway, and it breaches when the executed amount is above what the
     ///         rules allow once its reservation is released. The chain that sent it stops issuing.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 late = _issue(10, CAP);
         _discard(late);
         bytes32 fresh = _issue(10, CAP);
@@ -193,7 +193,7 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(_pendingIn(), CAP, "the fresh reservation still stands");
         assertEq(
             uint8(boundCompliance.statusOf(fresh)),
-            uint8(ITransferValidation.ValidationStatus.Pending),
+            uint8(ITickets.TicketStatus.Open),
             "the fresh validation is still holding its reservation"
         );
         assertTrue(boundCompliance.isIssuancePaused(polygon), "the origin chain is stopped");
@@ -202,14 +202,14 @@ contract PendingReservationTest is InteropSuiteTest {
         boundCompliance.setIssuancePaused(polygon, false);
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "", _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 1, 1, "", _salt());
     }
 
     /// @notice Issue #81, first bug: a rule bound after a validation was issued still sees its settlement,
     ///         because the position it reads belongs to the compliance and not to the rule. The old slot
     ///         design booked such a settlement against nobody.
     function test_handleSettlement_Success_WhenARuleIsBoundAfterIssuance() public {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 id = _issue(10, 60);
 
         CappedRecipientModule latecomer = CappedRecipientModule(
@@ -240,7 +240,7 @@ contract PendingReservationTest is InteropSuiteTest {
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
+        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         token.setCompliance(address(fresh));
 
         assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
@@ -253,13 +253,13 @@ contract PendingReservationTest is InteropSuiteTest {
     function test_setCompliance_RevertWhen_ARelocationValidationIsPending() public {
         bytes memory aliceOtherSat = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygonToo"));
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
-        assertTrue(boundCompliance.validationOf(id).relocation);
+        assertTrue(boundCompliance.ticketOf(id).relocation);
         assertEq(_pendingIn(address(aliceIdentity)), 0, "nothing promised to the identity");
         _recallAndBurnTheWholeSupply();
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
+        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         token.setCompliance(address(fresh));
 
         assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
@@ -289,7 +289,7 @@ contract PendingReservationTest is InteropSuiteTest {
         Token nextToken = _deployToken("next", "Next Token", "NXT");
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
+        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.bindToken(address(nextToken));
     }
 
@@ -311,7 +311,7 @@ contract PendingReservationTest is InteropSuiteTest {
     ///  supply. A recall is bounded by the bridged position, not by what validations reserve, and the satellite
     ///  proves it burned the whole position.
     function _recallAndBurnTheWholeSupply() private {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         vm.prank(agent);
         uint256 recallId = token.instructRecall(aliceSat, BALANCE, alice);
         gateway.relay(
@@ -339,11 +339,11 @@ contract PendingReservationTest is InteropSuiteTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
     }
 
     function _max(bytes32 id) private view returns (uint256) {
-        ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
+        ITickets.Ticket memory validation = boundCompliance.ticketOf(id);
         return validation.amountMax;
     }
 

@@ -82,7 +82,7 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, operator));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 100, operator, _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 10, 100, operator, _salt());
     }
 
     /// @notice Listing that same satellite wallet lets the validation through, and the operator travels on the
@@ -98,10 +98,10 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
         assertTrue(whitelist.isSpenderAllowed(address(boundCompliance), operator));
 
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 100, operator, _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, 100, operator, _salt());
 
-        assertEq(boundCompliance.validationOf(id).amountMax, 100);
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
+        assertEq(boundCompliance.ticketOf(id).amountMax, 100);
+        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         assertEq(_decodeQueuedValidation(gateway, 0).spender, operator, "the operator travels");
     }
 
@@ -121,7 +121,7 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, operator));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 100, operator, _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 10, 100, operator, _salt());
     }
 
     // ==== SpenderVerificationModule ====
@@ -133,7 +133,7 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, operator));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 100, operator, _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 10, 100, operator, _salt());
     }
 
     /// @notice The same operator passes once its wallet is linked to a verified identity, which is the whole
@@ -143,9 +143,9 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
         bytes memory operator = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("verifiedOperator"));
 
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 100, operator, _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, 100, operator, _salt());
 
-        assertEq(boundCompliance.validationOf(id).amountMax, 100);
+        assertEq(boundCompliance.ticketOf(id).amountMax, 100);
     }
 
     /// @notice A validation that names no operator asks no policy: the sender executes it itself.
@@ -153,9 +153,9 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
         _bindWhitelist();
 
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, bobSat, 10, 100, "", _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, 100, "", _salt());
 
-        assertEq(boundCompliance.validationOf(id).amountMax, 100);
+        assertEq(boundCompliance.ticketOf(id).amountMax, 100);
     }
 
     // ==== Helpers ====

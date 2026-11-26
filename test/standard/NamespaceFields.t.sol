@@ -55,9 +55,9 @@ import { ERC3643IdentityRegistryStorage } from "contracts/ERC-3643/base/ERC3643I
 import { ERC3643Token } from "contracts/ERC-3643/base/ERC3643Token.sol";
 import { ERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/base/ERC3643TrustedIssuersRegistry.sol";
 import { ComplianceLedgerLib } from "contracts/compliance/modular/ComplianceLedgerLib.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModuleSetLib } from "contracts/compliance/modular/ModuleSetLib.sol";
-import { TransferValidationLib } from "contracts/compliance/modular/TransferValidationLib.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
 import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
@@ -192,18 +192,18 @@ contract NamespaceFieldsTest is Test {
         }
 
         ledgerStorage.decimals = 18;
-        ledgerStorage.bridgedBalance[KEY] = 11;
-        ledgerStorage.totalBridged = 12;
+        ledgerStorage.awayBalance[KEY] = 11;
+        ledgerStorage.totalAwayBalance = 12;
         ledgerStorage.inTransit[bytes32(NUMBER)] = 13;
-        ledgerStorage.totalInTransit = 14;
-        ledgerStorage.reservedForValidations[KEY] = 15;
+        ledgerStorage.totalOnHold = 14;
+        ledgerStorage.reservedForTickets[KEY] = 15;
 
         assertEq(_word(_field(base, 0)), 18, "decimals");
-        assertEq(_word(_entry(_field(base, 1), KEY)), 11, "bridgedBalance");
-        assertEq(_word(_field(base, 2)), 12, "totalBridged");
+        assertEq(_word(_entry(_field(base, 1), KEY)), 11, "awayBalance");
+        assertEq(_word(_field(base, 2)), 12, "totalAwayBalance");
         assertEq(_word(_entry(_field(base, 3), bytes32(NUMBER))), 13, "inTransit");
-        assertEq(_word(_field(base, 4)), 14, "totalInTransit");
-        assertEq(_word(_entry(_field(base, 5), KEY)), 15, "reservedForValidations");
+        assertEq(_word(_field(base, 4)), 14, "totalOnHold");
+        assertEq(_word(_entry(_field(base, 5), KEY)), 15, "reservedForTickets");
     }
 
     function test_TREXMessaging() public {
@@ -214,7 +214,7 @@ contract NamespaceFieldsTest is Test {
         }
 
         messagingStorage.registry = ITrustedGatewayRegistry(address(0x1));
-        messagingStorage.routes[KEY] = address(0x2);
+        messagingStorage.receiptRoutes[KEY] = address(0x2);
         messagingStorage.peers[KEY] = hex"01";
         messagingStorage.received[ALICE][KEY] = true;
         messagingStorage.chains[KEY].chainType = 0xabcd;
@@ -224,7 +224,7 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.inboundPaused[KEY] = true;
 
         assertEq(_word(_field(base, 0)), 0x1, "registry");
-        assertEq(_word(_entry(_field(base, 1), KEY)), 0x2, "routes");
+        assertEq(_word(_entry(_field(base, 1), KEY)), 0x2, "receiptRoutes");
         assertEq(_slot(_entry(_field(base, 2), KEY)), _shortBytes(0x01), "peers");
         assertEq(_word(_entry(_entry(_field(base, 3), _key(ALICE)), KEY)), 1, "received");
         bytes32 chain = _entry(_field(base, 4), KEY);
@@ -304,20 +304,20 @@ contract NamespaceFieldsTest is Test {
 
     function test_TransferValidation() public {
         bytes32 base = Utils.erc7201("erc3643.storage.TransferValidation");
-        TransferValidationLib.ValidationStorage storage validationStorage;
+        TicketLib.ValidationStorage storage validationStorage;
         assembly ("memory-safe") {
             validationStorage.slot := base
         }
 
         validationStorage.defaultValidityWindow = 11;
-        validationStorage.reconciliationWindows[KEY] = 12;
+        validationStorage.waitingTimes[KEY] = 12;
         validationStorage.issuancePaused[KEY] = true;
-        ITransferValidation.Validation storage validation = validationStorage.validations[bytes32(NUMBER)];
+        ITickets.Ticket storage validation = validationStorage.validations[bytes32(NUMBER)];
         validation.hash = bytes32(uint256(21));
         validation.amountMin = 22;
         validation.amountMax = 23;
-        validation.expiry = 24;
-        validation.releaseAt = 25;
+        validation.validUntil = 24;
+        validation.waitingEndsAt = 25;
         validation.fromChainKey = bytes32(uint256(26));
         validation.toChainKey = bytes32(uint256(27));
         validation.fromKey = bytes32(uint256(28));
@@ -327,14 +327,13 @@ contract NamespaceFieldsTest is Test {
         validation.fromIdentity = ALICE;
         validation.toIdentity = BOB;
         validation.relocation = true;
-        validation.status = ITransferValidation.ValidationStatus.AwaitingMint;
-        validation.executedAmount = 30;
+        validation.status = ITickets.TicketStatus.AwaitingMint;
+        validation.moved = 30;
         validation.legWallet = hex"02";
         validation.spender = hex"03";
         validation.salt = bytes32(uint256(33));
-        validationStorage.awaitedTerms[bytes32(NUMBER)] =
-            TransferValidationLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
-        ITransferValidation.ParkedLeg storage parked = validationStorage.parkedLegs[bytes32(NUMBER)][KEY];
+        validationStorage.awaitedTerms[bytes32(NUMBER)] = TicketLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
+        ITickets.WaitingReceipt storage parked = validationStorage.waitingReceipts[bytes32(NUMBER)][KEY];
         parked.from = hex"05";
         parked.to = hex"06";
         parked.amount = 31;
@@ -343,7 +342,7 @@ contract NamespaceFieldsTest is Test {
         validationStorage.reportedLegs[KEY] = true;
 
         assertEq(_word(_field(base, 0)), 11, "defaultValidityWindow");
-        assertEq(_word(_entry(_field(base, 1), KEY)), 12, "reconciliationWindows");
+        assertEq(_word(_entry(_field(base, 1), KEY)), 12, "waitingTimes");
         assertEq(_word(_entry(_field(base, 2), KEY)), 1, "issuancePaused");
 
         bytes32 terms = _entry(_field(base, 4), bytes32(NUMBER));
@@ -351,19 +350,19 @@ contract NamespaceFieldsTest is Test {
         assertEq(_slot(_field(terms, 1)), _shortBytes(0x04), "awaitedTerms.spender");
 
         bytes32 leg = _entry(_entry(_field(base, 5), bytes32(NUMBER)), KEY);
-        assertEq(_slot(_field(leg, 0)), _shortBytes(0x05), "parkedLegs.from");
-        assertEq(_slot(_field(leg, 1)), _shortBytes(0x06), "parkedLegs.to");
-        assertEq(_word(_field(leg, 2)), 31, "parkedLegs.amount");
-        assertEq(_word(_field(leg, 3)), 32, "parkedLegs.hash");
-        assertEq(_word(_field(leg, 4)), 1, "parkedLegs.exists");
+        assertEq(_slot(_field(leg, 0)), _shortBytes(0x05), "waitingReceipts.from");
+        assertEq(_slot(_field(leg, 1)), _shortBytes(0x06), "waitingReceipts.to");
+        assertEq(_word(_field(leg, 2)), 31, "waitingReceipts.amount");
+        assertEq(_word(_field(leg, 3)), 32, "waitingReceipts.hash");
+        assertEq(_word(_field(leg, 4)), 1, "waitingReceipts.exists");
         assertEq(_word(_entry(_field(base, 6), KEY)), 1, "reportedLegs");
 
         bytes32 entry = _entry(_field(base, 3), bytes32(NUMBER));
         assertEq(_word(_field(entry, 0)), 21, "validations.hash");
         assertEq(_word(_field(entry, 1)), 22, "validations.amountMin");
         assertEq(_word(_field(entry, 2)), 23, "validations.amountMax");
-        // expiry fills bytes 0 to 7, releaseAt bytes 8 to 15.
-        assertEq(_word(_field(entry, 3)), 24 | (25 << 64), "validations.expiry and releaseAt");
+        // validUntil fills bytes 0 to 7, waitingEndsAt bytes 8 to 15.
+        assertEq(_word(_field(entry, 3)), 24 | (25 << 64), "validations.validUntil and waitingEndsAt");
         assertEq(_word(_field(entry, 4)), 26, "validations.fromChainKey");
         assertEq(_word(_field(entry, 5)), 27, "validations.toChainKey");
         assertEq(_word(_field(entry, 6)), 28, "validations.fromKey");
@@ -374,10 +373,10 @@ contract NamespaceFieldsTest is Test {
         // toIdentity fills bytes 0 to 19, relocation byte 20, status byte 21.
         assertEq(
             _word(_field(entry, 10)),
-            uint256(uint160(BOB)) | (1 << 160) | (uint256(ITransferValidation.ValidationStatus.AwaitingMint) << 168),
+            uint256(uint160(BOB)) | (1 << 160) | (uint256(ITickets.TicketStatus.AwaitingMint) << 168),
             "validations.toIdentity, relocation and status"
         );
-        assertEq(_word(_field(entry, 11)), 30, "validations.executedAmount");
+        assertEq(_word(_field(entry, 11)), 30, "validations.moved");
         assertEq(_slot(_field(entry, 12)), _shortBytes(0x02), "validations.legWallet");
         assertEq(_slot(_field(entry, 13)), _shortBytes(0x03), "validations.spender");
         assertEq(_word(_field(entry, 14)), 33, "validations.salt");

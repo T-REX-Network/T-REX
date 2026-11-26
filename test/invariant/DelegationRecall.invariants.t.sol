@@ -61,7 +61,7 @@ import { Utils } from "test/unit/helpers/Utils.sol";
 ///
 ///   DR-1  positionOf(identity) == native balance + bridged balance of its wallets
 ///   DR-2  sum of positions == totalSupply()
-///   DR-3  totalBridged == Lite balances + mints instructed and not yet minted + burns done on the Lite whose
+///   DR-3  totalAwayBalance == Lite balances + mints instructed and not yet minted + burns done on the Lite whose
 ///         proof has not settled yet (the Lite no longer holds them, the token still counts them)
 ///   DR-4  the Lite minted exactly the delegations it received, once each
 ///   DR-5  every settled recall debited exactly what the Lite burned for it
@@ -215,7 +215,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 i = 0; i < ACTORS; i++) {
             assertEq(
                 ledger.positionOf(address(identities[i])),
-                token.balanceOf(actors[i]) + token.bridgedBalanceOf(satellites[i]),
+                token.balanceOf(actors[i]) + token.awayBalanceOf(satellites[i]),
                 "DR-1"
             );
         }
@@ -242,8 +242,8 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 id = 1; id < recallActor.length; id++) {
             if (token.pendingRecall(id).amount != 0) pendingBurns += lite.burnedFor(id);
         }
-        assertEq(token.totalBridged(), liteBalances + pendingMints + pendingBurns, "DR-3");
-        assertEq(token.totalInTransit(), 0, "DR-3 transit");
+        assertEq(token.totalAwayBalance(), liteBalances + pendingMints + pendingBurns, "DR-3");
+        assertEq(token.totalOnHold(), 0, "DR-3 transit");
     }
 
     function invariant_DR4_theLiteMintedEachDelegationOnce() public view {
@@ -263,7 +263,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 id = 1; id < delegationAmount.length; id++) {
             delegated += delegationAmount[id];
         }
-        assertEq(token.totalBridged(), delegated - settledBurns, "DR-5");
+        assertEq(token.totalAwayBalance(), delegated - settledBurns, "DR-5");
     }
 
     function invariant_DR6_anHonestLiteNeverPausesItsChainOrHaltsTheToken() public view {

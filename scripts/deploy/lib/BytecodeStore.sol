@@ -158,8 +158,8 @@ library BytecodeStore {
             "TokenGuardsLib",
             "TokenDelegationLib",
             "ModuleSetLib",
-            "TransferValidationLib",
-            "TransferSettlementLib"
+            "TicketLib",
+            "ReceiptLib"
         ];
         fullyQualified = [
             "contracts/interop/TREXMessagingLib.sol:TREXMessagingLib",
@@ -168,8 +168,8 @@ library BytecodeStore {
             "contracts/token/TokenGuardsLib.sol:TokenGuardsLib",
             "contracts/token/TokenDelegationLib.sol:TokenDelegationLib",
             "contracts/compliance/modular/ModuleSetLib.sol:ModuleSetLib",
-            "contracts/compliance/modular/TransferValidationLib.sol:TransferValidationLib",
-            "contracts/compliance/modular/TransferSettlementLib.sol:TransferSettlementLib"
+            "contracts/compliance/modular/TicketLib.sol:TicketLib",
+            "contracts/compliance/modular/ReceiptLib.sol:ReceiptLib"
         ];
     }
 
@@ -191,8 +191,8 @@ library BytecodeStore {
         }
         uint8[] memory mcLinks = new uint8[](3);
         mcLinks[0] = 5; // ModuleSetLib
-        mcLinks[1] = 6; // TransferValidationLib
-        mcLinks[2] = 7; // TransferSettlementLib
+        mcLinks[1] = 6; // TicketLib
+        mcLinks[2] = 7; // ReceiptLib
         list[8] = ReleaseContract("Token", "default", "Token.sol", tokenLinks);
         list[9] = ReleaseContract("ModularCompliance", "default", "ModularCompliance.sol", mcLinks);
         list[10] = ReleaseContract("TREXRegistry", "default", "TREXRegistry.sol", none);

@@ -40,7 +40,7 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -88,7 +88,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
 
         issuedAt = block.timestamp;
         id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 90, 100);
-        assertTrue(boundCompliance.validationOf(id).twoLegs);
+        assertTrue(boundCompliance.ticketOf(id).twoLegs);
     }
 
     // ==== happy path Tests ====
@@ -105,12 +105,12 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         emit EventsLib.ValidationLegConfirmed(id, polygon, 95);
         polygonGateway.relay(burn);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "the burned amount left the sender's position");
-        assertEq(token.inTransitOf(id), 95, "and waits in transit");
-        assertEq(token.totalInTransit(), 95);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
-        assertEq(token.totalBridged(), BALANCE, "still bridged");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "the burned amount left the sender's position");
+        assertEq(token.onHoldOf(id), 95, "and waits in transit");
+        assertEq(token.totalOnHold(), 95);
+        assertEq(token.awayBalanceOf(bobOptimism), 0);
+        assertEq(token.totalAwayBalance(), BALANCE, "still bridged");
         assertEq(token.totalSupply(), BALANCE, "still issued");
         assertEq(
             IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
@@ -121,7 +121,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.BridgedTransfer(keccak256(aliceSat), keccak256(bobOptimism), id, aliceSat, bobOptimism, 95);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationSettled(id, optimism, 95);
+        emit EventsLib.ReceiptApplied(id, optimism, 95);
         optimismGateway.relay(mint);
 
         _assertSettledAt(95);
@@ -133,20 +133,20 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         uint256 burn = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95));
         uint256 mint = _liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95));
 
-        vm.expectCall(address(token), abi.encodeWithSelector(IToken.holdInTransit.selector), 0);
+        vm.expectCall(address(token), abi.encodeWithSelector(IToken.putOnHold.selector), 0);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ValidationLegConfirmed(id, optimism, 95);
         optimismGateway.relay(mint);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingBurn));
-        ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingBurn));
+        ITickets.Ticket memory state = boundCompliance.ticketOf(id);
         assertEq(state.legWallet, bobOptimism);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "a first mint leg moves nothing");
-        assertEq(token.inTransitOf(id), 0);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE, "a first mint leg moves nothing");
+        assertEq(token.onHoldOf(id), 0);
+        assertEq(token.awayBalanceOf(bobOptimism), 0);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationSettled(id, polygon, 95);
+        emit EventsLib.ReceiptApplied(id, polygon, 95);
         polygonGateway.relay(burn);
 
         _assertSettledAt(95);
@@ -159,23 +159,21 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
         vm.warp(issuedAt + VALIDITY_WINDOW + OPTIMISM_WINDOW + 365 days);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotDiscardable.selector,
-                id,
-                uint8(ITransferValidation.ValidationStatus.AwaitingMint)
+                ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.AwaitingMint)
             )
         );
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
 
         assertEq(
             IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), 100, "the reservation stays"
         );
-        assertEq(token.inTransitOf(id), 95, "the burned amount waits in transit");
+        assertEq(token.onHoldOf(id), 95, "the burned amount waits in transit");
 
         // The mint leg, however late, completes the pair.
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95)));
@@ -188,7 +186,7 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
 
         bytes32 next = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 1, BALANCE);
-        assertEq(boundCompliance.validationOf(next).amountMax, BALANCE - 95, "capped at what the wallet holds");
+        assertEq(boundCompliance.ticketOf(next).amountMax, BALANCE - 95, "capped at what the wallet holds");
 
         vm.prank(agent);
         vm.expectRevert(
@@ -214,18 +212,18 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         assertTrue(token.isInboundPaused(polygon));
         assertFalse(token.isInboundPaused(optimism));
         assertFalse(token.paused());
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "debited once");
-        assertEq(token.inTransitOf(id), 95, "held once");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "debited once");
+        assertEq(token.onHoldOf(id), 95, "held once");
 
         uint256 blocked = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         polygonGateway.relay(blocked);
         assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(blocked)));
 
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95)));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobOptimism), 95);
     }
 
     /// @notice The two legs must carry one amount.
@@ -237,8 +235,8 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         optimismGateway.relay(mint);
 
         assertFalse(token.messageReceived(address(optimismGateway), optimismGateway.receiveIdFor(mint)));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(token.awayBalanceOf(bobOptimism), 0);
     }
 
     /// @notice A burn leg can only come from the sender's chain, a mint leg only from the recipient's: each
@@ -250,10 +248,10 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         _relayRejected(optimismGateway, optimism, burnFromOptimism, 95);
         _relayRejected(polygonGateway, polygon, mintFromPolygon, 95);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
-        assertEq(token.inTransitOf(id), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(bobOptimism), 0);
+        assertEq(token.onHoldOf(id), 0);
     }
 
     /// @notice A notification carrying both wallets is no leg of a two-leg validation: it is rejected and the
@@ -263,9 +261,9 @@ contract CrossChainSettlementTest is InteropSuiteTest {
 
         _relayRejected(polygonGateway, polygon, index, 95);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.awayBalanceOf(bobOptimism), 0);
     }
 
     /// @notice The first leg is bounds-checked like any other: out of bounds it is rejected, holds nothing in
@@ -275,16 +273,16 @@ contract CrossChainSettlementTest is InteropSuiteTest {
 
         _relayRejected(polygonGateway, polygon, burn, 101);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
-        assertEq(token.inTransitOf(id), 0);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
+        assertEq(token.onHoldOf(id), 0);
     }
 
     /// @dev Relays a leg carrying the issued hash that fails the substantive gate: it is rejected, consumed, and
     ///  pauses the inbound of `chainKey` while the token keeps running.
     function _relayRejected(ERC7786GatewayMock gateway, bytes32 chainKey, uint256 index, uint256 amount) private {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementRejected(id, chainKey, amount, boundCompliance.validationOf(id).hash);
+        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).hash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(chainKey);
         gateway.relay(index);
@@ -295,14 +293,14 @@ contract CrossChainSettlementTest is InteropSuiteTest {
     }
 
     function _assertSettledAt(uint256 amount) private view {
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        ITransferValidation.Validation memory state = boundCompliance.validationOf(id);
-        assertEq(state.executedAmount, amount);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - amount);
-        assertEq(token.bridgedBalanceOf(bobOptimism), amount);
-        assertEq(token.inTransitOf(id), 0, "nothing left in transit");
-        assertEq(token.totalInTransit(), 0);
-        assertEq(token.totalBridged(), BALANCE);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        ITickets.Ticket memory state = boundCompliance.ticketOf(id);
+        assertEq(state.moved, amount);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - amount);
+        assertEq(token.awayBalanceOf(bobOptimism), amount);
+        assertEq(token.onHoldOf(id), 0, "nothing left in transit");
+        assertEq(token.totalOnHold(), 0);
+        assertEq(token.totalAwayBalance(), BALANCE);
         assertEq(token.totalSupply(), BALANCE);
         IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
         assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "the reservation is released once settled");

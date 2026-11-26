@@ -73,15 +73,15 @@ library MessageTypesLib {
     /// @dev The five types that cross the interop boundary, numbered from zero as their wire codes.
     /// Appending a member is the only backward-compatible way to grow the surface.
     enum Message {
-        /// Outbound. A `ComplianceValidation` issued on the reference chain for a satellite to execute.
-        COMPLIANCE_VALIDATION,
+        /// Outbound. A `TicketMessage` issued on the reference chain for a satellite to execute.
+        TICKET,
         /// Outbound. A delegation-out instruction to mint on a satellite. Resent unchanged under its `delegationId`;
         /// the Lite mints once per id.
-        MINT_INSTRUCTION,
+        MOVE_OUT,
         /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF` under its id.
-        RECALL_INSTRUCTION,
+        BRING_HOME,
         /// Inbound. A satellite reporting that a validation's leg executed.
-        SETTLEMENT_NOTIFICATION,
+        RECEIPT,
         /// Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.
         BURN_PROOF
     }
@@ -95,21 +95,22 @@ library MessageTypesLib {
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
     bytes2 internal constant EVM_CHAIN_TYPE = 0x0000;
 
-    /// @dev EIP-712 type hash of the terms of a `ComplianceValidation`, see {hashValidation}:
+    /// @dev EIP-712 type hash of the terms of a `TicketMessage`, see {hashValidation}. The type string is part of
+    ///  the wire format the away chain hashes too, so it keeps its first names:
     ///  keccak256("ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,
     ///  uint256 amountMax,address token)")
     bytes32 internal constant COMPLIANCE_VALIDATION_TYPEHASH =
         0xafd18733126d2336f2b9ca999b9c8ad036ae2ed6021708f89e163f1c7fdce926;
 
-    /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, the only thing
+    /// @dev Body of a `TICKET`: the reference chain's authorization for one movement, the only thing
     /// a satellite executes a transfer against.
     /// Validations expire; settlements never do.
-    struct ComplianceValidation {
+    struct TicketMessage {
         /// `keccak256(abi.encode(canonicalKey(from), salt))`, the salt supplied by the requester: a function of the
         /// request and never of the reference chain's ordering or clock, so a reorg that re-includes or drops the
         /// issuance leaves the id the satellite executed under unchanged. Single-use: consumed on the satellite, keys
         /// the record on T-REX.
-        bytes32 validationId;
+        bytes32 ticketId;
         /// The requester's nonce the id was derived from. Carried so that the satellite chain, where the body is
         /// final, holds what it takes to send the request again should a reorg drop its issuance: an agent reads
         /// it off the Lite and re-issues the same id. Not part of {hashValidation}: the id commits to it.
@@ -130,14 +131,14 @@ library MessageTypesLib {
         /// The asset's reference-chain address, its canonical identifier everywhere.
         address token;
         /// Absolute timestamp: the satellite executes strictly before it.
-        uint64 expiry;
-        /// Seconds T-REX keeps the slot reserved past `expiry` for the reconciliation.
+        uint64 validUntil;
+        /// Seconds T-REX keeps the slot reserved past `validUntil` for the reconciliation.
         uint64 reconciliationWindow;
     }
 
-    /// @dev Body of a `SETTLEMENT_NOTIFICATION`: a satellite reporting that one leg of a validation executed.
-    struct SettlementNotification {
-        bytes32 validationId;
+    /// @dev Body of a `RECEIPT`: a satellite reporting that one leg of a validation executed.
+    struct ReceiptMessage {
+        bytes32 ticketId;
         /// ERC-7930; empty on the mint leg.
         bytes from;
         /// ERC-7930; empty on the burn leg.
@@ -149,10 +150,10 @@ library MessageTypesLib {
         bytes32 hash;
     }
 
-    /// @dev Body of a `MINT_INSTRUCTION`: the reference chain already burned `amount` of `holder`'s native balance
+    /// @dev Body of a `MOVE_OUT`: the reference chain already burned `amount` of `holder`'s native balance
     /// and credited `toWallet`'s bridged position, so the satellite mints the same amount there, once per
     /// `delegationId`. A resend carries the same body byte for byte.
-    struct MintInstruction {
+    struct MoveOutMessage {
         /// Unique per token, sequential from 1: the Lite mints at most once per id.
         uint256 delegationId;
         /// ERC-7930 satellite wallet to mint to, linked to the same identity as `holder`.
@@ -162,9 +163,9 @@ library MessageTypesLib {
         address holder;
     }
 
-    /// @dev Body of a `RECALL_INSTRUCTION`: an order to burn up to `amount` of `wallet` on the satellite and answer
+    /// @dev Body of a `BRING_HOME`: an order to burn up to `amount` of `wallet` on the satellite and answer
     /// with a `BurnProof` under the same `recallId`. A resend carries the same body byte for byte.
-    struct RecallInstruction {
+    struct BringHomeMessage {
         /// Unique per token, sequential from 1: keys the pending recall the proof must answer.
         uint256 recallId;
         /// ERC-7930 satellite wallet to burn.
@@ -203,15 +204,15 @@ library MessageTypesLib {
     }
 
     /// @dev EIP-712 `hashStruct` of a validation's terms, without a domain: a commitment, not something to sign.
-    ///  The terms are the id, the wallets, the spender, the range and the token. `expiry` and `reconciliationWindow`
+    ///  The terms are the id, the wallets, the spender, the range and the token. `validUntil` and `reconciliationWindow`
     ///  are left out on purpose: both are read off the issuing block's clock, so a body re-issued after a reorg
     ///  dropped the first issuance would otherwise hash differently for the same movement, and the hash could no
     ///  longer say whether the satellite executed the terms this chain issued.
-    function hashValidation(ComplianceValidation memory validation) internal pure returns (bytes32) {
+    function hashValidation(TicketMessage memory validation) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
                 COMPLIANCE_VALIDATION_TYPEHASH,
-                validation.validationId,
+                validation.ticketId,
                 keccak256(validation.from),
                 keccak256(validation.to),
                 keccak256(validation.spender),
@@ -223,33 +224,33 @@ library MessageTypesLib {
     }
 
     /// @dev Wraps a compliance validation in the envelope, as the compliance does before dispatching a leg.
-    function encodeValidation(ComplianceValidation memory validation) internal pure returns (bytes memory) {
-        return abi.encode(Message.COMPLIANCE_VALIDATION, VERSION, abi.encode(validation));
+    function encodeValidation(TicketMessage memory validation) internal pure returns (bytes memory) {
+        return abi.encode(Message.TICKET, VERSION, abi.encode(validation));
     }
 
-    /// @dev Unwraps a `COMPLIANCE_VALIDATION` body. Reverts on a body that is not one.
-    function decodeValidation(bytes memory body) internal pure returns (ComplianceValidation memory) {
-        return abi.decode(body, (ComplianceValidation));
+    /// @dev Unwraps a `TICKET` body. Reverts on a body that is not one.
+    function decodeValidation(bytes memory body) internal pure returns (TicketMessage memory) {
+        return abi.decode(body, (TicketMessage));
     }
 
     /// @dev Wraps a settlement notification in the envelope, as a satellite's Lite does before sending.
-    function encodeSettlement(SettlementNotification memory notification) internal pure returns (bytes memory) {
-        return abi.encode(Message.SETTLEMENT_NOTIFICATION, VERSION, abi.encode(notification));
+    function encodeSettlement(ReceiptMessage memory notification) internal pure returns (bytes memory) {
+        return abi.encode(Message.RECEIPT, VERSION, abi.encode(notification));
     }
 
-    /// @dev Unwraps a `SETTLEMENT_NOTIFICATION` body. Reverts on a body that is not one.
-    function decodeSettlement(bytes memory body) internal pure returns (SettlementNotification memory) {
-        return abi.decode(body, (SettlementNotification));
+    /// @dev Unwraps a `RECEIPT` body. Reverts on a body that is not one.
+    function decodeSettlement(bytes memory body) internal pure returns (ReceiptMessage memory) {
+        return abi.decode(body, (ReceiptMessage));
     }
 
-    /// @dev Unwraps a `MINT_INSTRUCTION` body, as a satellite's Lite does. Reverts on a body that is not one.
-    function decodeMintInstruction(bytes memory body) internal pure returns (MintInstruction memory) {
-        return abi.decode(body, (MintInstruction));
+    /// @dev Unwraps a `MOVE_OUT` body, as a satellite's Lite does. Reverts on a body that is not one.
+    function decodeMintInstruction(bytes memory body) internal pure returns (MoveOutMessage memory) {
+        return abi.decode(body, (MoveOutMessage));
     }
 
-    /// @dev Unwraps a `RECALL_INSTRUCTION` body, as a satellite's Lite does. Reverts on a body that is not one.
-    function decodeRecallInstruction(bytes memory body) internal pure returns (RecallInstruction memory) {
-        return abi.decode(body, (RecallInstruction));
+    /// @dev Unwraps a `BRING_HOME` body, as a satellite's Lite does. Reverts on a body that is not one.
+    function decodeRecallInstruction(bytes memory body) internal pure returns (BringHomeMessage memory) {
+        return abi.decode(body, (BringHomeMessage));
     }
 
     /// @dev Wraps a burn proof in the envelope, as a satellite's Lite does before sending.

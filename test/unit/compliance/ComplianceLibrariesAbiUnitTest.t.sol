@@ -44,11 +44,11 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
-/// @dev Events and errors raised inside `ModuleSetLib`, `TransferValidationLib` and `TransferSettlementLib` are
+/// @dev Events and errors raised inside `ModuleSetLib`, `TicketLib` and `ReceiptLib` are
 ///  redeclared on the compliance's interfaces to stay in its ABI. This pins each redeclaration to the
 ///  definition the libraries actually use.
 contract ComplianceLibrariesAbiUnitTest is Test {
@@ -57,20 +57,20 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(IModularCompliance.ModuleInteraction.selector, EventsLib.ModuleInteraction.selector);
         assertEq(IModularCompliance.ModuleAdded.selector, EventsLib.ModuleAdded.selector);
         assertEq(IModularCompliance.ModuleTypesRecorded.selector, EventsLib.ModuleTypesRecorded.selector);
-        assertEq(ITransferValidation.TransferValidationIssued.selector, EventsLib.TransferValidationIssued.selector);
-        assertEq(ITransferValidation.SettlementNotified.selector, EventsLib.SettlementNotified.selector);
-        assertEq(ITransferValidation.ValidationLegConfirmed.selector, EventsLib.ValidationLegConfirmed.selector);
-        assertEq(ITransferValidation.ValidationSettled.selector, EventsLib.ValidationSettled.selector);
-        assertEq(ITransferValidation.LateReconciliation.selector, EventsLib.LateReconciliation.selector);
-        assertEq(ITransferValidation.ReplayedSettlement.selector, EventsLib.ReplayedSettlement.selector);
-        assertEq(ITransferValidation.SettlementDuplicate.selector, EventsLib.SettlementDuplicate.selector);
-        assertEq(ITransferValidation.ValidationDiscarded.selector, EventsLib.ValidationDiscarded.selector);
-        assertEq(ITransferValidation.ValidationResolved.selector, EventsLib.ValidationResolved.selector);
-        assertEq(ITransferValidation.SettlementParked.selector, EventsLib.SettlementParked.selector);
-        assertEq(ITransferValidation.ParkedLegSettled.selector, EventsLib.ParkedLegSettled.selector);
-        assertEq(ITransferValidation.SettlementRejected.selector, EventsLib.SettlementRejected.selector);
-        assertEq(ITransferValidation.ValidationOrphaned.selector, EventsLib.ValidationOrphaned.selector);
-        assertEq(ITransferValidation.SettlementBodyDiverged.selector, EventsLib.SettlementBodyDiverged.selector);
+        assertEq(ITickets.TicketWritten.selector, EventsLib.TicketWritten.selector);
+        assertEq(ITickets.ReceiptReceived.selector, EventsLib.ReceiptReceived.selector);
+        assertEq(ITickets.ValidationLegConfirmed.selector, EventsLib.ValidationLegConfirmed.selector);
+        assertEq(ITickets.ReceiptApplied.selector, EventsLib.ReceiptApplied.selector);
+        assertEq(ITickets.LateReconciliation.selector, EventsLib.LateReconciliation.selector);
+        assertEq(ITickets.ReplayedSettlement.selector, EventsLib.ReplayedSettlement.selector);
+        assertEq(ITickets.ReceiptDuplicate.selector, EventsLib.ReceiptDuplicate.selector);
+        assertEq(ITickets.TicketCancelled.selector, EventsLib.TicketCancelled.selector);
+        assertEq(ITickets.ClosedByHand.selector, EventsLib.ClosedByHand.selector);
+        assertEq(ITickets.ReceiptWaiting.selector, EventsLib.ReceiptWaiting.selector);
+        assertEq(ITickets.WaitingReceiptApplied.selector, EventsLib.WaitingReceiptApplied.selector);
+        assertEq(ITickets.ReceiptRefused.selector, EventsLib.ReceiptRefused.selector);
+        assertEq(ITickets.ValidationOrphaned.selector, EventsLib.ValidationOrphaned.selector);
+        assertEq(ITickets.SettlementBodyDiverged.selector, EventsLib.SettlementBodyDiverged.selector);
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
@@ -83,38 +83,33 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(IModularCompliance.ModuleHasNoType.selector, ErrorsLib.ModuleHasNoType.selector);
         assertEq(IModularCompliance.DuplicateModuleType.selector, ErrorsLib.DuplicateModuleType.selector);
         assertEq(IModularCompliance.ModuleNotBound.selector, ErrorsLib.ModuleNotBound.selector);
-        assertEq(ITransferValidation.InvalidRequestedRange.selector, ErrorsLib.InvalidRequestedRange.selector);
-        assertEq(ITransferValidation.SenderNotOnSatellite.selector, ErrorsLib.SenderNotOnSatellite.selector);
-        assertEq(ITransferValidation.UnverifiedWallet.selector, ErrorsLib.UnverifiedWallet.selector);
-        assertEq(ITransferValidation.NotAuthorizedForWallet.selector, ErrorsLib.NotAuthorizedForWallet.selector);
-        assertEq(ITransferValidation.EmptyValidationRange.selector, ErrorsLib.EmptyValidationRange.selector);
-        assertEq(ITransferValidation.ZeroValue.selector, ErrorsLib.ZeroValue.selector);
-        assertEq(ITransferValidation.ValidationSpenderRefused.selector, ErrorsLib.ValidationSpenderRefused.selector);
-        assertEq(ITransferValidation.ValidationAlreadyRequested.selector, ErrorsLib.ValidationAlreadyRequested.selector);
-        assertEq(ITransferValidation.ParkedLegNotSettleable.selector, ErrorsLib.ParkedLegNotSettleable.selector);
-        assertEq(ITransferValidation.ParkedLegAwaitsSettlement.selector, ErrorsLib.ParkedLegAwaitsSettlement.selector);
-        assertEq(ITransferValidation.TokenPaused.selector, ErrorsLib.TokenPaused.selector);
-        assertEq(ITransferValidation.SettlementAmountMismatch.selector, ErrorsLib.SettlementAmountMismatch.selector);
-        assertEq(ITransferValidation.ValidationNotDiscardable.selector, ErrorsLib.ValidationNotDiscardable.selector);
-        assertEq(ITransferValidation.ValidationNotReleasable.selector, ErrorsLib.ValidationNotReleasable.selector);
+        assertEq(ITickets.InvalidRequestedRange.selector, ErrorsLib.InvalidRequestedRange.selector);
+        assertEq(ITickets.SenderNotOnSatellite.selector, ErrorsLib.SenderNotOnSatellite.selector);
+        assertEq(ITickets.UnverifiedWallet.selector, ErrorsLib.UnverifiedWallet.selector);
+        assertEq(ITickets.NotAuthorizedForWallet.selector, ErrorsLib.NotAuthorizedForWallet.selector);
+        assertEq(ITickets.EmptyValidationRange.selector, ErrorsLib.EmptyValidationRange.selector);
+        assertEq(ITickets.ZeroValue.selector, ErrorsLib.ZeroValue.selector);
+        assertEq(ITickets.ValidationSpenderRefused.selector, ErrorsLib.ValidationSpenderRefused.selector);
+        assertEq(ITickets.TicketAlreadyWritten.selector, ErrorsLib.TicketAlreadyWritten.selector);
+        assertEq(ITickets.NoWaitingReceipt.selector, ErrorsLib.NoWaitingReceipt.selector);
+        assertEq(ITickets.ApplyWaitingReceiptFirst.selector, ErrorsLib.ApplyWaitingReceiptFirst.selector);
+        assertEq(ITickets.TokenPaused.selector, ErrorsLib.TokenPaused.selector);
+        assertEq(ITickets.SettlementAmountMismatch.selector, ErrorsLib.SettlementAmountMismatch.selector);
+        assertEq(ITickets.TicketNotCancellable.selector, ErrorsLib.TicketNotCancellable.selector);
+        assertEq(ITickets.CancelNotDue.selector, ErrorsLib.CancelNotDue.selector);
         assertEq(
-            ITransferValidation.ValidationNotPubliclyDiscardable.selector,
-            ErrorsLib.ValidationNotPubliclyDiscardable.selector
+            ITickets.ValidationNotPubliclyDiscardable.selector, ErrorsLib.ValidationNotPubliclyDiscardable.selector
         );
-        assertEq(ITransferValidation.ValidationNotStuck.selector, ErrorsLib.ValidationNotStuck.selector);
-        assertEq(ITransferValidation.ValidationNotYetResolvable.selector, ErrorsLib.ValidationNotYetResolvable.selector);
+        assertEq(ITickets.ValidationNotStuck.selector, ErrorsLib.ValidationNotStuck.selector);
+        assertEq(ITickets.ValidationNotYetResolvable.selector, ErrorsLib.ValidationNotYetResolvable.selector);
         assertEq(
-            ITransferValidation.NonCanonicalInteroperableAddress.selector,
-            ErrorsLib.NonCanonicalInteroperableAddress.selector
+            ITickets.NonCanonicalInteroperableAddress.selector, ErrorsLib.NonCanonicalInteroperableAddress.selector
         );
         assertEq(
-            ITransferValidation.InteroperableAddressEmptyReferenceAndAddress.selector,
+            ITickets.InteroperableAddressEmptyReferenceAndAddress.selector,
             InteroperableAddress.InteroperableAddressEmptyReferenceAndAddress.selector
         );
-        assertEq(
-            ITransferValidation.SafeCastOverflowedUintDowncast.selector,
-            SafeCast.SafeCastOverflowedUintDowncast.selector
-        );
+        assertEq(ITickets.SafeCastOverflowedUintDowncast.selector, SafeCast.SafeCastOverflowedUintDowncast.selector);
     }
 
 }

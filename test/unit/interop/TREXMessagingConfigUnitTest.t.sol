@@ -115,12 +115,12 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.ChainRegistered(evmChain, evmType, evmRef);
         vm.expectEmit(true, true, false, false, address(token));
-        emit EventsLib.RouteSet(evmChain, trustedGateway);
+        emit EventsLib.ReceiptRouteSet(evmChain, trustedGateway);
 
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
 
-        assertEq(token.routeFor(evmChain), trustedGateway);
+        assertEq(token.receiptRouteFor(evmChain), trustedGateway);
         assertTrue(token.isChainOpen(evmChain));
 
         (bytes2 chainType, bytes memory chainReference) = token.chainOf(evmChain);
@@ -130,10 +130,10 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     function testChainIsRegisteredOnce() public {
         vm.startPrank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
 
         vm.recordLogs();
-        token.setRoute(evmType, evmRef, address(0));
+        token.setReceiptRoute(evmType, evmRef, address(0));
         vm.stopPrank();
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -145,57 +145,57 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     function testSetRouteRevertsOnAnEmptyChainReference() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidChainReference.selector, evmType, bytes("")));
         vm.prank(identityManager);
-        token.setRoute(evmType, "", trustedGateway);
+        token.setReceiptRoute(evmType, "", trustedGateway);
     }
 
     /// @dev A gateway derives the chain from a minimal big-endian id; a padded one would never match it.
     function testSetRouteRevertsOnAPaddedEvmChainReference() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidChainReference.selector, evmType, hex"0089"));
         vm.prank(identityManager);
-        token.setRoute(evmType, hex"0089", trustedGateway);
+        token.setReceiptRoute(evmType, hex"0089", trustedGateway);
     }
 
     /// @dev Only EVM references are minimal by construction; another chain type may start with a zero.
     function testNonEvmChainReferenceMayStartWithZero() public {
         vm.prank(identityManager);
-        token.setRoute(nonEvmType, hex"0001", trustedGateway);
+        token.setReceiptRoute(nonEvmType, hex"0001", trustedGateway);
 
-        assertEq(token.routeFor(MessageTypesLib.chainKey(nonEvmType, hex"0001")), trustedGateway);
+        assertEq(token.receiptRouteFor(MessageTypesLib.chainKey(nonEvmType, hex"0001")), trustedGateway);
     }
 
     function testSetRouteRevertsOnUntrustedGateway() public {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotTrusted.selector, untrustedGateway));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotTrusted.selector, untrustedGateway));
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, untrustedGateway);
+        token.setReceiptRoute(evmType, evmRef, untrustedGateway);
     }
 
     function testZeroGatewayClosesTheChain() public {
         vm.startPrank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
-        token.setRoute(evmType, evmRef, address(0));
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, address(0));
         vm.stopPrank();
 
-        assertEq(token.routeFor(evmChain), address(0));
+        assertEq(token.receiptRouteFor(evmChain), address(0));
         assertFalse(token.isChainOpen(evmChain));
     }
 
     function testSetRouteRevertsWhenNotIdentityManager() public {
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
         vm.prank(agent);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
     }
 
     /// @dev The emergency lever: removal severs the route with no call on the token.
     function testRemovingTheGatewayClosesEveryRouteThroughIt() public {
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
         assertTrue(token.isChainOpen(evmChain));
 
         vm.prank(interopManager);
         registry.setTrustedGateway(trustedGateway, false);
 
         assertFalse(token.isChainOpen(evmChain));
-        assertEq(token.routeFor(evmChain), trustedGateway, "the route is stored, it is trust that went away");
+        assertEq(token.receiptRouteFor(evmChain), trustedGateway, "the route is stored, it is trust that went away");
     }
 
     /* ----- Peers ----- */
@@ -203,7 +203,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     /// @dev On the satellite, not on the reference chain: the Lite lives at the token's address over there.
     function testPeerDefaultsToTheTokensOwnAddressOnThatChain() public {
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
 
         assertEq(token.peerFor(evmChain), InteroperableAddress.formatEvmV1(0x89, address(token)));
         assertEq(
@@ -219,7 +219,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     function testNonEvmChainHasNoDefaultPeer() public {
         vm.prank(identityManager);
-        token.setRoute(nonEvmType, nonEvmRef, trustedGateway);
+        token.setReceiptRoute(nonEvmType, nonEvmRef, trustedGateway);
 
         assertEq(token.peerFor(nonEvmChain), "");
         assertFalse(token.isChainOpen(nonEvmChain), "routed, but nowhere to send to");
@@ -273,7 +273,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     function testEmptyPeerRestoresTheDefault() public {
         vm.startPrank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
 
         bytes memory explicitPeer = InteroperableAddress.formatEvmV1(0x89, makeAddr("OtherLite"));
         token.setPeer(evmChain, explicitPeer);
@@ -312,7 +312,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     function testPauserPausesAndResumesAChainsInbound() public {
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
 
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(evmChain);
@@ -330,7 +330,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     function testInboundPauseIsIdempotent() public {
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
         vm.prank(agent);
         token.setInboundPaused(evmChain, true);
 
@@ -349,7 +349,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
     function testInboundPauseIsThePausers() public {
         vm.prank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, identityManager));
         vm.prank(identityManager);
@@ -368,7 +368,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         uint256 supplyBefore = token.totalSupply();
 
         vm.startPrank(identityManager);
-        token.setRoute(evmType, evmRef, trustedGateway);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway);
         token.setPeer(nonEvmChain, nonEvmPeer);
         vm.stopPrank();
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -43,10 +43,10 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
 
     function _resend(bytes32 id) private {
         vm.prank(address(aliceIdentity));
-        boundCompliance.resendValidation(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
-    /* ----- requestTransferValidation ----- */
+    /* ----- askToMove ----- */
 
     function test_requestTransferValidation_RevertWhen_TheTokenIsPaused() public {
         _pause();
@@ -64,7 +64,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
 
         bytes32 id = _request();
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(polygonGateway.queueLength(), 1);
     }
 
@@ -76,7 +76,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         _requestValidation(agent, aliceSat, bobSat, 10, 100);
     }
 
-    /* ----- resendValidation ----- */
+    /* ----- sendTicket ----- */
 
     /// @dev Refused while paused: `ValidationResend.t.sol`, `test_resendValidation_RevertWhen_TheTokenIsPaused`.
     function test_resendValidation_Success_OnceTheTokenIsUnpaused() public {
@@ -90,7 +90,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload, "byte for byte");
     }
 
-    /* ----- discardExpiredValidations ----- */
+    /* ----- cancelTickets ----- */
 
     /// @dev The pause outlasts the validation's windows while the satellite's report waits at the gateway. The
     ///      validation is not discarded under the pause, so its reservation is not released for another request
@@ -104,14 +104,14 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         ids[0] = id;
 
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
         assertEq(token.reservedOf(aliceSat), 100, "the reservation stays while the leg may be waiting");
 
         _unpause();
         polygonGateway.relay(leg);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobSat), 100);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 100);
         assertFalse(boundCompliance.isIssuancePaused(polygon), "settled, not reconciled late");
     }
 
@@ -124,19 +124,19 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
 
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(token.reservedOf(aliceSat), 0);
     }
 
-    /// @dev The pause takes nothing back: a validation issued before it stays `Pending`, its reservation held,
+    /// @dev The pause takes nothing back: a validation issued before it stays `Open`, its reservation held,
     ///      and the satellite's report waits at the gateway until the unpause, as every settlement does.
     function test_pause_LeavesAValidationIssuedBeforeItPending() public {
         bytes32 id = _request();
         _pause();
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(token.reservedOf(aliceSat), 100);
     }
 

@@ -50,7 +50,7 @@ import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
 /// @title TokenLedgerHarness
 /// @notice Exposes the token's internal ledger transitions so tests can drive them before any flow references
 ///         them. Every entry point authorizes against the mint role, so the existing agent drives them all.
-///         Settlements go through `Token._settle`, the same path `settleValidation` takes in production, with
+///         Settlements go through `Token._settle`, the same path `finishMove` takes in production, with
 ///         only the bound-compliance and pause checks skipped.
 contract TokenLedgerHarness is Token {
 
@@ -86,25 +86,25 @@ contract TokenLedgerHarness is Token {
         emit EventsLib.Recalled(fromKey, holder, fromWallet, amount);
     }
 
-    function bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId)
+    function bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId)
         external
         restrictedFor(this.mint.selector)
     {
-        _settle(from, to, amount, validationId);
+        _settle(from, to, amount, ticketId);
     }
 
-    function settleToNative(bytes calldata fromWallet, address to, uint256 amount, bytes32 validationId)
+    function settleToNative(bytes calldata fromWallet, address to, uint256 amount, bytes32 ticketId)
         external
         restrictedFor(this.mint.selector)
     {
         // Self-call so the freshly built native envelope reaches `_settle` as calldata, like every other one.
-        this.settleSelf(fromWallet, InteroperableAddress.formatEvmV1(block.chainid, to), amount, validationId);
+        this.settleSelf(fromWallet, InteroperableAddress.formatEvmV1(block.chainid, to), amount, ticketId);
     }
 
     /// @dev The second hop of {settleToNative}. Reachable from this contract only.
-    function settleSelf(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) external {
+    function settleSelf(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId) external {
         require(msg.sender == address(this), "TokenLedgerHarness: self-call only");
-        _settle(from, to, amount, validationId);
+        _settle(from, to, amount, ticketId);
     }
 
 }

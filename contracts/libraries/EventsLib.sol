@@ -92,7 +92,7 @@ library EventsLib {
     /// @notice Emitted when a burn proof answers a recall never issued, or differs from the proof that settled it.
     ///  Nothing is applied. As on a replayed settlement, the token pauses its inbound from `originChainKey` when
     ///  the recall is one it issued, and pauses itself when it is not, since an unknown id may as well mean the
-    ///  token's own records are out of step, see {ISettlementHandler-Verdict}.
+    ///  token's own records are out of step, see {IReceiptHandler-Verdict}.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
@@ -106,26 +106,21 @@ library EventsLib {
     event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
 
     /// A held amount went back to the wallet it was burned from.
-    event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed validationId, bytes wallet, uint256 amount);
+    event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed ticketId, bytes wallet, uint256 amount);
 
     /// The keeper gave up on a pair whose other leg never arrived. `returnedAmount` went back to the wallet it
     /// was burned from, or is zero when it was the mint leg that landed and nothing here could be returned.
-    event ValidationResolved(bytes32 indexed validationId, uint256 returnedAmount);
+    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
 
-    event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed validationId, bytes fromWallet, uint256 amount);
+    event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed ticketId, bytes fromWallet, uint256 amount);
     /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
     event BridgedTransfer(
-        bytes32 indexed fromKey,
-        bytes32 indexed toKey,
-        bytes32 indexed validationId,
-        bytes from,
-        bytes to,
-        uint256 amount
+        bytes32 indexed fromKey, bytes32 indexed toKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
     /// @notice Emitted on a settled movement leaving a satellite wallet for a native one, under the validation it
     ///  consumed. Ownership moves between identities, unlike {Recalled}.
     event SettledToNative(
-        bytes32 indexed fromKey, address indexed to, bytes32 indexed validationId, bytes fromWallet, uint256 amount
+        bytes32 indexed fromKey, address indexed to, bytes32 indexed ticketId, bytes fromWallet, uint256 amount
     );
 
     // ModularCompliance Events
@@ -179,13 +174,13 @@ library EventsLib {
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event ReceiptRouteSet(bytes32 indexed chainKey, address indexed gateway);
     /// @notice Emitted when the fast route of `chainKey`, which carries validations only, is set; zero unsets it.
-    event FastRouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     /// @notice Emitted when a validation's leg toward `chainKey` is pinned to `gateway`, the chain's final route at
     ///         dispatch, which its settlement must come back through, whichever route carried the leg out.
-    event ValidationRoutePinned(bytes32 indexed validationId, bytes32 indexed chainKey, address gateway);
+    event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event ProtocolMessageReceived(
         MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 receiveId
@@ -203,36 +198,36 @@ library EventsLib {
     // ModularCompliance Interop Events
 
     /// @notice Emitted by the compliance when the token hands it an attributed settlement notification.
-    event SettlementNotified(
-        bytes32 indexed originChainKey, bytes32 indexed validationId, bytes from, bytes to, uint256 amount
+    event ReceiptReceived(
+        bytes32 indexed originChainKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
 
-    // TransferValidation Events
+    // Tickets Events
     event DefaultValidityWindowSet(uint64 duration);
-    event ReconciliationWindowSet(bytes32 indexed chainKey, uint64 duration);
+    event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
     event ValidationIssuancePaused(bytes32 indexed chainKey);
     event ValidationIssuanceUnpaused(bytes32 indexed chainKey);
     /// @notice Emitted on issuance with the full envelopes and the final bounds, so indexers need no reverse table.
-    event TransferValidationIssued(
-        bytes32 indexed validationId,
+    event TicketWritten(
+        bytes32 indexed ticketId,
         bytes from,
         bytes to,
         bytes spender,
         uint256 amountMin,
         uint256 amountMax,
-        uint64 expiry,
+        uint64 validUntil,
         uint64 reconciliationWindow,
         bytes32 salt
     );
-    /// @notice Warning: a reconciliation of `validationId` arrived from `chainKey` after its release deadline.
+    /// @notice Warning: a reconciliation of `ticketId` arrived from `chainKey` after its release deadline.
     ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
     ///         breaches a rule; otherwise this warning is the whole record.
-    event LateReconciliation(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event LateReconciliation(bytes32 indexed ticketId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
-    event ValidationDiscarded(bytes32 indexed validationId);
+    event TicketCancelled(bytes32 indexed ticketId);
     /// @notice Emitted when a validation is recorded and reserved while an `APPROVAL` module decides it.
-    event TransferValidationAwaitingApproval(
-        bytes32 indexed validationId,
+    event TicketWaitingForApproval(
+        bytes32 indexed ticketId,
         bytes from,
         bytes to,
         bytes spender,
@@ -242,12 +237,12 @@ library EventsLib {
     );
     /// @notice Emitted when a validation awaiting approval is refused, or left unanswered past its deadline, and
     ///         its reservation released.
-    event ValidationApprovalRefused(bytes32 indexed validationId);
+    event ValidationApprovalRefused(bytes32 indexed ticketId);
     /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
-    event ValidationResent(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event TicketSent(bytes32 indexed ticketId, bytes32 indexed chainKey);
     /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
     ///         the validation is pinned and can no longer be discarded.
-    event ValidationLegConfirmed(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event ValidationLegConfirmed(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
 
     /// The registry now names another identity for an empty wallet, and the ledger took note. `amount` is what
     /// moved between the two positions, zero: a wallet that holds tokens never changes identity in the ledger.
@@ -257,36 +252,36 @@ library EventsLib {
 
     /// @notice Emitted when every expected leg of a validation was received: slots committed, ledger updated.
     ///         `chainKey` is the chain of the leg that completed it.
-    event ValidationSettled(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event ReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
     /// @notice Emergency: a trusted gateway delivered a leg already accounted for, or a second leg for an id
-    ///         whose first one is parked, other than a delivery consumed before (`SettlementDuplicate`).
+    ///         whose first one is parked, other than a delivery consumed before (`ReceiptDuplicate`).
     ///         Nothing is applied and the token pauses its inbound from `chainKey`, lifted by the pauser after an
     ///         investigation.
-    event ReplayedSettlement(bytes32 indexed validationId, bytes32 indexed chainKey);
-    /// @notice A leg already consumed for `validationId` from `chainKey`, whether it was applied, parked or
+    event ReplayedSettlement(bytes32 indexed ticketId, bytes32 indexed chainKey);
+    /// @notice A leg already consumed for `ticketId` from `chainKey`, whether it was applied, parked or
     ///         refused, was delivered again, byte for byte, under another receive id: a gateway redelivery or a
     ///         Lite resending its settlement. Nothing is applied and nothing is paused; the delivery is consumed.
-    event SettlementDuplicate(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event ReceiptDuplicate(bytes32 indexed ticketId, bytes32 indexed chainKey);
     /// @notice A leg arrived from `chainKey` for an id with no issued body: the satellite executed a validation
     ///         this chain never sent, which a reorg that dropped the issuance explains as well as a hostile Lite.
     ///         The leg is kept under its id and the token pauses its inbound from `chainKey`. Once the request is
-    ///         sent again with the same salt, `settleParkedLeg` settles it.
-    event SettlementParked(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    ///         sent again with the same salt, `applyWaitingReceipt` settles it.
+    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
     /// @notice A parked leg from `chainKey` was settled, once its validation was issued.
-    event ParkedLegSettled(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
     /// @notice A leg from `chainKey` carries the issued hash but wallets or an amount outside the issued terms:
     ///         the Lite broke a rule on the body this chain issued. Nothing is applied, the validation stands,
     ///         and the token pauses its inbound from `chainKey`.
-    event SettlementRejected(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
     /// @notice A leg from `chainKey` fails the issued terms and carries another hash: the satellite executed a body
     ///         this chain never canonically issued, one a reorg orphaned. Nothing is applied and the token pauses
     ///         its inbound from `chainKey`. While no leg had landed yet the validation ends `Orphaned`, its
     ///         reservation released; otherwise it stands and the keeper resolves the pair after the second window.
-    event ValidationOrphaned(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
     /// @notice Information: a leg from `chainKey` settled inside the issued terms but carries another hash, so the
     ///         satellite executed a body that differed in something the terms do not cover, or a wider range
     ///         the canonical issuance narrowed, inside which the executed amount still sits.
-    event SettlementBodyDiverged(bytes32 indexed validationId, bytes32 indexed chainKey, bytes32 hash);
+    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 hash);
     // TREXAccessManager Events
 
     event DomainCreated(uint32 indexed domainId, string name);

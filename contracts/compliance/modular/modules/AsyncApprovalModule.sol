@@ -66,7 +66,7 @@ import {
     AccessManagedOwnableUpgradeable
 } from "../../../utils/AccessManagedOwnableUpgradeable.sol";
 import { ComplianceLedgerLib } from "../ComplianceLedgerLib.sol";
-import { ITransferValidation } from "../ITransferValidation.sol";
+import { ITickets } from "../ITickets.sol";
 import { MovementKindLib } from "../MovementKindLib.sol";
 import { AbstractModuleUpgradeable } from "./AbstractModuleUpgradeable.sol";
 import { IApprovalModule } from "./IApprovalModule.sol";
@@ -76,15 +76,15 @@ import { IModule } from "./IModule.sol";
 ///  without code, or one that does not implement it, is simply not told and reads the module's events.
 interface IAsyncApprover {
 
-    /// @dev `validationId`, requested on `compliance`, now waits for the caller's approver. An FHE rule starts
+    /// @dev `ticketId`, requested on `compliance`, now waits for the caller's approver. An FHE rule starts
     ///  its computation here and answers from its decryption callback.
-    function approvalAsked(address compliance, bytes32 validationId) external;
+    function approvalAsked(address compliance, bytes32 ticketId) external;
 
 }
 
 /// @dev Decides, for a token, whether a requested cross-chain movement is issued, through answers that may come
 ///  later: an institution's backend, a rule computed with FHE that answers from its decryption callback, any
-///  address. The compliance keeps the request `AwaitingApproval`, reserved, while the approvers answer.
+///  address. The compliance keeps the request `WaitingForApproval`, reserved, while the approvers answer.
 ///
 ///  The compliance owner lists the approvers with {setApprovers}. They answer in that order, each on the request
 ///  id, never on terms of their own: approve, possibly with a lower maximum, or refuse. Nobody can change the
@@ -134,7 +134,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         /// The approvers per compliance, in the order they answer, scoped by the bind nonce.
         mapping(address compliance => mapping(uint256 nonce => address[])) approvers;
         /// The requests awaiting approval per compliance, by validation id. Deleted once answered.
-        mapping(address compliance => mapping(bytes32 validationId => Request)) requests;
+        mapping(address compliance => mapping(bytes32 ticketId => Request)) requests;
         /// Native-transfer approvals per compliance, scoped by the bind nonce, keyed by
         /// `keccak256(abi.encode(fromWallet, toWallet, amount))` with the wallet keys the compliance builds.
         mapping(address compliance => mapping(uint256 nonce => mapping(bytes32 transferKey => Approval))) approvals;
@@ -151,12 +151,12 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         0x8e132769c339aa4b7063edecd97a34a6fcabe204f7e6adaf81c9a125d1e53f00;
 
     event ApproversSet(address indexed compliance, address[] approvers);
-    event ApprovalRequested(address indexed compliance, bytes32 indexed validationId, address indexed approver);
+    event ApprovalRequested(address indexed compliance, bytes32 indexed ticketId, address indexed approver);
     event ValidationApproved(
-        address indexed compliance, bytes32 indexed validationId, address indexed approver, uint256 amountMax
+        address indexed compliance, bytes32 indexed ticketId, address indexed approver, uint256 amountMax
     );
-    event ValidationRefused(address indexed compliance, bytes32 indexed validationId, address indexed approver);
-    event ValidationFullyApproved(address indexed compliance, bytes32 indexed validationId, uint256 amountMax);
+    event ValidationRefused(address indexed compliance, bytes32 indexed ticketId, address indexed approver);
+    event ValidationFullyApproved(address indexed compliance, bytes32 indexed ticketId, uint256 amountMax);
     event TransferApproved(
         address indexed compliance,
         address indexed from,
@@ -214,26 +214,26 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /// @dev Approves a relocation at once, since it changes no position. Otherwise keeps the request and tells
     ///  the first approver. Reverts with no approver set, which refuses the request: a request nobody could
     ///  approve would only hold its reservation until the deadline.
-    function approvalRequested(bytes32 validationId, IModule.TransferContext calldata ctx, uint64)
+    function approvalRequested(bytes32 ticketId, IModule.TransferContext calldata ctx, uint64)
         external
         onlyComplianceCall
     {
         if (ComplianceLedgerLib.isRelocation(ctx.fromIdentity, ctx.toIdentity)) {
-            // The compliance already records it `AwaitingApproval`, so this answer issues it inside the request.
-            ITransferValidation(msg.sender).answerApproval(validationId, ctx.amountMax);
+            // The compliance already records it `WaitingForApproval`, so this answer issues it inside the request.
+            ITickets(msg.sender).answerApproval(ticketId, ctx.amountMax);
             return;
         }
         AsyncApprovalStorage storage store = _getAsyncApprovalStorage();
         address[] storage approvers = store.approvers[msg.sender][getNonce(msg.sender)];
         require(approvers.length != 0, ErrorsLib.ApproversNotSet());
-        store.requests[msg.sender][validationId] = Request({
+        store.requests[msg.sender][ticketId] = Request({
             approved: 0,
             approversVersion: store.approversVersion[msg.sender],
             fullyApproved: false,
             amountMin: ctx.amountMin,
             amountMax: ctx.amountMax
         });
-        _ask(msg.sender, validationId, approvers[0]);
+        _ask(msg.sender, ticketId, approvers[0]);
     }
 
     /* ----- The approvers ----- */
@@ -242,43 +242,43 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     ///  may answer. A maximum below the requested minimum refuses. The last approval only records the request
     ///  as fully approved, so an approver answering from a callback never pays for, nor reverts on, the
     ///  issuance; {finalize} issues it. Emits `ValidationApproved`, and `ValidationFullyApproved` on the last.
-    function approveValidation(address compliance, bytes32 validationId, uint256 amountMax)
+    function approveValidation(address compliance, bytes32 ticketId, uint256 amountMax)
         external
         onlyBoundCompliance(compliance)
     {
-        (Request storage request, address[] storage approvers) = _requestForCaller(compliance, validationId);
+        (Request storage request, address[] storage approvers) = _requestForCaller(compliance, ticketId);
         if (amountMax < request.amountMax) request.amountMax = amountMax;
         if (request.amountMax == 0 || request.amountMax < request.amountMin) {
-            _refuse(compliance, validationId);
+            _refuse(compliance, ticketId);
             return;
         }
         request.approved++;
-        emit ValidationApproved(compliance, validationId, _msgSender(), request.amountMax);
+        emit ValidationApproved(compliance, ticketId, _msgSender(), request.amountMax);
 
         if (request.approved < approvers.length) {
-            _ask(compliance, validationId, approvers[request.approved]);
+            _ask(compliance, ticketId, approvers[request.approved]);
             return;
         }
         request.fullyApproved = true;
-        emit ValidationFullyApproved(compliance, validationId, request.amountMax);
+        emit ValidationFullyApproved(compliance, ticketId, request.amountMax);
     }
 
     /// @dev Issues a request every approver approved, at the lowest maximum approved, by answering the
     ///  compliance. Anyone may call it. A failure, a chain paused since the request for instance, reverts and
     ///  leaves the request fully approved, so it can be tried again before the deadline.
-    function finalize(address compliance, bytes32 validationId) external {
-        Request storage request = _getAsyncApprovalStorage().requests[compliance][validationId];
-        require(request.fullyApproved, ErrorsLib.NotFullyApproved(validationId));
+    function finalize(address compliance, bytes32 ticketId) external {
+        Request storage request = _getAsyncApprovalStorage().requests[compliance][ticketId];
+        require(request.fullyApproved, ErrorsLib.NotFullyApproved(ticketId));
         uint256 approvedMax = request.amountMax;
-        delete _getAsyncApprovalStorage().requests[compliance][validationId];
-        ITransferValidation(compliance).answerApproval(validationId, approvedMax);
+        delete _getAsyncApprovalStorage().requests[compliance][ticketId];
+        ITickets(compliance).answerApproval(ticketId, approvedMax);
     }
 
     /// @dev Refuses a request awaiting approval. Only the approver whose turn it is may answer. Emits
     ///  `ValidationRefused`.
-    function refuseValidation(address compliance, bytes32 validationId) external onlyBoundCompliance(compliance) {
-        _requestForCaller(compliance, validationId);
-        _refuse(compliance, validationId);
+    function refuseValidation(address compliance, bytes32 ticketId) external onlyBoundCompliance(compliance) {
+        _requestForCaller(compliance, ticketId);
+        _refuse(compliance, ticketId);
     }
 
     /// @dev Approves one native transfer of exactly `amount` from `from` to `to`, usable until `expiry`, by
@@ -325,8 +325,8 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     }
 
     /// @dev Where a request awaiting approval stands in this module; all zeros once answered.
-    function requestOf(address compliance, bytes32 validationId) external view returns (Request memory) {
-        return _getAsyncApprovalStorage().requests[compliance][validationId];
+    function requestOf(address compliance, bytes32 ticketId) external view returns (Request memory) {
+        return _getAsyncApprovalStorage().requests[compliance][ticketId];
     }
 
     /// @dev The approvals stored for a native transfer of exactly `amount` from `from` to `to`.
@@ -417,20 +417,18 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
 
     /// @dev The waiting request, and the approvers of `compliance`, once checked that the caller is the
     ///  approver whose turn it is.
-    function _requestForCaller(address compliance, bytes32 validationId)
+    function _requestForCaller(address compliance, bytes32 ticketId)
         private
         view
         returns (Request storage request, address[] storage approvers)
     {
         AsyncApprovalStorage storage store = _getAsyncApprovalStorage();
-        request = store.requests[compliance][validationId];
+        request = store.requests[compliance][ticketId];
         // A request is only kept once `setApprovers` ran, so its version is at least one: zero means none is
         // waiting here, never asked or already answered.
-        require(request.approversVersion != 0, ErrorsLib.UnknownApprovalRequest(validationId));
-        require(
-            request.approversVersion == store.approversVersion[compliance], ErrorsLib.ApproversChanged(validationId)
-        );
-        require(!request.fullyApproved, ErrorsLib.AlreadyFullyApproved(validationId));
+        require(request.approversVersion != 0, ErrorsLib.UnknownApprovalRequest(ticketId));
+        require(request.approversVersion == store.approversVersion[compliance], ErrorsLib.ApproversChanged(ticketId));
+        require(!request.fullyApproved, ErrorsLib.AlreadyFullyApproved(ticketId));
         approvers = store.approvers[compliance][getNonce(compliance)];
         // Past the end only after a rebind left the list empty: then nobody's turn comes.
         address expected = request.approved < approvers.length ? approvers[request.approved] : address(0);
@@ -438,19 +436,19 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     }
 
     /// @dev Forgets the request and refuses it on the compliance, which releases its reservation.
-    function _refuse(address compliance, bytes32 validationId) private {
-        delete _getAsyncApprovalStorage().requests[compliance][validationId];
-        emit ValidationRefused(compliance, validationId, _msgSender());
-        ITransferValidation(compliance).answerApproval(validationId, 0);
+    function _refuse(address compliance, bytes32 ticketId) private {
+        delete _getAsyncApprovalStorage().requests[compliance][ticketId];
+        emit ValidationRefused(compliance, ticketId, _msgSender());
+        ITickets(compliance).answerApproval(ticketId, 0);
     }
 
     /// @dev Announces whose turn it is, and tells that approver when it is a contract. Telling is best
     ///  effort: an approver that does not implement {IAsyncApprover} reads the event instead, and its failure
     ///  never refuses the request.
-    function _ask(address compliance, bytes32 validationId, address approver) private {
-        emit ApprovalRequested(compliance, validationId, approver);
+    function _ask(address compliance, bytes32 ticketId, address approver) private {
+        emit ApprovalRequested(compliance, ticketId, approver);
         if (approver.code.length == 0) return;
-        try IAsyncApprover(approver).approvalAsked(compliance, validationId) { } catch { }
+        try IAsyncApprover(approver).approvalAsked(compliance, ticketId) { } catch { }
     }
 
     function _requireApprover(address compliance) private view {

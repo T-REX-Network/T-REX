@@ -42,7 +42,7 @@ pragma solidity 0.8.30;
 import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Recipient.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -89,48 +89,47 @@ contract RouteSwitchTest is InteropSuiteTest {
         token.unpause();
     }
 
-    function _dispatch(bytes32 validationId) private {
+    function _dispatch(bytes32 ticketId) private {
         vm.prank(compliance);
-        token.dispatchComplianceValidation(satellite, validationId, validationBody);
+        token.dispatchComplianceValidation(satellite, ticketId, validationBody);
     }
 
-    function _settlementFrom(ERC7786GatewayMock gateway, bytes32 validationId) private returns (uint256) {
-        return _liteSends(
-            gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount))
-        );
+    function _settlementFrom(ERC7786GatewayMock gateway, bytes32 ticketId) private returns (uint256) {
+        return
+            _liteSends(
+                gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(ticketId, POLYGON, amount))
+            );
     }
 
-    function _expectHandled(bytes32 validationId) private {
+    function _expectHandled(bytes32 ticketId) private {
         vm.expectCall(
             compliance,
-            abi.encodeCall(
-                ISettlementHandler.handleSettlement, (satellite, _sameChainSettlement(validationId, POLYGON, amount))
-            )
+            abi.encodeCall(IReceiptHandler.receiveReceipt, (satellite, _sameChainSettlement(ticketId, POLYGON, amount)))
         );
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.SettlementParked(validationId, satellite, amount, bytes32(0));
+        emit EventsLib.ReceiptWaiting(ticketId, satellite, amount, bytes32(0));
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(satellite);
     }
 
     /// @dev A leg that got through: parked under its id, its chain's inbound paused, the token itself open.
-    function _assertParked(ERC7786GatewayMock gateway, uint256 index, bytes32 validationId) private view {
+    function _assertParked(ERC7786GatewayMock gateway, uint256 index, bytes32 ticketId) private view {
         assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "consumed");
-        assertTrue(boundCompliance.parkedLegOf(validationId, satellite).exists, "parked");
+        assertTrue(boundCompliance.waitingReceiptOf(ticketId, satellite).exists, "parked");
         assertTrue(token.isInboundPaused(satellite), "never issued by the compliance: the chain's inbound pauses");
         assertFalse(token.paused(), "the token itself stays open");
     }
 
-    function _expectNotPinned(ERC7786GatewayMock gateway, bytes32 validationId) private {
+    function _expectNotPinned(ERC7786GatewayMock gateway, bytes32 ticketId) private {
         vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.GatewayNotPinned.selector, address(gateway), validationId, satellite)
+            abi.encodeWithSelector(ErrorsLib.BridgeNotPinned.selector, address(gateway), ticketId, satellite)
         );
     }
 
     /* ----- The old leg ----- */
 
     function testTheSwitchIsInPlace() public view {
-        assertEq(token.routeFor(satellite), address(newGateway));
+        assertEq(token.receiptRouteFor(satellite), address(newGateway));
         assertEq(token.pinnedRouteFor(inFlight, satellite), address(oldGateway));
     }
 
@@ -164,7 +163,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         );
         uint256 replayOnNewRoute = _settlementFrom(newGateway, inFlight);
 
-        vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 1);
+        vm.expectCall(compliance, abi.encodeWithSelector(IReceiptHandler.receiveReceipt.selector), 1);
         oldGateway.relay(burnLeg);
         _assertParked(oldGateway, burnLeg, inFlight);
 
@@ -204,7 +203,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         uint256 viaOld = _settlementFrom(oldGateway, neverDispatched);
         uint256 viaNew = _settlementFrom(newGateway, neverDispatched);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotRouted.selector, address(oldGateway), satellite));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(oldGateway), satellite));
         oldGateway.relay(viaOld);
 
         _expectHandled(neverDispatched);
@@ -220,7 +219,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         uint256 viaOld = _liteSends(oldGateway, token, payload);
         uint256 viaNew = _liteSends(newGateway, token, payload);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotRouted.selector, address(oldGateway), satellite));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(oldGateway), satellite));
         oldGateway.relay(viaOld);
 
         newGateway.relay(viaNew);

@@ -62,7 +62,7 @@ pragma solidity 0.8.30;
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
@@ -112,7 +112,7 @@ library TokenDelegationLib {
         _compliance().agentTransferred(holder, holder, amount, MovementKindLib.DELEGATION);
 
         bytes32 chainKey = _chainKeyOf(toWallet);
-        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
+        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.AwayChainBlocked(chainKey));
         TokenLedgerLib.layout().delegations[delegationId] =
             _commitment(chainKey, keccak256(TREXMessagingLib.peerFor(chainKey)), toWallet, amount, holder);
 
@@ -153,7 +153,7 @@ library TokenDelegationLib {
         bytes32 walletKey = WalletKeyLib.satelliteKey(wallet);
         TokenLedgerLib.TokenStorage storage s = TokenLedgerLib.layout();
         require(s.openRecall[walletKey] == 0, ErrorsLib.RecallPending(walletKey, s.openRecall[walletKey]));
-        uint256 balance = s.bridgedBalance[walletKey];
+        uint256 balance = s.awayBalance[walletKey];
         require(amount <= balance, ErrorsLib.InsufficientBridgedBalance(wallet, balance, amount));
 
         bytes32 chainKey = _chainKeyOf(wallet);
@@ -163,7 +163,7 @@ library TokenDelegationLib {
             chainKey: chainKey,
             nativeWallet: nativeWallet,
             amount: amount,
-            gateway: TREXMessagingLib.layout().routes[chainKey],
+            gateway: TREXMessagingLib.layout().receiptRoutes[chainKey],
             peerKey: keccak256(TREXMessagingLib.peerFor(chainKey))
         });
         s.openRecall[walletKey] = recallId;
@@ -187,13 +187,13 @@ library TokenDelegationLib {
     ///  With no open recall: the very proof that settled it, from the same chain, is a duplicate and changes
     ///  nothing; anything else is a message the token cannot account for, judged as a replayed settlement is. A
     ///  different proof for a recall the token issued and settled is `PauseChain`: the chain that sent it is at
-    ///  fault. A proof for a recall never issued is `HaltToken`, see {ISettlementHandler-Verdict}.
+    ///  fault. A proof for a recall never issued is `HaltToken`, see {IReceiptHandler-Verdict}.
     /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the pause.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.
     function consumeBurnProof(bytes32 originChainKey, bytes memory body)
         external
-        returns (ISettlementHandler.Verdict verdict, address nativeWallet, uint256 amount)
+        returns (IReceiptHandler.Verdict verdict, address nativeWallet, uint256 amount)
     {
         MessageTypesLib.BurnProof memory proof = MessageTypesLib.decodeBurnProof(body);
         bytes32 proofHash = keccak256(abi.encode(originChainKey, body));
@@ -205,12 +205,11 @@ library TokenDelegationLib {
         if (recall.amount == 0) {
             if (s.settledProofs[proof.recallId] == proofHash) {
                 emit EventsLib.BurnProofDuplicate(proof.recallId, originChainKey);
-                return (ISettlementHandler.Verdict.None, address(0), 0);
+                return (IReceiptHandler.Verdict.None, address(0), 0);
             }
             emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
             bool issued = proof.recallId != 0 && proof.recallId <= s.lastRecallId;
-            return
-                (issued ? ISettlementHandler.Verdict.PauseChain : ISettlementHandler.Verdict.HaltToken, address(0), 0);
+            return (issued ? IReceiptHandler.Verdict.PauseChain : IReceiptHandler.Verdict.HaltToken, address(0), 0);
         }
 
         require(
@@ -269,7 +268,7 @@ library TokenDelegationLib {
             require(keccak256(wallet) == recall.walletKey, ErrorsLib.RecallMismatch(id));
             chainKey = recall.chainKey;
             _requireSamePeer(chainKey, recall.peerKey);
-            recall.gateway = TREXMessagingLib.layout().routes[chainKey];
+            recall.gateway = TREXMessagingLib.layout().receiptRoutes[chainKey];
             sendId = _sendRecall(chainKey, id, wallet, recall.amount, recall.nativeWallet);
         } else {
             revert ErrorsLib.UnknownResendKind(kind);
@@ -317,9 +316,9 @@ library TokenDelegationLib {
     {
         return TREXMessagingLib.sendMessage(
             chainKey,
-            MessageTypesLib.Message.MINT_INSTRUCTION,
+            MessageTypesLib.Message.MOVE_OUT,
             abi.encode(
-                MessageTypesLib.MintInstruction({
+                MessageTypesLib.MoveOutMessage({
                     delegationId: delegationId, toWallet: toWallet, amount: amount, holder: holder
                 })
             )
@@ -332,9 +331,9 @@ library TokenDelegationLib {
     {
         return TREXMessagingLib.sendMessage(
             chainKey,
-            MessageTypesLib.Message.RECALL_INSTRUCTION,
+            MessageTypesLib.Message.BRING_HOME,
             abi.encode(
-                MessageTypesLib.RecallInstruction({
+                MessageTypesLib.BringHomeMessage({
                     recallId: recallId, wallet: wallet, amount: amount, nativeWallet: nativeWallet
                 })
             )

@@ -40,7 +40,7 @@
 pragma solidity 0.8.30;
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -105,17 +105,17 @@ contract LateReconciliationTest is InteropSuiteTest {
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.BridgedTransfer(keccak256(aliceSat), keccak256(bobSat), late, aliceSat, bobSat, CAP);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationSettled(late, polygon, CAP);
+        emit EventsLib.ReceiptApplied(late, polygon, CAP);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.LateReconciliation(late, polygon);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.ValidationIssuancePaused(polygon);
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
-        assertEq(uint8(boundCompliance.statusOf(fresh)), uint8(ITransferValidation.ValidationStatus.Pending));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - CAP);
-        assertEq(token.bridgedBalanceOf(bobSat), CAP);
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.LateReconciled));
+        assertEq(uint8(boundCompliance.statusOf(fresh)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - CAP);
+        assertEq(token.awayBalanceOf(bobSat), CAP);
         assertEq(
             IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
             CAP,
@@ -127,12 +127,12 @@ contract LateReconciliationTest is InteropSuiteTest {
         // Issuance toward polygon is stopped until the manager resumes it.
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
-        boundCompliance.requestTransferValidation(aliceSat, carolSat, 10, 50, "", _salt());
+        boundCompliance.askToMove(aliceSat, carolSat, 10, 50, "", _salt());
 
         vm.prank(deployer);
         boundCompliance.setIssuancePaused(polygon, false);
         // Toward another identity, which has a cap of its own and nothing pending against it.
-        assertEq(boundCompliance.validationOf(_issue(aliceSat, carolSat, 10, 50)).amountMax, 50);
+        assertEq(boundCompliance.ticketOf(_issue(aliceSat, carolSat, 10, 50)).amountMax, 50);
     }
 
     /// @notice A late burn leg records itself and warns; the late mint leg completes the pair and warns again.
@@ -151,25 +151,25 @@ contract LateReconciliationTest is InteropSuiteTest {
 
         assertEq(
             uint8(boundCompliance.statusOf(late)),
-            uint8(ITransferValidation.ValidationStatus.DiscardedAwaitingMint),
+            uint8(ITickets.TicketStatus.DiscardedAwaitingMint),
             "the late burn leg landed on a discarded pair, which still owes its mint leg"
         );
         assertFalse(boundCompliance.isIssuancePaused(polygon), "a first leg commits nothing, so it breaches nothing");
         assertFalse(boundCompliance.isIssuancePaused(optimism));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "a late burn leg holds all the same");
-        assertEq(token.inTransitOf(late), 95);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 0, "nothing credited on the first leg");
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "a late burn leg holds all the same");
+        assertEq(token.onHoldOf(late), 95);
+        assertEq(token.awayBalanceOf(bobOptimism), 0, "nothing credited on the first leg");
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationSettled(late, optimism, 95);
+        emit EventsLib.ReceiptApplied(late, optimism, 95);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.LateReconciliation(late, optimism);
         optimismGateway.relay(mint);
 
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95);
-        assertEq(token.inTransitOf(late), 0);
-        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.LateReconciled));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95);
+        assertEq(token.onHoldOf(late), 0);
+        assertEq(token.awayBalanceOf(bobOptimism), 95);
         assertFalse(boundCompliance.isIssuancePaused(optimism), "95 against a cap of 100 breaches nothing");
     }
 
@@ -186,8 +186,8 @@ contract LateReconciliationTest is InteropSuiteTest {
 
         assertTrue(token.isInboundPaused(polygon));
         assertFalse(token.paused());
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
-        assertEq(token.bridgedBalanceOf(bobSat), CAP, "applied once");
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.LateReconciled));
+        assertEq(token.awayBalanceOf(bobSat), CAP, "applied once");
     }
 
     /// @notice The warning never reverts: a chain the manager already paused stays paused, the leg settles.
@@ -202,9 +202,9 @@ contract LateReconciliationTest is InteropSuiteTest {
         emit EventsLib.LateReconciliation(late, polygon);
         polygonGateway.relay(index);
 
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.LateReconciled));
         assertTrue(boundCompliance.isIssuancePaused(polygon));
-        assertEq(token.bridgedBalanceOf(bobSat), CAP);
+        assertEq(token.awayBalanceOf(bobSat), CAP);
     }
 
     function _issue(bytes memory from, bytes memory to, uint256 min, uint256 max) private returns (bytes32) {
@@ -216,8 +216,8 @@ contract LateReconciliationTest is InteropSuiteTest {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Discarded));
+        boundCompliance.cancelTickets(ids);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
     }
 
 }

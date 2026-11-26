@@ -64,10 +64,10 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.ledgerRecall(satellite1, user1, 40);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 20);
+        assertEq(token.awayBalanceOf(satellite1), 20);
         assertEq(token.balanceOf(user1), 80);
         assertEq(token.freeBalanceOf(user1), 80);
-        assertEq(token.totalBridged(), 20);
+        assertEq(token.totalAwayBalance(), 20);
         assertEq(token.totalSupply(), 100, "the supply never moves on a recall");
         _assertPartition();
     }
@@ -86,8 +86,8 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.ledgerRecall(satellite1, user1, 60);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.awayBalanceOf(satellite1), 0);
+        assertEq(token.totalAwayBalance(), 0);
         assertEq(token.balanceOf(user1), 100);
         _assertPartition();
     }
@@ -98,7 +98,7 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.ledgerRecall(satellite1, user1, 0);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 60);
+        assertEq(token.awayBalanceOf(satellite1), 60);
     }
 
     /// @dev Which native wallet receives is the flow's decision (same identity as the burned wallet); the ledger
@@ -138,8 +138,8 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         vm.stopPrank();
 
         assertEq(token.balanceOf(user1), 100);
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.awayBalanceOf(satellite1), 0);
+        assertEq(token.totalAwayBalance(), 0);
         assertEq(token.totalSupply(), 100);
     }
 

@@ -41,7 +41,7 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
@@ -51,7 +51,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /// @dev A validation leg is pinned to the gateway and the peer it was sent to. A peer change does not strand
 ///      it, and closing the chain stops it like every other message from that chain.
 ///      The validations are dispatched by the token alone, never issued by the compliance, so a leg that
-///      passes the transport reaches `handleSettlement`, which is what these tests read.
+///      passes the transport reaches `receiveReceipt`, which is what these tests read.
 contract PinnedOriginTest is InteropSuiteTest {
 
     ERC7786GatewayMock gateway;
@@ -77,12 +77,9 @@ contract PinnedOriginTest is InteropSuiteTest {
         token.unpause();
     }
 
-    function _settlementFrom(address author, bytes32 validationId) private returns (uint256) {
+    function _settlementFrom(address author, bytes32 ticketId) private returns (uint256) {
         return _queue(
-            gateway,
-            author,
-            token,
-            MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount))
+            gateway, author, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(ticketId, POLYGON, amount))
         );
     }
 
@@ -92,7 +89,7 @@ contract PinnedOriginTest is InteropSuiteTest {
     }
 
     function _expectHandled() private {
-        vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 1);
+        vm.expectCall(compliance, abi.encodeWithSelector(IReceiptHandler.receiveReceipt.selector), 1);
     }
 
     function _expectNotPeer(address author) private {

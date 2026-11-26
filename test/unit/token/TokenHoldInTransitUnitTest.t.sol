@@ -62,11 +62,11 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
     function test_holdInTransit_RevertWhen_CallerIsNotTheBoundCompliance() public {
         vm.prank(agent);
         vm.expectRevert(ErrorsLib.OnlyBoundCompliance.selector);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
 
         vm.prank(user1);
         vm.expectRevert(ErrorsLib.OnlyBoundCompliance.selector);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
     }
 
     // ==== hold Tests ====
@@ -75,12 +75,12 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.HeldInTransit(keccak256(satellite1), VALIDATION_ID, satellite1, 30);
         vm.prank(compliance);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 30, "the wallet no longer holds it");
-        assertEq(token.inTransitOf(VALIDATION_ID), 30, "the validation does");
-        assertEq(token.totalInTransit(), 30);
-        assertEq(token.totalBridged(), 60, "still bridged");
+        assertEq(token.awayBalanceOf(satellite1), 30, "the wallet no longer holds it");
+        assertEq(token.onHoldOf(VALIDATION_ID), 30, "the validation does");
+        assertEq(token.totalOnHold(), 30);
+        assertEq(token.totalAwayBalance(), 60, "still bridged");
         assertEq(token.totalSupply(), 100, "still issued");
         assertEq(token.balanceOf(user1), 40);
         _assertPartition();
@@ -88,28 +88,28 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
 
     function test_holdInTransit_Success_WhenTheWholePositionIsBurned() public {
         vm.prank(compliance);
-        token.holdInTransit(satellite1, 60, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 60, VALIDATION_ID, 0);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
-        assertEq(token.inTransitOf(VALIDATION_ID), 60);
+        assertEq(token.awayBalanceOf(satellite1), 0);
+        assertEq(token.onHoldOf(VALIDATION_ID), 60);
         _assertPartition();
     }
 
     function test_holdInTransit_RevertWhen_TheSatelliteSenderHasNotEnoughBridged() public {
         vm.prank(compliance);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, satellite1, 60, 61));
-        token.holdInTransit(satellite1, 61, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 61, VALIDATION_ID, 0);
     }
 
     function test_holdInTransit_RevertWhen_TheValidationAlreadyHolds() public {
         vm.startPrank(compliance);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TransitAlreadyHeld.selector, VALIDATION_ID));
-        token.holdInTransit(satellite1, 10, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 10, VALIDATION_ID, 0);
         vm.stopPrank();
 
-        assertEq(token.inTransitOf(VALIDATION_ID), 30, "held once");
+        assertEq(token.onHoldOf(VALIDATION_ID), 30, "held once");
     }
 
     function test_holdInTransit_RevertWhen_TheSenderIsNative() public {
@@ -117,53 +117,53 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
 
         vm.prank(compliance);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
-        token.holdInTransit(nativeUser1, 10, VALIDATION_ID, 0);
+        token.putOnHold(nativeUser1, 10, VALIDATION_ID, 0);
     }
 
     // ==== release Tests ====
 
     function test_settleValidation_Success_WhenTheMintLegReleasesTheHold() public {
         vm.startPrank(compliance);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
 
         vm.expectEmit(true, true, true, true, address(token));
         emit EventsLib.BridgedTransfer(
             keccak256(satellite1), keccak256(satellite3), VALIDATION_ID, satellite1, satellite3, 30
         );
-        token.settleValidation(satellite1, satellite3, 30, VALIDATION_ID);
+        token.finishMove(satellite1, satellite3, 30, VALIDATION_ID);
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 30, "not debited twice");
-        assertEq(token.bridgedBalanceOf(satellite3), 30, "credited from the hold");
-        assertEq(token.inTransitOf(VALIDATION_ID), 0);
-        assertEq(token.totalInTransit(), 0);
-        assertEq(token.totalBridged(), 60);
+        assertEq(token.awayBalanceOf(satellite1), 30, "not debited twice");
+        assertEq(token.awayBalanceOf(satellite3), 30, "credited from the hold");
+        assertEq(token.onHoldOf(VALIDATION_ID), 0);
+        assertEq(token.totalOnHold(), 0);
+        assertEq(token.totalAwayBalance(), 60);
         assertEq(token.totalSupply(), 100);
         _assertPartition();
     }
 
     function test_settleValidation_RevertWhen_TheSettledAmountIsNotTheHeldOne() public {
         vm.startPrank(compliance);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TransitAmountMismatch.selector, VALIDATION_ID, 30, 31));
-        token.settleValidation(satellite1, satellite3, 31, VALIDATION_ID);
+        token.finishMove(satellite1, satellite3, 31, VALIDATION_ID);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TransitAmountMismatch.selector, VALIDATION_ID, 30, 29));
-        token.settleValidation(satellite1, satellite3, 29, VALIDATION_ID);
+        token.finishMove(satellite1, satellite3, 29, VALIDATION_ID);
         vm.stopPrank();
 
-        assertEq(token.inTransitOf(VALIDATION_ID), 30, "still held");
+        assertEq(token.onHoldOf(VALIDATION_ID), 30, "still held");
     }
 
     function test_settleValidation_Success_WhenAnotherValidationSettlesBesideTheHold() public {
         vm.startPrank(compliance);
-        token.holdInTransit(satellite1, 30, VALIDATION_ID, 0);
-        token.settleValidation(satellite1, satellite2, 20, bytes32(uint256(VALIDATION_ID) + 1));
+        token.putOnHold(satellite1, 30, VALIDATION_ID, 0);
+        token.finishMove(satellite1, satellite2, 20, bytes32(uint256(VALIDATION_ID) + 1));
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 10, "the other one debits the wallet as usual");
-        assertEq(token.bridgedBalanceOf(satellite2), 20);
-        assertEq(token.inTransitOf(VALIDATION_ID), 30, "the hold is untouched");
+        assertEq(token.awayBalanceOf(satellite1), 10, "the other one debits the wallet as usual");
+        assertEq(token.awayBalanceOf(satellite2), 20);
+        assertEq(token.onHoldOf(VALIDATION_ID), 30, "the hold is untouched");
         _assertPartition();
     }
 

@@ -109,16 +109,16 @@ abstract contract TokenLedgerBaseUnitTest is TokenBaseUnitTest {
     }
 
     /// @dev Conservation over every position the suite knows: the native balances, the bridged positions and
-    ///  the in-transit holds partition `totalSupply`, and `totalBridged` is the bridged sum plus the holds.
+    ///  the in-transit holds partition `totalSupply`, and `totalAwayBalance` is the bridged sum plus the holds.
     function _assertPartition() internal view {
-        uint256 bridgedSum = token.bridgedBalanceOf(satellite1) + token.bridgedBalanceOf(satellite2)
-            + token.bridgedBalanceOf(satellite3) + token.totalInTransit();
+        uint256 bridgedSum = token.awayBalanceOf(satellite1) + token.awayBalanceOf(satellite2)
+            + token.awayBalanceOf(satellite3) + token.totalOnHold();
         assertEq(
             token.balanceOf(user1) + token.balanceOf(user2) + bridgedSum,
             token.totalSupply(),
             "buckets do not sum to the supply"
         );
-        assertEq(bridgedSum, token.totalBridged(), "bridged positions and holds do not sum to totalBridged");
+        assertEq(bridgedSum, token.totalAwayBalance(), "bridged positions and holds do not sum to totalAwayBalance");
         assertEq(token.balanceOf(address(token)), 0, "the token holds no escrow");
     }
 

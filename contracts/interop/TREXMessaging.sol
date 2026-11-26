@@ -99,13 +99,13 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function routeFor(bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().routes[chainKey];
+    function receiptRouteFor(bytes32 chainKey) public view returns (address) {
+        return TREXMessagingLib.layout().receiptRoutes[chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
-    function fastRouteFor(bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().fastRoutes[chainKey];
+    function ticketRouteFor(bytes32 chainKey) public view returns (address) {
+        return TREXMessagingLib.layout().ticketRoutes[chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
@@ -119,8 +119,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function pinnedRouteFor(bytes32 validationId, bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().pinnedRoutes[validationId][chainKey];
+    function pinnedRouteFor(bytes32 ticketId, bytes32 chainKey) public view returns (address) {
+        return TREXMessagingLib.layout().pinnedRoutes[ticketId][chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
@@ -156,7 +156,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
             TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
 
-        if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
+        if (messageType == MessageTypesLib.Message.RECEIPT) {
             _handleSettlement(chainKey, body);
         } else {
             _handleBurnProof(chainKey, body);
@@ -169,7 +169,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     ///
     /// Left to the inheriting token, because the destination is something only it knows: its bound
     /// compliance, which owns the slot lifecycle. The body arrives encoded, already known to decode as
-    /// a `MessageTypesLib.SettlementNotification`; {TREXMessagingLib-forwardSettlement} delivers it.
+    /// a `MessageTypesLib.ReceiptMessage`; {TREXMessagingLib-forwardSettlement} delivers it.
     function _handleSettlement(bytes32 chainKey, bytes memory body) internal virtual;
 
     /// @dev Acts on a burn proof attributed to this token's peer on `chainKey`. The token's recall path.
@@ -183,11 +183,11 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     function _setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
-        TREXMessagingLib.setRoute(chainType, chainReference, gateway);
+        TREXMessagingLib.setReceiptRoute(chainType, chainReference, gateway);
     }
 
     function _setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
-        TREXMessagingLib.setFastRoute(chainType, chainReference, gateway);
+        TREXMessagingLib.setTicketRoute(chainType, chainReference, gateway);
     }
 
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
@@ -202,11 +202,11 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
     /// its final route.
-    function _sendComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes memory body)
+    function _sendComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes memory body)
         internal
         returns (bytes32 sendId)
     {
-        return TREXMessagingLib.sendComplianceValidation(chainKey, validationId, body);
+        return TREXMessagingLib.sendComplianceValidation(chainKey, ticketId, body);
     }
 
 }

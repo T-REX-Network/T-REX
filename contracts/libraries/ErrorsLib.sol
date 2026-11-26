@@ -87,10 +87,10 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
     error TokenCirculating();
-    error ValidationsPending();
-    error NothingInTransit(bytes32 validationId);
-    error ValidationNotStuck(bytes32 validationId, uint8 status);
-    error ValidationNotYetResolvable(bytes32 validationId, uint64 resolvableAt);
+    error TicketsStillReserved();
+    error NothingInTransit(bytes32 ticketId);
+    error ValidationNotStuck(bytes32 ticketId, uint8 status);
+    error ValidationNotYetResolvable(bytes32 ticketId, uint64 resolvableAt);
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -123,9 +123,9 @@ library ErrorsLib {
     /// @dev `resend` knows two kinds: 0, a delegation, and 1, a recall.
     error UnknownResendKind(uint8 kind);
     /// @dev The validation already holds an amount in transit; a burn leg moves it once.
-    error TransitAlreadyHeld(bytes32 validationId);
+    error TransitAlreadyHeld(bytes32 ticketId);
     /// @dev The amount settled under the validation is not the one its burn leg put in transit.
-    error TransitAmountMismatch(bytes32 validationId, uint256 held, uint256 amount);
+    error TransitAmountMismatch(bytes32 ticketId, uint256 held, uint256 amount);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
@@ -154,10 +154,10 @@ library ErrorsLib {
     error ApproversNotSet();
     error NotAnApprover(address caller);
     error NotTheNextApprover(address caller, address expected);
-    error UnknownApprovalRequest(bytes32 validationId);
-    error ApproversChanged(bytes32 validationId);
-    error NotFullyApproved(bytes32 validationId);
-    error AlreadyFullyApproved(bytes32 validationId);
+    error UnknownApprovalRequest(bytes32 ticketId);
+    error ApproversChanged(bytes32 ticketId);
+    error NotFullyApproved(bytes32 ticketId);
+    error AlreadyFullyApproved(bytes32 ticketId);
     error ExpiryInPast(uint64 expiry);
     error TransferNotApproved(address from, address to, uint256 amount);
 
@@ -233,7 +233,7 @@ library ErrorsLib {
     // TREXRegistry Errors
     error Deprecated();
 
-    // TransferValidation Errors
+    // Tickets Errors
     /// @dev A `SPENDER` module refused the spender named on the requested validation.
     error ValidationSpenderRefused(bytes spender);
     /// @dev A validity or reconciliation window must be positive.
@@ -247,7 +247,7 @@ library ErrorsLib {
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
-    error ReconciliationWindowNotSet(bytes32 chainKey);
+    error WaitingTimeNotSet(bytes32 chainKey);
     /// @dev The requested range is inverted.
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     /// @dev The balance cap, the modules or the clamp left no amount to authorize.
@@ -258,52 +258,52 @@ library ErrorsLib {
     error UnverifiedWallet(bytes wallet);
     /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
     error SenderNotOnSatellite(bytes wallet);
-    /// @dev Only a validation stored `AwaitingApproval` can be answered; `status` is the one found instead.
-    error ValidationNotAwaitingApproval(bytes32 validationId, uint8 status);
+    /// @dev Only a validation stored `WaitingForApproval` can be answered; `status` is the one found instead.
+    error ValidationNotAwaitingApproval(bytes32 ticketId, uint8 status);
     /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
     error NotTheApprovalModule(address caller);
-    /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
-    ///  it is `AwaitingMint`; `status` is the `ValidationStatus` found instead.
-    error ValidationNotResendable(bytes32 validationId, uint8 status);
-    /// @dev The deadline for a resend has passed: `expiry` while `Pending`, since past it no satellite may execute;
-    ///  `releaseAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
-    error ValidationExpired(bytes32 validationId, uint64 deadline);
+    /// @dev A leg can be sent again while the validation is stored `Open`, or, the recipient's leg only, while
+    ///  it is `AwaitingMint`; `status` is the `TicketStatus` found instead.
+    error ValidationNotResendable(bytes32 ticketId, uint8 status);
+    /// @dev The deadline for a resend has passed: `validUntil` while `Open`, since past it no satellite may execute;
+    ///  `waitingEndsAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
+    error ValidationExpired(bytes32 ticketId, uint64 deadline);
     /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
-    error ChainNotPartOfValidation(bytes32 validationId, bytes32 chainKey);
+    error ChainNotPartOfValidation(bytes32 ticketId, bytes32 chainKey);
     /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id. The bound token is part
     ///  of the hash too, so a compliance bound to another token since the issuance gets this for every old id.
-    error ValidationBodyMismatch(bytes32 validationId);
+    error ValidationBodyMismatch(bytes32 ticketId);
     /// @dev The id was never issued by this compliance.
-    error UnknownValidation(bytes32 validationId);
+    error UnknownTicket(bytes32 ticketId);
     /// @dev `keccak256(canonicalKey(from), salt)` is already recorded: the same request was sent twice, or the
     ///  salt was reused for another movement out of the same wallet.
-    error ValidationAlreadyRequested(bytes32 validationId);
+    error TicketAlreadyWritten(bytes32 ticketId);
     /// @dev No leg is parked under this id for this chain, or nothing is issued under the id yet.
-    error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
+    error NoWaitingReceipt(bytes32 ticketId, bytes32 chainKey);
     /// @dev A leg `chainKey` reported for this validation is parked: it is settled first, so that the validation is
     ///  not discarded over a report this chain already holds.
-    error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
-    /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
-    error ValidationNotDiscardable(bytes32 validationId, uint8 status);
+    error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
+    /// @dev Only a stored `Open` validation can be discarded; `status` is the `TicketStatus` found instead.
+    error TicketNotCancellable(bytes32 ticketId, uint8 status);
     /// @dev The validation's release deadline has not passed yet.
-    error ValidationNotReleasable(bytes32 validationId, uint64 releaseAt);
-    /// @dev Between `releaseAt` and the end of the second window only the keeper may discard; `publicAt` is when
+    error CancelNotDue(bytes32 ticketId, uint64 waitingEndsAt);
+    /// @dev Between `waitingEndsAt` and the end of the second window only the keeper may discard; `publicAt` is when
     ///  anyone may.
-    error ValidationNotPubliclyDiscardable(bytes32 validationId, uint64 publicAt);
+    error ValidationNotPubliclyDiscardable(bytes32 ticketId, uint64 publicAt);
     /// @dev The second leg of a cross-chain validation does not repeat the first one's amount.
-    error SettlementAmountMismatch(bytes32 validationId, uint256 expected, uint256 amount);
+    error SettlementAmountMismatch(bytes32 ticketId, uint256 expected, uint256 amount);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
-    error ChainInboundPaused(bytes32 chainKey);
+    error AwayChainBlocked(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     /// @dev `gateway` would be both the fast and the final route of `chainKey`.
     error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
     /// @dev `gateway` is the fast route of `chainKey`, which carries validations out and nothing in.
-    error GatewayIsFastRoute(address gateway, bytes32 chainKey);
-    error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, bytes32 validationId, bytes32 chainKey);
-    error GatewayNotTrusted(address gateway);
+    error WrongRoute(address gateway, bytes32 chainKey);
+    error BridgeNotOnRoute(address gateway, bytes32 chainKey);
+    error BridgeNotPinned(address gateway, bytes32 ticketId, bytes32 chainKey);
+    error BridgeNotTrusted(address gateway);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
@@ -312,6 +312,6 @@ library ErrorsLib {
     error SenderNotCompliance(address sender);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
     error UnsupportedMessageVersion(uint8 messageVersion);
-    error ValidationAlreadyRouted(bytes32 validationId, bytes32 chainKey, address gateway);
+    error ValidationAlreadyRouted(bytes32 ticketId, bytes32 chainKey, address gateway);
 
 }

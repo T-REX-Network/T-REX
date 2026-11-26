@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -56,14 +56,14 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         polygonGateway.relay(first);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementDuplicate(id, polygon);
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         polygonGateway.relay(again);
 
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(again)), "consumed");
         _assertNothingPaused();
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "debited once");
-        assertEq(token.bridgedBalanceOf(bobSat), 95, "credited once");
-        assertEq(_status(id), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "debited once");
+        assertEq(token.awayBalanceOf(bobSat), 95, "credited once");
+        assertEq(_status(id), uint8(ITickets.TicketStatus.Done));
     }
 
     /// @dev The same leg any number of times is still one movement.
@@ -74,7 +74,7 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         }
 
         _assertNothingPaused();
-        assertEq(token.bridgedBalanceOf(bobSat), 95);
+        assertEq(token.awayBalanceOf(bobSat), 95);
     }
 
     function test_handleSettlement_PausesTheChain_WhenAnotherBodyArrivesForASettledId() public {
@@ -90,7 +90,7 @@ contract DuplicateSettlementTest is InteropSuiteTest {
 
         assertTrue(token.isInboundPaused(polygon));
         assertFalse(token.paused(), "the token keeps running");
-        assertEq(token.bridgedBalanceOf(bobSat), 95, "applied once, at the first amount");
+        assertEq(token.awayBalanceOf(bobSat), 95, "applied once, at the first amount");
     }
 
     /// @dev A duplicate does not clear a conflict either: the conflicting body still pauses after it.
@@ -117,13 +117,13 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         token.setInboundPaused(polygon, false);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementDuplicate(id, polygon);
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         polygonGateway.relay(again);
 
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(again)), "consumed");
         _assertNothingPaused();
-        assertEq(token.bridgedBalanceOf(bobSat), 0, "nothing applied");
-        assertEq(_status(id), uint8(ITransferValidation.ValidationStatus.Pending), "the validation stands");
+        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
+        assertEq(_status(id), uint8(ITickets.TicketStatus.Open), "the validation stands");
     }
 
     /* ----- Two legs ----- */
@@ -135,16 +135,16 @@ contract DuplicateSettlementTest is InteropSuiteTest {
 
         uint256 again = _liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95));
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementDuplicate(id, polygon);
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         polygonGateway.relay(again);
 
         _assertNothingPaused();
-        assertEq(token.inTransitOf(id), 95, "held once");
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE - 95, "debited once");
+        assertEq(token.onHoldOf(id), 95, "held once");
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "debited once");
 
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95)));
-        assertEq(_status(id), uint8(ITransferValidation.ValidationStatus.Settled));
-        assertEq(token.bridgedBalanceOf(bobOptimism), 95);
+        assertEq(_status(id), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobOptimism), 95);
     }
 
     function test_handleSettlement_CreditsOnce_WhenTheMintLegIsDeliveredTwice() public {
@@ -154,11 +154,11 @@ contract DuplicateSettlementTest is InteropSuiteTest {
 
         uint256 again = _liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, 95));
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementDuplicate(id, optimism);
+        emit EventsLib.ReceiptDuplicate(id, optimism);
         optimismGateway.relay(again);
 
         _assertNothingPaused();
-        assertEq(token.bridgedBalanceOf(bobOptimism), 95, "credited once");
+        assertEq(token.awayBalanceOf(bobOptimism), 95, "credited once");
     }
 
     /// @dev The burn leg landed, the mint never came and the keeper resolved the pair, returning the burned
@@ -171,14 +171,14 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         vm.warp(issuedAt + VALIDITY_WINDOW + 2 * OPTIMISM_WINDOW + 1);
         vm.prank(keeper);
         boundCompliance.resolveStuckValidation(id);
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "returned");
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE, "returned");
 
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, 95)));
 
         _assertNothingPaused();
-        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE, "returned once");
-        assertEq(token.inTransitOf(id), 0);
-        assertEq(_status(id), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE, "returned once");
+        assertEq(token.onHoldOf(id), 0);
+        assertEq(_status(id), uint8(ITickets.TicketStatus.Resolved));
     }
 
 }

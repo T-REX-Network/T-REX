@@ -67,8 +67,8 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 50, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 10);
-        assertEq(token.totalBridged(), 10);
+        assertEq(token.awayBalanceOf(satellite1), 10);
+        assertEq(token.totalAwayBalance(), 10);
         assertEq(token.balanceOf(user2), 50);
         assertEq(token.freeBalanceOf(user2), 50, "the credit lands free, never frozen");
         assertEq(token.getFrozenTokens(user2), 0);
@@ -116,7 +116,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
 
         assertEq(free2, free, "free balance diverged");
         assertEq(bridged2, bridged, "bridged position diverged");
-        assertEq(bridgedTotal2, bridgedTotal, "totalBridged diverged");
+        assertEq(bridgedTotal2, bridgedTotal, "totalAwayBalance diverged");
         assertEq(supply2, supply, "totalSupply diverged");
     }
 
@@ -124,8 +124,8 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 60, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.awayBalanceOf(satellite1), 0);
+        assertEq(token.totalAwayBalance(), 0);
         assertEq(token.balanceOf(user2), 60);
         _assertPartition();
     }
@@ -138,8 +138,8 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 0);
-        assertEq(token.bridgedBalanceOf(satellite3), 50);
-        assertEq(token.totalBridged(), 60);
+        assertEq(token.awayBalanceOf(satellite3), 50);
+        assertEq(token.totalAwayBalance(), 60);
         _assertPartition();
     }
 
@@ -149,7 +149,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 0, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 60);
+        assertEq(token.awayBalanceOf(satellite1), 60);
         assertEq(token.balanceOf(user2), 0);
     }
 
@@ -209,7 +209,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
 
     function _buckets() private view returns (uint256 free, uint256 bridged, uint256 bridgedTotal, uint256 supply) {
         return
-            (token.freeBalanceOf(user2), token.bridgedBalanceOf(satellite1), token.totalBridged(), token.totalSupply());
+            (token.freeBalanceOf(user2), token.awayBalanceOf(satellite1), token.totalAwayBalance(), token.totalSupply());
     }
 
 }

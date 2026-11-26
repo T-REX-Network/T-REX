@@ -41,14 +41,14 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
-import { TransferValidationHarness } from "test/integration/helpers/TransferValidationHarness.sol";
+import { TicketsHarness } from "test/integration/helpers/TicketsHarness.sol";
 import { RecordingModule, RuleOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ModularComplianceBaseUnitTest } from "test/unit/compliance/helpers/ModularComplianceBaseUnitTest.t.sol";
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
@@ -68,13 +68,13 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
     address internal aliceIdentity = makeAddr("AliceIdentity");
     address internal bobIdentity = makeAddr("BobIdentity");
 
-    TransferValidationHarness internal reversed;
+    TicketsHarness internal reversed;
     RuleOnlyModule internal a;
     RuleOnlyModule internal b;
 
     function setUp() public override {
         super.setUp();
-        reversed = TransferValidationHarness(
+        reversed = TicketsHarness(
             BeaconProxyDeployer.newProxy(
                 mcBeacon,
                 abi.encodeCall(ModularCompliance.init, (token, address(suiteManager), new address[](0), new bytes[](0)))
@@ -95,9 +95,9 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
 
         bytes32 polygon = _evmChainKey(POLYGON);
         mc.setDefaultValidityWindow(1 hours);
-        mc.setReconciliationWindow(polygon, 30 minutes);
+        mc.setWaitingTime(polygon, 30 minutes);
         reversed.setDefaultValidityWindow(1 hours);
-        reversed.setReconciliationWindow(polygon, 30 minutes);
+        reversed.setWaitingTime(polygon, 30 minutes);
 
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
@@ -120,7 +120,7 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         }
         // The wallet's room is the token's now: what it can still send is its balance less any reservation.
         vm.mockCall(token, abi.encodeWithSignature("availableOf(bytes)", from), abi.encode(uint256(balance)));
-        vm.mockCall(token, abi.encodeWithSignature("reserveForValidation(bytes,uint256)"), "");
+        vm.mockCall(token, abi.encodeWithSignature("reserveForTicket(bytes,uint256)"), "");
         a.setAllowedAmount(allowedByA);
         b.setAllowedAmount(allowedByB);
 
@@ -132,19 +132,19 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
                 expectedMin > expectedMax ? ErrorsLib.EmptyValidationRange.selector : ErrorsLib.ZeroValue.selector;
             vm.prank(aliceIdentity);
             vm.expectPartialRevert(expected);
-            mc.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
+            mc.askToMove(from, to, requestedMin, requestedMax, "", _salt());
             vm.prank(aliceIdentity);
             vm.expectPartialRevert(expected);
-            reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
+            reversed.askToMove(from, to, requestedMin, requestedMax, "", _salt());
             return;
         }
 
         vm.prank(aliceIdentity);
-        bytes32 id = mc.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
+        bytes32 id = mc.askToMove(from, to, requestedMin, requestedMax, "", _salt());
         vm.prank(aliceIdentity);
-        bytes32 reversedId = reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
-        ITransferValidation.Validation memory validation = mc.validationOf(id);
-        ITransferValidation.Validation memory reversedValidation = reversed.validationOf(reversedId);
+        bytes32 reversedId = reversed.askToMove(from, to, requestedMin, requestedMax, "", _salt());
+        ITickets.Ticket memory validation = mc.ticketOf(id);
+        ITickets.Ticket memory reversedValidation = reversed.ticketOf(reversedId);
 
         assertEq(validation.amountMin, requestedMin, "the caller's minimum is never raised");
         assertLe(validation.amountMax, requestedMax, "never wider than the request");
