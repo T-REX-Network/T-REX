@@ -38,8 +38,10 @@ A module may name any combination. It inherits `AbstractModuleUpgradeable`, whic
 neutrally, and overrides only the methods its types cover.
 
 The order on a native movement is: `canTransfer` asks the `TRANSFER_CHECK` modules; the token moves the balances and
-calls the compliance; the compliance moves the positions and tells the `AFTER` modules. A settlement asks
-nobody and tells the `AFTER` modules once the positions moved. The issuance of a validation asks `TRANSFER_CHECK`
+calls the compliance; the compliance moves the positions and tells the `AFTER` modules. A settlement tells the
+`AFTER` modules once the positions moved. It asks the `TRANSFER_CHECK` modules again only where home still decides:
+whether the second half of a move to another chain goes to the receiver or back to the sender, and, announced with
+`MoveBreachedRule` and never refused, a move inside one away chain. The issuance of a validation asks `TRANSFER_CHECK`
 and `SPENDER` only: nothing moves there.
 
 Which to pick. A bound on how much may move is a `TRANSFER_CHECK`: it returns a number, so it narrows a cross-chain
@@ -91,7 +93,7 @@ struct TransferContext {
     uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION, RECALL; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
-    bytes   data;           // empty today; room for a later compliance to say more without a selector change
+    bytes   data;           // abi.encode(bytes32 fromChainKey) on a move between chains, empty on a native one
 }
 ```
 
@@ -134,12 +136,17 @@ leaves it out, the way it leaves out `FORCED_TRANSFER` and `RECOVERY`. A tracker
 change of ownership, a holder count for instance, records it like any other movement. Write that choice
 in the module; never let it fall out of a `switch` with no default.
 
-`data` is empty and reserved. The struct is a parameter of every module function, so it is part of their
-selectors: a field added once modules are deployed changes the selectors and breaks every one of them. A
+`data` is room for what the struct does not carry. The struct is a parameter of every module function, so it is part
+of their selectors: a field added once modules are deployed changes the selectors and breaks every one of them. A
 new fact goes in `data` instead. The compliance that fills it documents the shape, an `abi.encode`d tuple,
 and only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when a
 later fact is added behind it. A module decodes `data` only when it knows which compliance filled it, and
 ignores it otherwise.
+
+`ModularCompliance` fills it on every move between chains, at the ask, when the rules are asked again and when the
+move is done: `abi.encode(bytes32 fromChainKey)`, the key of the chain the money leaves (`MessageTypesLib.chainKey`),
+home's own key for a home wallet's move out. The wallet keys cannot say it: an away wallet's key is a hash of its
+envelope. A native movement leaves `data` empty.
 
 A `SPENDER` module answers about `ctx.spender`, a wallet on this chain or on a satellite, so one
 policy covers `transferFrom` here and a validation a satellite operator will execute. The shipped
@@ -233,6 +240,31 @@ Limits, stated plainly:
 - **Mints are not judged**, being the issuer's own action, though they move holdings like a transfer does. An
   issuer whose rule covers total holdings checks it before minting.
 - **Forced transfers, recoveries and relocations** between one identity's native wallets are not judged either.
+
+## A limit per away chain
+
+The caps on the ticket route bound what a home reorg can cost. They do not bound a hostile away token, which can
+still report a move made on a home block that was dropped. `AwayChainVolumeModule` bounds what one away chain can
+make leave in a window, per compliance:
+
+- The compliance owner sets a limit per away chain with `setVolumeLimit(chainKey, limitPerWindow, window)`, through
+  `addAndSetModule` or `callModuleFunction` (so, like every module change, while no ticket holds a reservation). The
+  window is in seconds and must be positive (`ZeroDuration`); a new length also moves the end of the window running
+  now. `VolumeLimitSet` says so; `volumeLimitOf(compliance, chainKey)` reads it. To lift a limit, set
+  `type(uint256).max`. A chain with no limit set is neither limited nor counted.
+- `checkTransfer` reads the chain the money leaves from `data` and answers the room left on it in the current window:
+  the ask is narrowed to it, and refused once nothing is left. So is home's decision for a second half: a move whose
+  chain is full by then goes back to its sender. A native movement carries no chain and is never limited.
+- `afterTransfer` counts a move once, when it is done, on the chain it left. A window starts at the first move counted
+  after the last window ended, and the next window opens the chain again.
+
+Limits, stated plainly:
+
+- **Only finished moves count.** Tickets open at the same time each see the same room, so one window can carry the
+  limit plus what was open when it filled. The ask limits per identity bound how many can be open.
+- **A relocation is counted but never narrowed.** The rules are not asked about a move between one identity's own
+  wallets, so it passes whatever the room, and fills the room of the moves after it.
+- **Counting starts at binding,** and for a chain at its first limit. An unbind discards the limits and the counts.
 
 ## Two rules a module must follow
 

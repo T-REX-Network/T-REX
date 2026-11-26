@@ -221,7 +221,7 @@ library ErrorsLib {
     // Tickets Errors
     /// @dev A `SPENDER` module refused the spender named on the requested validation.
     error ValidationSpenderRefused(bytes spender);
-    /// @dev The window over which asks are counted must be positive.
+    /// @dev A window must be positive: the one asks are counted over, or a volume rule module's window.
     error ZeroDuration();
     /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused,
     ///  none whose receipt may be in flight is cancelled, and a waiting receipt is applied only once it is unpaused.

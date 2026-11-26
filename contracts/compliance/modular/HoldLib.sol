@@ -458,7 +458,7 @@ library HoldLib {
         address token
     ) private view returns (IModule.TransferContext memory) {
         return TransferContextLib.settlement(
-            address(this),
+            ticket.fromChainKey,
             MovementKindLib.CROSS_CHAIN,
             ticket.fromIdentity,
             address(_registryOf(token).resolveIdentity(to)),
@@ -675,7 +675,7 @@ library HoldLib {
         ITickets.Ticket storage earlierHold = store.validations[earlierHoldId];
         uint256 carried = ticket.carriedAmount;
         IModule.TransferContext memory move = TransferContextLib.settlement(
-            address(this),
+            earlierHold.fromChainKey,
             MovementKindLib.CROSS_CHAIN,
             earlierHold.fromIdentity,
             earlierHold.toIdentity,
@@ -715,7 +715,7 @@ library HoldLib {
         uint256 applied = ticket.moved;
         if (credit < applied) applied = credit;
         IModule.TransferContext memory move = TransferContextLib.settlement(
-            address(this),
+            ticket.fromChainKey,
             MovementKindLib.CROSS_CHAIN,
             ticket.fromIdentity,
             ticket.toIdentity,

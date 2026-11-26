@@ -130,13 +130,16 @@ interface IModule {
         /// on a native movement, the spender named on a validation, at its issuance and at its settlement.
         /// Empty when the sender executes itself, which is every direct transfer, mint and burn.
         bytes spender;
-        /// Room for what a later compliance has to say that this struct does not carry yet. Empty today.
+        /// Room for what a later compliance has to say that this struct does not carry yet.
         /// This struct is a parameter of every module function, so it is part of their selectors: a field
         /// added after modules are deployed changes the selectors and breaks every one of them. A new fact
         /// goes here instead. The compliance that fills it documents the shape as an `abi.encode`d tuple and
         /// only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when
         /// a later fact is added. A module decodes `data` only when it knows the compliance that fills it,
         /// and ignores it otherwise.
+        /// `ModularCompliance` fills it on a move between chains, at the ask, when the rules are asked again and
+        /// when the move is done: `abi.encode(bytes32 fromChainKey)`, the key (`MessageTypesLib.chainKey`) of the
+        /// chain the money leaves, home's own key for a home wallet. Empty on a native movement.
         bytes data;
     }
 

@@ -544,7 +544,7 @@ library ReceiptLib {
         TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
 
         IModule.TransferContext memory context = TransferContextLib.settlement(
-            address(this),
+            ticket.fromChainKey,
             MovementKindLib.CROSS_CHAIN,
             ticket.fromIdentity,
             ticket.toIdentity,

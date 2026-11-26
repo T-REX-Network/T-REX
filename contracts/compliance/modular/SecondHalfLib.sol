@@ -519,7 +519,7 @@ library SecondHalfLib {
 
         bytes32 homeWalletId = WalletKeyLib.walletId(homeWallet);
         IModule.TransferContext memory context = TransferContextLib.settlement(
-            address(this), MovementKindLib.RECALL, identity, identity, homeWalletId, homeWalletId, amount, ""
+            ticket.fromChainKey, MovementKindLib.RECALL, identity, identity, homeWalletId, homeWalletId, amount, ""
         );
         ModuleSetLib.callAfterTransfer(context);
     }
@@ -576,7 +576,7 @@ library SecondHalfLib {
         returns (IModule.TransferContext memory)
     {
         return TransferContextLib.settlement(
-            address(this),
+            ticket.fromChainKey,
             _kindOf(ticket),
             ticket.fromIdentity,
             toIdentity,
@@ -644,7 +644,7 @@ library SecondHalfLib {
         returns (IModule.TransferContext memory)
     {
         return TransferContextLib.settlement(
-            address(this),
+            ticket.fromChainKey,
             MovementKindLib.CROSS_CHAIN,
             ticket.fromIdentity,
             ticket.toIdentity,

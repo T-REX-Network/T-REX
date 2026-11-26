@@ -41,6 +41,7 @@ pragma solidity 0.8.30;
 
 import { Script, console } from "@forge-std/Script.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { AwayChainVolumeModule } from "contracts/compliance/modular/modules/AwayChainVolumeModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { SpenderVerificationModule } from "contracts/compliance/modular/modules/SpenderVerificationModule.sol";
@@ -54,8 +55,10 @@ interface ITokenCompliance {
 }
 
 /// @title DeployComplianceModules
-/// @notice Deploys the three standard compliance modules (spender verification, spender whitelist,
-///         max balance per identity) and binds them to every supplied token's ModularCompliance.
+/// @notice Deploys the four standard compliance modules (spender verification, spender whitelist,
+///         max balance per identity, volume per away chain) and binds them to every supplied token's
+///         ModularCompliance. The volume module is bound with no limit: the compliance owner sets one per away chain
+///         with `setVolumeLimit` through `callModuleFunction`, since the chain keys belong to each deployment.
 ///
 /// Each module is deployed once behind a `ModuleProxy` and shared across all the tokens:
 /// the modules key their state per-compliance by bind nonce, so a single instance serves
@@ -112,6 +115,13 @@ contract DeployComplianceModules is Script {
             )
         );
 
+        AwayChainVolumeModule volumeImpl = new AwayChainVolumeModule();
+        AwayChainVolumeModule volume = AwayChainVolumeModule(
+            address(
+                new ModuleProxy(address(volumeImpl), abi.encodeCall(AwayChainVolumeModule.initialize, (accessManager)))
+            )
+        );
+
         bytes[] memory maxBalanceSettings = new bytes[](1);
         maxBalanceSettings[0] = abi.encodeCall(MaxBalancePerIdentityModule.setMaxBalance, (MAX_BALANCE));
 
@@ -121,6 +131,7 @@ contract DeployComplianceModules is Script {
             IModularCompliance(compliance).addModule(address(verification));
             IModularCompliance(compliance).addModule(address(whitelist));
             IModularCompliance(compliance).addAndSetModule(address(maxBalance), maxBalanceSettings);
+            IModularCompliance(compliance).addModule(address(volume));
             console.log("Bound modules to token:", tokens[i], "compliance:", compliance);
         }
 
@@ -132,6 +143,8 @@ contract DeployComplianceModules is Script {
         console.log("SpenderWhitelistModule proxy:   ", address(whitelist));
         console.log("MaxBalancePerIdentityModule impl: ", address(maxBalanceImpl));
         console.log("MaxBalancePerIdentityModule proxy:", address(maxBalance));
+        console.log("AwayChainVolumeModule impl:       ", address(volumeImpl));
+        console.log("AwayChainVolumeModule proxy:      ", address(volume));
     }
 
 }

@@ -466,7 +466,7 @@ library TicketLib {
     function _capAtWhatTheRulesAllow(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
         if (ComplianceLedgerLib.isRelocation(draft.fromIdentity, draft.toIdentity)) return;
         IModule.TransferContext memory ctx = TransferContextLib.issuance(
-            address(this),
+            draft.fromChainKey,
             draft.fromIdentity,
             draft.toIdentity,
             draft.fromKey,
@@ -486,7 +486,7 @@ library TicketLib {
     function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
         if (spender.length == 0) return;
         IModule.TransferContext memory ctx = TransferContextLib.issuance(
-            address(this),
+            draft.fromChainKey,
             draft.fromIdentity,
             draft.toIdentity,
             draft.fromKey,
@@ -1052,7 +1052,7 @@ library TicketLib {
         );
 
         IModule.TransferContext memory ctx = TransferContextLib.issuance(
-            address(this),
+            draft.fromChainKey,
             draft.fromIdentity,
             draft.toIdentity,
             draft.fromKey,
