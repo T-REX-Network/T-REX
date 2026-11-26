@@ -29,7 +29,11 @@ issued the ticket, names the copy: two copies of one ask mined in two blocks sha
 `answer` says why a receipt says what it says, so a receipt of amount zero says why it is zero: `Executed` (the
 copy echoed was executed, for `amount`, possibly zero), `Expired` (never executed and past its valid until) or
 `StillOpen` (never executed, still before its valid until). A Lite reports `Executed` for every ticket it executed;
-home reads the other two once it asks a Lite for a receipt.
+home reads the other two once it asks a Lite for a receipt. A still open answer is not an answer to an ask: home
+raises the ticket's `seenValidUntil` up to its valid until plus the chain's full finality delivery and clock lead, and
+cancels only after an ask went unanswered for one waiting time. The Lite must ignore a ticket whose valid until is
+further ahead of its own clock than the validity window plus its lag budget, so a forged far valid until is never
+held.
 
 Every message travels through a gateway the network's `TrustedGatewayRegistry` trusts. The token accepts a settlement
 only from the chain's current peer, and a burn proof for an open recall only from the peer and through the gateway
@@ -135,7 +139,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| ticket | sender's identity, recipient's identity when the recipient is on the same away chain, or agent | `sendTicket(ticketId, chainKey, to, spender)`: while `Open` and before `validUntil`; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the issuance did, on the ticket route when one is set and on the receipt route otherwise, and only while the receipt route and the peer are still the ones the issuance pinned; refused while that away chain is blocked or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a ticket it holds |
+| ticket (an ask for its receipt) | anyone | `sendTicket(ticketId, chainKey, to, spender)`: while `Open`, three asks at most, the first one waiting time after the later of `validUntil` and `seenValidUntil`, each next one a waiting time later; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the ask did, on the ticket route when one is set and on the receipt route otherwise, and only while the receipt route and the peer are still the ones the ask pinned; refused while that away chain is blocked or the token is paused; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -145,7 +149,7 @@ A resend never retargets: it is refused (`PeerChanged`) once the chain's peer is
 was addressed to. A resend after a route switch is the expected way to recover a recall whose original gateway is gone.
 A ticket is the exception: its receipt is matched against the bridge and the peer it was pinned to, so after a route
 switch or a peer change the ticket is not resent (`ValidationAlreadyRouted`). Its reservation comes back through a
-cancel at `waitingEndsAt` and a new ticket is asked for. The ticket already sent keeps its receipt from the peer it
+cancel once an ask for its receipt went unanswered, and a new ticket is asked for. The ticket already sent keeps its receipt from the peer it
 was sent to.
 
 ## What the reference chain does with a Lite that breaks a rule
@@ -172,7 +176,7 @@ message, and its author has to send it again. The block of an away chain and the
 pauser after an investigation: `unblockAwayChain(chainKey)` on the compliance for one chain, `unpause` for the token.
 While a chain is blocked its good receipts are consumed and wait at home, and its burn proofs revert with
 `AwayChainBlocked` and wait at the gateway; a delegation toward it is refused, and the compliance neither issues a
-ticket toward it nor resends one, nor cancels any of its tickets, a ticket waiting for approval included, since the
+ticket toward it nor asks for a receipt there, nor cancels any of its tickets, a ticket waiting for approval included, since the
 waiting receipts may answer them and acting on their absence would release what they move. Native transfers, every
 other chain, and recall instructions and instruction resends toward the blocked chain are unaffected; the proof
 answering a recall lands once the block is lifted. To abandon a chain for good: distrust its gateway or close its
@@ -188,8 +192,8 @@ stays deliverable too. The remedy against a peer abusing its chain is to distrus
 
 | Brake | Stops | Set by | Lifted by |
 |---|---|---|---|
-| token pause, `pause` | every balance movement between wallets, native or satellite; every inbound receipt waits at home and every proof reverts; new tickets, approvals into issuance and ticket resends; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
-| block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home) and its proofs; delegations, new tickets and ticket resends toward it; cancels of its tickets | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms; the token on a conflicting proof from that chain | the pauser, `unblockAwayChain` |
+| token pause, `pause` | every balance movement between wallets, native or satellite; every inbound receipt waits at home and every proof reverts; new tickets, approvals into issuance and asks for receipts; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
+| block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home) and its proofs; delegations, new tickets and asks for receipts toward it; cancels of its tickets | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms; the token on a conflicting proof from that chain | the pauser, `unblockAwayChain` |
 | receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled meanwhile | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
 | bridge distrust, `distrustBridge` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled meanwhile | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 

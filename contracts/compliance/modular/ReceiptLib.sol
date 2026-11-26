@@ -117,8 +117,11 @@ library ReceiptLib {
             return;
         }
 
-        // 2. A still open answer moves nothing and never takes the half.
-        if (receipt.answer == MessageTypesLib.ReceiptAnswer.StillOpen) return;
+        // 2. A still open answer moves nothing and never takes the half: it may only move the ticket's clock.
+        if (receipt.answer == MessageTypesLib.ReceiptAnswer.StillOpen) {
+            _noteStillOpen(store, originChainKey, receipt);
+            return;
+        }
 
         // 3. An id home has no record of reverts and stays deliverable at the bridge.
         require(TicketLib.isRecorded(store, receipt.ticketId), ErrorsLib.UnknownTicket(receipt.ticketId));
@@ -198,6 +201,47 @@ library ReceiptLib {
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, originChainKey);
         _apply(ticket, originChainKey, receipt, token);
+    }
+
+    /// @dev A still open answer: the away token holds the ticket unexecuted, valid until `seenValidUntil`. It is not
+    ///  an answer to an ask for the receipt. Ignored for an id with no open ticket, from another chain or for a second
+    ///  half. On home's own ask block hash it must echo home's own valid until, or it is a bad receipt. Otherwise it
+    ///  raises `seenValidUntil`, up to a cap: valid until plus the chain's full finality delivery plus its clock lead,
+    ///  the latest an honest copy can be valid until; past the cap it counts as no answer. An answer that moves the
+    ///  valid until gives an ask back, so the ticket keeps its asks after the new waiting time.
+    function _noteStillOpen(
+        TicketLib.ValidationStorage storage store,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private {
+        if (!TicketLib.isRecorded(store, receipt.ticketId)) return;
+        ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
+        bool ticketOpen = ticket.status == ITickets.TicketStatus.Open;
+        bool fromTheChainTheTicketWentTo = originChainKey == ticket.fromChainKey;
+        bool answersTheTicket = receipt.half == 0;
+        bool answersAnOpenTicket = ticketOpen && fromTheChainTheTicketWentTo && answersTheTicket;
+        if (!answersAnOpenTicket) return;
+
+        bool onHomesOwnCopy = receipt.askBlockHash == ticket.askBlockHash;
+        bool echoesAnotherValidUntil = receipt.seenValidUntil != ticket.validUntil;
+        if (onHomesOwnCopy && echoesAnotherValidUntil) {
+            emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
+            TicketLib.blockAwayChain(originChainKey);
+            return;
+        }
+
+        ITickets.MeasuredTimes storage times = store.measuredTimes[originChainKey];
+        uint64 cap = ticket.validUntil + times.fullFinalityDelivery + times.clockLead;
+        if (receipt.seenValidUntil > cap) return;
+
+        uint64 latestValidUntil = ticket.validUntil;
+        if (ticket.seenValidUntil > latestValidUntil) latestValidUntil = ticket.seenValidUntil;
+        bool movesValidUntil = receipt.seenValidUntil > latestValidUntil;
+        if (movesValidUntil) {
+            ticket.seenValidUntil = receipt.seenValidUntil;
+            if (ticket.asksForReceipt != 0) ticket.asksForReceipt -= 1;
+        }
+        emit EventsLib.TicketStillOpen(receipt.ticketId, receipt.seenValidUntil);
     }
 
     /// @dev A receipt home cannot take in: another body for a half that already has one, applied or waiting, from a
@@ -416,18 +460,15 @@ library ReceiptLib {
 
     /* ----- Cancel ----- */
 
-    /// @dev Each id must be stored `Open` and past `waitingEndsAt`, or `WaitingForApproval` and past `validUntil`.
-    ///  One refused id reverts the whole batch.
-    /// @dev Who may: the keeper from `waitingEndsAt`, anyone from the end of the second window. A cancel turns a
-    ///  receipt that lands afterwards into a late one, so during the first window the keeper alone judges that a
-    ///  receipt is late rather than slow. No ticket is cancelled while the away chain that owes its receipt is
+    /// @dev Anyone may cancel: an `Open` ticket once an ask for its receipt went unanswered, see {_cancelDueAt}; a
+    ///  ticket `WaitingForApproval` once past `validUntil`. One refused id reverts the whole batch.
+    ///  No ticket is cancelled while the away chain that owes its receipt is
     ///  blocked or the token is stopped, a ticket waiting for approval included: its receipt may be waiting, see
     ///  {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot deliver its receipt, see
     ///  {_requireReceiptRouteOpen}. Nor while a receipt for it waits and can be applied now, see
     ///  {_requireNoWaitingReceiptToApply}.
     /// @param token the token the compliance is bound to
-    /// @param keeper whether the AccessManager binds the caller to this selector's role
-    function cancelTickets(bytes32[] calldata validationIds, address token, bool keeper) external {
+    function cancelTickets(bytes32[] calldata validationIds, address token) external {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         for (uint256 i = 0; i < validationIds.length; i++) {
             bytes32 ticketId = validationIds[i];
@@ -444,11 +485,9 @@ library ReceiptLib {
                 ticket.status == ITickets.TicketStatus.Open,
                 ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status))
             );
-            require(block.timestamp > ticket.waitingEndsAt, ErrorsLib.CancelNotDue(ticketId, ticket.waitingEndsAt));
-            if (!keeper) {
-                uint64 publicAt = _secondWindowEnd(ticket);
-                require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(ticketId, publicAt));
-            }
+            (bool askedAfterTheReceiptWasDue, uint64 dueAt) = _cancelDueAt(ticket);
+            require(askedAfterTheReceiptWasDue, ErrorsLib.CancelNotDue(ticketId, dueAt));
+            require(block.timestamp > dueAt, ErrorsLib.CancelNotDue(ticketId, dueAt));
             _requireReceiptRouteOpen(token, ticket.fromChainKey);
             _requireNoWaitingReceiptToApply(store, ticketId, ticket, token);
 
@@ -502,9 +541,22 @@ library ReceiptLib {
         }
     }
 
-    /// @dev The end of the second window: one more waiting time past `waitingEndsAt`. The public cancel opens here.
-    function _secondWindowEnd(ITickets.Ticket storage ticket) private view returns (uint64) {
-        return ticket.waitingEndsAt + (ticket.waitingEndsAt - ticket.validUntil);
+    /// @dev When an open ticket may be cancelled: one waiting time after an ask for its receipt sent at or after
+    ///  {TicketLib-waitingEndsAtOf}, strictly after, since the answer may land in that very second. An ask a still
+    ///  open answer gave back, or one sent before the valid until moved, does not count: until a new one is out,
+    ///  `dueAt` is the earliest a cancel could come.
+    function _cancelDueAt(ITickets.Ticket storage ticket)
+        private
+        view
+        returns (bool askedAfterTheReceiptWasDue, uint64 dueAt)
+    {
+        uint64 waitingEndsAt = TicketLib.waitingEndsAtOf(ticket);
+        bool anAskStands = ticket.asksForReceipt != 0;
+        bool sentAfterTheReceiptWasDue = ticket.lastSentAt >= waitingEndsAt;
+        askedAfterTheReceiptWasDue = anAskStands && sentAfterTheReceiptWasDue;
+        uint64 askedAt = waitingEndsAt;
+        if (askedAfterTheReceiptWasDue) askedAt = ticket.lastSentAt;
+        dueAt = askedAt + ticket.waitingTime;
     }
 
 }

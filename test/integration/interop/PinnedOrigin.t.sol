@@ -72,7 +72,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         _openEvmChain(token, POLYGON, address(gateway));
 
         vm.prank(compliance);
-        token.dispatchComplianceValidation(satellite, inFlight, abi.encode("validation"));
+        token.sendOnTicketRoute(satellite, inFlight, abi.encode("validation"));
 
         vm.prank(agent);
         token.unpause();
@@ -137,7 +137,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, inFlight, satellite, address(gateway))
         );
-        token.dispatchComplianceValidation(satellite, inFlight, abi.encode("validation"));
+        token.sendOnTicketRoute(satellite, inFlight, abi.encode("validation"));
     }
 
     function testAnUnpinnedSettlementFollowsTheCurrentPeer() public {

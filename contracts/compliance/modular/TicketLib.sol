@@ -62,6 +62,8 @@ pragma solidity 0.8.30;
 import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
+import { ITrustedGatewayRegistry } from "../../interop/ITrustedGatewayRegistry.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -80,7 +82,7 @@ import { IModule } from "./modules/IModule.sol";
  * @dev The layout of the compliance's validation record, and the issuance half of a validation's life,
  * deployed once and linked: the questions a request must answer, then the id built from the whole request,
  * the record, the reservation, the announcement and the ticket the away token will execute against; the
- * answer of an approval; a resend; and the table of what each ticket state keeps reserved, {moveTo}.
+ * answer of an approval; the ask for the receipt; and the table of what each ticket state keeps reserved, {moveTo}.
  *
  * That is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept it over
  * EIP-170. The compliance reaches it by DELEGATECALL, so the storage is its own namespaces at the slots they
@@ -93,9 +95,9 @@ library TicketLib {
 
     /// @custom:storage-location erc7201:erc3643.storage.TransferValidation
     struct ValidationStorage {
-        /// Added to the issuance timestamp to compute `validUntil`. Zero blocks issuance.
-        uint64 defaultValidityWindow;
-        /// Per-chain worst-case reconciliation latency. Zero blocks issuance toward that chain.
+        /// Added to the ask's timestamp to compute `validUntil`, per the route the ticket travels. Zero blocks asks.
+        ITickets.ValidityWindows validityWindows;
+        /// The waiting time of each away chain. Zero blocks asks from that chain.
         mapping(bytes32 chainKey => uint64 window) waitingTimes;
         /// Every requested validation, kept forever, under its id, see {ticketIdOf}.
         mapping(bytes32 ticketId => ITickets.Ticket validation) validations;
@@ -116,7 +118,41 @@ library TicketLib {
         /// Away chains blocked by the pauser or by a bad receipt: no ticket goes to them, none of their tickets is
         /// cancelled, and their receipts wait.
         mapping(bytes32 chainKey => bool blocked) blockedAwayChains;
+        /// The times measured for each away chain: the floors of its waiting time and of the validity windows.
+        mapping(bytes32 chainKey => ITickets.MeasuredTimes times) measuredTimes;
+        /// The floor of each validity window: the largest one any away chain's measured times asked for. Only rises.
+        ITickets.ValidityWindows validityWindowFloors;
+        /// The latest `stopWaitingAt` of any ticket: the compliance is not unbound before it.
+        uint64 latestStopWaitingAt;
+        /// New asks refused for the whole token.
+        bool asksPaused;
+        /// The limits on asks, see {ITickets-setAskLimits}.
+        ITickets.AskLimits askLimits;
+        /// The asks per window of an identity that has its own limit; zero for the token's limit.
+        mapping(address identity => uint32 asksPerWindow) askLimitOverrides;
+        /// What each identity asked: its open tickets and its asks in the current window.
+        mapping(address identity => IdentityAsks asks) identityAsks;
     }
+
+    /// @dev What one identity asked, counted against {ITickets-AskLimits}.
+    struct IdentityAsks {
+        /// Its tickets waiting for approval or open.
+        uint32 openTickets;
+        /// Its asks since `windowStartedAt`.
+        uint32 asksInWindow;
+        /// When its current window of asks started.
+        uint64 windowStartedAt;
+    }
+
+    /// @dev The most asks for the receipt of one ticket.
+    uint8 internal constant MAX_RECEIPT_ASKS = 3;
+
+    /// @dev The shortest waiting time any away chain may have, in seconds.
+    uint64 internal constant MIN_WAITING_TIME = 1 hours;
+
+    /// @dev The longest validity window, in seconds: how old the rules may be when an away token executes a ticket.
+    ///  A product number the owner gives; one day until then.
+    uint64 internal constant LONGEST_VALIDITY_WINDOW = 1 days;
 
     /// @dev The recipient's and the spender's envelopes of a validation awaiting approval.
     struct AwaitedTerms {
@@ -160,6 +196,7 @@ library TicketLib {
         address token,
         address authority
     ) external returns (bytes32 ticketId) {
+        require(!layout().asksPaused, ErrorsLib.AsksPaused());
         require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
 
         Draft memory draft;
@@ -168,6 +205,7 @@ library TicketLib {
         draft.requestedMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
         _requireCallerOwnsTheWallet(draft, from, token, authority);
+        _requireWithinAskLimits(draft);
         (draft.validUntil, draft.waitingTime) = _expiryAndWindow(token, draft.fromChainKey);
         _narrowAmountRange(draft, from, to, spender, token);
         _requireSpenderAllowed(draft, to, spender);
@@ -194,6 +232,46 @@ library TicketLib {
         if (spender.length != 0) WalletKeyLib.parse(spender);
     }
 
+    /// @dev The limits on asks, see {ITickets-setAskLimits}: the sender's identity below its open tickets and its asks
+    ///  in the current window, and the asked maximum not below the smallest amount. Counted per identity, never
+    ///  under a quota other holders share, so one identity can use up only its own asks.
+    function _requireWithinAskLimits(Draft memory draft) private view {
+        ValidationStorage storage store = layout();
+        ITickets.AskLimits memory limits = store.askLimits;
+        IdentityAsks memory asks = store.identityAsks[draft.fromIdentity];
+        require(asks.openTickets < limits.openTicketsPerIdentity, ErrorsLib.TooManyOpenTickets(draft.fromIdentity));
+        uint32 asksSoFar = _asksInTheCurrentWindow(asks, limits.askWindow);
+        require(asksSoFar < askLimitOf(store, draft.fromIdentity), ErrorsLib.AskLimitReached(draft.fromIdentity));
+        require(
+            draft.requestedMax >= limits.smallestAmount,
+            ErrorsLib.BelowSmallestAmount(draft.requestedMax, limits.smallestAmount)
+        );
+    }
+
+    /// @dev The asks an identity made in its current window; zero once the window is over.
+    function _asksInTheCurrentWindow(IdentityAsks memory asks, uint64 askWindow) private view returns (uint32) {
+        bool windowOver = block.timestamp >= asks.windowStartedAt + askWindow;
+        if (windowOver) return 0;
+        return asks.asksInWindow;
+    }
+
+    /// @dev Counts an ask against its identity: one more open ticket, one more ask in the window, a new window once
+    ///  the last one is over.
+    function _countTheAsk(ValidationStorage storage store, address identity) private {
+        IdentityAsks storage asks = store.identityAsks[identity];
+        uint32 asksSoFar = _asksInTheCurrentWindow(asks, store.askLimits.askWindow);
+        if (asksSoFar == 0) asks.windowStartedAt = uint64(block.timestamp);
+        asks.asksInWindow = asksSoFar + 1;
+        asks.openTickets += 1;
+    }
+
+    /// @dev The asks per window `identity` may make: its own limit when it has one, the token's otherwise.
+    function askLimitOf(ValidationStorage storage store, address identity) internal view returns (uint32) {
+        uint32 ownLimit = store.askLimitOverrides[identity];
+        if (ownLimit != 0) return ownLimit;
+        return store.askLimits.asksPerIdentityPerWindow;
+    }
+
     /// @dev Who may ask: the identity the sending wallet is linked to, or an address the AccessManager
     ///  authorised for this selector. A satellite wallet never matches its own bytes, so a wallet can never
     ///  request a validation for itself; its identity does that.
@@ -218,8 +296,8 @@ library TicketLib {
         return immediate;
     }
 
-    /// @dev How much may move. The range only ever narrows: first to what the sending wallet still has free,
-    ///  then to the smallest amount the rules allow.
+    /// @dev How much may move. The asked maximum must fit in what the sending wallet has free; the range then only
+    ///  ever narrows, to the smallest amount the rules allow.
     function _narrowAmountRange(
         Draft memory draft,
         bytes calldata from,
@@ -233,17 +311,17 @@ library TicketLib {
         draft.fromKey = WalletKeyLib.canonicalKey(from);
         draft.toKey = WalletKeyLib.canonicalKey(to);
 
-        _capAtWhatTheWalletCanSend(draft, from, token);
+        _requireRequestWithinTheFreeBalance(draft, from, token);
         _capAtWhatTheRulesAllow(draft, to, spender);
         require(draft.amountMax != 0, ErrorsLib.ZeroValue());
     }
 
-    /// @dev Caps the range at what the sending wallet can still send: its bridged balance less what earlier
-    ///  validations may still draw from it and less what an open recall is taking back.
-    function _capAtWhatTheWalletCanSend(Draft memory draft, bytes calldata from, address token) private view {
+    /// @dev The asked maximum must fit in what the sending wallet can still send: its away balance less what earlier
+    ///  tickets may still draw from it and less what an open recall is taking back. Refused, not narrowed: the id is
+    ///  built from the asked maximum, so a ticket narrowed here would carry a maximum its id does not name.
+    function _requireRequestWithinTheFreeBalance(Draft memory draft, bytes calldata from, address token) private view {
         uint256 free = IToken(token).availableOf(from);
-        if (free < draft.amountMax) draft.amountMax = free;
-        require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
+        require(draft.requestedMax <= free, ErrorsLib.RequestAboveBalance(from, free, draft.requestedMax));
     }
 
     /// @dev Caps the range at the smallest amount the rules allow. Skipped when both wallets belong to one
@@ -393,79 +471,76 @@ library TicketLib {
         _dispatch(token, ticketId, validation.fromChainKey, validation.validUntil, body);
     }
 
-    /// @dev The ticket, rebuilt from its record and the two envelopes the caller supplies again, for a resend. The
-    ///  envelopes must be the ones the ticket was asked with and the ask block hash is the recorded one, so a resend
-    ///  repeats the copy sent byte for byte and can neither widen nor retarget it. Announces the resend and sends it
-    ///  through the token, which as the compliance's DELEGATECALL target sees the compliance as its caller.
-    ///
-    ///  Only while `Open` and before `validUntil`, since past it no away token may execute. A blocked `chainKey`
-    ///  refuses a resend as it refuses an issuance, and so does the token's own pause, see {requireTokenRunning}.
-    ///  The sender's identity may resend, and so may the receiver's when the receiver is on the same away chain:
-    ///  both wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends.
+    /// @dev Asks the away token for the ticket's receipt, see {ITickets-sendTicket}: the ticket rebuilt from its
+    ///  record and the two envelopes the caller supplies again, which must be the ones it was asked with, sent byte for
+    ///  byte, ask block hash included. Anyone may ask, at the fixed times {nextAskDueAt} gives, at most
+    ///  `MAX_RECEIPT_ASKS` times. A blocked `chainKey` refuses an ask as it refuses an ask to move, and so does the
+    ///  token's own pause, see {requireTokenRunning}.
     /// @param token the token the compliance is bound to
-    /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
-    function resend(
-        bytes32 ticketId,
-        bytes32 chainKey,
-        bytes calldata to,
-        bytes calldata spender,
-        address token,
-        bool authorised
-    ) external {
+    function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender, address token)
+        external
+    {
         ValidationStorage storage store = layout();
         require(isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
-        ITickets.Ticket storage validation = store.validations[ticketId];
-        _requireResendable(validation, ticketId, chainKey);
+        ITickets.Ticket storage ticket = store.validations[ticketId];
+        _requireReceiptCanBeAsked(ticket, ticketId, chainKey);
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
-        _requireMayResend(validation, chainKey, authorised);
-
-        require(WalletKeyLib.canonicalKey(to) == validation.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
-        require(keccak256(spender) == keccak256(validation.spender), ErrorsLib.ValidationBodyMismatch(ticketId));
+        require(WalletKeyLib.canonicalKey(to) == ticket.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
+        require(keccak256(spender) == keccak256(ticket.spender), ErrorsLib.ValidationBodyMismatch(ticketId));
 
         MessageTypesLib.TicketMessage memory rebuilt = MessageTypesLib.TicketMessage({
             ticketId: ticketId,
-            salt: validation.salt,
-            from: validation.fromWallet,
+            salt: ticket.salt,
+            from: ticket.fromWallet,
             to: to,
             spender: spender,
-            amountMin: validation.amountMin,
-            amountMax: validation.amountMax,
-            requestedMax: validation.requestedMax,
+            amountMin: ticket.amountMin,
+            amountMax: ticket.amountMax,
+            requestedMax: ticket.requestedMax,
             token: token,
-            validUntil: validation.validUntil,
-            askBlockHash: validation.askBlockHash
+            validUntil: ticket.validUntil,
+            askBlockHash: ticket.askBlockHash
         });
 
-        emit EventsLib.TicketSent(ticketId, chainKey);
+        ticket.asksForReceipt += 1;
+        ticket.lastSentAt = uint64(block.timestamp);
+        emit EventsLib.ReceiptAsked(ticketId, ticket.asksForReceipt);
 
-        IToken(token).dispatchComplianceValidation(chainKey, ticketId, abi.encode(rebuilt));
+        IToken(token).sendOnTicketRoute(chainKey, ticketId, abi.encode(rebuilt));
     }
 
-    /// @dev Who may resend: the sender's identity, the receiver's when the receiver is on the ticket's away chain,
-    ///  or an address the AccessManager authorised.
-    function _requireMayResend(ITickets.Ticket storage validation, bytes32 chainKey, bool authorised) private view {
-        bool callerIsTheSendersIdentity = msg.sender == validation.fromIdentity;
-        bool receiverIsOnTheTicketsChain = chainKey == validation.toChainKey;
-        bool callerIsTheReceiversIdentity = msg.sender == validation.toIdentity;
-        bool callerIsAReceiverOnTheTicketsChain = receiverIsOnTheTicketsChain && callerIsTheReceiversIdentity;
-        require(
-            callerIsTheSendersIdentity || callerIsAReceiverOnTheTicketsChain || authorised,
-            ErrorsLib.NotAuthorizedForWallet(msg.sender, validation.fromWallet)
-        );
-    }
-
-    /// @dev Whether the ticket may go to `chainKey` again: see {resend}.
-    function _requireResendable(ITickets.Ticket storage validation, bytes32 ticketId, bytes32 chainKey) private view {
-        require(chainKey == validation.fromChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
-        ITickets.TicketStatus status = validation.status;
+    /// @dev Whether the ticket's receipt may be asked for now: see {sendTicket}.
+    function _requireReceiptCanBeAsked(ITickets.Ticket storage ticket, bytes32 ticketId, bytes32 chainKey)
+        private
+        view
+    {
+        require(chainKey == ticket.fromChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
+        ITickets.TicketStatus status = ticket.status;
         require(status == ITickets.TicketStatus.Open, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
-        require(block.timestamp < validation.validUntil, ErrorsLib.ValidationExpired(ticketId, validation.validUntil));
+        require(ticket.asksForReceipt < MAX_RECEIPT_ASKS, ErrorsLib.NoAsksLeft(ticketId));
+        uint64 dueAt = nextAskDueAt(ticket);
+        require(block.timestamp >= dueAt, ErrorsLib.SendNotDue(ticketId, dueAt));
     }
 
-    /// @dev By when: the away token's deadline from the validity window, and the reservation's from the waiting
-    ///  time of the sender's away chain. The token must be running, and that chain open and configured: this is
-    ///  where a request is refused with `TokenPaused`.
+    /// @dev When the next ask for the receipt is due: the first at {waitingEndsAtOf}, each next one waiting time
+    ///  later. Fixed times, not counted from the previous ask, so a late ask does not push the next ones back.
+    function nextAskDueAt(ITickets.Ticket storage ticket) internal view returns (uint64) {
+        uint64 asksStanding = ticket.asksForReceipt;
+        return waitingEndsAtOf(ticket) + asksStanding * ticket.waitingTime;
+    }
+
+    /// @dev The later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time: from then on the receipt
+    ///  is overdue and may be asked for.
+    function waitingEndsAtOf(ITickets.Ticket storage ticket) internal view returns (uint64) {
+        uint64 latestValidUntil = ticket.validUntil;
+        if (ticket.seenValidUntil > latestValidUntil) latestValidUntil = ticket.seenValidUntil;
+        return latestValidUntil + ticket.waitingTime;
+    }
+
+    /// @dev By when: the away token's deadline from the validity window of the route the ticket travels, and the
+    ///  waiting time of the sender's away chain. The token must be running, and that chain open and configured: this
+    ///  is where a request is refused with `TokenPaused`.
     function _expiryAndWindow(address token, bytes32 fromChainKey)
         private
         view
@@ -473,9 +548,26 @@ library TicketLib {
     {
         requireTokenRunning(token);
         ValidationStorage storage store = layout();
-        require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
         window = _openChainWindow(store, fromChainKey);
-        validUntil = uint64(block.timestamp) + store.defaultValidityWindow;
+        uint64 validityWindow = _validityWindowOf(store, token, fromChainKey);
+        require(validityWindow != 0, ErrorsLib.ValidityWindowNotSet());
+        validUntil = uint64(block.timestamp) + validityWindow;
+    }
+
+    /// @dev The validity window of a ticket toward `chainKey`: the ticket route's when the token sends tickets there
+    ///  on a trusted ticket bridge, the receipt route's otherwise. A ticket on the receipt route waits for the home
+    ///  chain's finality, so it needs the longer window to arrive in time.
+    function _validityWindowOf(ValidationStorage storage store, address token, bytes32 chainKey)
+        private
+        view
+        returns (uint64)
+    {
+        ITREXMessaging messaging = ITREXMessaging(token);
+        address ticketRoute = messaging.ticketRouteFor(chainKey);
+        if (ticketRoute == address(0)) return store.validityWindows.onReceiptRoute;
+        bool ticketBridgeTrusted = ITrustedGatewayRegistry(messaging.trustedGatewayRegistry()).isTrusted(ticketRoute);
+        if (!ticketBridgeTrusted) return store.validityWindows.onReceiptRoute;
+        return store.validityWindows.onTicketRoute;
     }
 
     /// @dev The waiting time of a chain a ticket may go to: not blocked, and a window configured.
@@ -485,9 +577,91 @@ library TicketLib {
         require(window != 0, ErrorsLib.WaitingTimeNotSet(chainKey));
     }
 
+    /* ----- Settings ----- */
+
+    /// @dev See {ITickets-setValidityWindows}.
+    function setValidityWindows(uint64 onTicketRoute, uint64 onReceiptRoute) external {
+        ITickets.ValidityWindows memory floors = layout().validityWindowFloors;
+        _requireValidityWindowInRange(onTicketRoute, floors.onTicketRoute);
+        _requireValidityWindowInRange(onReceiptRoute, floors.onReceiptRoute);
+        layout().validityWindows =
+            ITickets.ValidityWindows({ onTicketRoute: onTicketRoute, onReceiptRoute: onReceiptRoute });
+        emit EventsLib.ValidityWindowsSet(onTicketRoute, onReceiptRoute);
+    }
+
+    /// @dev See {ITickets-setWaitingTime}.
+    function setWaitingTime(bytes32 chainKey, uint64 duration) external {
+        ValidationStorage storage store = layout();
+        _requireWaitingTimeAboveTheFloors(chainKey, duration, store.measuredTimes[chainKey]);
+        store.waitingTimes[chainKey] = duration;
+        emit EventsLib.WaitingTimeSet(chainKey, duration);
+    }
+
+    /// @dev See {ITickets-setMeasuredTimes}. The settings already made must stay above the floors the new times give.
+    function setMeasuredTimes(bytes32 chainKey, ITickets.MeasuredTimes calldata times) external {
+        ValidationStorage storage store = layout();
+        uint64 waitingTime = store.waitingTimes[chainKey];
+        if (waitingTime != 0) _requireWaitingTimeAboveTheFloors(chainKey, waitingTime, times);
+
+        ITickets.ValidityWindows memory floors = _raisedValidityWindowFloors(store.validityWindowFloors, times);
+        ITickets.ValidityWindows memory windows = store.validityWindows;
+        bool windowsSet = windows.onTicketRoute != 0;
+        if (windowsSet) {
+            _requireValidityWindowInRange(windows.onTicketRoute, floors.onTicketRoute);
+            _requireValidityWindowInRange(windows.onReceiptRoute, floors.onReceiptRoute);
+        }
+
+        store.measuredTimes[chainKey] = times;
+        store.validityWindowFloors = floors;
+        emit EventsLib.MeasuredTimesSet(chainKey, times);
+    }
+
+    /// @dev The floors of the validity windows once one chain's times are added. They only rise: a floor one chain's
+    ///  times asked for stays, whatever another chain's times say. A ticket on the ticket route needs the chain's
+    ///  shortest validity window. A ticket on the receipt route needs that too, and must also outlast its full
+    ///  finality delivery on a clock that runs ahead.
+    function _raisedValidityWindowFloors(ITickets.ValidityWindows memory floors, ITickets.MeasuredTimes calldata times)
+        private
+        pure
+        returns (ITickets.ValidityWindows memory)
+    {
+        uint64 shortest = times.shortestValidityWindow;
+        uint64 receiptRouteFloor = times.fullFinalityDelivery + times.clockLead;
+        if (shortest > receiptRouteFloor) receiptRouteFloor = shortest;
+        if (shortest > floors.onTicketRoute) floors.onTicketRoute = shortest;
+        if (receiptRouteFloor > floors.onReceiptRoute) floors.onReceiptRoute = receiptRouteFloor;
+        return floors;
+    }
+
+    /// @dev A validity window above its floor, strictly: the away token executes strictly before valid until, so a
+    ///  holder acting at the last moment the floor allows would be refused at equality. At most the longest allowed.
+    function _requireValidityWindowInRange(uint64 duration, uint64 floor) private pure {
+        uint64 longest = LONGEST_VALIDITY_WINDOW;
+        require(duration > floor, ErrorsLib.ValidityWindowOutOfRange(duration, floor, longest));
+        require(duration <= longest, ErrorsLib.ValidityWindowOutOfRange(duration, floor, longest));
+    }
+
+    /// @dev The floors of a waiting time, each strict but the first: one hour; the ask's round trip, so an answer
+    ///  lands before the cancel; the full finality delivery plus the clock lead, so a second half arrives before its
+    ///  valid until on a clock that runs ahead; and the clock lag plus the reorg slot shift, so the away chain's clock
+    ///  has passed valid until when home cancels.
+    function _requireWaitingTimeAboveTheFloors(bytes32 chainKey, uint64 duration, ITickets.MeasuredTimes memory times)
+        private
+        pure
+    {
+        uint64 belowOneHour = MIN_WAITING_TIME - 1;
+        require(duration > belowOneHour, ErrorsLib.WaitingTimeTooShort(chainKey, duration, belowOneHour));
+        uint64 askRoundTrip = times.shortestWaitingTime;
+        require(duration > askRoundTrip, ErrorsLib.WaitingTimeTooShort(chainKey, duration, askRoundTrip));
+        uint64 secondHalfFloor = times.fullFinalityDelivery + times.clockLead;
+        require(duration > secondHalfFloor, ErrorsLib.WaitingTimeTooShort(chainKey, duration, secondHalfFloor));
+        uint64 clockFloor = times.clockLag + times.reorgSlotShift;
+        require(duration > clockFloor, ErrorsLib.WaitingTimeTooShort(chainKey, duration, clockFloor));
+    }
+
     /// @dev Nothing goes out while the token is paused: an incident is under investigation, every receipt waits
     ///  here unapplied, so a validation sent now could only be executed on a satellite with its report held, and
-    ///  its window could run out before the pause is lifted. Request, approval and resend alike. For the same
+    ///  its window could run out before the pause is lifted. Ask, approval and ask for the receipt alike. For the same
     ///  reason no ticket whose receipt may be waiting is cancelled under it, see {requireTicketCanBeDecided}.
     function requireTokenRunning(address token) internal view {
         require(!IToken(token).paused(), ErrorsLib.TokenPaused());
@@ -582,7 +756,8 @@ library TicketLib {
         stored.amountMin = draft.amountMin;
         stored.amountMax = draft.amountMax;
         stored.validUntil = draft.validUntil;
-        stored.waitingEndsAt = draft.validUntil + draft.waitingTime;
+        stored.waitingTime = draft.waitingTime;
+        stored.stopWaitingAt = draft.validUntil + 4 * draft.waitingTime;
         stored.fromChainKey = draft.fromChainKey;
         stored.toChainKey = draft.toChainKey;
         stored.fromKey = draft.fromKey;
@@ -596,6 +771,11 @@ library TicketLib {
         stored.status = ITickets.TicketStatus.Open;
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
         stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
+
+        ValidationStorage storage store = layout();
+        if (stored.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = stored.stopWaitingAt;
+        _countTheAsk(store, draft.fromIdentity);
+
         IToken(token).reserveForTicket(from, draft.amountMax);
     }
 
@@ -637,7 +817,8 @@ library TicketLib {
         }
         bool aReceiptWaitsForTheTicket = store.waitingReceipts[MessageTypesLib.halfKeyOf(ticketId, 0)].bodyHash != 0;
         if (aReceiptWaitsForTheTicket) return;
-        IToken(token).dispatchComplianceValidation(fromChainKey, ticketId, body);
+        store.validations[ticketId].lastSentAt = uint64(block.timestamp);
+        IToken(token).sendOnTicketRoute(fromChainKey, ticketId, body);
     }
 
     /// @dev Keeps a recorded validation waiting for the approval module, with the two envelopes it is issued
@@ -676,13 +857,17 @@ library TicketLib {
     ///  - `WaitingForApproval`, `Open`: the ask's `amountMax`, reserved in the ledger's total, against both
     ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token;
     ///  - `Cancelled`, `OnHold`, `Done`: none of the ask's reservation.
+    ///  The first two rows also count as one of the sender's identity's open tickets, see {ITickets-AskLimits}.
     ///  The release is read off the two rows, so it runs exactly once and is never skipped. A ticket is reserved
     ///  once, when it is written, so no move enters a row that holds more.
     function moveTo(ITickets.Ticket storage ticket, ITickets.TicketStatus next, address token) internal {
         bool oldRowHoldsTheAsk = _holdsTheAsk(ticket.status);
         bool newRowHoldsTheAsk = _holdsTheAsk(next);
         ticket.status = next;
-        if (oldRowHoldsTheAsk && !newRowHoldsTheAsk) _release(ticket, ticket.amountMax, token);
+        if (oldRowHoldsTheAsk && !newRowHoldsTheAsk) {
+            layout().identityAsks[ticket.fromIdentity].openTickets -= 1;
+            _release(ticket, ticket.amountMax, token);
+        }
     }
 
     /// @dev Whether a ticket in `status` holds the ask's reservation: the table of {moveTo}.

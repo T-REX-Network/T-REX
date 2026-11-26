@@ -62,9 +62,9 @@ import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 
 /**
  * @title ITickets
- * @dev The compliance's issuance surface for satellite movements: the two windows a COMPLIANCE_MANAGER tunes, the
- * block of an away chain, the receipts waiting to be applied, the lifecycle of every issued validation and the
- * keeper's discard. A satellite executes a transfer only against a `TicketMessage` the reference chain issued for
+ * @dev The compliance's issuance surface for satellite movements: the validity windows, waiting times, measured
+ * times and limits a COMPLIANCE_MANAGER tunes, the block of an away chain, the receipts waiting to be applied, the
+ * lifecycle of every ticket, the ask for its receipt and its cancel. A satellite executes a transfer only against a `TicketMessage` the reference chain issued for
  * that exact transfer;
  * this is where it comes from. A ceiling on what may be issued is a rule, not a setting: a module answers it
  * from `checkTransfer`.
@@ -103,6 +103,14 @@ interface ITickets {
     event ReceiptOnOlderTerms(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 seenMax);
     event MoveBreachedRule(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
     event TicketLimitsSet(bytes32 indexed chainKey, uint256 perTicketCap, uint256 perWindowCap);
+    event ValidityWindowsSet(uint64 onTicketRoute, uint64 onReceiptRoute);
+    event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
+    event MeasuredTimesSet(bytes32 indexed chainKey, MeasuredTimes times);
+    event AsksPausedSet(bool paused);
+    event AskLimitsSet(AskLimits limits);
+    event AskLimitOfSet(address indexed identity, uint32 asksPerWindow);
+    event ReceiptAsked(bytes32 indexed ticketId, uint8 askNumber);
+    event TicketStillOpen(bytes32 indexed ticketId, uint64 seenValidUntil);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error SenderNotOnSatellite(bytes wallet);
@@ -119,8 +127,17 @@ interface ITickets {
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
     error TokenPaused();
     error TicketNotCancellable(bytes32 ticketId, uint8 status);
-    error CancelNotDue(bytes32 ticketId, uint64 waitingEndsAt);
-    error ValidationNotPubliclyDiscardable(bytes32 ticketId, uint64 publicAt);
+    error CancelNotDue(bytes32 ticketId, uint64 dueAt);
+    error NoAsksLeft(bytes32 ticketId);
+    error SendNotDue(bytes32 ticketId, uint64 dueAt);
+    error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);
+    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
+    error AsksPaused();
+    error AskLimitReached(address identity);
+    error TooManyOpenTickets(address identity);
+    error BelowSmallestAmount(uint256 requestedMax, uint256 smallestAmount);
+    error RequestAboveBalance(bytes wallet, uint256 free, uint256 requestedMax);
+    error ZeroDuration();
     error ChainNotOpen(bytes32 chainKey);
     error UnknownTicket(bytes32 ticketId);
     error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);
@@ -172,8 +189,9 @@ interface ITickets {
         uint256 amountMax;
         /// The satellite's hard deadline: no execution at or after it.
         uint64 validUntil;
-        /// `validUntil` plus the waiting time: past it, the reservation may be released and the validation discarded.
-        uint64 waitingEndsAt;
+        /// The waiting time of the sender's away chain at the ask, kept so a later change of the setting does not
+        /// move a ticket already out: the asks for the receipt and the cancel count in it.
+        uint64 waitingTime;
         /// `from`'s satellite chain, keyed as `MessageTypesLib.chainKey` computes it.
         bytes32 fromChainKey;
         /// Same for `to`'s chain; the reference chain's own key for a native wallet.
@@ -210,6 +228,18 @@ interface ITickets {
         bytes32 salt;
         /// The upper bound as asked, before it was narrowed to `amountMax`: part of the id, and carried in the ticket.
         uint256 requestedMax;
+
+        /* ----- The clock; last for the layout's sake ----- */
+
+        /// The latest valid until the away token reported in a still open answer, within home's cap; zero when none.
+        /// The asks and the cancel count from the later of it and `validUntil`.
+        uint64 seenValidUntil;
+        /// `validUntil` plus four waiting times, fixed at the ask: home stops waiting for this ticket then.
+        uint64 stopWaitingAt;
+        /// When the ticket last left home: its first send, then each ask for its receipt.
+        uint64 lastSentAt;
+        /// The asks for the receipt that stand; a still open answer that moves valid until gives one back.
+        uint8 asksForReceipt;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
@@ -230,6 +260,44 @@ interface ITickets {
         uint256 amount;
     }
 
+    /// @dev The two validity windows: a ticket is valid until the ask's time plus the window of the route it travels.
+    struct ValidityWindows {
+        /// For a ticket on the ticket route, sent before the home chain's finality.
+        uint64 onTicketRoute;
+        /// For a ticket on the receipt route, sent at full finality, which takes longer to arrive.
+        uint64 onReceiptRoute;
+    }
+
+    /// @dev The times measured for one away chain, in seconds. Each is a floor a setting must stay above.
+    struct MeasuredTimes {
+        /// The smallest validity window this chain's tickets on the ticket route need: the approver's time, the
+        /// ticket's delivery, the holder's time to act and the clock lead.
+        uint64 shortestValidityWindow;
+        /// The smallest waiting time an ask for the receipt needs: the ask's delivery at full finality, the time to
+        /// answer, the receipt's way back and the failed and held deliveries to absorb.
+        uint64 shortestWaitingTime;
+        /// How far this chain's clock may run ahead of home's.
+        uint64 clockLead;
+        /// How far this chain's clock may run behind home's. The waiting time must be above it plus `reorgSlotShift`.
+        uint64 clockLag;
+        /// The longest delivery to this chain at full finality.
+        uint64 fullFinalityDelivery;
+        /// How far an ask mined again after a home reorg may move in time, under a minute on Ethereum.
+        uint64 reorgSlotShift;
+    }
+
+    /// @dev The limits on asks, for the whole token.
+    struct AskLimits {
+        /// The most tickets one identity may have waiting for approval or open at once.
+        uint32 openTicketsPerIdentity;
+        /// The most asks one identity may make in one `askWindow`, unless it has its own limit.
+        uint32 asksPerIdentityPerWindow;
+        /// The length of the window asks are counted over, in seconds.
+        uint64 askWindow;
+        /// The smallest maximum one may ask to move.
+        uint256 smallestAmount;
+    }
+
     /// @dev The caps on tickets toward one away chain.
     struct TicketLimits {
         /// The most one ticket toward the away chain may carry. A receipt on older terms whose `seenMax` is above it
@@ -243,9 +311,10 @@ interface ITickets {
     /// a home wallet, and sends it to the sender's away chain through the token. A sender on
     /// the reference chain is refused: the Lite that executes a validation must physically hold the position it
     /// moves, where a native balance stays free to leave between issuance and settlement. The caller derives the
-    /// requested range from an amount and a slippage tolerance; the range is only ever narrowed: capped at `from`'s
-    /// bridged position less what is already pending out of it, then at the smallest `checkTransfer` answer any module
-    /// answers (skipped when both wallets belong to one identity).
+    /// requested range from an amount and a slippage tolerance. The asked maximum must fit in `from`'s free away
+    /// balance, since the id is built from it; the range is then only ever narrowed, to the smallest
+    /// `checkTransfer` answer any module answers (skipped when both wallets belong to one identity). The ticket is
+    /// valid for the validity window of the route it travels, see {setValidityWindows}.
     ///
     /// The id is built from the whole request, see {TicketLib-ticketIdOf}: the kind, both wallets, the spender, the
     /// asked minimum and maximum, and the salt. Never from this chain's ordering or clock: the same request lands
@@ -257,6 +326,7 @@ interface ITickets {
     /// {IReceiptHandler-receiveReceipt}.
     ///
     /// Requirements:
+    /// - Asks not paused for the token; otherwise reverts with `AsksPaused`.
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
     /// - The id of the request not yet recorded; otherwise reverts with `TicketAlreadyWritten`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
@@ -268,7 +338,11 @@ interface ITickets {
     /// - A validity window set, and `from`'s chain with a waiting time; otherwise `ValidityWindowNotSet` or
     ///   `WaitingTimeNotSet`.
     /// - `from`'s chain not blocked; otherwise `AwayChainBlocked`.
+    /// - The sender's identity below its open tickets and its asks in the current window; otherwise
+    ///   `TooManyOpenTickets` or `AskLimitReached`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
+    /// - `requestedMax` at least the smallest amount, and at most `from`'s free away balance; otherwise
+    ///   `BelowSmallestAmount` or `RequestAboveBalance`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - `from`'s chain open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
@@ -318,27 +392,82 @@ interface ITickets {
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external;
 
-    /// @dev Sets how long a validation stays executable on the satellite: `validUntil` is issuance time plus this.
+    /// @dev Sets the two validity windows: a ticket is valid until the ask's time plus the window of the route it
+    /// travels. A ticket at full finality takes longer to arrive, so it needs the longer window.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `duration` must not be zero; otherwise reverts with `ZeroDuration`.
+    /// - `onTicketRoute` above the largest `shortestValidityWindow` measured for an away chain, `onReceiptRoute` above
+    ///   that too and above the largest full finality delivery plus clock lead, and both at most
+    ///   `LONGEST_VALIDITY_WINDOW` (one day); otherwise reverts with `ValidityWindowOutOfRange`.
     ///
-    /// Emits `DefaultValidityWindowSet`.
-    /// @param duration The validity window in seconds.
-    function setDefaultValidityWindow(uint64 duration) external;
+    /// Emits `ValidityWindowsSet`.
+    /// @param onTicketRoute The window, in seconds, of a ticket on the ticket route.
+    /// @param onReceiptRoute The window, in seconds, of a ticket on the receipt route.
+    function setValidityWindows(uint64 onTicketRoute, uint64 onReceiptRoute) external;
 
-    /// @dev Sets how long T-REX keeps a reservation past `validUntil` for a ticket to that chain. Snapshot at issuance,
-    /// so a later change never moves an outstanding deadline.
+    /// @dev Sets the waiting time of the away chain `chainKey`: one waiting time after valid until anyone may ask for
+    /// a ticket's receipt, and one more after an unanswered ask anyone may cancel it. Kept on each ticket at its ask,
+    /// so a later change never moves a ticket already out.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `duration` must not be zero; otherwise reverts with `ZeroDuration`.
+    /// - `duration` at least `MIN_WAITING_TIME`, one hour; above the chain's `shortestWaitingTime`, so an ask's answer
+    ///   lands before the cancel; above its full finality delivery plus clock lead, so a second half arrives before
+    ///   its valid until; and above its clock lag plus reorg slot shift; otherwise reverts with `WaitingTimeTooShort`.
     ///
     /// Emits `WaitingTimeSet`.
     /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
-    /// @param duration The window in seconds.
+    /// @param duration The waiting time in seconds.
     function setWaitingTime(bytes32 chainKey, uint64 duration) external;
+
+    /// @dev Sets the times measured for the away chain `chainKey`, the floors of its waiting time and of the validity
+    /// windows. Set when the chain is added. The validity windows' floors only rise.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - The chain's waiting time, once set, still above every floor the new times give; otherwise reverts with
+    ///   `WaitingTimeTooShort`.
+    /// - The validity windows, once set, still above the floors the new times give; otherwise reverts with
+    ///   `ValidityWindowOutOfRange`.
+    ///
+    /// Emits `MeasuredTimesSet`.
+    /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
+    /// @param times The measured times, in seconds.
+    function setMeasuredTimes(bytes32 chainKey, MeasuredTimes calldata times) external;
+
+    /// @dev Pauses or resumes new asks for the whole token. Receipts, asks for receipts and cancels go on, so the
+    /// tickets already out can end.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    ///
+    /// Emits `AsksPausedSet`.
+    /// @param paused Whether new asks are refused.
+    function setAsksPaused(bool paused) external;
+
+    /// @dev Sets the limits on asks: how many tickets one identity may hold open, how many asks it may make per
+    /// window, and the smallest amount one may ask to move. One identity can then use up only its own share of what
+    /// home pays to send. A limit of zero refuses every ask.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `limits.askWindow` must not be zero; otherwise reverts with `ZeroDuration`.
+    ///
+    /// Emits `AskLimitsSet`.
+    /// @param limits The limits.
+    function setAskLimits(AskLimits calldata limits) external;
+
+    /// @dev Gives `identity` its own limit of asks per window, for an identity that moves often. Zero gives it the
+    /// token's limit again.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    ///
+    /// Emits `AskLimitOfSet`.
+    /// @param identity The identity.
+    /// @param asksPerWindow Its asks per window; zero for the token's limit.
+    function setAskLimitOf(address identity, uint32 asksPerWindow) external;
 
     /// @dev Blocks the away chain `chainKey` on suspicion of fraud, before or after a bad receipt. While it is
     /// blocked no ticket goes to it, none of its tickets is cancelled, and every good receipt from it waits here,
@@ -394,15 +523,13 @@ interface ITickets {
     /// @param perWindowCap The most the ticket route toward the chain may carry in one window of one waiting time.
     function setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) external;
 
-    /// @dev Cancels overdue tickets in a batch: releases their reservations, so the next ask is computed as if
-    /// they never happened. From `waitingEndsAt` the keeper may cancel; from the end of the second window, one more
-    /// waiting time past `waitingEndsAt`, anyone may. A receipt that lands after the cancel is still applied as the
-    /// move it is. The batch is atomic: one refused id reverts the whole call.
-    ///
-    /// A cancel cannot know whether the away token executed the ticket before its deadline: the away token reports
-    /// only what it executed. If it did and the receipt is still in flight, the wallet's room is given back early, a
-    /// newer ticket may reserve it, and the late receipt still debits the wallet when it lands. Set each chain's
-    /// waiting time above the longest delivery delay its bridge can have, so a receipt this late is not expected.
+    /// @dev Cancels overdue tickets in a batch, for anyone: releases their reservations, so the next ask is computed as
+    /// if they never happened. An open ticket is cancelled only once an ask for its receipt, sent at or after
+    /// `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), has gone
+    /// unanswered for one more waiting time: the away token answers an ask with its stored receipt, a zero receipt,
+    /// or a still open answer, so an executed ticket is not cancelled over one lost or late message. A receipt that
+    /// lands after the cancel is still applied as the move it is. The batch is atomic: one refused id reverts the
+    /// whole call.
     ///
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
@@ -410,9 +537,8 @@ interface ITickets {
     ///   sent for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop and the
     ///   block of its away chain apply to it.
     /// - Each other id must be stored `Open`; otherwise reverts with `TicketNotCancellable`.
-    /// - `block.timestamp` must be past each id's `waitingEndsAt`; otherwise reverts with `CancelNotDue`.
-    /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
-    ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
+    /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` more than one waiting time past
+    ///   that ask; otherwise reverts with `CancelNotDue`.
     /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits under the pause, so the
     ///   one that answers the ticket may be among them. This holds for a ticket `WaitingForApproval` too.
     /// - The sender's away chain not blocked; otherwise reverts with `AwayChainBlocked`: its receipts wait, and may
@@ -429,40 +555,49 @@ interface ITickets {
     /// @param validationIds The tickets to cancel.
     function cancelTickets(bytes32[] calldata validationIds) external;
 
-    /// @dev Sends an open ticket to the sender's away chain again, byte for byte, through the bridge the first send
-    /// pinned. The way to recover a ticket the bridge lost before its valid until, instead of waiting for
-    /// `waitingEndsAt` and asking again. `to` is the one envelope the record does not keep; it is read off
-    /// `TicketWritten`, like `spender`, and both must be the ones the ticket was asked with, so a resend can neither
-    /// widen nor retarget the move. The copy sent is the one recorded, ask block hash included. Nothing is written.
+    /// @dev Asks the away token for the receipt of an open ticket, for anyone: sends the ticket again, byte for byte,
+    /// through the bridge the first send pinned. The away token answers a later copy with the receipt it stored, a
+    /// zero receipt when the ticket expired unexecuted, or a still open answer. `MAX_RECEIPT_ASKS` asks at most, at
+    /// fixed times: the first at `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's
+    /// waiting time), each next one waiting time later. `to` is the one envelope the record does not keep; it is
+    /// read off `TicketWritten`, like `spender`, and both must be the ones the ticket was asked with.
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
     /// - `chainKey` must be the sender's chain; otherwise reverts with `ChainNotPartOfValidation`.
     /// - It must be stored `Open`; otherwise reverts with `ValidationNotResendable`.
-    /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`: past it no away
-    ///   token may execute.
+    /// - Fewer than `MAX_RECEIPT_ASKS` asks standing; otherwise reverts with `NoAsksLeft`.
+    /// - `block.timestamp` at or after the next ask's time; otherwise reverts with `SendNotDue`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - `chainKey` must not be blocked; otherwise reverts with `AwayChainBlocked`.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
-    /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `to` is on the same
-    ///   away chain, or authorised by the AccessManager for this selector; otherwise reverts with
-    ///   `NotAuthorizedForWallet`.
     /// - The pinned bridge and peer must still be the chain's route and peer; otherwise the token reverts with
-    ///   `ValidationAlreadyRouted`. The ticket then returns its reservation through a cancel at `waitingEndsAt`.
+    ///   `ValidationAlreadyRouted`.
     ///
-    /// Nothing counts or spaces resends. The token forwards no value to the bridge, so a resend costs its caller
-    /// the gas and whatever the bridge charges, and the away token ignores a copy it already holds.
-    ///
-    /// Emits `TicketSent`, then the token's `ProtocolMessageSent`.
+    /// Emits `ReceiptAsked`, then the token's `ProtocolMessageSent`.
     /// @param ticketId The ticket sent again.
     /// @param chainKey The sender's away chain, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param to ERC-7930 interoperable address of the recipient, as issued.
     /// @param spender ERC-7930 address of the spender, as issued, or empty.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external;
 
-    /// @dev The window added to the issuance timestamp to compute `validUntil`. Zero until set, which blocks issuance.
-    function defaultValidityWindow() external view returns (uint64);
+    /// @dev The two validity windows, zero until set, which blocks issuance.
+    function validityWindows() external view returns (ValidityWindows memory);
+
+    /// @dev The times measured for `chainKey`, zero until set.
+    /// @param chainKey The away chain to look up.
+    function measuredTimesOf(bytes32 chainKey) external view returns (MeasuredTimes memory);
+
+    /// @dev Whether new asks are paused for the whole token.
+    function areAsksPaused() external view returns (bool);
+
+    /// @dev The limits on asks, zero until set, which blocks issuance.
+    function askLimits() external view returns (AskLimits memory);
+
+    /// @dev The asks per window `identity` may make: its own limit when it has one, the token's otherwise.
+    /// @param identity The identity to look up.
+    function askLimitOf(address identity) external view returns (uint32);
 
     /// @dev The waiting time configured for `chainKey`, zero when unset, which blocks issuance.
     /// @param chainKey The chain to look up.

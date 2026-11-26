@@ -60,6 +60,7 @@ pragma solidity 0.8.30;
 
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
+import { ITickets } from "../compliance/modular/ITickets.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
 import { ITrustedGatewayRegistry } from "../interop/ITrustedGatewayRegistry.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
@@ -203,8 +204,22 @@ library EventsLib {
     );
 
     // Tickets Events
-    event DefaultValidityWindowSet(uint64 duration);
+    /// @notice The two validity windows were set: for tickets on the ticket route, and on the receipt route.
+    event ValidityWindowsSet(uint64 onTicketRoute, uint64 onReceiptRoute);
     event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
+    /// @notice The measured times of the away chain `chainKey` were set.
+    event MeasuredTimesSet(bytes32 indexed chainKey, ITickets.MeasuredTimes times);
+    /// @notice New asks were paused or resumed for the whole token.
+    event AsksPausedSet(bool paused);
+    /// @notice The limits on asks were set.
+    event AskLimitsSet(ITickets.AskLimits limits);
+    /// @notice The ask limit of one identity was set; zero gives it the token's limit again.
+    event AskLimitOfSet(address indexed identity, uint32 asksPerWindow);
+    /// @notice Anyone asked the away token for the receipt of `ticketId`; `askNumber` counts the asks that stand.
+    event ReceiptAsked(bytes32 indexed ticketId, uint8 askNumber);
+    /// @notice The away token answered that `ticketId` is still open; `seenValidUntil` is the latest valid until it
+    ///         reported, within home's cap.
+    event TicketStillOpen(bytes32 indexed ticketId, uint64 seenValidUntil);
     /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, on a bad receipt or
     ///         receipt terms it broke, or on a burn proof for a recall already settled. No ticket goes to it, none of
     ///         its tickets is cancelled, and its receipts wait.
@@ -225,7 +240,7 @@ library EventsLib {
         bytes32 askBlockHash,
         bytes32 salt
     );
-    /// @notice Emitted when the keeper discards an expired validation and its slots are released.
+    /// @notice Emitted when a ticket is cancelled and its reservation released.
     event TicketCancelled(bytes32 indexed ticketId);
     /// @notice Emitted when a validation is recorded and reserved while an `APPROVAL` module decides it.
     event TicketWaitingForApproval(
@@ -240,8 +255,6 @@ library EventsLib {
     /// @notice Emitted when a validation awaiting approval is refused, or left unanswered past its deadline, and
     ///         its reservation released.
     event ValidationApprovalRefused(bytes32 indexed ticketId);
-    /// @notice Emitted when an issued ticket is sent to `chainKey` again, byte for byte.
-    event TicketSent(bytes32 indexed ticketId, bytes32 indexed chainKey);
     /// @notice Emitted when the caps on tickets toward `chainKey` are set.
     event TicketLimitsSet(bytes32 indexed chainKey, uint256 perTicketCap, uint256 perWindowCap);
 

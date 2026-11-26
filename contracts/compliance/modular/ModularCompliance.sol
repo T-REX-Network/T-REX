@@ -59,7 +59,6 @@
 
 pragma solidity 0.8.30;
 
-import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -254,13 +253,33 @@ contract ModularCompliance is
     /* ----- Validation settings ----- */
 
     /// @inheritdoc ITickets
-    function setDefaultValidityWindow(uint64 duration) external restricted {
-        _setDefaultValidityWindow(duration);
+    function setValidityWindows(uint64 onTicketRoute, uint64 onReceiptRoute) external restricted {
+        TicketLib.setValidityWindows(onTicketRoute, onReceiptRoute);
     }
 
     /// @inheritdoc ITickets
     function setWaitingTime(bytes32 chainKey, uint64 duration) external restricted {
-        _setReconciliationWindow(chainKey, duration);
+        TicketLib.setWaitingTime(chainKey, duration);
+    }
+
+    /// @inheritdoc ITickets
+    function setMeasuredTimes(bytes32 chainKey, MeasuredTimes calldata times) external restricted {
+        TicketLib.setMeasuredTimes(chainKey, times);
+    }
+
+    /// @inheritdoc ITickets
+    function setAsksPaused(bool paused) external restricted {
+        _setAsksPaused(paused);
+    }
+
+    /// @inheritdoc ITickets
+    function setAskLimits(AskLimits calldata limits) external restricted {
+        _setAskLimits(limits);
+    }
+
+    /// @inheritdoc ITickets
+    function setAskLimitOf(address identity, uint32 asksPerWindow) external restricted {
+        _setAskLimitOf(identity, asksPerWindow);
     }
 
     /// @inheritdoc ITickets
@@ -297,12 +316,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITickets
-    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
-    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
+    /// @dev Not `restricted`: anyone may cancel, once the ticket's clock allows it.
     function cancelTickets(bytes32[] calldata validationIds) external {
-        ReceiptLib.cancelTickets(
-            validationIds, _getTokenBound(), _canCallSelector(msg.sender, this.cancelTickets.selector)
-        );
+        ReceiptLib.cancelTickets(validationIds, _getTokenBound());
     }
 
     /**
@@ -346,10 +362,14 @@ contract ModularCompliance is
 
     /// @dev The ledger's positions belong to the bound token's holders, and no path binds a circulating token
     ///  back, so the token may leave only once it has no supply. An open validation keeps it too: closing one
-    ///  releases its reservation on the bound token. A compliance that must change under it is upgraded instead.
+    ///  releases its reservation on the bound token. So does every ticket home still waits for, until its
+    ///  `stopWaitingAt`: a new compliance would meet its late receipt with no record. A compliance that must change
+    ///  under it is upgraded instead.
     function _requireBoundTokenCanLeave() private view {
         require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
         require(_ledger().pendingTotal == 0, ErrorsLib.TicketsStillReserved());
+        bool homeStoppedWaiting = block.timestamp >= _validationStorage().latestStopWaitingAt;
+        require(homeStoppedWaiting, ErrorsLib.TicketsStillReserved());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -478,12 +498,6 @@ contract ModularCompliance is
     /// @inheritdoc Tickets
     function _authority() internal view override returns (address) {
         return authority();
-    }
-
-    /// @inheritdoc Tickets
-    function _canCallSelector(address caller, bytes4 selector) internal view override returns (bool) {
-        (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
-        return immediate;
     }
 
     /* ----- Module lifecycle ----- */

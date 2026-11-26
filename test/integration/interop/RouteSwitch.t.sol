@@ -89,7 +89,7 @@ contract RouteSwitchTest is InteropSuiteTest {
 
     function _dispatch(bytes32 ticketId) private {
         vm.prank(compliance);
-        token.dispatchComplianceValidation(satellite, ticketId, validationBody);
+        token.sendOnTicketRoute(satellite, ticketId, validationBody);
     }
 
     function _settlementFrom(ERC7786GatewayMock gateway, bytes32 ticketId) private returns (uint256) {

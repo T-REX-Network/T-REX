@@ -67,9 +67,9 @@ import { TicketLib } from "./TicketLib.sol";
 
 /**
  * @title Tickets
- * @dev The compliance's issuance layer for satellite movements: the two windows, the block of an away chain, the record
- * of every issued validation, the issuance itself, the pending reservation it writes, settlement, discard and the
- * late-reconciliation surface. Own ERC-7201 namespace, so the module registry's layout is untouched.
+ * @dev The compliance's issuance layer for satellite movements: the validity windows, the waiting times and their
+ * floors, the limits on asks, the block of an away chain, the record of every ticket, the ask itself, the pending
+ * reservation it writes, the ask for the receipt, the receipt and the cancel. Own ERC-7201 namespace, so the module registry's layout is untouched.
  *
  * Three flows, each readable top to bottom, each in a library deployed once and linked so the compliance stays
  * under the contract size limit: {TicketLib-request} issues, {ReceiptLib-receiveReceipt} records what an away
@@ -80,8 +80,9 @@ import { TicketLib } from "./TicketLib.sol";
  * hold the position it moves, where a native balance stays free to leave between issuance and settlement. A native
  * position reaches a satellite through delegation-out instead, which burns before it instructs.
  *
- * `validUntil` is the satellite's hard deadline; `validUntil` plus the waiting time is when T-REX may release the
- * reservation, never a refusal of a late receipt. Tickets expire; receipts never do.
+ * `validUntil` is the satellite's hard deadline. One waiting time later anyone may ask the away token for the
+ * receipt, and one waiting time after an unanswered ask anyone may cancel the ticket, never a refusal of a late
+ * receipt. Tickets expire; receipts never do.
  */
 abstract contract Tickets is ITickets, ComplianceLedger {
 
@@ -110,26 +111,38 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    /// @dev The record does not keep `to`, which the caller supplies again with `spender`; both must be the ones
-    ///  the ticket was asked with, see {TicketLib-resend}. Nothing is written: the
-    ///  reservation, the id and the pinned route are those of the issuance, and the token refuses the send once
-    ///  the pinned bridge or peer is no longer the chain's.
+    /// @dev Not `restricted`: anyone may ask, at the times the ticket's clock gives, see {TicketLib-sendTicket}. The
+    ///  reservation, the id and the pinned route are those of the ask, and the token refuses the send once the
+    ///  pinned bridge or peer is no longer the chain's.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external {
-        TicketLib.resend(
-            ticketId,
-            chainKey,
-            to,
-            spender,
-            address(_boundToken()),
-            _canCallSelector(msg.sender, this.sendTicket.selector)
-        );
+        TicketLib.sendTicket(ticketId, chainKey, to, spender, address(_boundToken()));
     }
 
     /* ----- Views ----- */
 
     /// @inheritdoc ITickets
-    function defaultValidityWindow() public view returns (uint64) {
-        return _validationStorage().defaultValidityWindow;
+    function validityWindows() public view returns (ValidityWindows memory) {
+        return _validationStorage().validityWindows;
+    }
+
+    /// @inheritdoc ITickets
+    function measuredTimesOf(bytes32 chainKey) public view returns (MeasuredTimes memory) {
+        return _validationStorage().measuredTimes[chainKey];
+    }
+
+    /// @inheritdoc ITickets
+    function areAsksPaused() public view returns (bool) {
+        return _validationStorage().asksPaused;
+    }
+
+    /// @inheritdoc ITickets
+    function askLimits() public view returns (AskLimits memory) {
+        return _validationStorage().askLimits;
+    }
+
+    /// @inheritdoc ITickets
+    function askLimitOf(address identity) public view returns (uint32) {
+        return TicketLib.askLimitOf(_validationStorage(), identity);
     }
 
     /// @inheritdoc ITickets
@@ -166,16 +179,20 @@ abstract contract Tickets is ITickets, ComplianceLedger {
 
     /* ----- Settings ----- */
 
-    function _setDefaultValidityWindow(uint64 duration) internal {
-        require(duration != 0, ErrorsLib.ZeroDuration());
-        _validationStorage().defaultValidityWindow = duration;
-        emit EventsLib.DefaultValidityWindowSet(duration);
+    function _setAsksPaused(bool paused) internal {
+        _validationStorage().asksPaused = paused;
+        emit EventsLib.AsksPausedSet(paused);
     }
 
-    function _setReconciliationWindow(bytes32 chainKey, uint64 duration) internal {
-        require(duration != 0, ErrorsLib.ZeroDuration());
-        _validationStorage().waitingTimes[chainKey] = duration;
-        emit EventsLib.WaitingTimeSet(chainKey, duration);
+    function _setAskLimits(AskLimits calldata limits) internal {
+        require(limits.askWindow != 0, ErrorsLib.ZeroDuration());
+        _validationStorage().askLimits = limits;
+        emit EventsLib.AskLimitsSet(limits);
+    }
+
+    function _setAskLimitOf(address identity, uint32 asksPerWindow) internal {
+        _validationStorage().askLimitOverrides[identity] = asksPerWindow;
+        emit EventsLib.AskLimitOfSet(identity, asksPerWindow);
     }
 
     function _setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) internal {
@@ -198,9 +215,6 @@ abstract contract Tickets is ITickets, ComplianceLedger {
 
     /// @dev The AccessManager of this compliance.
     function _authority() internal view virtual returns (address);
-
-    /// @dev Whether the AccessManager lets `caller` call `selector` on this contract now.
-    function _canCallSelector(address caller, bytes4 selector) internal view virtual returns (bool);
 
     function _validationStorage() internal pure returns (TicketLib.ValidationStorage storage) {
         return TicketLib.layout();

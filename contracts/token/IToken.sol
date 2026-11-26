@@ -201,10 +201,9 @@ interface IToken is IERC3643 {
         address accessManagerAddress
     ) external;
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
-    function dispatchComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes calldata body)
-        external
-        returns (bytes32);
+    /// @dev Sends a ticket, or an ask for its receipt, to this token's peer on `chainKey`, on the ticket route when
+    ///  one is usable and on the receipt route otherwise. Callable by the bound compliance alone.
+    function sendOnTicketRoute(bytes32 chainKey, bytes32 ticketId, bytes calldata body) external returns (bytes32);
 
     /// @notice Moves `amount` of `holder`'s free balance onto `toWallet`, a satellite wallet of the same identity: the
     ///  native balance is burned (`Transfer(holder, 0x0)`), the bridged position credited, `totalSupply` unchanged,

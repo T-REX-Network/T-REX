@@ -191,15 +191,12 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
     /// only ever has to trust a single reference address. A ticket goes to the sender's away chain only.
     ///
-    /// Callable by the bound compliance alone. No role opens this door: a validation body and the id it
-    /// travels under are the compliance's to author, and a human holding the selector could otherwise
-    /// forge either, or pin a route under an id the compliance has not reached yet. Reverts when the
-    /// chain was never opened, or when this validation already went out toward `chainKey` through
-    /// another gateway.
-    function dispatchComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes calldata body)
-        external
-        returns (bytes32)
-    {
+    /// Callable by the bound compliance alone, for a ticket's first send and each ask for its receipt. No role
+    /// opens this door: a ticket body and the id it travels under are the compliance's to author, and a human
+    /// holding the selector could otherwise forge either, or pin a route under an id the compliance has not
+    /// reached yet. Reverts when the chain was never opened, or when this ticket already went out toward
+    /// `chainKey` through another gateway.
+    function sendOnTicketRoute(bytes32 chainKey, bytes32 ticketId, bytes calldata body) external returns (bytes32) {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.SenderNotCompliance(_msgSender()));
 
         return _sendComplianceValidation(chainKey, ticketId, body);

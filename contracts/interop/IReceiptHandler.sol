@@ -80,7 +80,10 @@ interface IReceiptHandler {
     /// Home records what the receipt reports, because the away token's balances already moved. In order:
     /// - The same receipt again, under the same half, from the same chain: changes nothing (`ReceiptDuplicate`).
     ///   When that receipt is waiting and can now be applied, the repeat applies it (`WaitingReceiptApplied`).
-    /// - A still open answer: changes nothing.
+    /// - A still open answer: never takes the half. For an open ticket from its own chain it may raise the ticket's
+    ///   `seenValidUntil`, up to valid until plus the chain's full finality delivery and clock lead
+    ///   (`TicketStillOpen`), and gives an ask for the receipt back when it does; past that cap it counts as no
+    ///   answer. On home's own ask block hash with another valid until it is a bad receipt. Otherwise ignored.
     /// - An id home has no record of: reverts with `UnknownTicket`, and stays deliverable at the bridge.
     /// - A bad receipt: another body for a half that already has one, applied or waiting, a chain that is not the
     ///   sender's, wallets that are not the ticket's, a half the ticket never sent, or an expired answer that moved

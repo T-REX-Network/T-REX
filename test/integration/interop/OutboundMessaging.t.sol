@@ -96,7 +96,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
     function _dispatch(bytes32 id, bytes32 chainKey) private returns (bytes32) {
         vm.prank(compliance);
-        return token.dispatchComplianceValidation(chainKey, id, validationBody);
+        return token.sendOnTicketRoute(chainKey, id, validationBody);
     }
 
     /* ----- Happy path ----- */
@@ -182,7 +182,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, ticketId, optimism, address(gateway))
         );
-        token.dispatchComplianceValidation(optimism, ticketId, abi.encode("validation"));
+        token.sendOnTicketRoute(optimism, ticketId, abi.encode("validation"));
 
         assertEq(_pinnedBridgeOf(ticketId), address(gateway));
         assertEq(gateway.queueLength(), 1);
@@ -289,7 +289,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
     function testDispatchRevertsForAnUnauthorizedCaller() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, alice));
         vm.prank(alice);
-        token.dispatchComplianceValidation(satellite, ticketId, validationBody);
+        token.sendOnTicketRoute(satellite, ticketId, validationBody);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, bob));
         vm.prank(bob);
@@ -314,7 +314,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, agent));
         vm.prank(agent);
-        token.dispatchComplianceValidation(satellite, ticketId, validationBody);
+        token.sendOnTicketRoute(satellite, ticketId, validationBody);
 
         assertEq(gateway.queueLength(), 2);
         assertEq(_pinnedBridgeOf(ticketId), address(0));

@@ -234,7 +234,7 @@ library ErrorsLib {
     // Tickets Errors
     /// @dev A `SPENDER` module refused the spender named on the requested validation.
     error ValidationSpenderRefused(bytes spender);
-    /// @dev A validity or reconciliation window must be positive.
+    /// @dev The window over which asks are counted must be positive.
     error ZeroDuration();
     /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused,
     ///  none whose receipt may be in flight is cancelled, and a waiting receipt is applied only once it is unpaused.
@@ -259,7 +259,7 @@ library ErrorsLib {
     error NotTheApprovalModule(address caller);
     /// @dev A ticket can be sent again while it is stored `Open`; `status` is the `TicketStatus` found instead.
     error ValidationNotResendable(bytes32 ticketId, uint8 status);
-    /// @dev The deadline for a resend has passed: `validUntil`, since past it no away token may execute.
+    /// @dev The approver answered at or after `validUntil`, past which no away token may execute.
     error ValidationExpired(bytes32 ticketId, uint64 deadline);
     /// @dev `chainKey` is not the sender's chain, the only one a ticket goes to.
     error ChainNotPartOfValidation(bytes32 ticketId, bytes32 chainKey);
@@ -279,11 +279,29 @@ library ErrorsLib {
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
     /// @dev Only a stored `Open` validation can be discarded; `status` is the `TicketStatus` found instead.
     error TicketNotCancellable(bytes32 ticketId, uint8 status);
-    /// @dev The validation's release deadline has not passed yet.
-    error CancelNotDue(bytes32 ticketId, uint64 waitingEndsAt);
-    /// @dev Between `waitingEndsAt` and the end of the second window only the keeper may discard; `publicAt` is when
-    ///  anyone may.
-    error ValidationNotPubliclyDiscardable(bytes32 ticketId, uint64 publicAt);
+    /// @dev The ticket may not be cancelled yet: no ask for its receipt has gone unanswered for one waiting time.
+    ///  `dueAt` is the earliest the cancel can come, once such an ask is out.
+    error CancelNotDue(bytes32 ticketId, uint64 dueAt);
+    /// @dev The ticket was already asked for its receipt the most times allowed.
+    error NoAsksLeft(bytes32 ticketId);
+    /// @dev The next ask for the ticket's receipt is due only at `dueAt`.
+    error SendNotDue(bytes32 ticketId, uint64 dueAt);
+    /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or a floor
+    ///  measured for that chain.
+    error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);
+    /// @dev A validity window must be above the floor measured for every away chain and at most the longest allowed.
+    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
+    /// @dev New asks are paused for the whole token; receipts still land.
+    error AsksPaused();
+    /// @dev The identity asked as many times as it may in the current window.
+    error AskLimitReached(address identity);
+    /// @dev The identity already has as many tickets waiting for approval or open as it may.
+    error TooManyOpenTickets(address identity);
+    /// @dev The asked maximum is below the smallest amount one may ask to move.
+    error BelowSmallestAmount(uint256 requestedMax, uint256 smallestAmount);
+    /// @dev The asked maximum is above what the sending wallet has free: the id is built from the asked maximum, so it
+    ///  is refused rather than narrowed.
+    error RequestAboveBalance(bytes wallet, uint256 free, uint256 requestedMax);
     /// @dev The per-ticket cap toward `chainKey` is lowered while a ticket sent under the higher cap may still be
     ///  executed: an honest receipt of it would then block that away chain. Allowed from `allowedAt`.
     error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);

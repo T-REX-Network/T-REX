@@ -46,6 +46,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IKeyExecutor } from "@onchain-id/solidity/contracts/interface/IKeyExecutor.sol";
 
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
@@ -67,10 +68,10 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  * link (the wallet sends the proposal itself through the gateway, the identity settles it).
  *
  * What lands on chain, in order:
- *   gateway trusted, route + peer set, validity and reconciliation windows set, two satellite
- *   wallets linked, investor0 delegates 100 GOLD to its satellite wallet, validation 1 issued
- *   and settled for 30 (satellite 0 -> satellite 1), validation 2 issued and left pending,
- *   validation 3 issued toward investor1's native wallet and its leg resent once, a recall of 20
+ *   gateway trusted, route + peer set, measured times, validity windows, waiting time, ask limits
+ *   and ticket caps set, two satellite wallets linked, investor0 delegates 100 GOLD to its satellite
+ *   wallet, validation 1 issued and settled for 30 (satellite 0 -> satellite 1), validation 2 issued
+ *   and left pending, validation 3 issued toward investor1's native wallet, a recall of 20
  *   instructed on satellite wallet 1 and settled by a burn proof.
  *
  * ===== Environment =====
@@ -249,14 +250,43 @@ contract SeedInterop is Script {
         }
     }
 
+    /// @dev OpenZeppelin's sizing for Base with a monitored on-call time of 30 minutes: tickets on the ticket route
+    ///  need a validity window above 6.2 minutes, tickets at full finality above 24.6 minutes, and the waiting time
+    ///  must be above 91.4 minutes. The measured times are set first: they are the floors the other settings check.
     function _ensureWindows() internal {
-        if (compliance.defaultValidityWindow() == 0) {
-            compliance.setDefaultValidityWindow(1 days);
-            console.log("Default validity window set to 1 day");
+        if (compliance.measuredTimesOf(chainKey).shortestWaitingTime == 0) {
+            compliance.setMeasuredTimes(
+                chainKey,
+                ITickets.MeasuredTimes({
+                    shortestValidityWindow: 372,
+                    shortestWaitingTime: 5485,
+                    clockLead: 30,
+                    clockLag: 120,
+                    fullFinalityDelivery: 1148,
+                    reorgSlotShift: 60
+                })
+            );
+            console.log("Measured times set for the satellite chain, from OpenZeppelin's Base sizing");
+        }
+        if (compliance.validityWindows().onTicketRoute == 0) {
+            compliance.setValidityWindows(15 minutes, 25 minutes);
+            console.log("Validity windows set to 15 minutes on the ticket route, 25 minutes on the receipt route");
         }
         if (compliance.waitingTimeOf(chainKey) == 0) {
-            compliance.setWaitingTime(chainKey, 1 hours);
-            console.log("Reconciliation window set to 1 hour");
+            compliance.setWaitingTime(chainKey, 95 minutes);
+            console.log("Waiting time set to 95 minutes");
+        }
+        if (compliance.askLimits().askWindow == 0) {
+            compliance.setAskLimits(
+                ITickets.AskLimits({
+                    openTicketsPerIdentity: 10, asksPerIdentityPerWindow: 20, askWindow: 1 days, smallestAmount: UNIT
+                })
+            );
+            console.log("Ask limits set: 10 open tickets and 20 asks a day per identity, 1 GOLD at least");
+        }
+        if (compliance.ticketLimitsOf(chainKey).perTicketCap == 0) {
+            compliance.setTicketLimits(chainKey, 1000 * UNIT, 10_000 * UNIT);
+            console.log("Ticket caps set: 1,000 GOLD per ticket, 10,000 GOLD per waiting time");
         }
     }
 
@@ -332,10 +362,8 @@ contract SeedInterop is Script {
         bytes memory nativeInvestor1 = InteroperableAddress.formatEvmV1(block.chainid, wallets[1]);
         resentValidation =
             compliance.askToMove(satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "", _salt("resent"));
-        compliance.sendTicket(resentValidation, chainKey, nativeInvestor1, "");
-        console.log(
-            "Validation issued toward investor1's native wallet and resent once, id", vm.toString(resentValidation)
-        );
+        // Its receipt may be asked for only one waiting time after its valid until, so it is not asked for here.
+        console.log("Validation issued toward investor1's native wallet, id", vm.toString(resentValidation));
     }
 
     /// @dev A salt per seeded validation, distinct per run so a replayed seed never reuses an id.

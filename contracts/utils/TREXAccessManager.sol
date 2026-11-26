@@ -386,24 +386,23 @@ contract TREXAccessManager is AccessManagerUpgradeable {
 
         // Cross-chain validation policy.
         uint64 complianceManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER);
-        _setTargetFunctionRole(compliance, ITickets.setDefaultValidityWindow.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setValidityWindows.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setWaitingTime.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setMeasuredTimes.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setTicketLimits.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setAsksPaused.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setAskLimits.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setAskLimitOf.selector, complianceManagerRole);
 
-        // Issuing a ticket, and sending a lost one again.
+        // Asking to move any wallet's tokens. Asking for a receipt and cancelling are open to anyone.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(compliance, ITickets.askToMove.selector, agentRole);
-        _setTargetFunctionRole(compliance, ITickets.sendTicket.selector, agentRole);
 
         // Blocking an away chain, lifting the block, and refusing a receipt waiting from a blocked chain.
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
         _setTargetFunctionRole(compliance, ITickets.blockAwayChain.selector, pauserRole);
         _setTargetFunctionRole(compliance, ITickets.unblockAwayChain.selector, pauserRole);
         _setTargetFunctionRole(compliance, ITickets.refuseWaitingReceipt.selector, pauserRole);
-
-        // Cancelling overdue tickets.
-        uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);
-        _setTargetFunctionRole(compliance, ITickets.cancelTickets.selector, validationKeeperRole);
     }
 
     /// @dev Who hands out which role. The key that appoints never acts: `AGENT_ADMIN` and `SUITE_ADMIN` open

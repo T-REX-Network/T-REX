@@ -112,7 +112,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         // selectors mocked below, so only the reservation calls actually reach the stub.
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
-        vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
+        vm.mockCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector), abi.encode(bytes32(0)));
 
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
@@ -727,8 +727,8 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
         MessageTypesLib.TicketMessage memory expected = _expected(id, salt, fromSat, toSat, "", 10, 90);
 
-        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, abi.encode(expected))), 1);
-        vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
+        vm.expectCall(token, abi.encodeCall(Token.sendOnTicketRoute, (polygon, id, abi.encode(expected))), 1);
+        vm.expectCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector), 1);
         vm.prank(aliceIdentity);
         mc.askToMove(fromSat, toSat, 10, 90, "", salt);
     }
@@ -736,8 +736,8 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_Success_WhenDispatchingToTheSatelliteSideOnly() public configured {
         bytes32 salt = _salt();
         bytes32 id = _ticketId(fromSat, nativeBob, "", 10, 40, salt);
-        vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, polygon, id), 1);
-        vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
+        vm.expectCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector, polygon, id), 1);
+        vm.expectCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector), 1);
         vm.prank(aliceIdentity);
         mc.askToMove(fromSat, nativeBob, 10, 40, "", salt);
     }
@@ -746,7 +746,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_RevertWhen_TheTokenRefusesTheDispatch() public configured {
         vm.mockCallRevert(
             token,
-            abi.encodeWithSelector(Token.dispatchComplianceValidation.selector),
+            abi.encodeWithSelector(Token.sendOnTicketRoute.selector),
             abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon)
         );
 
