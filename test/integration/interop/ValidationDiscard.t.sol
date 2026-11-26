@@ -66,6 +66,9 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        // Running: a paused token refuses every request (TokenPaused).
+        vm.prank(agent);
+        token.unpause();
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
@@ -261,8 +264,6 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.prank(deployer);
         boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (2 * CAP)), address(cappedRule));
         bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, CAP);
-        vm.prank(agent);
-        token.unpause();
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
         vm.warp(issuedAt + 100 * VALIDITY_WINDOW);
 

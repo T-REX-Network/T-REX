@@ -69,6 +69,9 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        // Running: a paused token refuses every request (TokenPaused).
+        vm.prank(agent);
+        token.unpause();
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
