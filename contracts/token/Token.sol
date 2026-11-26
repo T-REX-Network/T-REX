@@ -129,6 +129,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
         TokenLedgerLib.layout().decimals = tokenDecimals;
         _initERC3643(identityRegistryAddress, complianceAddress, onchainIdAddress);
+        // `_initERC3643` writes the ONCHAINID without the setter's check. A token deployed outside the factory
+        // could otherwise start out pointing at another token's identity.
+        _checkOnchainID(identityRegistryAddress, onchainIdAddress);
 
         // The network's registry, fixed for the token's lifetime: no role can move it afterwards.
         _setTrustedGatewayRegistry(trustedGatewayRegistryAddress);
@@ -160,6 +163,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc ITREXMessaging
+    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external restricted {
+        _setFastRoute(chainType, chainReference, gateway);
+    }
+
+    /// @inheritdoc ITREXMessaging
     function setPeer(bytes32 chainKey, bytes calldata peer) external restricted {
         _setPeer(chainKey, peer);
     }
@@ -173,7 +181,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /* ----- Interop Dispatch ----- */
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
+    /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
+    /// its final route.
     ///
     /// The reference side has two contracts with something to say, the compliance and the token, but
     /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
@@ -185,7 +194,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// forge either, or pin a route under an id the compliance has not reached yet. Reverts when the
     /// chain was never opened, or when this validation already went out toward `chainKey` through
     /// another gateway.
-    function dispatchComplianceValidation(bytes32 chainKey, uint256 validationId, bytes calldata body)
+    function dispatchComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes calldata body)
         external
         returns (bytes32)
     {
@@ -235,7 +244,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId)
+    function settleValidation(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId)
         external
         whenNotPaused
     {
@@ -244,7 +253,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function holdInTransit(bytes calldata from, uint256 amount, uint256 validationId, uint256 reserved)
+    /// @dev No pause guard: a brake is applied under any state, as it is at delivery.
+    function applyVerdict(bytes32 chainKey, ISettlementHandler.Verdict verdict) external {
+        _requireBoundCompliance();
+        _applyVerdict(chainKey, verdict);
+    }
+
+    /// @inheritdoc IToken
+    function holdInTransit(bytes calldata from, uint256 amount, bytes32 validationId, uint256 reserved)
         external
         whenNotPaused
     {
@@ -283,7 +299,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function returnHeldInTransit(bytes calldata to, uint256 validationId) external whenNotPaused {
+    function returnHeldInTransit(bytes calldata to, bytes32 validationId) external whenNotPaused {
         _requireBoundCompliance();
         TokenLedgerLib.returnHeldInTransit(to, validationId);
     }
@@ -321,7 +337,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function inTransitOf(uint256 validationId) external view returns (uint256) {
+    function inTransitOf(bytes32 validationId) external view returns (uint256) {
         return TokenLedgerLib.layout().inTransit[validationId];
     }
 
@@ -403,7 +419,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  native wallet: the compliance issues no validation whose sender is native, so the satellite executing
     ///  one always holds the position it moves. The one path every settlement takes, {settleValidation} adding
     ///  only the caller and pause checks.
-    function _settle(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) internal {
+    function _settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) internal {
         (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, validationId);
         if (!toNative) return;
 
@@ -450,6 +466,13 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         super._setSymbol(tokenSymbol);
     }
 
+    /// @dev Adds T-REX validation to the standard setter. Investors find the token through its ONCHAINID, so
+    ///  the token may only point at the identity the IdentityFactory binds to it, never at another token's.
+    function _setOnchainID(address onchainIdAddress) internal override {
+        _checkOnchainID(address(_getIdentityRegistry()), onchainIdAddress);
+        super._setOnchainID(onchainIdAddress);
+    }
+
     /// @dev Adds T-REX validation to the standard setter. A wrong registry halts the token, since
     ///  `isVerified` is called on every transfer, so the target must advertise the standard interface
     ///  and share this token's authority. `onlySharedAuthority` is a misconfiguration guard only:
@@ -458,12 +481,18 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  A token with supply keeps its registry. The compliance attributes every position through it, so a
     ///  registry that binds wallets differently would leave positions under identities no wallet resolves
     ///  to any more. Wallet bindings are changed in the registry the token has, never by swapping it.
+    ///
+    ///  The new registry's IdentityFactory must bind the token to the ONCHAINID the token holds, the rule of
+    ///  {_setOnchainID} seen from the other side: whichever of the two changes, the token never points at an
+    ///  identity its registry's factory does not bind to it.
     function _setIdentityRegistry(address identityRegistryAddress)
         internal
         override
         onlySharedAuthority(identityRegistryAddress)
     {
-        TokenGuardsLib.checkIdentityRegistry(address(_getIdentityRegistry()), identityRegistryAddress, totalSupply());
+        TokenGuardsLib.checkIdentityRegistry(
+            address(_getIdentityRegistry()), identityRegistryAddress, totalSupply(), _erc3643TokenStorage().onchainId
+        );
 
         super._setIdentityRegistry(identityRegistryAddress);
     }
@@ -514,8 +543,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _migrateFrozenAmount(newWallet, frozenTokens);
         _migrateAddressFrozen(lostWallet, newWallet);
 
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(lostWallet, newWallet, investorTokens, MovementKindLib.RECOVERY);
+        _reportAgentMovement(lostWallet, newWallet, investorTokens, MovementKindLib.RECOVERY);
 
         if (migrateIdentity) _getIdentityRegistry().deleteIdentity(lostWallet);
 
@@ -539,8 +567,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _forceUpdate(from, to, amount);
         emit EventsLib.ForcedTransfer(_msgSender());
         // Reported as an agent's movement, so a module counting what the investor does can leave it out.
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(from, to, amount, MovementKindLib.FORCED_TRANSFER);
+        _reportAgentMovement(from, to, amount, MovementKindLib.FORCED_TRANSFER);
         return true;
     }
 
@@ -568,10 +595,10 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
     ///      incident under investigation settles nothing. When the compliance reports a replayed settlement, the
     ///      chain that sent it is misbehaving and everything it reports is suspect: the token stops taking that
-    ///      chain's messages until an agent has investigated and called `setInboundPaused(chainKey, false)`. A
-    ///      never-issued id may mean the token's own records are out of step with what it dispatched, which no
-    ///      chain pause contains, so the token halts itself through its pause instead, until an agent calls
-    ///      `unpause`; see {ISettlementHandler-Verdict} for the price of that choice.
+    ///      chain's messages until an agent has investigated and called `setInboundPaused(chainKey, false)`. The
+    ///      same brake answers every leg the compliance cannot account for, an id never issued included: a
+    ///      validation id is a function of the request, so an unknown one is that chain's to explain, see
+    ///      {ISettlementHandler-handleSettlement}.
     function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
         _applyVerdict(chainKey, TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body));
     }
@@ -601,8 +628,20 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         }
         if (amount == 0) return;
         ERC20Upgradeable._update(address(0), nativeWallet, amount);
-        IModularCompliance(address(_getCompliance()))
-            .agentTransferred(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
+        _reportAgentMovement(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
+    }
+
+    /// @dev {TokenGuardsLib-checkOnchainID}, from `init` and from the setter. One function for both because every
+    ///  separate call into a linked library is compiled in full, and the token sits at the contract size limit.
+    function _checkOnchainID(address identityRegistryAddress, address onchainIdAddress) private view {
+        TokenGuardsLib.checkOnchainID(identityRegistryAddress, onchainIdAddress);
+    }
+
+    /// @dev Tells the compliance about a movement an agent made, so the modules can leave it out of what they
+    ///  count against the investor. One function for the forced transfer, the recovery and the recall, for the
+    ///  reason {_checkOnchainID} gives.
+    function _reportAgentMovement(address from, address to, uint256 amount, uint8 kind) private {
+        IModularCompliance(address(_getCompliance())).agentTransferred(from, to, amount, kind);
     }
 
     /// @dev The two brakes a handler can ask for, see {ISettlementHandler-Verdict}.

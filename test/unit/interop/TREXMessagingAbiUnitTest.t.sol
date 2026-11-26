@@ -65,6 +65,7 @@ contract TREXMessagingAbiUnitTest is Test {
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
+        assertEq(ITREXMessaging.ChainInboundPaused.selector, ErrorsLib.ChainInboundPaused.selector);
         assertEq(ITREXMessaging.ChainNotOpen.selector, ErrorsLib.ChainNotOpen.selector);
         assertEq(ITREXMessaging.ChainNotRegistered.selector, ErrorsLib.ChainNotRegistered.selector);
         assertEq(ITREXMessaging.GatewayNotRouted.selector, ErrorsLib.GatewayNotRouted.selector);

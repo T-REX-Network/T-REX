@@ -89,7 +89,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     uint256 public callsResend;
     uint256 public callsRelay;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
         gateway = _newTrustedGateway(POLYGON);
@@ -117,7 +117,12 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         vm.stopPrank();
 
         targetContract(address(this));
-        bytes4[] memory selectors = new bytes4[](8);
+        targetSelector(FuzzSelector({ addr: address(this), selectors: _targetSelectors() }));
+    }
+
+    /// @dev The transitions the fuzzer calls. A suite built on this one appends its own.
+    function _targetSelectors() internal view virtual returns (bytes4[] memory selectors) {
+        selectors = new bytes4[](8);
         selectors[0] = this.mint.selector;
         selectors[1] = this.transfer.selector;
         selectors[2] = this.delegate.selector;
@@ -126,24 +131,23 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         selectors[5] = this.liteResendsProof.selector;
         selectors[6] = this.relay.selector;
         selectors[7] = this.drop.selector;
-        targetSelector(FuzzSelector({ addr: address(this), selectors: selectors }));
     }
 
     /* ----- Transitions ----- */
 
-    function mint(uint256 actorSeed, uint256 amount) external {
+    function mint(uint256 actorSeed, uint256 amount) public virtual {
         vm.prank(agent);
         token.mint(actors[actorSeed % ACTORS], bound(amount, 1, MAX_AMOUNT));
     }
 
-    function transfer(uint256 fromSeed, uint256 toSeed, uint256 amount) external {
+    function transfer(uint256 fromSeed, uint256 toSeed, uint256 amount) public virtual {
         address from = actors[fromSeed % ACTORS];
         amount = bound(amount, 0, token.balanceOf(from));
         vm.prank(from);
         try token.transfer(actors[toSeed % ACTORS], amount) { } catch { }
     }
 
-    function delegate(uint256 actorSeed, uint256 amount) external {
+    function delegate(uint256 actorSeed, uint256 amount) public virtual {
         callsDelegate++;
         uint256 actor = actorSeed % ACTORS;
         amount = bound(amount, 1, MAX_AMOUNT);
@@ -154,7 +158,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         } catch { }
     }
 
-    function instructRecall(uint256 actorSeed, uint256 amount) external {
+    function instructRecall(uint256 actorSeed, uint256 amount) public virtual {
         callsInstruct++;
         uint256 actor = actorSeed % ACTORS;
         amount = bound(amount, 1, MAX_AMOUNT);
@@ -164,7 +168,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         } catch { }
     }
 
-    function resend(uint256 idSeed, bool recall) external {
+    function resend(uint256 idSeed, bool recall) public virtual {
         callsResend++;
         if (recall) {
             if (recallActor.length == 1) return;
@@ -183,12 +187,12 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         }
     }
 
-    function liteResendsProof(uint256 idSeed) external {
+    function liteResendsProof(uint256 idSeed) external virtual {
         if (recallActor.length == 1) return;
         try lite.resendProof(1 + idSeed % (recallActor.length - 1)) { } catch { }
     }
 
-    function relay(uint256 indexSeed) external {
+    function relay(uint256 indexSeed) external virtual {
         callsRelay++;
         uint256 length = gateway.queueLength();
         if (length == 0) return;
@@ -198,7 +202,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         try gateway.relay(index) { } catch { }
     }
 
-    function drop(uint256 indexSeed) external {
+    function drop(uint256 indexSeed) public virtual {
         uint256 length = gateway.queueLength();
         if (length == 0) return;
         uint256 index = indexSeed % length;

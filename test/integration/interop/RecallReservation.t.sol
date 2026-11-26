@@ -41,7 +41,7 @@ contract RecallReservationTest is InteropSuiteTest {
         );
     }
 
-    function _aliceRequests(uint256 min, uint256 max) private returns (uint256) {
+    function _aliceRequests(uint256 min, uint256 max) private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, min, max);
     }
 
@@ -60,7 +60,7 @@ contract RecallReservationTest is InteropSuiteTest {
     function test_requestTransferValidation_IsNarrowed_WhenARecallIsOpen() public {
         _recall(aliceSat, alice, 200);
 
-        uint256 id = _aliceRequests(1, POSITION);
+        bytes32 id = _aliceRequests(1, POSITION);
 
         assertEq(boundCompliance.validationOf(id).amountMax, POSITION - 200, "capped below the recalled amount");
         assertEq(token.reservedOf(aliceSat), POSITION - 200);
@@ -111,7 +111,7 @@ contract RecallReservationTest is InteropSuiteTest {
 
         assertEq(token.bridgedBalanceOf(aliceSat), POSITION - 200);
         assertEq(token.availableOf(aliceSat), POSITION - 200, "what is left is free again");
-        uint256 id = _aliceRequests(1, POSITION);
+        bytes32 id = _aliceRequests(1, POSITION);
         assertEq(boundCompliance.validationOf(id).amountMax, POSITION - 200);
     }
 
@@ -151,7 +151,7 @@ contract RecallReservationTest is InteropSuiteTest {
     ///      burning the recalled amount and executing the validation in full, and both landing.
     function test_recallThenValidation_BothSettle_WhenTheSatelliteExecutesBoth() public {
         uint256 recallId = _recall(aliceSat, alice, 200);
-        uint256 id = _aliceRequests(1, POSITION);
+        bytes32 id = _aliceRequests(1, POSITION);
 
         _prove(recallId, aliceSat, 200);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, POSITION - 200)));
