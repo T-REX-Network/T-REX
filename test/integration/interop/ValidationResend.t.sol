@@ -364,15 +364,17 @@ contract ValidationResendTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 1);
     }
 
-    /// @notice The pause stops movements; a settlement is one, an issuance and a resend are not.
-    function test_resendValidation_Success_WhenTheTokenIsPaused() public {
+    /// @notice A paused token sends nothing out: its report could not land until the unpause anyway. The leg goes
+    ///         again once the pause is lifted, see `ValidationTokenPause.t.sol`.
+    function test_resendValidation_RevertWhen_TheTokenIsPaused() public {
         vm.prank(agent);
         token.pause();
 
         vm.prank(address(aliceIdentity));
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
         boundCompliance.resendValidation(id, polygon, bobSat, "");
 
-        assertEq(polygonGateway.queueLength(), 2);
+        assertEq(polygonGateway.queueLength(), 1, "only the issuance went out");
     }
 
     /// @notice The leg's settlement is matched against the pinned gateway, so it is never resent through another.

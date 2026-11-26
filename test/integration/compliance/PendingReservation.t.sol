@@ -69,6 +69,9 @@ contract PendingReservationTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        // Running: a paused token refuses every request (TokenPaused).
+        vm.prank(agent);
+        token.unpause();
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
@@ -154,8 +157,6 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         validation did not use comes back.
     function test_handleSettlement_Success_WhenSettlingBelowTheReservation() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.prank(agent);
-        token.unpause();
         bytes32 first = _issue(10, 60);
         _issue(10, 40);
         assertEq(_pendingIn(), CAP);
@@ -181,8 +182,6 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         rules allow once its reservation is released. The chain that sent it stops issuing.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.prank(agent);
-        token.unpause();
         bytes32 late = _issue(10, CAP);
         _discard(late);
         bytes32 fresh = _issue(10, CAP);
@@ -211,8 +210,6 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         design booked such a settlement against nobody.
     function test_handleSettlement_Success_WhenARuleIsBoundAfterIssuance() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.prank(agent);
-        token.unpause();
         bytes32 id = _issue(10, 60);
 
         CappedRecipientModule latecomer = CappedRecipientModule(
@@ -315,10 +312,8 @@ contract PendingReservationTest is InteropSuiteTest {
     ///  proves it burned the whole position.
     function _recallAndBurnTheWholeSupply() private {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.startPrank(agent);
-        token.unpause();
+        vm.prank(agent);
         uint256 recallId = token.instructRecall(aliceSat, BALANCE, alice);
-        vm.stopPrank();
         gateway.relay(
             _liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, BALANCE)))
         );

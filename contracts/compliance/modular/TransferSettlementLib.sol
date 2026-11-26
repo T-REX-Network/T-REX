@@ -351,7 +351,7 @@ library TransferSettlementLib {
         require(
             store.validations[validationId].hash != bytes32(0), ErrorsLib.ParkedLegNotSettleable(validationId, chainKey)
         );
-        require(!IToken(token).paused(), ErrorsLib.TokenPaused());
+        TransferValidationLib.requireTokenRunning(token);
         // A delivered leg from a paused chain waits at the gateway; a parked one from it waits here, for the same
         // investigation. The re-request is refused under the pause too, see
         // {TransferValidationLib-requireInboundOpen}.
@@ -504,8 +504,9 @@ library TransferSettlementLib {
     ///  the wallet they left. When it was the mint leg, nothing on this chain can be returned, so the chain
     ///  that owes the burn stops being issued to instead and an operator investigates. Either way the
     ///  validation ends in `Resolved`, where any leg arriving afterwards pauses its chain's inbound. While the
-    ///  chain owing the leg has its inbound paused on the token the leg may be waiting at its gateway, so the
-    ///  pair is not resolved under the pause, see {TransferValidationLib-requireAwaitedInboundOpen}.
+    ///  chain owing the leg has its inbound paused on the token, or the token itself is paused, the leg may be
+    ///  waiting at its gateway, so the pair is not resolved under the pause, see
+    ///  {TransferValidationLib-requireAwaitedInboundOpen}.
     /// @param token the token the compliance is bound to
     function resolveStuckValidation(bytes32 validationId, address token) external {
         TransferValidationLib.ValidationStorage storage store = TransferValidationLib.layout();
@@ -540,8 +541,9 @@ library TransferSettlementLib {
     ///  leg that lands afterwards into a late reconciliation, which can pause its chain's issuance, so during the
     ///  first window the keeper alone judges that a leg is late rather than slow. Past the second window a pair
     ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
-    ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token: its leg may be
-    ///  waiting at that gateway, see {TransferValidationLib-requireAwaitedInboundOpen}. Nor while a leg is parked
+    ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token, or the token
+    ///  itself is paused: its leg may be waiting at that gateway, see
+    ///  {TransferValidationLib-requireAwaitedInboundOpen}. Nor while a leg is parked
     ///  under its id: that report waits here instead, see {_requireNoParkedLeg}.
     /// @param token the token the compliance is bound to
     /// @param keeper whether the AccessManager binds the caller to this selector's role

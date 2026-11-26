@@ -240,6 +240,10 @@ library ErrorsLib {
     error ZeroDuration();
     /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
     error ValidationIssuancePaused(bytes32 chainKey);
+    /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused,
+    ///  none that may have a leg in flight is discarded or resolved, and a parked leg, like a delivered one, is
+    ///  settled only once it is unpaused.
+    error TokenPaused();
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
@@ -279,8 +283,6 @@ library ErrorsLib {
     /// @dev A leg `chainKey` reported for this validation is parked: it is settled first, so that the validation is
     ///  not discarded over a report this chain already holds.
     error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
-    /// @dev The token is paused: a parked leg, like a delivered one, is settled only once it is unpaused.
-    error TokenPaused();
     /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
     error ValidationNotDiscardable(bytes32 validationId, uint8 status);
     /// @dev The validation's release deadline has not passed yet.

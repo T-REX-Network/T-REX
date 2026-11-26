@@ -341,15 +341,18 @@ library TransferValidationLib {
             return;
         }
 
+        // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
+        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
+        // are checked again, since one may have been paused while the request waited, and so is the token: all
+        // of it before anything is written.
+        requireTokenRunning(token);
+        _openChainWindow(store, token, validation.fromChainKey);
+        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
+
         if (approvedMax < validation.amountMax) {
             _release(validation, validation.amountMax - approvedMax, token);
             validation.amountMax = approvedMax;
         }
-        // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
-        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
-        // are checked again, since one may have been paused while the request waited.
-        _openChainWindow(store, token, validation.fromChainKey);
-        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
         validation.status = ITransferValidation.ValidationStatus.Pending;
 
         bytes memory body = _issueRecorded(
@@ -386,7 +389,7 @@ library TransferValidationLib {
     ///  window between the last resend and the resolution, as between the last execution and the discard. A burn
     ///  that lands after a discard is past `releaseAt` by definition, so a discarded pair is never resendable.
     ///  Issuance paused toward `chainKey` refuses a resend as it refuses an issuance: the pause exists to send
-    ///  nothing more toward that chain.
+    ///  nothing more toward that chain. The token's own pause refuses it too, see {requireTokenRunning}.
     ///
     ///  The sender's identity may resend either leg, the recipient's the leg toward the recipient's chain: both
     ///  wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends: the
@@ -406,6 +409,7 @@ library TransferValidationLib {
         require(isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         ITransferValidation.Validation storage validation = store.validations[validationId];
         _requireResendable(validation, validationId, chainKey);
+        requireTokenRunning(token);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         requireInboundOpen(token, chainKey);
         require(
@@ -457,12 +461,14 @@ library TransferValidationLib {
     }
 
     /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
-    ///  reconciliation window of the chains involved. Every chain involved must be open and configured.
+    ///  reconciliation window of the chains involved. The token must be running, and every chain involved open
+    ///  and configured: this is where a request is refused with `TokenPaused`.
     function _expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
         private
         view
         returns (uint64 expiry, uint64 window)
     {
+        requireTokenRunning(token);
         ValidationStorage storage store = layout();
         require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
         window = _openChainWindow(store, token, fromChainKey);
@@ -486,6 +492,15 @@ library TransferValidationLib {
         require(window != 0, ErrorsLib.ReconciliationWindowNotSet(chainKey));
     }
 
+    /// @dev Nothing goes out while the token is paused: an incident is under investigation, every settlement
+    ///  reverts and waits at its gateway, so a validation sent now could only be executed on a satellite with its
+    ///  report held, and its window could run out before the pause is lifted. Request, approval and resend alike.
+    ///  For the same reason no validation with a leg possibly in flight is discarded or resolved under it, see
+    ///  {requireAwaitedInboundOpen}.
+    function requireTokenRunning(address token) internal view {
+        require(!IToken(token).paused(), ErrorsLib.TokenPaused());
+    }
+
     /// @dev Nothing goes toward a chain whose inbound the token has paused: its reports are held at the gateway,
     ///  so a leg sent now could only add to what cannot land, see {ITREXMessaging-setInboundPaused}.
     function requireInboundOpen(address token, bytes32 chainKey) internal view {
@@ -496,8 +511,11 @@ library TransferValidationLib {
     ///  reports held at that chain's gateway may already answer it: discarding or resolving on their absence
     ///  would release or return what they move, and they would then land on a validation that no longer expects
     ///  them. Which chains count follows the status: both while `Pending`, the one owing the missing leg once the
-    ///  other landed.
+    ///  other landed. The token's own pause holds every chain's reports the same way, so nothing is decided under
+    ///  it either: a pause that outlasts `releaseAt` would otherwise release a reservation whose leg is waiting,
+    ///  and the room it frees could be issued again before that leg lands.
     function requireAwaitedInboundOpen(address token, ITransferValidation.Validation storage validation) internal view {
+        requireTokenRunning(token);
         ITransferValidation.ValidationStatus status = validation.status;
         bool mintOwed = status == ITransferValidation.ValidationStatus.AwaitingMint
             || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint;
