@@ -106,6 +106,7 @@ interface ITransferValidation {
     error ValidationSpenderRefused(bytes spender);
     error ValidationAlreadyRequested(bytes32 validationId);
     error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
+    error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
     error TokenPaused();
     error SettlementAmountMismatch(bytes32 validationId, uint256 expected, uint256 amount);
     error ValidationNotDiscardable(bytes32 validationId, uint8 status);
@@ -381,6 +382,8 @@ interface ITransferValidation {
     ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
     /// - No chain an id still awaits with its inbound paused on the token; otherwise reverts with
     ///   `ChainInboundPaused`: the reports held at that gateway may answer the validation.
+    /// - No leg parked under an id for a chain it involves; otherwise reverts with `ParkedLegAwaitsSettlement`:
+    ///   the report is already here, and {settleParkedLeg} takes it in or refuses it first.
     ///
     /// Emits `ValidationDiscarded` per id.
     /// @param validationIds The validations to discard.
@@ -399,6 +402,11 @@ interface ITransferValidation {
     /// - The chain owing the missing leg must not have its inbound paused on the token; otherwise reverts with
     ///   `ChainInboundPaused`: the leg may be waiting at that gateway, and returning the hold under it would leave
     ///   the ledger crediting the sender for what the receiving chain minted.
+    ///
+    /// A leg parked for the chain owing the missing leg does not block the resolution, unlike a discard: the keeper
+    /// settles it with {settleParkedLeg} first, and resolves only when it cannot be settled. A parked leg at another
+    /// amount than the leg that landed reverts there for good, as the same leg delivered would at the gateway, and
+    /// the resolution is the only way the pair ends.
     ///
     /// Emits `ValidationResolved`.
     function resolveStuckValidation(bytes32 validationId) external;

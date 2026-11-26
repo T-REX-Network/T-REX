@@ -155,6 +155,33 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(token.isInboundPaused(polygon));
     }
 
+    /// @notice A validation is not discarded over the leg parked under its id: the report of the movement is
+    ///         already here, so the discard waits for it, for the public caller as for the keeper. Once the leg is
+    ///         settled the validation is `Settled`, and never a late reconciliation.
+    function test_discardExpiredValidations_RevertWhen_ALegIsParkedUnderTheId_ThenTheLegSettles() public {
+        bytes32 salt = _salt();
+        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).validationId;
+        _execute(id, 95);
+        polygonGateway.relay(_last(polygonGateway));
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
+        vm.prank(address(aliceIdentity));
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 90, 100, "", salt);
+
+        // Nobody settled the parked leg, and the second window passed: the discard is open to anyone.
+        ITransferValidation.Validation memory issued = boundCompliance.validationOf(id);
+        vm.warp(uint256(issued.releaseAt) + (issued.releaseAt - issued.expiry) + 1);
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = id;
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ParkedLegAwaitsSettlement.selector, id, polygon));
+        boundCompliance.discardExpiredValidations(ids);
+
+        boundCompliance.settleParkedLeg(id, polygon);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobSat), 95);
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "settled, not reconciled late");
+    }
+
     /// @notice The pause the parking set gates both steps of the recovery: the request sent again and the settling
     ///         of the parked leg wait for the pauser, as a leg at the gateway does.
     function test_reorg_RevertWhen_TheChainIsStillPausedForEitherStep() public {

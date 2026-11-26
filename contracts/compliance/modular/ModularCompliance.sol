@@ -273,8 +273,9 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITransferValidation
-    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, so
-    ///  settling it decides nothing a caller could abuse, as relaying a delivery decides nothing.
+    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, and it is
+    ///  judged as a delivery would be. The caller chooses when, as whoever relays a delivery does: a leg that is
+    ///  refused pauses its chain's inbound at that moment, the verdict the delivery would have reached.
     function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external {
         TransferSettlementLib.settleParkedLeg(validationId, chainKey, _getTokenBound());
     }

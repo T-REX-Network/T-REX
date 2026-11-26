@@ -541,7 +541,8 @@ library TransferSettlementLib {
     ///  first window the keeper alone judges that a leg is late rather than slow. Past the second window a pair
     ///  would be resolvable anyway, so whoever is left waiting on the reservation may release it, keeper or not.
     ///  Nor is a validation discarded while a chain it awaits has its inbound paused on the token: its leg may be
-    ///  waiting at that gateway, see {TransferValidationLib-requireAwaitedInboundOpen}.
+    ///  waiting at that gateway, see {TransferValidationLib-requireAwaitedInboundOpen}. Nor while a leg is parked
+    ///  under its id: that report waits here instead, see {_requireNoParkedLeg}.
     /// @param token the token the compliance is bound to
     /// @param keeper whether the AccessManager binds the caller to this selector's role
     function discardExpiredValidations(bytes32[] calldata validationIds, address token, bool keeper) external {
@@ -569,11 +570,28 @@ library TransferSettlementLib {
                 require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(validationId, publicAt));
             }
             TransferValidationLib.requireAwaitedInboundOpen(token, validation);
+            _requireNoParkedLeg(store, validationId, validation.fromChainKey);
+            if (validation.twoLegs) _requireNoParkedLeg(store, validationId, validation.toChainKey);
 
             _moveTo(validation, ITransferValidation.ValidationStatus.Discarded, false, token);
 
             emit EventsLib.ValidationDiscarded(validationId);
         }
+    }
+
+    /// @dev A validation is not discarded over a leg parked under its id. The leg was reported while nothing was
+    ///  issued and waits for {settleParkedLeg}; discarding first would release the reservation of a movement this
+    ///  chain already holds the report of, and turn that report into a late reconciliation. From `Pending` the
+    ///  parked leg is always consumed, applied or refused, so this never leaves a validation without a way out.
+    function _requireNoParkedLeg(
+        TransferValidationLib.ValidationStorage storage store,
+        bytes32 validationId,
+        bytes32 chainKey
+    ) private view {
+        require(
+            !store.parkedLegs[validationId][chainKey].exists,
+            ErrorsLib.ParkedLegAwaitsSettlement(validationId, chainKey)
+        );
     }
 
     /// @dev The end of the second reconciliation window: one more window past `releaseAt`, the same length as

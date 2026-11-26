@@ -91,6 +91,7 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITransferValidation.ValidationSpenderRefused.selector, ErrorsLib.ValidationSpenderRefused.selector);
         assertEq(ITransferValidation.ValidationAlreadyRequested.selector, ErrorsLib.ValidationAlreadyRequested.selector);
         assertEq(ITransferValidation.ParkedLegNotSettleable.selector, ErrorsLib.ParkedLegNotSettleable.selector);
+        assertEq(ITransferValidation.ParkedLegAwaitsSettlement.selector, ErrorsLib.ParkedLegAwaitsSettlement.selector);
         assertEq(ITransferValidation.TokenPaused.selector, ErrorsLib.TokenPaused.selector);
         assertEq(ITransferValidation.SettlementAmountMismatch.selector, ErrorsLib.SettlementAmountMismatch.selector);
         assertEq(ITransferValidation.ValidationNotDiscardable.selector, ErrorsLib.ValidationNotDiscardable.selector);

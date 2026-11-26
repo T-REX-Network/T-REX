@@ -276,6 +276,9 @@ library ErrorsLib {
     error ValidationAlreadyRequested(bytes32 validationId);
     /// @dev No leg is parked under this id for this chain, or nothing is issued under the id yet.
     error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
+    /// @dev A leg `chainKey` reported for this validation is parked: it is settled first, so that the validation is
+    ///  not discarded over a report this chain already holds.
+    error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
     /// @dev The token is paused: a parked leg, like a delivered one, is settled only once it is unpaused.
     error TokenPaused();
     /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
