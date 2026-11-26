@@ -229,7 +229,7 @@ library TransferValidationLib {
     }
 
     /// @dev Caps the range at what the sending wallet can still send: its bridged balance less what earlier
-    ///  validations may still draw from it.
+    ///  validations may still draw from it and less what an open recall is taking back.
     function _capAtWhatTheWalletCanSend(Draft memory draft, bytes calldata from, address token) private view {
         uint256 free = IToken(token).availableOf(from);
         if (free < draft.amountMax) draft.amountMax = free;

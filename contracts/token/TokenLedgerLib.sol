@@ -144,13 +144,17 @@ library TokenLedgerLib {
         return layout().reservedForValidations[WalletKeyLib.canonicalKey(wallet)];
     }
 
-    /// @dev See {IToken-availableOf}.
+    /// @dev See {IToken-availableOf}. The open recall's amount is read off its record rather than kept as a
+    ///  second reservation, so it counts from the instruction and stops counting the moment the proof that
+    ///  settles the recall deletes the record; `recalls[0]` is never written, so a wallet without one adds zero.
     function availableOf(bytes calldata wallet) external view returns (uint256) {
         TokenStorage storage s = layout();
         bytes32 key = WalletKeyLib.canonicalKey(wallet);
         uint256 balance = s.bridgedBalance[key];
-        uint256 reserved = s.reservedForValidations[key];
-        return reserved < balance ? balance - reserved : 0;
+        uint256 reservedForValidations = s.reservedForValidations[key];
+        uint256 recalledAmount = s.recalls[s.openRecall[key]].amount;
+        uint256 heldBack = reservedForValidations + recalledAmount;
+        return heldBack < balance ? balance - heldBack : 0;
     }
 
     /* ----- Reservations ----- */

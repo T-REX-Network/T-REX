@@ -65,7 +65,11 @@ that recall was dispatched to.
    the same id with a different body is refused. The reference chain already burned the native balance and credited
    the bridged position; a Lite that mints twice has inflated its chain.
 10. **A recall instruction burns at most once per `recallId`.** The Lite burns `min(amount, balance)`, where `balance`
-    may be below `amount`, down to zero, when a validation executed first; stores the proof; sends it. A repeated
+    may be below `amount`, down to zero, when a validation requested before the recall executed first, including
+    one that was still awaiting approval when the recall was instructed; stores the proof; sends it. A validation
+    requested after it cannot draw on the recalled amount: the token holds `amount` back from the wallet's
+    `availableOf` from the instruction until the proof settles the recall. Nothing else releases it: an instruction
+    that was never answered may still be executed, so its amount stays held back. A repeated
     instruction is answered with the stored proof, and the operator can resend it. The Lite never answers one id with
     two different proofs and never proves more than instructed. The token credits the native wallet the instruction
     recorded, not one the proof could choose.
