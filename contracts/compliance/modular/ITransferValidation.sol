@@ -68,6 +68,9 @@ pragma solidity 0.8.30;
  */
 interface ITransferValidation {
 
+    // The events and errors below are raised inside `TransferValidationLib` and `TransferSettlementLib`, which
+    // the compliance reaches by DELEGATECALL. They are declared again here so that they stay in the compliance's
+    // ABI; each is documented where it is defined, in `EventsLib` and `ErrorsLib`.
     event TransferValidationIssued(
         bytes32 indexed validationId,
         bytes from,
@@ -79,6 +82,34 @@ interface ITransferValidation {
         uint64 reconciliationWindow,
         bytes32 salt
     );
+    event SettlementNotified(
+        bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
+    );
+    event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
+    event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
+    event ValidationDiscarded(uint256 indexed validationId);
+    event ValidationResolved(uint256 indexed validationId, uint256 returnedAmount);
+
+    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
+    error SenderNotOnSatellite(bytes wallet);
+    error UnverifiedWallet(bytes wallet);
+    error NotAuthorizedForWallet(address caller, bytes wallet);
+    error EmptyValidationRange(uint256 min, uint256 max);
+    error ZeroValue();
+    error ValidationSpenderRefused(bytes spender);
+    error SettlementLegMismatch(uint256 validationId);
+    error SettlementOutOfBounds(uint256 validationId, uint256 amount);
+    error SettlementAmountMismatch(uint256 validationId, uint256 expected, uint256 amount);
+    error ValidationNotDiscardable(uint256 validationId, uint8 status);
+    error ValidationNotReleasable(uint256 validationId, uint64 releaseAt);
+    error ValidationNotPubliclyDiscardable(uint256 validationId, uint64 publicAt);
+    error ValidationNotStuck(uint256 validationId, uint8 status);
+    error ValidationNotYetResolvable(uint256 validationId, uint64 resolvableAt);
+    error NonCanonicalInteroperableAddress(bytes envelope);
+    error InteroperableAddressEmptyReferenceAndAddress();
+    error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
 
     /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
     /// the keeper gave up, and what is still reserved are all read off this one value.
