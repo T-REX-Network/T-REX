@@ -83,14 +83,19 @@ interface ITransferValidation {
         bytes32 salt
     );
     event SettlementNotified(
-        bytes32 indexed originChainKey, uint256 indexed validationId, bytes from, bytes to, uint256 amount
+        bytes32 indexed originChainKey, bytes32 indexed validationId, bytes from, bytes to, uint256 amount
     );
-    event ValidationLegConfirmed(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
-    event ValidationSettled(uint256 indexed validationId, bytes32 indexed chainKey, uint256 amount);
-    event LateReconciliation(uint256 indexed validationId, bytes32 indexed chainKey);
-    event ReplayedSettlement(uint256 indexed validationId, bytes32 indexed chainKey);
-    event ValidationDiscarded(uint256 indexed validationId);
-    event ValidationResolved(uint256 indexed validationId, uint256 returnedAmount);
+    event ValidationLegConfirmed(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event ValidationSettled(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
+    event LateReconciliation(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event ReplayedSettlement(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event ValidationDiscarded(bytes32 indexed validationId);
+    event ValidationResolved(bytes32 indexed validationId, uint256 returnedAmount);
+    event SettlementParked(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ParkedLegSettled(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event SettlementRejected(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ValidationOrphaned(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event SettlementBodyDiverged(bytes32 indexed validationId, bytes32 indexed chainKey, bytes32 hash);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error SenderNotOnSatellite(bytes wallet);
@@ -99,14 +104,15 @@ interface ITransferValidation {
     error EmptyValidationRange(uint256 min, uint256 max);
     error ZeroValue();
     error ValidationSpenderRefused(bytes spender);
-    error SettlementLegMismatch(uint256 validationId);
-    error SettlementOutOfBounds(uint256 validationId, uint256 amount);
-    error SettlementAmountMismatch(uint256 validationId, uint256 expected, uint256 amount);
-    error ValidationNotDiscardable(uint256 validationId, uint8 status);
-    error ValidationNotReleasable(uint256 validationId, uint64 releaseAt);
-    error ValidationNotPubliclyDiscardable(uint256 validationId, uint64 publicAt);
-    error ValidationNotStuck(uint256 validationId, uint8 status);
-    error ValidationNotYetResolvable(uint256 validationId, uint64 resolvableAt);
+    error ValidationAlreadyRequested(bytes32 validationId);
+    error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
+    error TokenPaused();
+    error SettlementAmountMismatch(bytes32 validationId, uint256 expected, uint256 amount);
+    error ValidationNotDiscardable(bytes32 validationId, uint8 status);
+    error ValidationNotReleasable(bytes32 validationId, uint64 releaseAt);
+    error ValidationNotPubliclyDiscardable(bytes32 validationId, uint64 publicAt);
+    error ValidationNotStuck(bytes32 validationId, uint8 status);
+    error ValidationNotYetResolvable(bytes32 validationId, uint64 resolvableAt);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
