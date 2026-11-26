@@ -85,18 +85,30 @@ interface IReceiptHandler {
     ///   (`TicketStillOpen`), and gives an ask for the receipt back when it does; past that cap it counts as no
     ///   answer. On home's own ask block hash with another valid until it is a bad receipt. Otherwise ignored.
     /// - An id home has no record of: reverts with `UnknownTicket`, and stays deliverable at the bridge.
-    /// - A bad receipt: another body for a half that already has one, applied or waiting, a chain that is not the
-    ///   sender's, wallets that are not the ticket's, a half the ticket never sent, or an expired answer that moved
-    ///   something. It is refused (`ReceiptRefused`), nothing is applied, and the chain that sent it is blocked.
-    /// - A receipt that cannot be applied yet: its ticket was never sent, the token is stopped, its away chain is
-    ///   blocked, or the sender's away balance is below its amount. It waits (`ReceiptWaiting`), tagged with
-    ///   `bridge` and `senderPeerKey`, for anyone to apply with `applyWaitingReceipt`.
-    /// - A zero receipt: the ticket ends `Done` with nothing moved. It is never a bad receipt.
-    /// - Any other receipt is applied as it happened and the ticket ends `Done`. A rule the move breaks now is
-    ///   announced (`MoveBreachedRule`), never refused. The terms check then decides whether the chain is also
-    ///   blocked: on home's own ask block hash the receipt must carry home's own terms; on another ask block hash it
-    ///   is a copy from a dropped home block (`ReceiptOnOlderTerms`), allowed up to `requestedMax` and the away
-    ///   chain's per-ticket cap.
+    /// - A bad receipt: another body for a half that already has one, applied or waiting. For the ticket's own half:
+    ///   a chain that is not the sender's, wallets that are not the ticket's, or an expired answer that moved
+    ///   something. For a second half: a half home never sent, a wallet that is not the half's, a chain that is not
+    ///   the one that wallet is on, a sender named, or anything but a mint of the money on hold or a zero answer that
+    ///   the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`), nothing is applied,
+    ///   and the chain that sent it is blocked.
+    /// - A receipt that cannot be applied yet: the token is stopped or its away chain is blocked; for the ticket's own
+    ///   half, also its ticket was never sent or the sender's away balance is below its amount. It waits
+    ///   (`ReceiptWaiting`), tagged with `bridge` and `senderPeerKey`, for anyone to apply with `applyWaitingReceipt`.
+    /// - A zero receipt for the ticket's own half: the ticket ends `Done` with nothing moved. It is never a bad
+    ///   receipt. A zero answer to the latest second half: that half is dead, the money stays on hold, and a new
+    ///   half is owed (`sendSecondHalf`).
+    /// - Any other receipt for the ticket's own half is applied as it happened. The terms check decides whether the
+    ///   chain is also blocked: on home's own ask block hash the receipt must carry home's own terms; on another ask
+    ///   block hash it is a copy from a dropped home block (`ReceiptOnOlderTerms`), allowed up to `requestedMax` and
+    ///   the away chain's per-ticket cap. A move inside one away chain ends `Done`, and a rule it breaks now is
+    ///   announced (`MoveBreachedRule`), never refused. A move to another chain goes `OnHold`, the rules are asked
+    ///   again for the receiver, and a receiver at home is minted at once (`Done`); otherwise the second half, a
+    ///   `MOVE_OUT`, is sent to the receiver, or back to the sender when the rules refuse it, inside this delivery
+    ///   (`SecondHalfSent`). With less gas left than the send needs, the whole delivery reverts and stays
+    ///   deliverable (`NotEnoughGasForTheSecondHalf`); a send that fails is caught (`SecondHalfNotSent`) and the
+    ///   half stays owed.
+    /// - A receipt equal to the latest second half: the money on hold lands on its wallet and the ticket ends
+    ///   `Done`. The positions move and the trackers are told once, here, on a move to the receiver only.
     /// A revert, from a tracker module for instance, leaves the message deliverable again.
     /// @param originChainKey The key of the chain the receipt came from.
     /// @param bridge The bridge that delivered it.

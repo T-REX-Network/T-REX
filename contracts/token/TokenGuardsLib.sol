@@ -94,7 +94,7 @@ library TokenGuardsLib {
     ) external view {
         require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
 
-        // The token's recovery and delegation, and the spender check on every `transferFrom`, call T-REX
+        // The token's recovery and recall, and the spender check on every `transferFrom`, call T-REX
         // methods outside the standard interface, which would revert on a registry missing them.
         bytes4[] memory calledInterfaces = new bytes4[](2);
         calledInterfaces[0] = type(IERC3643IdentityRegistry).interfaceId;

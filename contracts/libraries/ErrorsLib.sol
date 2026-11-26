@@ -88,7 +88,6 @@ library ErrorsLib {
     error ComplianceAlreadyBoundToToken();
     error TokenCirculating();
     error TicketsStillReserved();
-    error NothingInTransit(bytes32 ticketId);
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -103,8 +102,8 @@ library ErrorsLib {
     error OnlyBoundCompliance();
     /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
-    /// @dev A delegation-out or a recall moves location, never ownership: the native wallet and the satellite
-    ///  wallet must resolve to one identity, and that identity must exist.
+    /// @dev A recall moves location, never ownership: the native wallet and the satellite wallet must resolve to one
+    ///  identity, and that identity must exist.
     error WalletsNotLinked(address nativeWallet, bytes wallet);
     /// @dev The burn proof or the resend names another wallet, or the proof another chain, than the recall.
     error RecallMismatch(uint256 recallId);
@@ -114,16 +113,12 @@ library ErrorsLib {
     error RecallPending(bytes32 walletKey, uint256 recallId);
     /// @dev The recall is not waiting for a proof: never issued, or already settled.
     error RecallNotPending(uint256 recallId);
-    /// @dev The fields given for a resend are not the ones the delegation committed to.
-    error DelegationMismatch(uint256 delegationId);
     /// @dev The chain's peer changed since the instruction went out; a resend never retargets.
     error PeerChanged(bytes32 chainKey);
-    /// @dev `resend` knows two kinds: 0, a delegation, and 1, a recall.
+    /// @dev `resend` knows one kind: 1, a recall.
     error UnknownResendKind(uint8 kind);
-    /// @dev The validation already holds an amount in transit; a burn leg moves it once.
+    /// @dev The ticket already holds money on hold; a move puts its money on hold once.
     error TransitAlreadyHeld(bytes32 ticketId);
-    /// @dev The amount settled under the validation is not the one its burn leg put in transit.
-    error TransitAmountMismatch(bytes32 ticketId, uint256 held, uint256 amount);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
@@ -251,8 +246,8 @@ library ErrorsLib {
     error NotAuthorizedForWallet(address caller, bytes wallet);
     /// @dev `from` has no identity, or `to` is not eligible for new activity.
     error UnverifiedWallet(bytes wallet);
-    /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
-    error SenderNotOnSatellite(bytes wallet);
+    /// @dev Both wallets are home wallets: that is a plain transfer, not a move between chains.
+    error NotACrossChainMove();
     /// @dev Only a validation stored `WaitingForApproval` can be answered; `status` is the one found instead.
     error ValidationNotAwaitingApproval(bytes32 ticketId, uint8 status);
     /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
@@ -284,8 +279,15 @@ library ErrorsLib {
     error CancelNotDue(bytes32 ticketId, uint64 dueAt);
     /// @dev The ticket was already asked for its receipt the most times allowed.
     error NoAsksLeft(bytes32 ticketId);
-    /// @dev The next ask for the ticket's receipt is due only at `dueAt`.
+    /// @dev The next ask for the ticket's receipt, or the next send of its second half, is due only at `dueAt`.
     error SendNotDue(bytes32 ticketId, uint64 dueAt);
+    /// @dev The ticket owes no second half now: it holds no money with a destination, or its latest half was sent
+    ///  the most times allowed and is waiting for its receipt.
+    error SecondHalfNotOwed(bytes32 ticketId);
+    /// @dev The ticket's money on hold already had the most new halves allowed; a human ends it.
+    error NoNewHalfLeft(bytes32 ticketId);
+    /// @dev Less gas is left than a second half's send needs: the whole delivery reverts and stays deliverable.
+    error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
     /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or a floor
     ///  measured for that chain.
     error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);

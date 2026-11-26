@@ -63,6 +63,7 @@ import { EventsLib } from "../../libraries/EventsLib.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedger } from "./ComplianceLedger.sol";
 import { ITickets } from "./ITickets.sol";
+import { SecondHalfLib } from "./SecondHalfLib.sol";
 import { TicketLib } from "./TicketLib.sol";
 
 /**
@@ -71,14 +72,15 @@ import { TicketLib } from "./TicketLib.sol";
  * floors, the limits on asks, the block of an away chain, the record of every ticket, the ask itself, the pending
  * reservation it writes, the ask for the receipt, the receipt and the cancel. Own ERC-7201 namespace, so the module registry's layout is untouched.
  *
- * Three flows, each readable top to bottom, each in a library deployed once and linked so the compliance stays
+ * Four flows, each readable top to bottom, each in a library deployed once and linked so the compliance stays
  * under the contract size limit: {TicketLib-request} issues, {ReceiptLib-receiveReceipt} records what an away
- * token reports it did, {ReceiptLib-cancelTickets} rolls back what it never did. What stays here is the entry points of the first, the views and the settings. The reservation involves no
- * module: issuance writes the pending amounts into the ledger and the other two flows release them once.
+ * token reports it did, {SecondHalfLib} carries a move that leaves its away chain through home, and
+ * {ReceiptLib-cancelTickets} rolls back what an away token never did. What stays here is the entry points, the views
+ * and the settings. The reservation involves no module: issuance writes the pending amounts into the ledger and the
+ * other flows release them once.
  *
- * `from` is always a satellite wallet, never a native one: the Lite that executes a validation has to physically
- * hold the position it moves, where a native balance stays free to leave between issuance and settlement. A native
- * position reaches a satellite through delegation-out instead, which burns before it instructs.
+ * A ticket goes to the sender's away chain only: the away token that executes it physically holds the position it
+ * moves. A home wallet has no ticket to execute: its move out burns at home in the ask and is a second half only.
  *
  * `validUntil` is the satellite's hard deadline. One waiting time later anyone may ask the away token for the
  * receipt, and one waiting time after an unanswered ask anyone may cancel the ticket, never a refusal of a late
@@ -116,6 +118,13 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     ///  pinned bridge or peer is no longer the chain's.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external {
         TicketLib.sendTicket(ticketId, chainKey, to, spender, address(_boundToken()));
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev Not `restricted`: anyone may send an owed second half, at the times its clock gives, see
+    ///  {SecondHalfLib-sendSecondHalf}.
+    function sendSecondHalf(bytes32 ticketId, bytes calldata wallet) external {
+        SecondHalfLib.sendSecondHalf(ticketId, wallet, address(_boundToken()));
     }
 
     /* ----- Views ----- */

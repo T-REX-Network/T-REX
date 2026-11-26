@@ -115,10 +115,12 @@ library TransferContextLib {
         ctx.spender = spender;
     }
 
-    /// @dev A validation that settled: the amount a satellite actually executed, between two satellite wallets
-    ///  or landing on a native one, executed by the spender the validation names.
+    /// @dev A move between chains that is done: the amount that moved, between two away wallets or between an away
+    ///  wallet and a home wallet, executed by the spender the ticket names. `kind` is `CROSS_CHAIN` for a move out of
+    ///  an away wallet and `DELEGATION` for a home wallet's move out.
     function settlement(
         address compliance,
+        uint8 kind,
         address fromIdentity,
         address toIdentity,
         bytes32 fromWallet,
@@ -133,7 +135,7 @@ library TransferContextLib {
         ctx.toWallet = toWallet;
         ctx.amountMin = amount;
         ctx.amountMax = amount;
-        ctx.kind = MovementKindLib.CROSS_CHAIN;
+        ctx.kind = kind;
         ctx.spender = spender;
     }
 

@@ -1,0 +1,461 @@
+// SPDX-License-Identifier: GPL-3.0
+//
+//                                             :+#####%%%%%%%%%%%%%%+
+//                                         .-*@@@%+.:+%@@@@@%%#***%@@%=
+//                                     :=*%@@@#=.      :#@@%       *@@@%=
+//                       .-+*%@%*-.:+%@@@@@@+.     -*+:  .=#.       :%@@@%-
+//                   :=*@@@@%%@@@@@@@@@%@@@-   .=#@@@%@%=             =@@@@#.
+//             -=+#%@@%#*=:.  :%@@@@%.   -*@@#*@@@@@@@#=:-              *@@@@+
+//            =@@%=:.     :=:   *@@@@@%#-   =%*%@@@@#+-.        =+       :%@@@%-
+//           -@@%.     .+@@@     =+=-.         @@#-           +@@@%-       =@@@@%:
+//          :@@@.    .+@@#%:                   :    .=*=-::.-%@@@+*@@=       +@@@@#.
+//          %@@:    +@%%*                         =%@@@@@@@@@@@#.  .*@%-       +@@@@*.
+//         #@@=                                .+@@@@%:=*@@@@@-      :%@%:      .*@@@@+
+//        *@@*                                +@@@#-@@%-:%@@*          +@@#.      :%@@@@-
+//       -@@%           .:-=++*##%%%@@@@@@@@@@@@*. :@+.@@@%:            .#@@+       =@@@@#:
+//      .@@@*-+*#%%%@@@@@@@@@@@@@@@@%%#**@@%@@@.   *@=*@@#                :#@%=      .#@@@@#-
+//      -%@@@@@@@@@@@@@@@*+==-:-@@@=    *@# .#@*-=*@@@@%=                 -%@@@*       =@@@@@%-
+//         -+%@@@#.   %@%%=   -@@:+@: -@@*    *@@*-::                   -%@@%=.         .*@@@@@#
+//            *@@@*  +@* *@@##@@-  #@*@@+    -@@=          .         :+@@@#:           .-+@@@%+-
+//             +@@@%*@@:..=@@@@*   .@@@*   .#@#.       .=+-       .=%@@@*.         :+#@@@@*=:
+//              =@@@@%@@@@@@@@@@@@@@@@@@@@@@%-      :+#*.       :*@@@%=.       .=#@@@@%+:
+//               .%@@=                 .....    .=#@@+.       .#@@@*:       -*%@@@@%+.
+//                 +@@#+===---:::...         .=%@@*-         +@@@+.      -*@@@@@%+.
+//                  -@@@@@@@@@@@@@@@@@@@@@@%@@@@=          -@@@+      -#@@@@@#=.
+//                    ..:::---===+++***###%%%@@@#-       .#@@+     -*@@@@@#=.
+//                                           @@@@@@+.   +@@*.   .+@@@@@%=.
+//                                          -@@@@@=   =@@%:   -#@@@@%+.
+//                                          +@@@@@. =@@@=  .+@@@@@*:
+//                                          #@@@@#:%@@#. :*@@@@#-
+//                                          @@@@@%@@@= :#@@@@+.
+//                                         :@@@@@@@#.:#@@@%-
+//                                         +@@@@@@-.*@@@*:
+//                                         #@@@@#.=@@@+.
+//                                         @@@@+-%@%=
+//                                        :@@@#%@%=
+//                                        +@@@@%-
+//                                        :#%%=
+//
+
+// T-REX Smart Contracts
+// The ERC-3643 token suite of the T-REX ecosystem.
+//
+// Copyright (C) 2026 Digital Asset Operational Services ISAC Ltd. ("T-REX Network")
+//
+// This file is part of the T-REX smart contract suite.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+pragma solidity 0.8.30;
+
+import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
+import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
+import { EventsLib } from "../../libraries/EventsLib.sol";
+import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
+import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
+import { IToken } from "../../token/IToken.sol";
+import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
+import { ITickets } from "./ITickets.sol";
+import { ModuleSetLib } from "./ModuleSetLib.sol";
+import { MovementKindLib } from "./MovementKindLib.sol";
+import { TicketLib } from "./TicketLib.sol";
+import { TransferContextLib } from "./TransferContextLib.sol";
+import { IModule } from "./modules/IModule.sol";
+
+/**
+ * @title SecondHalfLib
+ * @dev The second half of a move between chains, deployed once and linked. A move that leaves its away chain is done
+ * in halves, one after the other, never at the same time: the away token's execution of the ticket is the first
+ * half, home's `MOVE_OUT` is the second.
+ *
+ * When the first half's receipt lands, the money goes on hold at home. In the same transaction home asks the rules
+ * again for the receiver and decides where it goes: to the receiver, minted at once when it is a home wallet, or
+ * back to the sender when the rules refuse it; a return never asks the rules. A home wallet that moves out is the
+ * same move with no first half: its tokens are burned at home and go on hold in the ask itself.
+ *
+ * A second half has its own valid until and its own pin. Its receipt, equal to it, ends the move `Done`, and only
+ * then are the positions moved and the trackers told, once. A half answered zero after its valid until is dead and a
+ * new half is owed; the number of new halves per money on hold is bounded, so a wrong waiting time costs a bounded
+ * number of sends.
+ *
+ * The compliance reaches this by DELEGATECALL, from {ReceiptLib} and {TicketLib} or from its own entry point, so the
+ * storage is its own namespaces, the token and the modules see the compliance as their caller, and every event is
+ * the compliance's.
+ */
+library SecondHalfLib {
+
+    /// @dev The most sends of one second half: its first send and two sends again.
+    uint8 internal constant MAX_SENDS_PER_HALF = 3;
+
+    /// @dev The most second halves one money on hold may have.
+    uint8 internal constant MAX_NEW_HALVES = 4;
+
+    /// @dev The gas a second half's send needs inside its receipt's delivery: below it the whole delivery reverts and
+    ///  stays deliverable, so no relayer can make the send fail on purpose. From the plan's figure for one send on
+    ///  the receipt route; to be replaced by a measured run.
+    uint256 internal constant SECOND_HALF_SEND_GAS = 288_000;
+
+    /* ----- The first half landed ----- */
+
+    /// @dev See {IReceiptHandler-receiveReceipt}: a first-half receipt for a ticket whose receiver is on another
+    ///  chain. Three steps, in one transaction, so the receiver's room is never left unreserved in between.
+    /// @param token the token the compliance is bound to
+    function takeOntoHold(
+        bytes32 ticketId,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) external {
+        ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
+        uint256 amount = receipt.amount;
+
+        // Step 1: the money goes on hold and the ask's row is released, so the rules judge the receiver without it.
+        ticket.moved = amount;
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.OnHold, token);
+        IToken(token).putOnHold(receipt.from, amount, ticketId);
+        emit EventsLib.ReceiptApplied(ticketId, originChainKey, amount);
+
+        // Step 2: forward to the receiver when it may take the money now, back to the sender otherwise.
+        bool forward = _receiverMayTakeIt(ticket, receipt.to, amount, token);
+        ticket.secondHalfToKey = ticket.fromKey;
+        if (forward) ticket.secondHalfToKey = ticket.toKey;
+        TicketLib.reserveTheHold(ticket);
+
+        // Step 3: a home receiver is minted now; any other wallet gets its move out inside this delivery.
+        (bool receiverAtHome,) = WalletKeyLib.isReferenceChain(receipt.to);
+        if (forward && receiverAtHome) {
+            _finish(ticket, ticketId, receipt.to, token);
+            return;
+        }
+        bytes calldata wallet = receipt.from;
+        if (forward) wallet = receipt.to;
+        _takeANewHalf(ticket, ticketId);
+        _trySendInsideTheDelivery(ticket, ticketId, wallet, token);
+    }
+
+    /// @dev See {ITickets-askToMove}: a home wallet that moves out. The ticket is written and its rules were asked at
+    ///  the ask, which is the destination decision. The amount is burned at home onto hold and the move out leaves in
+    ///  the same transaction; a send that fails reverts the whole ask.
+    /// @param to the receiver's wallet, as asked
+    /// @param token the token the compliance is bound to
+    function moveOutFromHome(bytes32 ticketId, bytes calldata to, address token) external {
+        ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
+        (, address homeWallet) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+        require(!IToken(token).isFrozen(homeWallet), ErrorsLib.FrozenWallet(homeWallet));
+        // The ledger counts the wallet's balance under the owner it credited: a funded wallet relinked to another
+        // identity is refused here, before its tokens leave, as a transfer out of it would be.
+        ComplianceLedgerLib.currentOwner(token, homeWallet, ticket.fromIdentity, 0);
+
+        uint256 amount = ticket.amountMax;
+        ticket.moved = amount;
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.OnHold, token);
+        ticket.secondHalfToKey = ticket.toKey;
+        TicketLib.reserveTheHold(ticket);
+        _takeANewHalf(ticket, ticketId);
+
+        IToken(token).burnOntoHold(ticket.fromWallet, amount, ticketId);
+        _sendTheLatestHalf(ticket, ticketId, to, token);
+    }
+
+    /* ----- Anyone ----- */
+
+    /// @dev See {ITickets-sendSecondHalf}.
+    /// @param token the token the compliance is bound to
+    function sendSecondHalf(bytes32 ticketId, bytes calldata wallet, address token) external {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
+        ITickets.Ticket storage ticket = store.validations[ticketId];
+        bool onHoldWithAHalf = ticket.status == ITickets.TicketStatus.OnHold && ticket.half != 0;
+        require(onHoldWithAHalf, ErrorsLib.SecondHalfNotOwed(ticketId));
+        require(WalletKeyLib.canonicalKey(wallet) == ticket.secondHalfToKey, ErrorsLib.ValidationBodyMismatch(ticketId));
+        bytes32 chainKey = _chainKeyOf(wallet);
+        TicketLib.requireTokenRunning(token);
+        TicketLib.requireAwayChainNotBlocked(chainKey);
+        TicketLib.requireNoHostileChange(token, chainKey);
+
+        if (ticket.secondHalfOwed) {
+            // A half whose send failed never left: it goes under its own number. A dead half is replaced.
+            bool latestHalfLeft = ticket.secondHalfSends != 0;
+            if (latestHalfLeft) _takeANewHalf(ticket, ticketId);
+            _sendTheLatestHalf(ticket, ticketId, wallet, token);
+            return;
+        }
+
+        require(ticket.secondHalfSends < MAX_SENDS_PER_HALF, ErrorsLib.SecondHalfNotOwed(ticketId));
+        uint64 dueAt = _nextSendDueAt(ticket, store.waitingTimes[chainKey]);
+        require(block.timestamp >= dueAt, ErrorsLib.SendNotDue(ticketId, dueAt));
+
+        // Past its valid until by now: a half pinned to a pair the chain no longer has goes to the current pair, as a
+        // new half, since its old away token can no longer be asked.
+        if (!_pinnedToTheCurrentPair(ticketId, ticket.half, chainKey, token)) {
+            _takeANewHalf(ticket, ticketId);
+            _sendTheLatestHalf(ticket, ticketId, wallet, token);
+            return;
+        }
+
+        ticket.secondHalfSends += 1;
+        _send(ticket, ticketId, chainKey, wallet, token);
+    }
+
+    /* ----- The second half landed ----- */
+
+    /// @dev See {IReceiptHandler-receiveReceipt}: a good receipt for a second half, see {ReceiptLib}. A zero answer to
+    ///  the latest half says it arrived after its valid until and was never executed: the half is dead, the money
+    ///  stays on hold, and a new half is owed. A receipt equal to the latest half ends the move. A zero answer to an
+    ///  older half changes nothing: that half is dead already.
+    /// @param token the token the compliance is bound to
+    function applySecondHalfReceipt(
+        bytes32 ticketId,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) external {
+        ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
+        emit EventsLib.ReceiptApplied(ticketId, originChainKey, receipt.amount);
+
+        bool answersTheLatestHalf = receipt.half == ticket.half;
+        if (!answersTheLatestHalf) return;
+        if (receipt.amount == 0) {
+            ticket.secondHalfOwed = true;
+            return;
+        }
+        _finish(ticket, ticketId, receipt.to, token);
+    }
+
+    /* ----- Private ----- */
+
+    /// @dev Ends the move on `toWallet` and the ticket `Done`. On a forward move the positions move and the trackers
+    ///  are told, once, here: the sender's total owned counted the money on hold until now. A return moves no
+    ///  position and tells no tracker: it is an undo.
+    function _finish(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata toWallet, address token) private {
+        bool forward = ticket.secondHalfToKey == ticket.toKey;
+        uint256 amount = ticket.moved;
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+        if (!forward) {
+            IToken(token).finishMove(ticket.fromWallet, toWallet, amount, ticketId);
+            return;
+        }
+
+        address toIdentity = _receiverIdentityNow(ticket, toWallet, token);
+        IModule.TransferContext memory context = _doneMove(ticket, toWallet, toIdentity);
+        ComplianceLedgerLib.movePosition(
+            context.fromIdentity, context.toIdentity, context.fromWallet, context.toWallet, amount
+        );
+        IToken(token).finishMove(ticket.fromWallet, toWallet, amount, ticketId);
+        ModuleSetLib.callAfterTransfer(context);
+    }
+
+    /// @dev The move as the trackers are told it, for the money on hold.
+    function _doneMove(ITickets.Ticket storage ticket, bytes calldata toWallet, address toIdentity)
+        private
+        view
+        returns (IModule.TransferContext memory)
+    {
+        return TransferContextLib.settlement(
+            address(this),
+            _kindOf(ticket),
+            ticket.fromIdentity,
+            toIdentity,
+            WalletKeyLib.walletId(ticket.fromWallet),
+            WalletKeyLib.walletId(toWallet),
+            ticket.moved,
+            ticket.spender
+        );
+    }
+
+    /// @dev A home wallet's move out is a `DELEGATION`, any other move a `CROSS_CHAIN`.
+    function _kindOf(ITickets.Ticket storage ticket) private view returns (uint8) {
+        (bool senderAtHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+        if (senderAtHome) return MovementKindLib.DELEGATION;
+        return MovementKindLib.CROSS_CHAIN;
+    }
+
+    /// @dev The receiver's identity when the move is done. A home receiver may have changed owner since the ask, so it
+    ///  is resolved again through the registry; a wallet the registry no longer names keeps the identity it was
+    ///  asked for. The token has not minted to it yet, which is why nothing is adjusted for this very move.
+    function _receiverIdentityNow(ITickets.Ticket storage ticket, bytes calldata toWallet, address token)
+        private
+        returns (address)
+    {
+        address askedIdentity = ticket.toIdentity;
+        (bool receiverAtHome, address homeReceiver) = WalletKeyLib.isReferenceChain(toWallet);
+        if (!receiverAtHome) return askedIdentity;
+        address registryIdentity = address(_registryOf(token).identity(homeReceiver));
+        if (registryIdentity == address(0)) registryIdentity = askedIdentity;
+        return ComplianceLedgerLib.currentOwner(token, homeReceiver, registryIdentity, 0);
+    }
+
+    /// @dev Whether the receiver may take the money now: it is eligible, its chain takes second halves (a home wallet
+    ///  needs none), and the rules allow the amount, unless both wallets are one identity's.
+    function _receiverMayTakeIt(ITickets.Ticket storage ticket, bytes calldata to, uint256 amount, address token)
+        private
+        view
+        returns (bool)
+    {
+        bool receiverEligible = _registryOf(token).isWalletVerified(to);
+        (bool receiverAtHome,) = WalletKeyLib.isReferenceChain(to);
+        bool chainTakesIt = receiverAtHome || _awayChainTakesHalves(ticket.toChainKey, token);
+        bool rulesAllowIt = ComplianceLedgerLib.isRelocation(ticket.fromIdentity, ticket.toIdentity);
+        if (!rulesAllowIt) rulesAllowIt = amount <= ModuleSetLib.callCheckTransfer(_askedMove(ticket, to, amount));
+        return receiverEligible && chainTakesIt && rulesAllowIt;
+    }
+
+    /// @dev The move as the rules are asked about it at the receipt.
+    function _askedMove(ITickets.Ticket storage ticket, bytes calldata to, uint256 amount)
+        private
+        view
+        returns (IModule.TransferContext memory)
+    {
+        return TransferContextLib.settlement(
+            address(this),
+            MovementKindLib.CROSS_CHAIN,
+            ticket.fromIdentity,
+            ticket.toIdentity,
+            WalletKeyLib.walletId(ticket.fromWallet),
+            WalletKeyLib.walletId(to),
+            amount,
+            ticket.spender
+        );
+    }
+
+    /// @dev Whether an away chain takes a second half now: its receipt route is open, it is not blocked, and it has a
+    ///  waiting time to give the half its valid until.
+    function _awayChainTakesHalves(bytes32 chainKey, address token) private view returns (bool) {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        bool routeOpen = ITREXMessaging(token).isChainOpen(chainKey);
+        bool blocked = store.blockedAwayChains[chainKey];
+        bool hasAWaitingTime = store.waitingTimes[chainKey] != 0;
+        return routeOpen && !blocked && hasAWaitingTime;
+    }
+
+    /// @dev Numbers a new second half, within the bound of new halves per money on hold, and announces the last one.
+    function _takeANewHalf(ITickets.Ticket storage ticket, bytes32 ticketId) private {
+        require(ticket.newHalves < MAX_NEW_HALVES, ErrorsLib.NoNewHalfLeft(ticketId));
+        ticket.newHalves += 1;
+        ticket.half += 1;
+        if (ticket.newHalves == MAX_NEW_HALVES) emit EventsLib.NewHalfLimitReached(ticketId);
+    }
+
+    /// @dev Writes the first send of the latest half: its valid until is now plus its chain's waiting time.
+    function _writeTheFirstSend(ITickets.Ticket storage ticket, bytes32 chainKey) private {
+        uint64 waitingTime = TicketLib.layout().waitingTimes[chainKey];
+        ticket.secondHalfValidUntil = uint64(block.timestamp) + waitingTime;
+        ticket.secondHalfSends = 1;
+        ticket.secondHalfOwed = false;
+    }
+
+    /// @dev Sends the latest half for the first time. A send that reverts reverts the caller's transaction.
+    function _sendTheLatestHalf(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata wallet, address token)
+        private
+    {
+        bytes32 chainKey = _chainKeyOf(wallet);
+        _writeTheFirstSend(ticket, chainKey);
+        _send(ticket, ticketId, chainKey, wallet, token);
+    }
+
+    /// @dev Sends the latest half for the first time inside a receipt's delivery. Below `SECOND_HALF_SEND_GAS` the
+    ///  whole delivery reverts and stays deliverable. A send that fails is caught: the receipt stays applied, and the
+    ///  half stays owed under its own number for anyone to send.
+    function _trySendInsideTheDelivery(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes calldata wallet,
+        address token
+    ) private {
+        bytes32 chainKey = _chainKeyOf(wallet);
+        _writeTheFirstSend(ticket, chainKey);
+        bytes memory body = _moveOutBody(ticket, ticketId, wallet);
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, ticket.half);
+
+        uint256 gasLeft = gasleft();
+        require(gasLeft >= SECOND_HALF_SEND_GAS, ErrorsLib.NotEnoughGasForTheSecondHalf(gasLeft, SECOND_HALF_SEND_GAS));
+        try IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.MOVE_OUT, body) {
+            emit EventsLib.SecondHalfSent(
+                ticketId, ticket.half, chainKey, wallet, ticket.moved, ticket.secondHalfValidUntil
+            );
+        } catch {
+            ticket.secondHalfSends = 0;
+            ticket.secondHalfOwed = true;
+            emit EventsLib.SecondHalfNotSent(ticketId, ticket.half);
+        }
+    }
+
+    /// @dev Sends the latest half as recorded: its number, its wallet, the money on hold and its valid until.
+    function _send(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes32 chainKey,
+        bytes calldata wallet,
+        address token
+    ) private {
+        bytes memory body = _moveOutBody(ticket, ticketId, wallet);
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, ticket.half);
+
+        emit EventsLib.SecondHalfSent(
+            ticketId, ticket.half, chainKey, wallet, ticket.moved, ticket.secondHalfValidUntil
+        );
+
+        IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.MOVE_OUT, body);
+    }
+
+    /// @dev The `MOVE_OUT` of the latest half, encoded.
+    function _moveOutBody(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata wallet)
+        private
+        view
+        returns (bytes memory)
+    {
+        return abi.encode(
+            MessageTypesLib.MoveOutMessage({
+                ticketId: ticketId,
+                half: ticket.half,
+                toWallet: wallet,
+                amount: ticket.moved,
+                validUntil: ticket.secondHalfValidUntil
+            })
+        );
+    }
+
+    /// @dev When the latest half may be sent again: one waiting time after its valid until for the second send, two
+    ///  more for the third. Fixed times, never counted from the last send, so a late send does not push the next one.
+    function _nextSendDueAt(ITickets.Ticket storage ticket, uint64 waitingTime) private view returns (uint64) {
+        uint64 sends = ticket.secondHalfSends;
+        uint64 waitingTimesAfterValidUntil = sends * (sends + 1) / 2;
+        return ticket.secondHalfValidUntil + waitingTimesAfterValidUntil * waitingTime;
+    }
+
+    /// @dev Whether the half is still pinned to the chain's current receipt route and peer.
+    function _pinnedToTheCurrentPair(bytes32 ticketId, uint8 half, bytes32 chainKey, address token)
+        private
+        view
+        returns (bool)
+    {
+        ITREXMessaging messaging = ITREXMessaging(token);
+        (address pinnedBridge, bytes32 pinnedPeerKey) = messaging.pinOf(MessageTypesLib.halfKeyOf(ticketId, half));
+        bool sameBridge = pinnedBridge == messaging.receiptRouteFor(chainKey);
+        bool samePeer = pinnedPeerKey == keccak256(messaging.peerFor(chainKey));
+        return sameBridge && samePeer;
+    }
+
+    /// @dev The registry of the token the compliance is bound to.
+    function _registryOf(address token) private view returns (ITREXRegistry) {
+        return ITREXRegistry(address(IToken(token).identityRegistry()));
+    }
+
+    function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
+        (bytes2 chainType, bytes memory chainReference,) = WalletKeyLib.parse(wallet);
+        return MessageTypesLib.chainKey(chainType, chainReference);
+    }
+
+}

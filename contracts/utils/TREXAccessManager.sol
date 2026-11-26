@@ -281,7 +281,6 @@ contract TREXAccessManager is AccessManagerUpgradeable {
 
         // Cross-chain instructions.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-        _setTargetFunctionRole(token, IToken.delegateOut.selector, agentRole);
         _setTargetFunctionRole(token, IToken.instructRecall.selector, agentRole);
         _setTargetFunctionRole(token, IToken.resend.selector, agentRole);
 

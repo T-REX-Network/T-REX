@@ -80,7 +80,6 @@ import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
-import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 import {
     AccessManagedOwnableBase,
     AccessManagedOwnableUpgradeable
@@ -207,26 +206,14 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    /// @dev The native burn happens here, the only part the library cannot reach; {TokenDelegationLib-delegateOut}
-    ///  then checks the burn stayed inside the free balance, credits the bridged position, checks the wallets, tells
-    ///  the compliance, commits and sends the instruction. One transaction, so a refusal anywhere undoes the burn,
-    ///  and the satellite is never told to mint what this chain still holds. It is the only way a native position
-    ///  reaches a satellite, and `totalSupply` never moves.
-    function delegateOut(address holder, bytes calldata toWallet, uint256 amount)
-        external
-        whenNotPaused
-        nonReentrant
-        returns (bytes32)
-    {
-        ITREXRegistry registry = ITREXRegistry(address(_getIdentityRegistry()));
-        if (_msgSender() != holder && _msgSender() != address(registry.identity(holder))) {
-            _checkCanCallSelector(this.delegateOut.selector);
-        }
-        require(!_isFrozen(holder), ErrorsLib.FrozenWallet(holder));
-
-        ERC20Upgradeable._update(holder, address(0), amount);
-
-        return TokenDelegationLib.delegateOut(holder, toWallet, amount);
+    function sendOnReceiptRoute(
+        bytes32 chainKey,
+        bytes32 halfKey,
+        MessageTypesLib.Message messageType,
+        bytes calldata body
+    ) external returns (bytes32) {
+        _requireBoundCompliance();
+        return TREXMessagingLib.sendOnReceiptRoute(chainKey, halfKey, messageType, body);
     }
 
     /// @inheritdoc IToken
@@ -256,22 +243,30 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    function putOnHold(bytes calldata from, uint256 amount, bytes32 ticketId, uint256 reserved) external whenNotPaused {
+    function putOnHold(bytes calldata from, uint256 amount, bytes32 ticketId) external whenNotPaused {
         _requireBoundCompliance();
-        TokenLedgerLib.putOnHold(from, amount, ticketId, reserved);
+        TokenLedgerLib.putOnHold(from, amount, ticketId);
+    }
+
+    /// @inheritdoc IToken
+    /// @dev The burn stays on the raw `_update`: the compliance tells the trackers once, when the move is done.
+    function burnOntoHold(bytes calldata from, uint256 amount, bytes32 ticketId) external whenNotPaused {
+        _requireBoundCompliance();
+        address holder = TokenLedgerLib.holdFromHome(from, amount, ticketId);
+        ERC20Upgradeable._update(holder, address(0), amount);
     }
 
     /* ----- Ledger Views ----- */
 
     /// @inheritdoc IERC20
-    /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite. A delegation-out, a
-    ///  recall or either native-side settlement leg moves between the two terms and never changes the sum; only a
-    ///  mint or a burn does.
+    /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite, money on hold included.
+    ///  A home wallet's move out, a recall or a move ending at home moves between the two terms and never changes the
+    ///  sum; only a mint or a burn does.
     ///
     ///  The register reports the issuance, not the native float, and the events say so at the cost of one
     ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
     ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
-    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance`; `DelegatedOut`, `Recalled` and
+    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance`; `HeldInTransit`, `Recalled` and
     ///  `SettledToNative` are the reconciliation for anyone deriving it that way, and
     ///  `totalSupply() - totalAwayBalance()` is the native float. An escrow address holding the delegated float
     ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
@@ -289,12 +284,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// @inheritdoc IToken
     function awayBalanceOf(bytes calldata wallet) external view returns (uint256) {
         return TokenLedgerLib.awayBalanceOf(wallet);
-    }
-
-    /// @inheritdoc IToken
-    function returnHeldInTransit(bytes calldata to, bytes32 ticketId) external whenNotPaused {
-        _requireBoundCompliance();
-        TokenLedgerLib.returnHeldInTransit(to, ticketId);
     }
 
     /// @inheritdoc IToken
@@ -394,19 +383,16 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Ledger Transitions ----- */
 
     // Pause policy for everything below: the transitions move balances without {_update} and check no pause
-    // themselves; the entry points that reach them do. Those are `_handleSettlement`, `finishMove`,
-    // `putOnHold`, `delegateOut` and `_handleBurnProof`, each of which requires the token not to be paused,
-    // so that the pause halts every movement between wallets, native or satellite, while mints and burns stay
-    // allowed.
+    // themselves; the entry points that reach them do. Those are `finishMove`, `putOnHold`, `burnOntoHold` and
+    // `_handleBurnProof`, each of which requires the token not to be paused, so that the pause halts every movement
+    // between wallets, native or satellite, while mints and burns stay allowed.
 
-    /// @dev Applies the settled leg of a validation: `from`'s satellite position down, and either `to`'s free
-    ///  balance up when `to` is on the reference chain (a native mint, `Transfer(0x0, to)`, and a distinct event
-    ///  because ownership moves between identities), or `to`'s satellite position up otherwise (a bridged
-    ///  transfer, nothing native). `ticketId` is the validation the settlement consumed. The calling flow
-    ///  owns the lifecycle; the ledger checks the buckets and the envelopes only. There is no mirror leaving a
-    ///  native wallet: the compliance issues no validation whose sender is native, so the satellite executing
-    ///  one always holds the position it moves. The one path every settlement takes, {finishMove} adding
-    ///  only the caller and pause checks.
+    /// @dev Ends a move: the amount leaves the ticket's hold, or `from`'s away balance for a move inside one away
+    ///  chain, and either lands on `to`'s free balance when `to` is on this chain (a native mint, `Transfer(0x0,
+    ///  to)`, and a distinct event because ownership moves between identities), or on `to`'s away balance otherwise
+    ///  (nothing native). `ticketId` is the ticket of the move. The compliance owns the lifecycle; the ledger checks
+    ///  the buckets and the envelopes only. The one path every move's end takes, {finishMove} adding only the caller
+    ///  and pause checks.
     function _settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId) internal {
         (bool toNative, address recipient, bytes32 fromKey) = TokenLedgerLib.settle(from, to, amount, ticketId);
         if (!toNative) return;
@@ -596,7 +582,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
     ///      minted to, so a recall never moves ownership or `totalSupply`. The mint stays on the raw `_update`,
     ///      so the modules do not see a plain mint for tokens they never saw burned; the compliance is told a
-    ///      `RECALL` instead, native wallet to the same native wallet, the exact inverse of the `DELEGATION`.
+    ///      `RECALL` instead, native wallet to the same native wallet.
     ///      `consumeBurnProof` runs `syncOwner` before the mint, so the owner follow inside `agentTransferred`
     ///      finds nothing left to settle. Same pause policy as {_handleSettlement}: a paused token leaves the
     ///      proof deliverable, a proof for a recall already settled blocks its away chain on the compliance, a proof

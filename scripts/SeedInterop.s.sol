@@ -57,7 +57,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /**
  * @title SeedInterop
  * @notice Seeds every cross-chain flow of the Gold Token on one chain, so a subgraph and an SDK
- *         see real routes, validations, a delegation and a recall without a second chain.
+ *         see real routes, validations, a home wallet's move out and a recall without a second chain.
  *
  * The "satellite" is chain SATELLITE_CHAIN_ID (default 31338, a local id no public network uses), reached
  * through a loopback ERC-7786 gateway (test/integration/mocks/ERC7786GatewayMock.sol) that
@@ -69,8 +69,8 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  *
  * What lands on chain, in order:
  *   gateway trusted, route + peer set, measured times, validity windows, waiting time, ask limits
- *   and ticket caps set, two satellite wallets linked, investor0 delegates 100 GOLD to its satellite
- *   wallet, validation 1 issued and settled for 30 (satellite 0 -> satellite 1), validation 2 issued
+ *   and ticket caps set, two satellite wallets linked, investor0 moves 100 GOLD out of its home wallet to
+ *   its satellite wallet (burned at home onto hold, landed by the move out's receipt), validation 1 issued and settled for 30 (satellite 0 -> satellite 1), validation 2 issued
  *   and left pending, validation 3 issued toward investor1's native wallet, a recall of 20
  *   instructed on satellite wallet 1 and settled by a burn proof.
  *
@@ -84,7 +84,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  *
  * ===== Idempotency =====
  * Infrastructure steps check on-chain state first. The gateway address, once deployed, is kept in
- * the record and reused. The movement steps (delegation, validations, recall) run once: the record
+ * the record and reused. The movement steps (move out, validations, recall) run once: the record
  * carries `movementsSeeded` and a re-run skips them unless INTEROP_FORCE_MOVEMENTS=true.
  *
  * Usage:
@@ -141,7 +141,7 @@ contract SeedInterop is Script {
         if (movementsSeeded && !vm.envOr("INTEROP_FORCE_MOVEMENTS", false)) {
             console.log("Movements already seeded, skipping (set INTEROP_FORCE_MOVEMENTS=true to add more)");
         } else {
-            _delegateOut();
+            _moveOutFromHome();
             vm.startBroadcast(deployerKey);
             _seedValidations();
             _seedRecall();
@@ -320,17 +320,39 @@ contract SeedInterop is Script {
 
     // ============ Movements ============
 
-    function _delegateOut() internal {
+    /// @dev investor0 moves 100 GOLD from its home wallet to its away wallet: burned at home onto hold, then the
+    ///  move out's receipt from the away chain lands it there.
+    function _moveOutFromHome() internal {
         if (token.awayBalanceOf(satellites[0]) != 0) {
-            console.log("investor0 already holds a bridged position, skipping the delegation");
+            console.log("investor0 already holds an away balance, skipping the move out");
             return;
         }
         require(token.balanceOf(wallets[0]) >= 100 * UNIT, "investor0 holds less than 100 GOLD");
         _fund(wallets[0]);
+        bytes memory homeWallet = InteroperableAddress.formatEvmV1(block.chainid, wallets[0]);
         vm.startBroadcast(investorKeys[0]);
-        token.delegateOut(wallets[0], satellites[0], 100 * UNIT);
+        bytes32 ticketId =
+            compliance.askToMove(homeWallet, satellites[0], 100 * UNIT, 100 * UNIT, "", _salt("move out"));
         vm.stopBroadcast();
-        console.log("investor0 delegated 100 GOLD to its satellite wallet");
+
+        vm.startBroadcast(deployerKey);
+        _liteSends(
+            MessageTypesLib.encodeSettlement(
+                MessageTypesLib.ReceiptMessage({
+                    ticketId: ticketId,
+                    from: "",
+                    to: satellites[0],
+                    amount: 100 * UNIT,
+                    askBlockHash: bytes32(0),
+                    seenMax: 0,
+                    seenValidUntil: 0,
+                    half: 1,
+                    answer: MessageTypesLib.ReceiptAnswer.Executed
+                })
+            )
+        );
+        vm.stopBroadcast();
+        console.log("investor0 moved 100 GOLD out to its away wallet");
     }
 
     function _seedValidations() internal {

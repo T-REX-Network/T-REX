@@ -73,6 +73,7 @@ import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
 import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
+import { SecondHalfLib } from "./SecondHalfLib.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
 import { IApprovalModule } from "./modules/IApprovalModule.sol";
 import { IModule } from "./modules/IModule.sol";
@@ -166,6 +167,8 @@ library TicketLib {
 
     /// @dev What issuance works out before the first write, in memory so the flow stays one function.
     struct Draft {
+        /// The sender as a home wallet; zero for an away sender.
+        address homeWallet;
         bytes32 fromChainKey;
         bytes32 toChainKey;
         address fromIdentity;
@@ -206,7 +209,7 @@ library TicketLib {
         _resolveRoute(draft, from, to, spender);
         _requireCallerOwnsTheWallet(draft, from, token, authority);
         _requireWithinAskLimits(draft);
-        (draft.validUntil, draft.waitingTime) = _expiryAndWindow(token, draft.fromChainKey);
+        (draft.validUntil, draft.waitingTime) = _expiryAndWindow(token, _firstChainOf(draft));
         _narrowAmountRange(draft, from, to, spender, token);
         _requireSpenderAllowed(draft, to, spender);
 
@@ -214,22 +217,32 @@ library TicketLib {
         ticketId = _issue(from, to, spender, salt, draft, token);
     }
 
-    /// @dev Where the move goes: both envelopes parse, the sender sits on an away chain, and the receiver sits on
-    ///  the same away chain or at home. A move between two away chains is done in two halves, home sending the
-    ///  second one once the first is done, and is refused until home can send it. The spender is parsed here and
-    ///  judged in {_requireSpenderAllowed}, once the range is known.
+    /// @dev Where the move goes: both envelopes parse, and at most one of the two wallets is a home wallet. A move
+    ///  that leaves its away chain is done in two halves, home sending the second one once the first is done; a
+    ///  home wallet's move out has the second half only. A home sender names no spender: it moves its own tokens in
+    ///  the ask itself. The spender is parsed here and judged in {_requireSpenderAllowed}, once the range is known.
     function _resolveRoute(Draft memory draft, bytes calldata from, bytes calldata to, bytes calldata spender)
         private
         view
     {
-        (bool fromNative,) = WalletKeyLib.isReferenceChain(from);
-        require(!fromNative, ErrorsLib.SenderNotOnSatellite(from));
-        (bool toNative,) = WalletKeyLib.isReferenceChain(to);
+        (bool fromHome, address homeWallet) = WalletKeyLib.isReferenceChain(from);
+        (bool toHome,) = WalletKeyLib.isReferenceChain(to);
+        bool bothAtHome = fromHome && toHome;
+        require(!bothAtHome, ErrorsLib.NotACrossChainMove());
+        draft.homeWallet = homeWallet;
         draft.fromChainKey = _chainKeyOf(from);
         draft.toChainKey = _chainKeyOf(to);
-        bool receiverOnTheSendersChain = draft.toChainKey == draft.fromChainKey;
-        require(toNative || receiverOnTheSendersChain, ErrorsLib.ChainNotOpen(draft.toChainKey));
-        if (spender.length != 0) WalletKeyLib.parse(spender);
+        if (spender.length == 0) return;
+        require(!fromHome, ErrorsLib.ValidationSpenderRefused(spender));
+        WalletKeyLib.parse(spender);
+    }
+
+    /// @dev The chain the move's first message goes to: the sender's away chain for its ticket, or the receiver's
+    ///  for a home wallet's move out. Its waiting time, its block and its validity window rule the ask.
+    function _firstChainOf(Draft memory draft) private pure returns (bytes32) {
+        bool fromHome = draft.homeWallet != address(0);
+        if (fromHome) return draft.toChainKey;
+        return draft.fromChainKey;
     }
 
     /// @dev The limits on asks, see {ITickets-setAskLimits}: the sender's identity below its open tickets and its asks
@@ -272,9 +285,8 @@ library TicketLib {
         return store.askLimits.asksPerIdentityPerWindow;
     }
 
-    /// @dev Who may ask: the identity the sending wallet is linked to, or an address the AccessManager
-    ///  authorised for this selector. A satellite wallet never matches its own bytes, so a wallet can never
-    ///  request a validation for itself; its identity does that.
+    /// @dev Who may ask: the identity the sending wallet is linked to, a home wallet itself, or an address the
+    ///  AccessManager authorised for this selector. An away wallet has no address here, so its identity asks for it.
     function _requireCallerOwnsTheWallet(Draft memory draft, bytes calldata from, address token, address authority)
         private
         view
@@ -282,8 +294,10 @@ library TicketLib {
         draft.fromIdentity = address(_registryOf(token).resolveIdentity(from));
         require(draft.fromIdentity != address(0), ErrorsLib.UnverifiedWallet(from));
         bool callerIsTheWalletsIdentity = msg.sender == draft.fromIdentity;
+        bool callerIsTheHomeWallet = msg.sender == draft.homeWallet;
+        bool callerOwnsTheWallet = callerIsTheWalletsIdentity || callerIsTheHomeWallet;
         require(
-            callerIsTheWalletsIdentity || _mayRequestForAnyWallet(authority),
+            callerOwnsTheWallet || _mayRequestForAnyWallet(authority),
             ErrorsLib.NotAuthorizedForWallet(msg.sender, from)
         );
     }
@@ -316,11 +330,17 @@ library TicketLib {
         require(draft.amountMax != 0, ErrorsLib.ZeroValue());
     }
 
-    /// @dev The asked maximum must fit in what the sending wallet can still send: its away balance less what earlier
-    ///  tickets may still draw from it and less what an open recall is taking back. Refused, not narrowed: the id is
-    ///  built from the asked maximum, so a ticket narrowed here would carry a maximum its id does not name.
+    /// @dev The asked maximum must fit in what the sending wallet can still send: an away wallet's balance less what
+    ///  earlier tickets may still draw from it and less what an open recall is taking back, or a home wallet's
+    ///  unfrozen balance. Refused, not narrowed: the id is built from the asked maximum, so a ticket narrowed here
+    ///  would carry a maximum its id does not name.
     function _requireRequestWithinTheFreeBalance(Draft memory draft, bytes calldata from, address token) private view {
-        uint256 free = IToken(token).availableOf(from);
+        uint256 free;
+        if (draft.homeWallet != address(0)) {
+            free = IToken(token).freeBalanceOf(draft.homeWallet);
+        } else {
+            free = IToken(token).availableOf(from);
+        }
         require(draft.requestedMax <= free, ErrorsLib.RequestAboveBalance(from, free, draft.requestedMax));
     }
 
@@ -394,6 +414,10 @@ library TicketLib {
             _awaitApproval(ticketId, from, to, spender, draft, approvalModule);
             return ticketId;
         }
+        if (draft.homeWallet != address(0)) {
+            SecondHalfLib.moveOutFromHome(ticketId, to, token);
+            return ticketId;
+        }
 
         bytes memory body = _issueRecorded(
             ticketId,
@@ -442,13 +466,22 @@ library TicketLib {
         // is checked again, since it may have been blocked while the request waited, and so is the token: all
         // of it before anything is written. Both rows hold the ask, so the narrowing alone gives something back.
         requireTokenRunning(token);
-        _openChainWindow(store, token, validation.fromChainKey);
+        (bool fromHome,) = WalletKeyLib.isReferenceChain(validation.fromWallet);
+        bytes32 firstChainKey = validation.fromChainKey;
+        if (fromHome) firstChainKey = validation.toChainKey;
+        _openChainWindow(store, token, firstChainKey);
 
         if (approvedMax < validation.amountMax) {
             _release(validation, validation.amountMax - approvedMax, token);
             validation.amountMax = approvedMax;
         }
         validation.status = ITickets.TicketStatus.Open;
+        if (fromHome) {
+            bytes memory to = store.awaitedTerms[ticketId].to;
+            delete store.awaitedTerms[ticketId];
+            SecondHalfLib.moveOutFromHome(ticketId, to, token);
+            return;
+        }
 
         bytes memory body = _issueRecorded(
             ticketId,
@@ -794,7 +827,8 @@ library TicketLib {
         if (stored.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = stored.stopWaitingAt;
         _countTheAsk(store, draft.fromIdentity);
 
-        IToken(token).reserveForTicket(from, draft.amountMax);
+        // A home wallet's tokens are burned in the ask itself, or at the approval, so nothing is reserved on the token.
+        if (draft.homeWallet == address(0)) IToken(token).reserveForTicket(from, draft.amountMax);
     }
 
     /// @dev Writes the ask block hash of the copy the away token will execute against, announces it, and encodes it.
@@ -874,18 +908,43 @@ library TicketLib {
     ///  The table, one row per state:
     ///  - `WaitingForApproval`, `Open`: the ask's `amountMax`, reserved in the ledger's total, against both
     ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token;
-    ///  - `Cancelled`, `OnHold`, `Done`: none of the ask's reservation.
+    ///  - `OnHold`: `moved`, reserved in the ledger's total, and against the receiver's identity when the money goes
+    ///    to the receiver and the two wallets are not one identity's. Written by {reserveTheHold} once the
+    ///    destination is known, since the rules judge the receiver between the ask's release and this write;
+    ///  - `Cancelled`, `Done`: nothing.
     ///  The first two rows also count as one of the sender's identity's open tickets, see {ITickets-AskLimits}.
-    ///  The release is read off the two rows, so it runs exactly once and is never skipped. A ticket is reserved
-    ///  once, when it is written, so no move enters a row that holds more.
+    ///  The release is read off the two rows, so it runs exactly once and is never skipped.
     function moveTo(ITickets.Ticket storage ticket, ITickets.TicketStatus next, address token) internal {
-        bool oldRowHoldsTheAsk = _holdsTheAsk(ticket.status);
-        bool newRowHoldsTheAsk = _holdsTheAsk(next);
+        ITickets.TicketStatus previous = ticket.status;
         ticket.status = next;
-        if (oldRowHoldsTheAsk && !newRowHoldsTheAsk) {
+        bool leavesTheAsk = _holdsTheAsk(previous) && !_holdsTheAsk(next);
+        if (leavesTheAsk) {
             layout().identityAsks[ticket.fromIdentity].openTickets -= 1;
             _release(ticket, ticket.amountMax, token);
         }
+        bool leavesTheHold = previous == ITickets.TicketStatus.OnHold && next != ITickets.TicketStatus.OnHold;
+        if (leavesTheHold) _releaseTheHold(ticket);
+    }
+
+    /// @dev Writes the `OnHold` row of {moveTo}'s table, once `secondHalfToKey` names where the money goes.
+    function reserveTheHold(ITickets.Ticket storage ticket) internal {
+        ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
+        ledger.pendingTotal += ticket.moved;
+        if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] += ticket.moved;
+    }
+
+    /// @dev Gives back the `OnHold` row of {moveTo}'s table.
+    function _releaseTheHold(ITickets.Ticket storage ticket) private {
+        ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
+        ledger.pendingTotal -= ticket.moved;
+        if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] -= ticket.moved;
+    }
+
+    /// @dev Whether the money on hold is kept against the receiver's identity: it goes to the receiver, and the two
+    ///  wallets are not one identity's.
+    function _holdReservesForTheReceiver(ITickets.Ticket storage ticket) private view returns (bool) {
+        bool goesToTheReceiver = ticket.secondHalfToKey == ticket.toKey;
+        return goesToTheReceiver && !ticket.relocation;
     }
 
     /// @dev Whether a ticket in `status` holds the ask's reservation: the table of {moveTo}.
@@ -894,8 +953,8 @@ library TicketLib {
     }
 
     /// @dev Gives back `amount` of what a ticket reserved: in the ledger's total, against the identities unless both
-    ///  wallets are one identity's, and against the sending wallet on the token. {moveTo} gives back a whole row;
-    ///  an approver's narrowing gives back part of it.
+    ///  wallets are one identity's, and against the sending away wallet on the token. {moveTo} gives back a whole
+    ///  row; an approver's narrowing gives back part of it. A home wallet reserved nothing on the token.
     function _release(ITickets.Ticket storage validation, uint256 amount, address token) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
         ledger.pendingTotal -= amount;
@@ -903,7 +962,8 @@ library TicketLib {
             ledger.pendingOut[validation.fromIdentity] -= amount;
             ledger.pendingIn[validation.toIdentity] -= amount;
         }
-        IToken(token).releaseFromTicket(validation.fromWallet, amount);
+        (bool fromHome,) = WalletKeyLib.isReferenceChain(validation.fromWallet);
+        if (!fromHome) IToken(token).releaseFromTicket(validation.fromWallet, amount);
     }
 
     /// @dev The bound `APPROVAL` module, or zero when none is: the compliance binds one at most.

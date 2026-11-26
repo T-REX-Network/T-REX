@@ -411,7 +411,7 @@ contract ModularCompliance is
     }
 
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced, recovery, delegation and recall paths so that the trackers learn what moved the tokens.
+    ///  the token's forced, recovery and recall paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         _applyMovement(from, to, amount, kind);
@@ -427,10 +427,9 @@ contract ModularCompliance is
     ///  to the new owner here, before the movement itself is counted.
     ///
     ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
-    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
-    ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
-    ///  the full adjustment. A recall names the native wallet on both sides too, after its mint: `syncOwner`
-    ///  settled that wallet's owner before the mint, so no owner is left to follow here.
+    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A recall names the
+    ///  native wallet on both sides too, after its mint: `syncOwner` settled that wallet's owner before the mint, so
+    ///  no owner is left to follow here.
     ///
     ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
     ///  is not taken for it.
@@ -439,8 +438,8 @@ contract ModularCompliance is
         ITREXRegistry registry = _registryOf(token);
         address fromIdentity;
         address toIdentity;
-        // A self-transfer leaves the balance where it was; a delegation reports holder to holder after its burn.
-        bool balanceUnchanged = from == to && kind != MovementKindLib.DELEGATION;
+        // A self-transfer leaves the balance where it was, and so does a recall, reported after its mint.
+        bool balanceUnchanged = from == to;
         int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
         if (from != address(0)) {
             fromIdentity = ComplianceLedgerLib.currentOwner(token, from, address(registry.identity(from)), adjustment);

@@ -111,9 +111,19 @@ interface ITickets {
     event AskLimitOfSet(address indexed identity, uint32 asksPerWindow);
     event ReceiptAsked(bytes32 indexed ticketId, uint8 askNumber);
     event TicketStillOpen(bytes32 indexed ticketId, uint64 seenValidUntil);
+    event SecondHalfSent(
+        bytes32 indexed ticketId, uint8 half, bytes32 indexed chainKey, bytes wallet, uint256 amount, uint64 validUntil
+    );
+    event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
+    event NewHalfLimitReached(bytes32 indexed ticketId);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
-    error SenderNotOnSatellite(bytes wallet);
+    error NotACrossChainMove();
+    error FrozenWallet(address user);
+    error SecondHalfNotOwed(bytes32 ticketId);
+    error NoNewHalfLeft(bytes32 ticketId);
+    error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
+    error ValidationBodyMismatch(bytes32 ticketId);
     error UnverifiedWallet(bytes wallet);
     error NotAuthorizedForWallet(address caller, bytes wallet);
     error EmptyValidationRange(uint256 min, uint256 max);
@@ -166,7 +176,8 @@ interface ITickets {
         /// Its reservation released: refused by the approver, or cancelled once its receipt was overdue. A late
         /// receipt for a ticket that was sent is still applied as the move it is.
         Cancelled,
-        /// Money left a wallet and is held between two halves of a move.
+        /// Money left a wallet and is held between two halves of a move: the away chain burned it, or a home wallet
+        /// that moves out burned it at home. `secondHalfToKey` says where it goes: the receiver, or back to the sender.
         OnHold,
         /// The money is where it ends, or nothing moved.
         Done
@@ -217,7 +228,8 @@ interface ITickets {
         bool relocation;
         /// Where the ticket stands. What is still reserved is read off this.
         TicketStatus status;
-        /// What the away token reported it moved.
+        /// What the away token reported it moved, or what a home wallet that moves out burned: the money on hold
+        /// while the ticket is `OnHold`.
         uint256 moved;
         /// The spender the validation names, empty when `from` executes itself. Kept so the `AFTER` modules
         /// are told who executed it when it settles.
@@ -241,6 +253,22 @@ interface ITickets {
         uint64 lastSentAt;
         /// The asks for the receipt that stand; a still open answer that moves valid until gives one back.
         uint8 asksForReceipt;
+
+        /* ----- The second half, while the money is on hold; last for the layout's sake ----- */
+
+        /// The number of the latest second half, from 1; zero while the ticket has none.
+        uint8 half;
+        /// The key of the wallet the second half mints to: the receiver's on a forward move, the sender's on a return.
+        bytes32 secondHalfToKey;
+        /// The latest second half's valid until: its first send time plus the waiting time of its chain.
+        uint64 secondHalfValidUntil;
+        /// How many times the latest second half was sent, at most `MAX_SENDS_PER_HALF`. Zero when it never left.
+        uint8 secondHalfSends;
+        /// The latest second half is dead, answered zero after its valid until, or its send failed: anyone sends the
+        /// next one with `sendSecondHalf`.
+        bool secondHalfOwed;
+        /// How many second halves this money on hold has had, at most `MAX_NEW_HALVES`.
+        uint8 newHalves;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
@@ -310,14 +338,16 @@ interface ITickets {
         uint256 perWindowCap;
     }
 
-    /// @dev Issues a `TicketMessage` for a movement out of an away wallet, toward a wallet on the same away chain or
-    /// a home wallet, and sends it to the sender's away chain through the token. A sender on
-    /// the reference chain is refused: the Lite that executes a validation must physically hold the position it
-    /// moves, where a native balance stays free to leave between issuance and settlement. The caller derives the
-    /// requested range from an amount and a slippage tolerance. The asked maximum must fit in `from`'s free away
-    /// balance, since the id is built from it; the range is then only ever narrowed, to the smallest
-    /// `checkTransfer` answer any module answers (skipped when both wallets belong to one identity). The ticket is
-    /// valid for the validity window of the route it travels, see {setValidityWindows}.
+    /// @dev Asks to move tokens between chains. From an away wallet, toward any wallet: issues a `TicketMessage` and
+    /// sends it to the sender's away chain only, through the token. When the receiver is on another chain, home puts
+    /// the amount on hold once the receipt lands, asks the rules again for the receiver and sends the second half, a
+    /// `MOVE_OUT`, to the receiver, or back to the sender when the rules refuse it. From a home wallet, toward an
+    /// away wallet: the same move with no first half, done in this transaction: the amount is burned at home and put
+    /// on hold, and the `MOVE_OUT` leaves at once. The caller derives the requested range from an amount and a
+    /// slippage tolerance. The asked maximum must fit in `from`'s free balance, since the id is built from it; the
+    /// range is then only ever narrowed, to the smallest `checkTransfer` answer any module answers (skipped when both
+    /// wallets belong to one identity); a home wallet moves out that narrowed maximum. The ticket is valid for the
+    /// validity window of the route it travels, see {setValidityWindows}.
     ///
     /// The id is built from the whole request, see {TicketLib-ticketIdOf}: the kind, both wallets, the spender, the
     /// asked minimum and maximum, and the salt. Never from this chain's ordering or clock: the same request lands
@@ -333,25 +363,28 @@ interface ITickets {
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
     /// - The id of the request not yet recorded; otherwise reverts with `TicketAlreadyWritten`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
-    /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
-    /// - `to` at home or on `from`'s away chain; otherwise reverts with `ChainNotOpen` for `to`'s chain.
-    /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
-    ///   otherwise reverts with `NotAuthorizedForWallet`.
+    /// - `from` and `to` not both home wallets; otherwise reverts with `NotACrossChainMove`.
+    /// - No spender for a home `from`; otherwise reverts with `ValidationSpenderRefused`.
+    /// - The caller is the identity `from` is linked to, a home `from` itself, or authorised by the AccessManager for
+    ///   this selector; otherwise reverts with `NotAuthorizedForWallet`. Every ask counts in the limits of `from`'s
+    ///   identity, a home wallet's included.
     /// - The token not paused; otherwise reverts with `TokenPaused`.
-    /// - A validity window set, and `from`'s chain with a waiting time; otherwise `ValidityWindowNotSet` or
-    ///   `WaitingTimeNotSet`.
-    /// - `from`'s chain not blocked; otherwise `AwayChainBlocked`.
-    /// - No hostile change running on `from`'s chain, see {ITREXMessaging-hostileChangeEndsAt}; otherwise
+    /// - A validity window set, and the chain the first message goes to with a waiting time; otherwise
+    ///   `ValidityWindowNotSet` or `WaitingTimeNotSet`. That chain is `from`'s, or `to`'s for a home `from`.
+    /// - That chain not blocked; otherwise `AwayChainBlocked`.
+    /// - No hostile change running on that chain, see {ITREXMessaging-hostileChangeEndsAt}; otherwise
     ///   `HostileChangeNotOver`.
     /// - The sender's identity below its open tickets and its asks in the current window; otherwise
     ///   `TooManyOpenTickets` or `AskLimitReached`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
-    /// - `requestedMax` at least the smallest amount, and at most `from`'s free away balance; otherwise
-    ///   `BelowSmallestAmount` or `RequestAboveBalance`.
+    /// - `requestedMax` at least the smallest amount, and at most `from`'s free balance: its away balance less what
+    ///   is reserved, or a home wallet's unfrozen balance; otherwise `BelowSmallestAmount` or `RequestAboveBalance`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
-    /// - `from`'s chain open on the token; otherwise the token reverts with `ChainNotOpen`.
+    /// - A home `from` not frozen; otherwise `FrozenWallet`.
+    /// - The chain the first message goes to open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
-    /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent`.
+    /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent`. For a home `from`: the token's
+    /// `HeldInTransit` and `Transfer`, `SecondHalfSent`, then the token's `HalfPinned` and `ProtocolMessageSent`.
     ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
     /// reserved as `WaitingForApproval`, `TicketWaitingForApproval` is emitted, the module is told, and
@@ -392,7 +425,8 @@ interface ITickets {
     ///   configured, not blocked and with no hostile change running, as at a request.
     ///
     /// Emits `TicketWritten` and sends the ticket, unless a receipt for it already waits here, as `askToMove`
-    /// does, or emits `ValidationApprovalRefused`.
+    /// does, or emits `ValidationApprovalRefused`. A home wallet's move out is burned onto hold and its `MOVE_OUT`
+    /// sent instead, as `askToMove` does with no approval module; its chain is the receiver's.
     /// @param ticketId The validation awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external;
@@ -592,6 +626,36 @@ interface ITickets {
     /// @param spender ERC-7930 address of the spender, as issued, or empty.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external;
 
+    /// @dev Sends the owed second half of a move, or sends its latest half again, for anyone. The money of the move is
+    /// on hold at home, and the half mints it to `wallet` on its away chain: the receiver's wallet, or the sender's on
+    /// a return. `wallet` is the one envelope the record does not keep; it is read off `SecondHalfSent`.
+    ///
+    /// An owed half, one that died answered zero after its valid until, is sent as a new half, with a fresh valid
+    /// until: the send time plus the waiting time of its chain. At most `MAX_NEW_HALVES` halves per money on hold.
+    /// A half whose send failed inside its receipt's delivery never left, and is sent under its own number.
+    ///
+    /// Otherwise the latest half is sent again, byte for byte, as an ask for its receipt: the away token answers with
+    /// its stored receipt or a zero receipt. At most `MAX_SENDS_PER_HALF` sends per half, at fixed times: the second
+    /// once the half's valid until plus one waiting time has passed, the third two waiting times after that, never
+    /// counted from the last send. When the pair the half was pinned to is no longer the chain's current pair, the half
+    /// is past its valid until by then, so the next half goes to the current pair as a new half.
+    ///
+    /// Requirements:
+    /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
+    /// - It must hold money on hold with a second half, and that half must be owed or have sends left; otherwise
+    ///   reverts with `SecondHalfNotOwed`.
+    /// - `wallet` must have the key of the half's wallet; otherwise reverts with `ValidationBodyMismatch`.
+    /// - The token must not be paused, `wallet`'s chain not blocked and no hostile change running on it; otherwise
+    ///   reverts with `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
+    /// - A send again only at or after its fixed time; otherwise reverts with `SendNotDue`.
+    /// - A new half only below `MAX_NEW_HALVES`; otherwise reverts with `NoNewHalfLeft`.
+    ///
+    /// Emits `SecondHalfSent`, `NewHalfLimitReached` when the last new half leaves, then the token's `HalfPinned` for
+    /// a new half and `ProtocolMessageSent`.
+    /// @param ticketId The ticket whose money is on hold.
+    /// @param wallet ERC-7930 interoperable address of the wallet the half mints to.
+    function sendSecondHalf(bytes32 ticketId, bytes calldata wallet) external;
+
     /// @dev The two validity windows, zero until set, which blocks issuance.
     function validityWindows() external view returns (ValidityWindows memory);
 
@@ -629,10 +693,11 @@ interface ITickets {
     ///
     /// Requirements:
     /// - `receipt` must be the one waiting under `halfKey`; otherwise reverts with `NoWaitingReceipt`.
-    /// - Its ticket must be sent; otherwise reverts with `NoWaitingReceipt`.
+    /// - For the ticket's own half, its ticket must be sent; otherwise reverts with `NoWaitingReceipt`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - Its away chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
-    /// - The sender's away balance must cover the amount; otherwise reverts with `InsufficientBridgedBalance`.
+    /// - For the ticket's own half, the sender's away balance must cover the amount; otherwise reverts with
+    ///   `InsufficientBridgedBalance`. A second half's money is already on hold at home.
     /// - The route check of {ITREXMessaging-checkReceiptOrigin} must pass; otherwise the token reverts with its
     ///   error.
     ///

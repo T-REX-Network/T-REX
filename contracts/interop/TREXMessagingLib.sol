@@ -354,6 +354,34 @@ library TREXMessagingLib {
         sendId = _send(gateway, peer, chainKey, messageType, body);
     }
 
+    /// @dev Sends a message for one half of a move on the chain's receipt route, at full finality, and pins the half
+    /// to that route and peer at its first send. A half sent again goes to the pair it was pinned to only, while that
+    /// pair is still the chain's current one: the away token that holds the half is the one that answers it, so a
+    /// send never retargets. A half whose pair was replaced is the compliance's to send again as a new half.
+    function sendOnReceiptRoute(
+        bytes32 chainKey,
+        bytes32 halfKey,
+        MessageTypesLib.Message messageType,
+        bytes memory body
+    ) external returns (bytes32 sendId) {
+        MessagingStorage storage s = layout();
+        (address receiptRoute, bytes memory peer) = _openRoute(s, chainKey);
+        bytes32 peerKey = keccak256(peer);
+
+        Pin storage pin = s.pins[halfKey];
+        if (pin.bridge == address(0)) {
+            pin.bridge = receiptRoute;
+            pin.peerKey = peerKey;
+
+            emit EventsLib.HalfPinned(halfKey, chainKey, receiptRoute);
+        } else {
+            bool pinnedToTheCurrentPair = pin.bridge == receiptRoute && pin.peerKey == peerKey;
+            require(pinnedToTheCurrentPair, ErrorsLib.PeerChanged(chainKey));
+        }
+
+        sendId = _send(receiptRoute, peer, chainKey, messageType, body);
+    }
+
     /* ----- Inbound ----- */
 
     /// @dev Attributes and admits one inbound delivery, and hands back what the token must act on.

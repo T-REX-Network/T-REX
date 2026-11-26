@@ -75,8 +75,8 @@ library MessageTypesLib {
     enum Message {
         /// Outbound. A `TicketMessage` issued on the reference chain for a satellite to execute.
         TICKET,
-        /// Outbound. A delegation-out instruction to mint on a satellite. Resent unchanged under its `delegationId`;
-        /// the Lite mints once per id.
+        /// Outbound. Home's order to an away chain to mint, the second half of a move into it. The away token mints
+        /// once per half, strictly before the half's valid until, and answers with a `RECEIPT` for that half.
         MOVE_OUT,
         /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF` under its id.
         BRING_HOME,
@@ -154,23 +154,27 @@ library MessageTypesLib {
         uint256 seenMax;
         /// The `validUntil` of that copy.
         uint64 seenValidUntil;
-        /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket.
+        /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket, the half's number
+        /// for a move out. A move out's receipt leaves `from` empty and names the minted wallet in `to`.
         uint8 half;
         /// Why the receipt says what it says, so a zero receipt says why it is zero.
         ReceiptAnswer answer;
     }
 
-    /// @dev Body of a `MOVE_OUT`: the reference chain already burned `amount` of `holder`'s native balance
-    /// and credited `toWallet`'s bridged position, so the satellite mints the same amount there, once per
-    /// `delegationId`. A resend carries the same body byte for byte.
+    /// @dev Body of a `MOVE_OUT`: the second half of a move. Home holds `amount` on hold for `ticketId`, so the away
+    /// token mints it to `toWallet` once per half, strictly before `validUntil` on its own clock. A half that
+    /// arrives at or after its valid until, never executed, is answered with a stored zero receipt (`Expired`) and is
+    /// dead. A half sent again carries the same body byte for byte.
     struct MoveOutMessage {
-        /// Unique per token, sequential from 1: the Lite mints at most once per id.
-        uint256 delegationId;
-        /// ERC-7930 satellite wallet to mint to, linked to the same identity as `holder`.
+        /// The ticket of the move: the forward move's or the return's.
+        bytes32 ticketId;
+        /// Which second half this is, from 1. With the ticket id it keys the half, see {halfKeyOf}.
+        uint8 half;
+        /// ERC-7930 wallet on the away chain to mint to.
         bytes toWallet;
         uint256 amount;
-        /// Reference-chain wallet the tokens left. Informational for the satellite.
-        address holder;
+        /// The half's own valid until: its first send time plus the waiting time of the chain it goes to.
+        uint64 validUntil;
     }
 
     /// @dev Body of a `BRING_HOME`: an order to burn up to `amount` of `wallet` on the satellite and answer

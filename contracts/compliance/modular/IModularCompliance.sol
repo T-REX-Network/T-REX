@@ -194,11 +194,10 @@ interface IModularCompliance is IERC3643Compliance {
 
     /**
      *  @dev function called whenever the token moves tokens outside a plain transfer: a forced transfer or a
-     *  recovery by an agent, a delegation out to a satellite wallet, which the holder, the holder's identity
-     *  or an agent may start, or the recall that brings it back
+     *  recovery by an agent, or a recall that brings an away position back to a home wallet
      *  the standard `transferred` cannot say what moved the tokens, and a module counting an investor's own
      *  activity must tell these movements apart, so the token reports them here with the kind they were,
-     *  `FORCED_TRANSFER`, `RECOVERY`, `DELEGATION` or `RECALL` from `MovementKindLib`, and the trackers see
+     *  `FORCED_TRANSFER`, `RECOVERY` or `RECALL` from `MovementKindLib`, and the trackers see
      *  them under that kind
      *  no rule is asked: the token checked the movement itself, see the token
      *  the token is trusted with `_kind`: it is the only caller and the kind is its own operation

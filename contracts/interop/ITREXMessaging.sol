@@ -73,7 +73,7 @@ interface ITREXMessaging {
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     event FormerRouteKept(bytes32 indexed chainKey, address indexed bridge, bytes32 peerKey, uint64 acceptedUntil);
     event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
-    event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
+    event HalfPinned(bytes32 indexed halfKey, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount

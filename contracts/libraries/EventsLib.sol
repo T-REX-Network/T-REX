@@ -75,11 +75,6 @@ library EventsLib {
 
     // Token Events
 
-    /// @notice Emitted on a delegation-out. Carries the full envelope so indexers need no reverse key table, and the
-    ///  delegation's id, which the mint instruction and any resend carry. Zero on a transition with no instruction.
-    event DelegatedOut(
-        address indexed holder, bytes32 indexed toKey, uint256 indexed delegationId, bytes toWallet, uint256 amount
-    );
     /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
     event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
     /// @notice Emitted when an agent orders a satellite to burn up to `amount` of `wallet`; the proof that answers
@@ -94,22 +89,19 @@ library EventsLib {
     /// @notice Emitted when a burn proof differs from the proof that settled its recall. Nothing is applied and the
     ///  compliance blocks `originChainKey`. A proof for a recall never issued reverts instead, and stops nothing.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
-    /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
+    /// @notice Emitted when an agent resends a recall instruction unchanged: `kind` 1.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
-    /// @notice Emitted when the burn leg of a cross-chain validation takes the amount out of the sender's
-    ///         position and holds it in transit until the mint leg lands.
     /// A validation being issued reserved part of a satellite wallet's bridged balance.
     event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
 
-    /// A reservation against a satellite wallet was given back, because the validation settled, was discarded,
-    /// or turned into an in-transit hold.
+    /// A reservation against a satellite wallet was given back, because the ticket left its open row: a receipt
+    /// or a cancel.
     event ReleasedFromValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
 
-    /// A held amount went back to the wallet it was burned from.
-    event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed ticketId, bytes wallet, uint256 amount);
-
+    /// @notice Emitted when the money of a move goes on hold between its two halves: an away chain burned it from
+    ///         `fromWallet`, or a home wallet that moves out burned it at home.
     event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed ticketId, bytes fromWallet, uint256 amount);
-    /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
+    /// @notice Emitted when a move ends on an away wallet, from the sender's away balance or from the move's hold.
     event BridgedTransfer(
         bytes32 indexed fromKey, bytes32 indexed toKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
@@ -190,9 +182,10 @@ library EventsLib {
     /// @notice Emitted when the peer of `chainKey` is replaced as hostile: no former pair is kept, and asks, ticket
     ///  sends and cancels for that away chain wait until `endsAt`.
     event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
-    /// @notice Emitted when the half of `ticketId` toward `chainKey` is pinned to `gateway`, the chain's receipt
-    ///         route when it left, and to the peer it went to, whichever route carried the ticket out.
-    event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
+    /// @notice Emitted when the half `halfKey` toward `chainKey` is pinned to `gateway`, the chain's receipt route
+    ///         when it left, and to the peer it went to, whichever route carried it out. Half 0's key is the ticket
+    ///         id, see {MessageTypesLib-halfKeyOf}.
+    event HalfPinned(bytes32 indexed halfKey, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event ProtocolMessageReceived(
         MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 receiveId
@@ -226,6 +219,16 @@ library EventsLib {
     /// @notice The away token answered that `ticketId` is still open; `seenValidUntil` is the latest valid until it
     ///         reported, within home's cap.
     event TicketStillOpen(bytes32 indexed ticketId, uint64 seenValidUntil);
+    /// @notice The second half `half` of `ticketId` left for `wallet` on `chainKey`: a move out of `amount`, which the
+    ///         away token mints strictly before `validUntil` on its own clock.
+    event SecondHalfSent(
+        bytes32 indexed ticketId, uint8 half, bytes32 indexed chainKey, bytes wallet, uint256 amount, uint64 validUntil
+    );
+    /// @notice The send of the second half `half` of `ticketId`, tried inside its receipt's delivery, failed. The half
+    ///         stays owed: anyone sends it with `sendSecondHalf`.
+    event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
+    /// @notice The money on hold for `ticketId` took its last new half: if that half dies too, a human ends it.
+    event NewHalfLimitReached(bytes32 indexed ticketId);
     /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, on a bad receipt or
     ///         receipt terms it broke, or on a burn proof for a recall already settled. No ticket goes to it, none of
     ///         its tickets is cancelled, and its receipts wait.

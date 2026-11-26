@@ -62,7 +62,6 @@ pragma solidity 0.8.30;
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { ITickets } from "../compliance/modular/ITickets.sol";
-import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
@@ -73,67 +72,25 @@ import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 
 /**
  * @title TokenDelegationLib
- * @dev The checks, the bookkeeping and the messages of the two movements that change a position's location and
- * never its owner: a delegation-out, native wallet to satellite wallet of one identity, and a recall, the way
- * back. Deployed once and linked.
+ * @dev The checks, the bookkeeping and the messages of a recall: an agent's order to an away chain to burn a
+ * wallet's position so it comes back to a home wallet of the same identity. Deployed once and linked. A home
+ * wallet's move to an away wallet is a ticket of the compliance now, see {SecondHalfLib}.
  *
  * The token reaches this by DELEGATECALL, so the storage is its own `erc3643.storage.TREXToken` namespace, the
  * registry, the compliance and the gateway see the token as their caller, and every event is the token's. The
  * registry and the compliance are read from the token's own getters, so the token passes neither. The native
- * half of each movement stays in the token, since it is the ERC-20 balance this library cannot reach: the token
- * burns before {delegateOut} and mints after {consumeBurnProof}, then reports the recall to the compliance;
- * everything bridged happens here.
+ * half stays in the token, since it is the ERC-20 balance this library cannot reach: the token mints after
+ * {consumeBurnProof}, then reports the recall to the compliance; everything bridged happens here.
  *
- * Both instructions are retryable, never written off: {resend} sends an instruction again byte for byte, under
- * the same id, to the same peer, and the Lite acts on each id once. Nothing here checks a caller or the pause:
- * the token's entry points do, before they reach this.
+ * The instruction is retryable, never written off: {resend} sends it again byte for byte, under the same id, to
+ * the same peer, and the Lite acts on each id once. Nothing here checks a caller or the pause: the token's entry
+ * points do, before they reach this.
  */
 library TokenDelegationLib {
 
-    /// @dev `resend` kind of a delegation's mint instruction.
-    uint8 internal constant DELEGATION = 0;
-
-    /// @dev `resend` kind of a recall instruction.
+    /// @dev `resend` kind of a recall instruction, the only kind left: a move out is a second half, sent again by
+    ///  anyone through the compliance.
     uint8 internal constant RECALL = 1;
-
-    /// @dev The rest of a delegation-out, once the token has burned `amount` of `holder`'s native balance: the burn
-    ///  stayed inside the free balance, the bridged position of `toWallet` is credited under a fresh delegation id
-    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the away chain is not
-    ///  blocked on the compliance (no more supply goes to a chain whose reports are suspect), the compliance is
-    ///  told, the instruction is committed and sent. Any refusal reverts the burn with it, so nothing is delegated
-    ///  that the satellite is not told to mint.
-    /// @return sendId The gateway's id for the instruction.
-    function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId) {
-        uint256 delegationId = _creditDelegation(holder, toWallet, amount);
-
-        _requireLinked(holder, toWallet);
-        require(_registry().isWalletVerified(toWallet), ErrorsLib.UnverifiedWallet(toWallet));
-
-        _compliance().agentTransferred(holder, holder, amount, MovementKindLib.DELEGATION);
-
-        bytes32 chainKey = _chainKeyOf(toWallet);
-        _requireAwayChainNotBlocked(chainKey);
-        TokenLedgerLib.layout().delegations[delegationId] =
-            _commitment(chainKey, keccak256(TREXMessagingLib.peerFor(chainKey)), toWallet, amount, holder);
-
-        return _sendMint(chainKey, delegationId, toWallet, amount, holder);
-    }
-
-    /// @dev The bridged half of a delegation-out, through the ledger's own transition: the token already burned, so
-    ///  the free balance before the burn is what it holds now plus `amount`, less what is frozen. Then the delegation
-    ///  takes the next id.
-    function _creditDelegation(address holder, bytes calldata toWallet, uint256 amount)
-        private
-        returns (uint256 delegationId)
-    {
-        require(amount != 0, ErrorsLib.ZeroValue());
-        IERC3643 token = IERC3643(address(this));
-        uint256 freeBefore = token.balanceOf(holder) + amount - token.getFrozenTokens(holder);
-        bytes32 toKey = TokenLedgerLib.creditFromNative(holder, toWallet, amount, freeBefore);
-        delegationId = ++TokenLedgerLib.layout().lastDelegationId;
-
-        emit EventsLib.DelegatedOut(holder, toKey, delegationId, toWallet, amount);
-    }
 
     /// @dev Records a recall instruction and sends it. One recall at a time per wallet. The amount is bounded by the
     ///  wallet's bridged position so the proof that answers can always apply, and not by its reservations: a
@@ -242,41 +199,22 @@ library TokenDelegationLib {
         }
     }
 
-    /// @dev Sends an instruction again, unchanged, through the chain's current route, to the peer it first went to.
-    ///
-    ///  A delegation (`kind` 0) is resent from the fields the caller supplies, `abi.encode(toWallet, amount, holder,
-    ///  peer)`, which must hash to the commitment stored at dispatch. A recall (`kind` 1) is resent from its stored
-    ///  record and the `abi.encode(wallet)` the caller supplies, which must be the recorded wallet; it is refused
-    ///  once settled, and its admitted gateway moves to the current route, since the Lite answers through the
-    ///  gateway that delivered the resend. Either way the chain's peer must still be the one the instruction was
+    /// @dev Sends a recall instruction again, unchanged, through the chain's current route, to the peer it first went
+    ///  to, from its stored record and the `abi.encode(wallet)` the caller supplies, which must be the recorded wallet.
+    ///  It is refused once settled, and its admitted gateway moves to the current route, since the Lite answers
+    ///  through the gateway that delivered the resend. The chain's peer must still be the one the instruction was
     ///  addressed to: a resend never retargets. Nothing moves on this chain.
     /// @return sendId The gateway's id for the resent instruction.
     function resend(uint8 kind, uint256 id, bytes calldata data) external returns (bytes32 sendId) {
-        TokenLedgerLib.TokenStorage storage s = TokenLedgerLib.layout();
-        bytes32 chainKey;
-        if (kind == DELEGATION) {
-            (bytes memory toWallet, uint256 amount, address holder, bytes memory peer) =
-                abi.decode(data, (bytes, uint256, address, bytes));
-            chainKey = _chainKeyOf(toWallet);
-            bytes32 committed = s.delegations[id];
-            require(
-                committed != 0 && committed == _commitment(chainKey, keccak256(peer), toWallet, amount, holder),
-                ErrorsLib.DelegationMismatch(id)
-            );
-            _requireSamePeer(chainKey, keccak256(peer));
-            sendId = _sendMint(chainKey, id, toWallet, amount, holder);
-        } else if (kind == RECALL) {
-            bytes memory wallet = abi.decode(data, (bytes));
-            TokenLedgerLib.PendingRecall storage recall = s.recalls[id];
-            require(recall.amount != 0, ErrorsLib.RecallNotPending(id));
-            require(keccak256(wallet) == recall.walletKey, ErrorsLib.RecallMismatch(id));
-            chainKey = recall.chainKey;
-            _requireSamePeer(chainKey, recall.peerKey);
-            recall.gateway = TREXMessagingLib.layout().receiptRoutes[chainKey];
-            sendId = _sendRecall(chainKey, id, wallet, recall.amount, recall.nativeWallet);
-        } else {
-            revert ErrorsLib.UnknownResendKind(kind);
-        }
+        require(kind == RECALL, ErrorsLib.UnknownResendKind(kind));
+        bytes memory wallet = abi.decode(data, (bytes));
+        TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[id];
+        require(recall.amount != 0, ErrorsLib.RecallNotPending(id));
+        require(keccak256(wallet) == recall.walletKey, ErrorsLib.RecallMismatch(id));
+        bytes32 chainKey = recall.chainKey;
+        _requireSamePeer(chainKey, recall.peerKey);
+        recall.gateway = TREXMessagingLib.layout().receiptRoutes[chainKey];
+        sendId = _sendRecall(chainKey, id, wallet, recall.amount, recall.nativeWallet);
 
         emit EventsLib.InstructionResent(kind, id, chainKey, sendId);
     }
@@ -297,42 +235,19 @@ library TokenDelegationLib {
         return ITREXRegistry(address(IERC3643(address(this)).identityRegistry()));
     }
 
-    /// @dev The token's compliance, through its own getter.
-    /// @dev A blocked away chain is the compliance's: nothing is delegated toward it and none of its proofs lands.
+    /// @dev A blocked away chain is the compliance's: none of its proofs lands.
     function _requireAwayChainNotBlocked(bytes32 chainKey) private view {
         bool blocked = ITickets(address(_compliance())).isAwayChainBlocked(chainKey);
         require(!blocked, ErrorsLib.AwayChainBlocked(chainKey));
     }
 
+    /// @dev The token's compliance, through its own getter.
     function _compliance() private view returns (IModularCompliance) {
         return IModularCompliance(address(IERC3643(address(this)).compliance()));
     }
 
     function _requireSamePeer(bytes32 chainKey, bytes32 peerKey) private view {
         require(keccak256(TREXMessagingLib.peerFor(chainKey)) == peerKey, ErrorsLib.PeerChanged(chainKey));
-    }
-
-    function _commitment(bytes32 chainKey, bytes32 peerKey, bytes memory toWallet, uint256 amount, address holder)
-        private
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encode(chainKey, peerKey, toWallet, amount, holder));
-    }
-
-    function _sendMint(bytes32 chainKey, uint256 delegationId, bytes memory toWallet, uint256 amount, address holder)
-        private
-        returns (bytes32)
-    {
-        return TREXMessagingLib.sendMessage(
-            chainKey,
-            MessageTypesLib.Message.MOVE_OUT,
-            abi.encode(
-                MessageTypesLib.MoveOutMessage({
-                    delegationId: delegationId, toWallet: toWallet, amount: amount, holder: holder
-                })
-            )
-        );
     }
 
     function _sendRecall(bytes32 chainKey, uint256 recallId, bytes memory wallet, uint256 amount, address nativeWallet)
