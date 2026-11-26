@@ -141,7 +141,7 @@ abstract contract PlanBuilder {
         address protocolAdminSafe;
         address upgradeCouncilSafe;
         address operationsSafe;
-        address[7] libs;
+        address[8] libs;
         address tokenImpl;
         address mcImpl;
         address trexRegistryImpl;
@@ -283,8 +283,8 @@ abstract contract PlanBuilder {
 
     /// @dev Libraries in dependency order: TokenDelegationLib links the two before it.
     function _fillLibraries(Addrs memory a, bytes32 salt) internal view {
-        (string[7] memory names,) = BytecodeStore.libraries();
-        for (uint256 i = 0; i < 7; i++) {
+        (string[8] memory names,) = BytecodeStore.libraries();
+        for (uint256 i = 0; i < 8; i++) {
             a.libs[i] = _create2Address(a, salt, _initCode(names[i], a.libs));
         }
     }
@@ -319,11 +319,11 @@ abstract contract PlanBuilder {
     // ---------------------------------------------------------------------------------------------------------
 
     /// @notice Linked creation code of a release contract, built in its own call frame.
-    function _initCode(string memory name, address[7] memory libs) internal view returns (bytes memory) {
+    function _initCode(string memory name, address[8] memory libs) internal view returns (bytes memory) {
         return _engine().planInitCode(name, libs);
     }
 
-    function planInitCode(string calldata name, address[7] calldata libs) external view returns (bytes memory) {
+    function planInitCode(string calldata name, address[8] calldata libs) external view returns (bytes memory) {
         return BytecodeStore.initCode(name, libs);
     }
 
@@ -547,8 +547,8 @@ abstract contract PlanBuilder {
     }
 
     function _protocolRows(DeployConfig memory c, Addrs memory a, RowList memory rows) internal view {
-        (string[7] memory libs,) = BytecodeStore.libraries();
-        for (uint256 i = 0; i < 7; i++) {
+        (string[8] memory libs,) = BytecodeStore.libraries();
+        for (uint256 i = 0; i < 8; i++) {
             bytes memory init = _initCode(libs[i], a.libs);
             PlanLists.push(
                 rows,
@@ -717,8 +717,8 @@ abstract contract PlanBuilder {
     /// @notice CREATE2 steps for the build's libraries and implementations under `salt`.
     /// @dev `a` must have been filled for that salt (Upgrade.s.sol publishes a release under its own salt).
     function _create2Steps(Addrs memory a, bytes32 salt, string memory idPrefix, StepList memory steps) internal view {
-        (string[7] memory libs,) = BytecodeStore.libraries();
-        for (uint256 i = 0; i < 7; i++) {
+        (string[8] memory libs,) = BytecodeStore.libraries();
+        for (uint256 i = 0; i < 8; i++) {
             bytes memory init = _initCode(libs[i], a.libs);
             _create2Step(steps, string.concat(idPrefix, libs[i]), a, salt, init);
         }

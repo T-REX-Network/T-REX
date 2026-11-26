@@ -159,7 +159,7 @@ contract TREXRegistrySharedStorageUnitTest is TREXRegistryBaseUnitTest {
                         TREXRegistry.init,
                         (
                             address(identityRegistryStorage),
-                            address(accessManager),
+                            address(suiteManager),
                             new uint256[](0),
                             new address[](0),
                             new uint256[][](0)

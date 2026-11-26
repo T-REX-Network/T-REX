@@ -148,9 +148,9 @@ library BytecodeStore {
         uint8[] links;
     }
 
-    /// @notice The seven linked libraries, by fully qualified name, in deployment order: TokenDelegationLib
+    /// @notice The eight linked libraries, by fully qualified name, in deployment order: TokenDelegationLib
     ///         links TREXMessagingLib and TokenLedgerLib, so both come before it.
-    function libraries() internal pure returns (string[7] memory names, string[7] memory fullyQualified) {
+    function libraries() internal pure returns (string[8] memory names, string[8] memory fullyQualified) {
         names = [
             "TREXMessagingLib",
             "TokenLedgerLib",
@@ -158,7 +158,8 @@ library BytecodeStore {
             "TokenGuardsLib",
             "TokenDelegationLib",
             "ModuleSetLib",
-            "TransferValidationLib"
+            "TransferValidationLib",
+            "TransferSettlementLib"
         ];
         fullyQualified = [
             "contracts/interop/TREXMessagingLib.sol:TREXMessagingLib",
@@ -167,16 +168,17 @@ library BytecodeStore {
             "contracts/token/TokenGuardsLib.sol:TokenGuardsLib",
             "contracts/token/TokenDelegationLib.sol:TokenDelegationLib",
             "contracts/compliance/modular/ModuleSetLib.sol:ModuleSetLib",
-            "contracts/compliance/modular/TransferValidationLib.sol:TransferValidationLib"
+            "contracts/compliance/modular/TransferValidationLib.sol:TransferValidationLib",
+            "contracts/compliance/modular/TransferSettlementLib.sol:TransferSettlementLib"
         ];
     }
 
     /// @notice Every contract a release ships, libraries first.
     function releaseContracts() internal pure returns (ReleaseContract[] memory list) {
-        list = new ReleaseContract[](32);
+        list = new ReleaseContract[](33);
         uint8[] memory none = new uint8[](0);
-        (string[7] memory libs,) = libraries();
-        for (uint256 i = 0; i < 7; i++) {
+        (string[8] memory libs,) = libraries();
+        for (uint256 i = 0; i < 8; i++) {
             list[i] = ReleaseContract(libs[i], "default", string.concat(libs[i], ".sol"), none);
         }
         uint8[] memory delegationLinks = new uint8[](2);
@@ -187,34 +189,35 @@ library BytecodeStore {
         for (uint8 i = 0; i < 5; i++) {
             tokenLinks[i] = i;
         }
-        uint8[] memory mcLinks = new uint8[](2);
-        mcLinks[0] = 5;
-        mcLinks[1] = 6;
-        list[7] = ReleaseContract("Token", "default", "Token.sol", tokenLinks);
-        list[8] = ReleaseContract("ModularCompliance", "default", "ModularCompliance.sol", mcLinks);
-        list[9] = ReleaseContract("TREXRegistry", "default", "TREXRegistry.sol", none);
-        list[10] = ReleaseContract("IdentityRegistryStorage", "default", "IdentityRegistryStorage.sol", none);
-        list[11] = ReleaseContract("TREXAccessManager", "default", "TREXAccessManager.sol", none);
-        list[12] = ReleaseContract("TREXImplementationAuthority", "default", "TREXImplementationAuthority.sol", none);
-        list[13] = ReleaseContract("TrustedGatewayRegistry", "default", "TrustedGatewayRegistry.sol", none);
-        list[14] = ReleaseContract("TREXFactory", "default", "TREXFactory.sol", none);
-        list[15] = ReleaseContract("SpenderVerificationModule", "default", "SpenderVerificationModule.sol", none);
-        list[16] = ReleaseContract("SpenderWhitelistModule", "default", "SpenderWhitelistModule.sol", none);
-        list[17] = ReleaseContract("MaxBalancePerIdentityModule", "default", "MaxBalancePerIdentityModule.sol", none);
-        list[18] = ReleaseContract("ModuleProxy", "default", "ModuleProxy.sol", none);
-        list[19] = ReleaseContract("UtilityChecker", "default", "UtilityChecker.sol", none);
-        list[20] = ReleaseContract("UtilityCheckerProxy", "default", "UtilityCheckerProxy.sol", none);
-        list[21] = ReleaseContract("UtilityCheckerDeployer", "default", "UtilityCheckerDeployer.sol", none);
-        list[22] = ReleaseContract("AccessManager", "default", "AccessManager.sol", none);
-        list[23] = ReleaseContract("IdentityFactory", "onchainid", "IdentityFactory.sol", none);
-        list[24] = ReleaseContract("Identity", "onchainid", "Identity.sol", none);
-        list[25] = ReleaseContract("IdentityUtilities", "onchainid", "IdentityUtilities.sol", none);
-        list[26] = ReleaseContract("IdentityUtilitiesProxy", "onchainid", "IdentityUtilitiesProxy.sol", none);
-        list[27] = ReleaseContract("ERC734Validator", "onchainid", "ERC734Validator.sol", none);
-        list[28] = ReleaseContract("KeyApprovalModule", "onchainid", "KeyApprovalModule.sol", none);
-        list[29] = ReleaseContract("ReputationRegistry", "onchainid", "ReputationRegistry.sol", none);
-        list[30] = ReleaseContract("ERC7913WebAuthnVerifier", "onchainid", "ERC7913WebAuthnVerifier.sol", none);
-        list[31] = ReleaseContract("RoleRevoker", "default", "RoleRevoker.sol", none);
+        uint8[] memory mcLinks = new uint8[](3);
+        mcLinks[0] = 5; // ModuleSetLib
+        mcLinks[1] = 6; // TransferValidationLib
+        mcLinks[2] = 7; // TransferSettlementLib
+        list[8] = ReleaseContract("Token", "default", "Token.sol", tokenLinks);
+        list[9] = ReleaseContract("ModularCompliance", "default", "ModularCompliance.sol", mcLinks);
+        list[10] = ReleaseContract("TREXRegistry", "default", "TREXRegistry.sol", none);
+        list[11] = ReleaseContract("IdentityRegistryStorage", "default", "IdentityRegistryStorage.sol", none);
+        list[12] = ReleaseContract("TREXAccessManager", "default", "TREXAccessManager.sol", none);
+        list[13] = ReleaseContract("TREXImplementationAuthority", "default", "TREXImplementationAuthority.sol", none);
+        list[14] = ReleaseContract("TrustedGatewayRegistry", "default", "TrustedGatewayRegistry.sol", none);
+        list[15] = ReleaseContract("TREXFactory", "default", "TREXFactory.sol", none);
+        list[16] = ReleaseContract("SpenderVerificationModule", "default", "SpenderVerificationModule.sol", none);
+        list[17] = ReleaseContract("SpenderWhitelistModule", "default", "SpenderWhitelistModule.sol", none);
+        list[18] = ReleaseContract("MaxBalancePerIdentityModule", "default", "MaxBalancePerIdentityModule.sol", none);
+        list[19] = ReleaseContract("ModuleProxy", "default", "ModuleProxy.sol", none);
+        list[20] = ReleaseContract("UtilityChecker", "default", "UtilityChecker.sol", none);
+        list[21] = ReleaseContract("UtilityCheckerProxy", "default", "UtilityCheckerProxy.sol", none);
+        list[22] = ReleaseContract("UtilityCheckerDeployer", "default", "UtilityCheckerDeployer.sol", none);
+        list[23] = ReleaseContract("AccessManager", "default", "AccessManager.sol", none);
+        list[24] = ReleaseContract("IdentityFactory", "onchainid", "IdentityFactory.sol", none);
+        list[25] = ReleaseContract("Identity", "onchainid", "Identity.sol", none);
+        list[26] = ReleaseContract("IdentityUtilities", "onchainid", "IdentityUtilities.sol", none);
+        list[27] = ReleaseContract("IdentityUtilitiesProxy", "onchainid", "IdentityUtilitiesProxy.sol", none);
+        list[28] = ReleaseContract("ERC734Validator", "onchainid", "ERC734Validator.sol", none);
+        list[29] = ReleaseContract("KeyApprovalModule", "onchainid", "KeyApprovalModule.sol", none);
+        list[30] = ReleaseContract("ReputationRegistry", "onchainid", "ReputationRegistry.sol", none);
+        list[31] = ReleaseContract("ERC7913WebAuthnVerifier", "onchainid", "ERC7913WebAuthnVerifier.sol", none);
+        list[32] = ReleaseContract("RoleRevoker", "default", "RoleRevoker.sol", none);
     }
 
     function releaseContract(string memory name) internal pure returns (ReleaseContract memory) {
@@ -284,10 +287,10 @@ library BytecodeStore {
     /// @dev A contract that links no library comes straight from `getCode`, which reads the artifact natively (no
     ///      JSON in EVM memory) and refuses bytecode that still has library placeholders, so a library added to it
     ///      fails here. The three linked contracts are read as JSON and linked by {LinkerLib}.
-    function initCode(string memory name, address[7] memory libraryAddresses) internal view returns (bytes memory) {
+    function initCode(string memory name, address[8] memory libraryAddresses) internal view returns (bytes memory) {
         (string memory path, ReleaseContract memory c) = _builtPath(name);
         if (c.links.length == 0) return VM.getCode(path);
-        (, string[7] memory fqn) = libraries();
+        (, string[8] memory fqn) = libraries();
         LinkerLib.Link[] memory links = new LinkerLib.Link[](c.links.length);
         for (uint256 i = 0; i < c.links.length; i++) {
             links[i] = LinkerLib.Link(fqn[c.links[i]], libraryAddresses[c.links[i]]);
@@ -338,7 +341,7 @@ library BytecodeStore {
             sources.length == c.links.length,
             string.concat("BytecodeStore: link references changed for ", c.name, "; update releaseContracts")
         );
-        (, string[7] memory fqn) = libraries();
+        (, string[8] memory fqn) = libraries();
         for (uint256 i = 0; i < c.links.length; i++) {
             string memory source = VM.split(fqn[c.links[i]], ":")[0];
             bool found;

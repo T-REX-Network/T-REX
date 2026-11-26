@@ -215,7 +215,8 @@ interface IToken is IERC3643 {
     /// @dev Callable by `holder`, by the identity `holder` is linked to, or by an address the AccessManager authorises
     ///  for this selector; otherwise reverts with `AccessManagedUnauthorized`. Reverts with `EnforcedPause`,
     ///  `FrozenWallet`, `ZeroValue`, `WalletsNotLinked`, `UnverifiedWallet`, `NotASatelliteWallet`,
-    ///  `ERC20InsufficientBalance` and `ChainNotOpen`; nothing moves in any of these cases. Emits `Transfer`,
+    ///  `ERC20InsufficientBalance`, `ChainInboundPaused` and `ChainNotOpen`; nothing moves in any of these cases.
+    ///  Emits `Transfer`,
     ///  `DelegatedOut` and `ProtocolMessageSent`.
     /// @param holder the native wallet the tokens leave
     /// @param toWallet the ERC-7930 envelope of the satellite wallet to credit
@@ -224,8 +225,9 @@ interface IToken is IERC3643 {
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId);
 
     /// @notice Orders the Lite on `wallet`'s chain to burn up to `amount` of `wallet` and prove it under the returned id.
-    ///  The proof debits the bridged position and credits `nativeWallet` by what the satellite actually burned. A
-    ///  forced movement of location, never of ownership. One recall at a time per wallet; a lost instruction is sent
+    ///  The proof debits the bridged position and credits `nativeWallet` by what the satellite actually burned, and the
+    ///  compliance is told, as a `RECALL`, the inverse of the `DELEGATION` it heard on the way out. A forced movement
+    ///  of location, never of ownership. One recall at a time per wallet; a lost instruction is sent
     ///  again with {resend}. Only the gateway and the peer the instruction went to may answer it, even after a
     ///  `setPeer`: before replacing a hostile peer, distrust its gateway or drain its open recalls.
     /// @dev Callable by the AccessManager role bound to this selector. Not pause-gated: the instruction moves nothing.

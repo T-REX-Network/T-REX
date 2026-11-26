@@ -165,7 +165,7 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
             address(
                 new ModuleProxy(
                     address(new SpenderWhitelistModule()),
-                    abi.encodeCall(SpenderWhitelistModule.initialize, (address(accessManager)))
+                    abi.encodeCall(SpenderWhitelistModule.initialize, (address(suiteManager)))
                 )
             )
         );
@@ -178,7 +178,7 @@ contract SpenderPolicyCrossChainTest is InteropSuiteTest {
             address(
                 new ModuleProxy(
                     address(new SpenderVerificationModule()),
-                    abi.encodeCall(SpenderVerificationModule.initialize, (address(accessManager)))
+                    abi.encodeCall(SpenderVerificationModule.initialize, (address(suiteManager)))
                 )
             )
         );

@@ -60,7 +60,7 @@ import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
-import { RecordingModule, TrackerOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
+import { NativeLedgerModule, RecordingModule, TrackerOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 import { Utils } from "test/unit/helpers/Utils.sol";
 
@@ -232,6 +232,21 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.prank(alice);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         token.delegateOut(alice, aliceSat, 1);
+    }
+
+    /// @notice No more supply goes to a chain whose reports are suspect; the burn is undone with the refusal.
+    function test_delegateOut_RevertWhen_TheChainsInboundIsPaused() public {
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        uint256 nativeBefore = token.balanceOf(alice);
+        uint256 bridgedBefore = token.bridgedBalanceOf(aliceSat);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, polygon));
+        token.delegateOut(alice, aliceSat, 1);
+
+        assertEq(token.balanceOf(alice), nativeBefore);
+        assertEq(token.bridgedBalanceOf(aliceSat), bridgedBefore);
     }
 
     function test_delegateOut_RevertWhen_TheHolderIsFrozen() public {
@@ -529,17 +544,21 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
 
-    /// @notice A different proof for a settled recall is a message the token cannot account for: it pauses itself.
-    function test_handleBurnProof_HaltsTheToken_WhenAConflictingProofArrivesForASettledRecall() public {
+    /// @notice A different proof for a settled recall is a message the token cannot account for, from a chain it
+    ///         can name: that chain's inbound pauses, the token keeps running.
+    function test_handleBurnProof_PausesTheChain_WhenAConflictingProofArrivesForASettledRecall() public {
         uint256 recallId = _instructed();
         polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 200));
         uint256 conflicting = _proof(polygonGateway, recallId, aliceSat, 150);
 
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ReplayedBurnProof(recallId, polygon);
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(conflicting);
 
-        assertTrue(token.paused());
+        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.paused());
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
 
@@ -656,7 +675,8 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ReplayedBurnProof(recallId, polygon);
         polygonGateway.relay(tooMuch);
-        assertTrue(token.paused(), "the stale 200 proof conflicts with the 100 that settled");
+        assertTrue(token.isInboundPaused(polygon), "the stale 200 proof conflicts with the 100 that settled");
+        assertFalse(token.paused());
     }
 
     /* ----- resend ----- */
@@ -810,29 +830,165 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         );
     }
 
-    /// @notice The sync is the owner change alone: no movement is counted, so no tracker module is told. The
-    ///         wallet is empty, since a funded one would be refused.
-    function test_syncOwner_Success_WithoutCallingAnyModule() public {
-        TrackerOnlyModule tracker = TrackerOnlyModule(
-            address(new ModuleProxy(address(new TrackerOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
-        );
-        vm.prank(deployer);
-        boundCompliance.addModule(address(tracker));
+    /// @notice The sync is the owner change alone: no movement is counted there, so the one call a tracker gets
+    ///         is the `RECALL` itself, addressed to the owner the sync just settled on. The wallet is empty,
+    ///         since a funded one would be refused.
+    function test_syncOwner_Success_TheRecallIsTheOnlyModuleCall() public {
+        TrackerOnlyModule tracker = _tracker();
         vm.prank(alice);
         token.transfer(charlie, MINTED);
         uint256 recallId = _relinkedRecall();
         uint256 callsBefore = tracker.totalHookCalls();
 
         vm.expectCall(address(boundCompliance), abi.encodeCall(IModularCompliance.syncOwner, (alice)), 1);
+        vm.expectCall(
+            address(boundCompliance),
+            abi.encodeCall(IModularCompliance.agentTransferred, (alice, alice, 100, MovementKindLib.RECALL)),
+            1
+        );
         polygonGateway.relay(_proof(polygonGateway, recallId, bobSat, 100));
 
-        assertEq(tracker.totalHookCalls(), callsBefore, "no module was called");
+        assertEq(tracker.totalHookCalls(), callsBefore + 1, "the recall is the only movement reported");
+        (, address fromIdentity, address toIdentity,, bytes32 toWallet) = _lastParties(tracker);
+        (, uint256 amount, uint8 kind,,) = _lastMovement(tracker);
+        assertEq(kind, MovementKindLib.RECALL);
+        assertEq(fromIdentity, address(bobIdentity), "the sender is the owner after the sync, not Alice");
+        assertEq(toIdentity, address(bobIdentity), "the recipient is the owner after the sync, not Alice");
+        assertEq(toWallet, bytes32(uint256(uint160(alice))));
+        assertEq(amount, 100);
     }
 
     function test_syncOwner_RevertWhen_TheCallerIsNotTheBoundToken() public {
         vm.prank(alice);
         vm.expectRevert();
         IModularCompliance(address(boundCompliance)).syncOwner(alice);
+    }
+
+    /* ----- The recall as a movement the modules see ----- */
+
+    /// @notice The way back is reported as the exact inverse of a `DELEGATION`: the native wallet is both the sender
+    ///         and the recipient, on one identity, and the hook runs once the native half landed.
+    function test_handleBurnProof_Success_ReportsARecallToTheModules() public {
+        TrackerOnlyModule tracker = _tracker();
+        uint256 recallId = _instructed();
+        uint256 callsBefore = tracker.totalHookCalls();
+
+        vm.expectCall(
+            address(boundCompliance),
+            abi.encodeCall(IModularCompliance.agentTransferred, (alice, alice, 200, MovementKindLib.RECALL)),
+            1
+        );
+        polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 200));
+
+        assertEq(tracker.totalHookCalls(), callsBefore + 1);
+        (address compliance, address fromIdentity, address toIdentity, bytes32 fromWallet, bytes32 toWallet) =
+            _lastParties(tracker);
+        (uint256 amountMin, uint256 amountMax, uint8 kind, bool isIssuance, bytes memory spender) =
+            _lastMovement(tracker);
+        assertEq(compliance, address(boundCompliance));
+        assertEq(kind, MovementKindLib.RECALL);
+        assertEq(fromIdentity, address(aliceIdentity));
+        assertEq(toIdentity, address(aliceIdentity));
+        assertEq(fromWallet, bytes32(uint256(uint160(alice))), "the sender is the native wallet, as on a delegation");
+        assertEq(toWallet, bytes32(uint256(uint160(alice))));
+        assertEq(amountMin, 200);
+        assertEq(amountMax, 200);
+        assertFalse(isIssuance);
+        assertEq(spender.length, 0);
+        assertEq(ledger.positionOf(address(aliceIdentity)), MINTED, "the position never moved");
+    }
+
+    /// @notice Nothing came home, so nothing is reported.
+    function test_handleBurnProof_Success_WithoutReportingAZeroRecall() public {
+        TrackerOnlyModule tracker = _tracker();
+        uint256 recallId = _instructed();
+        uint256 callsBefore = tracker.totalHookCalls();
+
+        vm.expectCall(address(boundCompliance), abi.encodeWithSelector(IModularCompliance.agentTransferred.selector), 0);
+        polygonGateway.relay(_proof(polygonGateway, recallId, aliceSat, 0));
+
+        assertEq(tracker.totalHookCalls(), callsBefore);
+    }
+
+    /// @notice A module keeping its own record of native balances follows a delegation out and the recall back
+    ///         without being reseeded: the out-leg debits it, the in-leg credits it.
+    function test_handleBurnProof_Success_ANativeLedgerModuleFollowsTheRoundTrip() public {
+        NativeLedgerModule module = _nativeLedger();
+        bytes32 bobKey = bytes32(uint256(uint160(bob)));
+        vm.prank(agent);
+        token.mint(bob, 500);
+        vm.prank(bob);
+        token.delegateOut(bob, bobSat, 300);
+        assertEq(module.recorded(bobKey), 200, "the out-leg debited the record");
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(bobSat, 300, bob);
+
+        polygonGateway.relay(_proof(polygonGateway, recallId, bobSat, 300));
+
+        assertEq(token.balanceOf(bob), 500);
+        assertEq(module.recorded(bobKey), token.balanceOf(bob), "the record equals the live balance");
+        assertEq(token.bridgedBalanceOf(bobSat), 0);
+    }
+
+    /// @notice A cap kept in a module's own ledger holds across the satellite: Charlie delegates out, hands the
+    ///         position to Bob on the satellite, Bob recalls it, and the module counts what landed on him, so a mint
+    ///         that would take him over the cap is refused. Charlie is minted after the module is bound, so its
+    ///         record starts in step with the token.
+    function test_handleBurnProof_Success_ANativeLedgerCapCannotBeExceededThroughTheSatellite() public {
+        NativeLedgerModule module = _nativeLedger();
+        module.setCap(150);
+        bytes32 bobKey = bytes32(uint256(uint160(bob)));
+        bytes memory charlieSat = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
+        vm.prank(agent);
+        token.mint(charlie, 100);
+        vm.prank(charlie);
+        token.delegateOut(charlie, charlieSat, 100);
+        uint256 validationId = _requestValidation(address(charlieIdentity), charlieSat, bobSat, 100, 100);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(validationId, charlieSat, bobSat, 100)));
+        vm.prank(agent);
+        uint256 recallId = token.instructRecall(bobSat, 100, bob);
+
+        polygonGateway.relay(_proof(polygonGateway, recallId, bobSat, 100));
+
+        assertEq(token.balanceOf(bob), 100);
+        assertEq(module.recorded(bobKey), 100, "the recall credited Bob's record");
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(NativeLedgerModule.CapExceeded.selector, bobKey, 200, 150));
+        token.mint(bob, 100);
+        assertEq(token.balanceOf(bob), 100, "the mint over the cap was refused");
+    }
+
+    function _tracker() private returns (TrackerOnlyModule tracker) {
+        tracker = TrackerOnlyModule(
+            address(new ModuleProxy(address(new TrackerOnlyModule()), abi.encodeCall(RecordingModule.initialize, ())))
+        );
+        vm.prank(deployer);
+        boundCompliance.addModule(address(tracker));
+    }
+
+    function _nativeLedger() private returns (NativeLedgerModule module) {
+        module = NativeLedgerModule(
+            address(new ModuleProxy(address(new NativeLedgerModule()), abi.encodeCall(RecordingModule.initialize, ())))
+        );
+        vm.prank(deployer);
+        boundCompliance.addModule(address(module));
+    }
+
+    function _lastParties(RecordingModule module)
+        private
+        view
+        returns (address compliance, address fromIdentity, address toIdentity, bytes32 fromWallet, bytes32 toWallet)
+    {
+        (compliance, fromIdentity, toIdentity, fromWallet, toWallet,,,,,,) = module.lastContext();
+    }
+
+    function _lastMovement(RecordingModule module)
+        private
+        view
+        returns (uint256 amountMin, uint256 amountMax, uint8 kind, bool isIssuance, bytes memory spender)
+    {
+        (,,,,, amountMin, amountMax, kind, isIssuance, spender,) = module.lastContext();
     }
 
     /* ----- Admission pinned to the dispatch route and peer ----- */

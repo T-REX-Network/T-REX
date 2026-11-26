@@ -73,7 +73,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
     function testTokenFreezePartialTokensRevertsWhenCallerOnlyAddressFreezer() public {
         address addressFreezer = makeAddr("AddressFreezer");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_ADDRESS_FREEZER), addressFreezer, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_ADDRESS_FREEZER), addressFreezer, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, addressFreezer));
         vm.prank(addressFreezer);
@@ -97,7 +97,9 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
         uint256 hugeAmount = type(uint256).max;
 
         vm.expectRevert(
-            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, mintAmount, hugeAmount)
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector, user, mintAmount - freezeAmount, hugeAmount
+            )
         );
         vm.prank(agent);
         token.freezePartialTokens(user, hugeAmount);
@@ -165,7 +167,7 @@ contract TokenFreezeUnitTest is TokenBaseUnitTest {
 
     function testTokenSetAddressFrozenRevertsWhenCallerOnlyPartialFreezer() public {
         address partialFreezer = makeAddr("PartialFreezer");
-        accessManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_PARTIAL_FREEZER), partialFreezer, 0);
+        suiteManager.grantRole(RolesLib.forDomain(1, RolesLib.Role.AGENT_PARTIAL_FREEZER), partialFreezer, 0);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, partialFreezer));
         vm.prank(partialFreezer);

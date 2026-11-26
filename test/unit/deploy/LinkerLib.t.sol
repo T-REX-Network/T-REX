@@ -48,7 +48,7 @@ import { LinkerLib } from "scripts/deploy/lib/LinkerLib.sol";
 contract LinkerLibTest is Test {
 
     function test_placeholdersAreTheOnesSolcWrote() public view {
-        (string[7] memory names, string[7] memory fqn) = BytecodeStore.libraries();
+        (string[8] memory names, string[8] memory fqn) = BytecodeStore.libraries();
         string memory token = BytecodeStore.unlinkedInitCodeHex("Token");
         for (uint256 i = 0; i < 5; i++) {
             assertTrue(vm.contains(token, LinkerLib.placeholder(fqn[i])), names[i]);
@@ -59,8 +59,8 @@ contract LinkerLibTest is Test {
     }
 
     function test_linksEveryPlaceholder() public view {
-        address[7] memory libs;
-        for (uint256 i = 0; i < 7; i++) {
+        address[8] memory libs;
+        for (uint256 i = 0; i < 8; i++) {
             libs[i] = address(uint160(0xAAAA0000 + i));
         }
         bytes memory token = BytecodeStore.initCode("Token", libs);

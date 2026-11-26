@@ -116,6 +116,9 @@ library TREXMessagingLib {
 
         /// `keccak256` of the peer each validation leg was sent to, snapshot with its gateway.
         mapping(uint256 validationId => mapping(bytes32 chainKey => bytes32 peerKey)) pinnedPeers;
+
+        /// Chains whose messages are refused, and left deliverable, until the pauser lifts it.
+        mapping(bytes32 chainKey => bool paused) inboundPaused;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
@@ -211,6 +214,19 @@ library TREXMessagingLib {
         emit EventsLib.PeerSet(chainKey, peer);
     }
 
+    /// @dev See {ITREXMessaging-setInboundPaused}. Authorization is the caller's. Idempotent: the same state again
+    /// changes nothing and emits nothing. A chain registered by a route or a peer is never deregistered, and a
+    /// message is attributed only to a registered chain, so the token's own call on a verdict never meets the
+    /// registration refusal; it is there for a pauser's typo.
+    function setInboundPaused(bytes32 chainKey, bool pause) external {
+        MessagingStorage storage s = layout();
+        require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
+        if (s.inboundPaused[chainKey] == pause) return;
+        s.inboundPaused[chainKey] = pause;
+        if (pause) emit EventsLib.InboundPaused(chainKey);
+        else emit EventsLib.InboundUnpaused(chainKey);
+    }
+
     /* ----- Outbound ----- */
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`, pinning the route it took.
@@ -265,8 +281,9 @@ library TREXMessagingLib {
     /// the peer and gateway its validation was pinned to, or the current ones for an id this token never
     /// dispatched; a burn proof for a recall still open comes from the peer and gateway that recall was
     /// dispatched to, so a later route or peer change cannot strand it, and any other burn proof from the current
-    /// peer and route. Acting on the message is left to the token, since only it knows its compliance and its
-    /// pause. The gateway's trust is the caller's check, made before this is reached, so a gateway the registry
+    /// peer and route. A chain whose inbound is paused is refused last, once the message is attributed to it, so
+    /// the revert undoes the replay guard's record and the delivery stays deliverable. Acting on the message is
+    /// left to the token, since only it knows its compliance and its pause. The gateway's trust is the caller's check, made before this is reached, so a gateway the registry
     /// no longer trusts is refused even when pinned.
     /// @return messageType `SETTLEMENT_NOTIFICATION` or `BURN_PROOF`; anything else reverts.
     /// @return chainKey The chain the message is attributed to.
@@ -297,16 +314,21 @@ library TREXMessagingLib {
         } else {
             revert ErrorsLib.MessageTypeNotInbound(messageType);
         }
+
+        require(!s.inboundPaused[chainKey], ErrorsLib.ChainInboundPaused(chainKey));
     }
 
-    /// @dev Hands an admitted settlement to `handler`, decoded, and reports whether the token must halt.
+    /// @dev Hands an admitted settlement to `handler`, decoded, and reports the handler's verdict.
     ///
     /// The token calls this from inside its own pause and reentrancy checks. Run by DELEGATECALL, so
     /// the handler sees the token as its caller, which is the only caller a compliance accepts.
     /// @param handler The token's bound compliance.
     /// @param body A settlement body, as {acceptMessage} returned it.
-    /// @return halt Whether the handler reported a replayed or never-issued settlement.
-    function forwardSettlement(address handler, bytes32 chainKey, bytes memory body) external returns (bool halt) {
+    /// @return verdict `None`, or the pause the handler asks for on a replayed or never-issued settlement.
+    function forwardSettlement(address handler, bytes32 chainKey, bytes memory body)
+        external
+        returns (ISettlementHandler.Verdict verdict)
+    {
         return ISettlementHandler(handler).handleSettlement(chainKey, MessageTypesLib.decodeSettlement(body));
     }
 
