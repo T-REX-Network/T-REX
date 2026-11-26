@@ -121,15 +121,18 @@ A Lite that executes a validation before finality owns the reorg exposure, and t
 that chain. Three things can happen to an issuance after the Lite acted on it, and each has one outcome:
 
 - **Re-included in another order.** The id is the same, since it never depended on the order. Nothing to do.
-- **Dropped.** The receipt reaches the reference chain under an id home has no record of: the delivery reverts
-  and stays deliverable at the bridge, and no chain is blocked. The request sent again with the same terms and
+- **Dropped.** The receipt reaches the reference chain under an id home has no record of. Home puts its amount on
+  hold under the sender, with no destination (`ReceiptWithoutTicket`), and no chain is blocked; when the Lite moved
+  the tokens to a wallet on its own chain, that wallet gets uncounted credit (`uncountedCreditOf`): tokens it holds
+  that home does not count for it yet and that it cannot ask to move. The request sent again with the same terms and
   `salt` takes the same id; the body carries the `salt`, so an agent can send it on the requester's behalf from the
-  Lite's copy. The receipt delivered again is then applied on the older terms it echoes, as below. When the request
-  sent again waits for an `APPROVAL` module, the receipt waits under its half (`ReceiptWaiting`, `waitingReceiptOf`)
-  and anyone applies it with `applyWaitingReceipt(halfKey, receipt)` once the approval sent the ticket; while a
-  receipt for the ticket waits and can be applied, the ticket is not cancelled (`ApplyWaitingReceiptFirst`). When the request is refused
-  this time, the receipt stays waiting and readable: nothing is applied and the ledger does not follow what the
-  Lite executed. No function takes such a receipt in or sends it back today: that exit needs a contract change.
+  Lite's copy. That ask takes the money on hold and finishes the move, once the held receipt keeps the ask's terms and
+  the per-ticket cap; no approval module may be bound. If nobody takes it within four waiting times of the sender's
+  chain, anyone cancels it (`cancelHold`): a `BRING_HOME` on the receiver for at most its uncounted credit, then a
+  `MOVE_OUT` of what burned back to the sender. A bring home that burns less than it asked leaves the rest on hold
+  (`CancelHoldShort`) and is not sent again until credit comes back to the receiver. A receipt for a ticket home
+  wrote and never sent (waiting for approval, or cancelled before it left) is put on hold the same way, never applied
+  as that ticket's move.
 - **Mined again in another block.** The id is the same and the ask block hash is not: the copy home now holds may
   have another `amountMax` or `validUntil`. The ask block hash the receipt echoes tells the two cases apart. On
   home's own ask block hash the receipt must echo home's own terms and move an amount inside them. On another one it
@@ -182,8 +185,9 @@ containment the operator also distrusts its bridge.
 |---|---|
 | 3, 7: another receipt for a half that already has one, applied or waiting | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain (`blockAwayChain`) |
 | the receipt home holds for a half, delivered again byte for byte (a bridge redelivery, or the Lite resending its receipt) | `ReceiptDuplicate`, consumed, nothing applied, nothing blocked; a chain blocked over the first delivery and reopened stays open |
-| a receipt for an id home has no record of | reverts with `UnknownTicket` and stays deliverable; nothing is blocked; once the request is sent again with the same terms and salt, the receipt lands |
-| a good receipt that cannot be applied yet: its ticket never sent, the token stopped, its away chain blocked, or the sender's away balance too low | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
+| a first-half receipt for an id home has no record of, or for a ticket home never sent | put on hold under the sender with no destination (`ReceiptWithoutTicket`), nothing blocked; refused and the chain blocked when its sender is not on that chain or, for a ticket home wrote, its wallets are not the ticket's; taken by the ask mined again, or cancelled with `cancelHold` |
+| a second-half receipt for an id home has no record of | `ReceiptUnknown`, consumed, nothing written, nothing blocked |
+| a good receipt that cannot be applied yet: the token stopped, its away chain blocked, or the sender's away balance too low (for a receipt with no ticket, its away balance and the uncounted credit it may carry) | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
 | 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
 | 9: a move out's receipt from a chain the half was not sent to, naming a sender, minting another amount, or minting an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
 | a move out's receipt with less gas left than home's send of a new half needs, where one is sent | reverts with `NotEnoughGasForTheSecondHalf` and stays deliverable |
@@ -206,8 +210,8 @@ route, refuse the receipts it left waiting, then lift the block so its tickets c
 
 Threat model, stated plainly. A trusted gateway, or the registered peer behind it, can stop its own chain's inbound
 with one bad receipt, and a receipt can do little more: it is applied as it happened on its own chain, bounded by
-`requestedMax` and the per-ticket cap on older terms, and a receipt for an id the token never issued reverts and
-blocks nobody. Nothing a message says stops the whole token. The remedy against a peer abusing its chain is to
+`requestedMax` and the per-ticket cap on older terms, and a receipt for an id the token never issued is put on hold
+under its sender, blocks nobody, and is cancelled after four waiting times if nobody takes it. Nothing a message says stops the whole token. The remedy against a peer abusing its chain is to
 distrust its gateway.
 
 ### The brakes

@@ -278,6 +278,13 @@ library ErrorsLib {
     error SecondHalfNotOwed(bytes32 ticketId);
     /// @dev The ticket's money on hold already had the most new halves allowed; a human ends it.
     error NoNewHalfLeft(bytes32 ticketId);
+    /// @dev The money on hold under `laterTicketId` still carries uncounted credit of the one under `ticketId`: the
+    ///  earlier one is not cancelled before the later one gives it back, and the later one is not taken before the
+    ///  earlier one is.
+    error LaterHoldStillCarries(bytes32 ticketId, bytes32 laterTicketId);
+    /// @dev The receipt held under `ticketId` moved an amount the ask mined again does not allow, or echoed a maximum
+    ///  above what was asked or above the away chain's per-ticket cap: the ask does not take it.
+    error HeldReceiptBreaksItsTerms(bytes32 ticketId);
     /// @dev Less gas is left than a second half's send needs: the whole delivery reverts and stays deliverable.
     error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
     /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or a floor

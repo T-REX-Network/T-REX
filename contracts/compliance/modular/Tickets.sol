@@ -60,6 +60,7 @@ pragma solidity 0.8.30;
 
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedger } from "./ComplianceLedger.sol";
 import { ITickets } from "./ITickets.sol";
@@ -177,6 +178,11 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     /// @inheritdoc ITickets
     function ticketOf(bytes32 ticketId) public view returns (Ticket memory) {
         return _validationStorage().validations[ticketId];
+    }
+
+    /// @inheritdoc ITickets
+    function uncountedCreditOf(bytes calldata wallet) public view returns (uint256) {
+        return _validationStorage().uncountedCredit[WalletKeyLib.canonicalKey(wallet)];
     }
 
     /// @inheritdoc ITickets

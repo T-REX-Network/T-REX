@@ -71,7 +71,7 @@ import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
  */
 interface ITickets {
 
-    // The events and errors below are raised inside `TicketLib` and `ReceiptLib`, which
+    // The events and errors below are raised inside `TicketLib`, `ReceiptLib`, `SecondHalfLib` and `HoldLib`, which
     // the compliance reaches by DELEGATECALL. They are declared again here so that they stay in the compliance's
     // ABI; each is documented where it is defined, in `EventsLib` and `ErrorsLib`.
     event TicketWritten(
@@ -116,6 +116,13 @@ interface ITickets {
     );
     event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
     event NewHalfLimitReached(bytes32 indexed ticketId);
+    event ReceiptWithoutTicket(
+        bytes32 indexed ticketId, bytes32 indexed chainKey, bytes from, bytes to, uint256 amount
+    );
+    event ReceiptUnknown(bytes32 indexed halfKey, bytes32 indexed chainKey);
+    event HoldTaken(bytes32 indexed ticketId);
+    event HoldCancelled(bytes32 indexed ticketId);
+    event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error NotACrossChainMove();
@@ -159,6 +166,8 @@ interface ITickets {
     error BringHomeAlreadyOpen(bytes32 walletKey, bytes32 ticketId);
     error WaitingTimeNotSet(bytes32 chainKey);
     error NotASatelliteWallet(bytes wallet);
+    error LaterHoldStillCarries(bytes32 ticketId, bytes32 laterTicketId);
+    error HeldReceiptBreaksItsTerms(bytes32 ticketId);
 
     /// @dev What a ticket is for. Part of the ticket id, so a holder's move and an agent's bring home asked with the
     /// same wallet and salt never share an id.
@@ -201,7 +210,8 @@ interface ITickets {
         bytes32 askBlockHash;
         /// Final inclusive lower bound, so a settlement's executed amount can be classified.
         uint256 amountMin;
-        /// Final inclusive upper bound, what the reservation was taken at.
+        /// Final inclusive upper bound, what the reservation was taken at. For a record a receipt created: the maximum
+        /// the receipt echoed, then, once its money on hold is being cancelled, what the cancel's latest half moves.
         uint256 amountMax;
         /// The satellite's hard deadline: no execution at or after it.
         uint64 validUntil;
@@ -282,6 +292,23 @@ interface ITickets {
         /// The home wallet a bring home mints to; zero for a move. Kept because the bring home's receipt names only
         /// the wallet it burned.
         address homeWallet;
+
+        /* ----- Money on hold with no ticket; last for the layout's sake ----- */
+
+        /// A ticket home sent answers this record. False for a record a receipt created: an id home has no record
+        /// of, or a ticket home wrote and never sent. Only such a record may be taken by the ask mined again.
+        bool written;
+        /// The earlier money on hold whose uncounted credit this one carries: the sender spent tokens home does not
+        /// count for it yet. Zero when none.
+        bytes32 carriedFrom;
+        /// How much of this money on hold is the earlier one's uncounted credit, not yet the sender's own.
+        uint256 carriedAmount;
+        /// The later money on hold that carries this one's uncounted credit; zero when none. This one is not
+        /// cancelled before that one gives the credit back.
+        bytes32 carriedBy;
+        /// The cancel of this money on hold burned less than it asked: the rest stays on hold and is not sent again
+        /// until carried credit comes back to the receiver.
+        bool shortCancel;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
@@ -371,10 +398,21 @@ interface ITickets {
     /// issues the same id, and the away token's receipt, delivered again, is applied on older terms, see
     /// {IReceiptHandler-receiveReceipt}.
     ///
+    /// When a receipt for this id came first and its money is on hold with no ticket, the ask takes it, right after
+    /// the id is built and the caller checked: the move the away token made is finished, and none of the requirements
+    /// below on limits, windows, balances or amounts is asked. A move inside one away chain is then applied when the
+    /// receiver is verified and the rules allow it now, and its hold is cancelled otherwise, see {cancelHold}; a move
+    /// out of the away chain is decided as a first-half receipt is. The take is refused while an approval module is
+    /// bound (`TicketAlreadyWritten`), while the token is paused, the sender's chain blocked or a hostile change runs
+    /// on it, while the hold carries an earlier hold's credit (`LaterHoldStillCarries`: the tokens spent are not the
+    /// sender's yet), and when the held receipt breaks the terms of the ask or the away chain's per-ticket cap
+    /// (`HeldReceiptBreaksItsTerms`). Emits `HoldTaken`.
+    ///
     /// Requirements:
     /// - Asks not paused for the token; otherwise reverts with `AsksPaused`.
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
-    /// - The id of the request not yet recorded; otherwise reverts with `TicketAlreadyWritten`.
+    /// - The id of the request not yet recorded, or money on hold the ask may take; otherwise reverts with
+    ///   `TicketAlreadyWritten`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - `from` and `to` not both home wallets; otherwise reverts with `NotACrossChainMove`.
     /// - No spender for a home `from`; otherwise reverts with `ValidationSpenderRefused`.
@@ -434,11 +472,12 @@ interface ITickets {
     /// - It must be stored `WaitingForApproval`; otherwise reverts with `ValidationNotAwaitingApproval`.
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
+    /// - No receipt for the ticket waiting: it answers no copy home sent, and is booked on hold once it can be;
+    ///   otherwise reverts with `ApplyWaitingReceiptFirst`.
     /// - On an approval, the token not paused, otherwise `TokenPaused`, and the sender's chain still open,
     ///   configured, not blocked and with no hostile change running, as at a request.
     ///
-    /// Emits `TicketWritten` and sends the ticket, unless a receipt for it already waits here, as `askToMove`
-    /// does, or emits `ValidationApprovalRefused`. A home wallet's move out is burned onto hold and its `MOVE_OUT`
+    /// Emits `TicketWritten` and sends the ticket, as `askToMove` does, or emits `ValidationApprovalRefused`. A home wallet's move out is burned onto hold and its `MOVE_OUT`
     /// sent instead, as `askToMove` does with no approval module; its chain is the receiver's.
     /// @param ticketId The validation awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
@@ -707,6 +746,40 @@ interface ITickets {
     function bringHome(bytes calldata awayWallet, uint256 amount, address homeWallet, bytes32 salt)
         external
         returns (bytes32 ticketId);
+
+    /// @dev Cancels money on hold with no ticket, for anyone, once nobody took it: a receipt home has no ticket for
+    /// was booked on hold under its sender, see {IReceiptHandler-receiveReceipt}, and the same ask was not mined again
+    /// before `stopWaitingAt`. When the away token moved the tokens to a wallet on its own chain, the cancel first
+    /// sends a `BRING_HOME` on that receiver for at most its uncounted credit; what it burns goes back to the sender by
+    /// a `MOVE_OUT`, as uncounted credit for the part this hold carried from an earlier one. When the tokens left the
+    /// away chain, they go back to the sender by a `MOVE_OUT` at once. A bring home that burns less than it asked is a
+    /// short cancel: the rest stays on hold, announced, and is not sent again until carried credit comes back to the
+    /// receiver; then `cancelHold` sends it again. Money on hold whose credit a later hold carries is cancelled after
+    /// that later one, last in, first out. A bring home that expired unexecuted is sent again with `cancelHold`.
+    ///
+    /// Requirements:
+    /// - `ticketId` must be recorded; otherwise reverts with `UnknownTicket`.
+    /// - It must be money on hold with no ticket; otherwise reverts with `TicketNotCancellable`.
+    /// - `receiver` must have the key of the receiver the receipt named; otherwise reverts with
+    ///   `ValidationBodyMismatch`.
+    /// - The token not paused, the sender's away chain not blocked and no hostile change running on it; otherwise
+    ///   reverts with `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
+    /// - No later hold carrying its credit; otherwise reverts with `LaterHoldStillCarries`.
+    /// - A first cancel only at or after `stopWaitingAt`; otherwise reverts with `CancelNotDue`. A cancel already
+    ///   started only when its next bring home is owed; otherwise reverts with `TicketNotCancellable`.
+    ///
+    /// Emits `HoldCancelled` on the first cancel, then `SecondHalfSent` and the token's `HalfPinned` and
+    /// `ProtocolMessageSent`, or `CancelHoldShort` when the receiver has no uncounted credit left to burn.
+    /// @param ticketId The id the money on hold is kept under.
+    /// @param receiver ERC-7930 interoperable address of the receiver the receipt named, read off
+    /// `ReceiptWithoutTicket`.
+    function cancelHold(bytes32 ticketId, bytes calldata receiver) external;
+
+    /// @dev The uncounted credit of `wallet`: tokens it holds on its away chain that home does not count for it yet,
+    /// from receipts with no ticket that named it as the receiver. Never part of its away balance, so never asked to
+    /// move.
+    /// @param wallet ERC-7930 interoperable address of the away wallet.
+    function uncountedCreditOf(bytes calldata wallet) external view returns (uint256);
 
     /// @dev The two validity windows, zero until set, which blocks issuance.
     function validityWindows() external view returns (ValidityWindows memory);

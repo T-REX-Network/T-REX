@@ -209,6 +209,21 @@ library EventsLib {
     event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
     /// @notice The money on hold for `ticketId` took its last new half: if that half dies too, a human ends it.
     event NewHalfLimitReached(bytes32 indexed ticketId);
+    /// @notice A receipt from `chainKey` for `ticketId`, which no ticket home sent answers, put `amount` on hold under
+    ///         `from` with no destination. When `to` is on the same away chain, `amount` is its uncounted credit.
+    event ReceiptWithoutTicket(
+        bytes32 indexed ticketId, bytes32 indexed chainKey, bytes from, bytes to, uint256 amount
+    );
+    /// @notice A receipt from `chainKey` for a second half `halfKey` of an id home has no record of was refused.
+    ///         Nothing is written and no chain is blocked.
+    event ReceiptUnknown(bytes32 indexed halfKey, bytes32 indexed chainKey);
+    /// @notice The ask mined again took the money on hold with no ticket under `ticketId`.
+    event HoldTaken(bytes32 indexed ticketId);
+    /// @notice The cancel of the money on hold with no ticket under `ticketId` started.
+    event HoldCancelled(bytes32 indexed ticketId);
+    /// @notice The cancel of the money on hold under `ticketId` burned `missing` less than it holds: that rest stays
+    ///         on hold under the sender until carried credit comes back to the receiver, or a human acts.
+    event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
     /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, or on a bad receipt or
     ///         receipt terms it broke. No ticket goes to it, none of its tickets is cancelled, and its receipts wait.
     event AwayChainBlockStarted(bytes32 indexed chainKey);

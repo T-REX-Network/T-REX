@@ -84,15 +84,25 @@ interface IReceiptHandler {
     ///   `seenValidUntil`, up to valid until plus the chain's full finality delivery and clock lead
     ///   (`TicketStillOpen`), and gives an ask for the receipt back when it does; past that cap it counts as no
     ///   answer. On home's own ask block hash with another valid until it is a bad receipt. Otherwise ignored.
-    /// - An id home has no record of: reverts with `UnknownTicket`, and stays deliverable at the bridge.
+    /// - A second half of an id home has no record of: refused and announced (`ReceiptUnknown`); nothing is written
+    ///   and no chain is blocked.
+    /// - A first-half receipt that no ticket home sent answers: an id home has no record of, or a move home wrote and
+    ///   never sent, waiting for approval or cancelled before it left. It is a bad receipt when another body came for
+    ///   the id, when its sender is not on the chain that sent it, when an expired answer moved something, or, for a
+    ///   ticket home wrote, when it names other wallets. Otherwise it waits like any receipt, while the token is
+    ///   stopped, its chain is blocked, its sender has no identity or cannot cover the amount with its away balance
+    ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt, or one from a
+    ///   wallet to itself, ends the id `Done`; any other puts its amount on hold under the sender with no destination,
+    ///   gives uncounted credit to a receiver on the same away chain, and blocks nobody (`ReceiptWithoutTicket`). The
+    ///   same ask mined again takes it; otherwise anyone cancels it with `cancelHold`.
     /// - A bad receipt: another body for a half that already has one, applied or waiting. For the ticket's own half:
     ///   a chain that is not the sender's, wallets that are not the ticket's, or an expired answer that moved
-    ///   something. For a second half: a half home never sent, a wallet that is not the half's, a chain that is not
+    ///   something. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet that is not the half's, a chain that is not
     ///   the one that wallet is on, a sender named, or anything but a mint of the money on hold or a zero answer that
     ///   the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`), nothing is applied,
     ///   and the chain that sent it is blocked.
     /// - A receipt that cannot be applied yet: the token is stopped or its away chain is blocked; for the ticket's own
-    ///   half, also its ticket was never sent or the sender's away balance is below its amount. It waits
+    ///   half, also the sender's away balance is below its amount. It waits
     ///   (`ReceiptWaiting`), tagged with `bridge` and `senderPeerKey`, for anyone to apply with `applyWaitingReceipt`.
     /// - A zero receipt for the ticket's own half: the ticket ends `Done` with nothing moved. It is never a bad
     ///   receipt. A zero answer to the latest second half: that half is dead, the money stays on hold, and a new

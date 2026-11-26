@@ -96,9 +96,12 @@ import { IModule } from "./modules/IModule.sol";
  * valid until, sent again the same way. Its receipt mints what was burned at the home wallet of the same identity, or
  * sends it back to the away wallet by a move out when that home wallet is no longer the identity's.
  *
- * The compliance reaches this by DELEGATECALL, from {ReceiptLib} and {TicketLib} or from its own entry point, so the
- * storage is its own namespaces, the token and the modules see the compliance as their caller, and every event is
- * the compliance's.
+ * Money on hold with no ticket, which a receipt home sent no ticket for put there, is {HoldLib}'s; it sends its halves
+ * with the functions below, and its take with {takeTheHold}.
+ *
+ * The compliance reaches this by DELEGATECALL, from {ReceiptLib}, {TicketLib} and {HoldLib} or from its own entry
+ * point, so the storage is its own namespaces, the token and the modules see the compliance as their caller, and every
+ * event is the compliance's.
  */
 library SecondHalfLib {
 
@@ -134,10 +137,7 @@ library SecondHalfLib {
         emit EventsLib.ReceiptApplied(ticketId, originChainKey, amount);
 
         // Step 2: forward to the receiver when it may take the money now, back to the sender otherwise.
-        bool forward = _receiverMayTakeIt(ticket, receipt.to, amount, token);
-        ticket.secondHalfToKey = ticket.fromKey;
-        if (forward) ticket.secondHalfToKey = ticket.toKey;
-        TicketLib.reserveTheHold(ticket);
+        bool forward = _chooseWhereItGoes(ticket, receipt.to, token);
 
         // Step 3: a home receiver is minted now; any other wallet gets its move out inside this delivery.
         (bool receiverAtHome,) = WalletKeyLib.isReferenceChain(receipt.to);
@@ -147,8 +147,32 @@ library SecondHalfLib {
         }
         bytes calldata wallet = receipt.from;
         if (forward) wallet = receipt.to;
-        _takeANewHalf(ticket, ticketId);
-        _trySendInsideTheDelivery(ticket, ticketId, wallet, token);
+        takeANewHalf(ticket, ticketId);
+        trySendInsideTheDelivery(ticket, ticketId, wallet, token);
+    }
+
+    /// @dev See {HoldLib-take}: the ask mined again takes money on hold with no ticket whose tokens left the away
+    ///  chain. The money is on hold already; the destination is decided as {takeOntoHold} decides it, and the half
+    ///  leaves inside the ask, whose transaction reverts when the send fails.
+    /// @param from the sender's wallet, as asked
+    /// @param to the receiver's wallet, as asked
+    /// @param token the token the compliance is bound to
+    function takeTheHold(bytes32 ticketId, bytes calldata from, bytes calldata to, address token) external {
+        ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
+
+        // The hold was kept with no destination; it is kept again once the destination is known.
+        ComplianceLedgerLib.releasePendingTotal(ticket.moved);
+        bool forward = _chooseWhereItGoes(ticket, to, token);
+
+        (bool receiverAtHome,) = WalletKeyLib.isReferenceChain(to);
+        if (forward && receiverAtHome) {
+            _finish(ticket, ticketId, to, token);
+            return;
+        }
+        bytes calldata wallet = from;
+        if (forward) wallet = to;
+        takeANewHalf(ticket, ticketId);
+        sendTheLatestHalf(ticket, ticketId, wallet, token);
     }
 
     /// @dev See {ITickets-askToMove}: a home wallet that moves out. The ticket is written and its rules were asked at
@@ -169,10 +193,10 @@ library SecondHalfLib {
         TicketLib.moveTo(ticket, ITickets.TicketStatus.OnHold, token);
         ticket.secondHalfToKey = ticket.toKey;
         TicketLib.reserveTheHold(ticket);
-        _takeANewHalf(ticket, ticketId);
+        takeANewHalf(ticket, ticketId);
 
         IToken(token).burnOntoHold(ticket.fromWallet, amount, ticketId);
-        _sendTheLatestHalf(ticket, ticketId, to, token);
+        sendTheLatestHalf(ticket, ticketId, to, token);
     }
 
     /* ----- A bring home ----- */
@@ -193,7 +217,7 @@ library SecondHalfLib {
         ITickets.Ticket storage ticket = _writeTheBringHome(ticketId, awayWallet, amount, homeWallet, identity);
         ticket.salt = salt;
         _announceTheBringHome(ticket, ticketId);
-        _takeANewHalf(ticket, ticketId);
+        takeANewHalf(ticket, ticketId);
         _writeTheFirstSend(ticket, ticket.fromChainKey);
 
         // Interactions
@@ -210,8 +234,13 @@ library SecondHalfLib {
         require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
         ITickets.Ticket storage ticket = store.validations[ticketId];
         bool onHoldWithAHalf = ticket.status == ITickets.TicketStatus.OnHold && ticket.half != 0;
-        bool anOpenBringHome = _isAnOpenBringHome(ticket);
+        bool anOpenBringHome =
+            ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
         require(onHoldWithAHalf || anOpenBringHome, ErrorsLib.SecondHalfNotOwed(ticketId));
+        // The bring home of a cancel of money on hold with no ticket is sent again only while it is out: once it is
+        // answered, {HoldLib-cancelHold} decides whether another one goes, for how much.
+        bool aCancelsBringHome = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
+        if (aCancelsBringHome) require(TicketLib.aBringHomeIsOut(ticket), ErrorsLib.SecondHalfNotOwed(ticketId));
         require(WalletKeyLib.canonicalKey(wallet) == ticket.secondHalfToKey, ErrorsLib.ValidationBodyMismatch(ticketId));
         bytes32 chainKey = _chainKeyOf(wallet);
         TicketLib.requireTokenRunning(token);
@@ -221,8 +250,8 @@ library SecondHalfLib {
         if (ticket.secondHalfOwed) {
             // A half whose send failed never left: it goes under its own number. A dead half is replaced.
             bool latestHalfLeft = ticket.secondHalfSends != 0;
-            if (latestHalfLeft) _takeANewHalf(ticket, ticketId);
-            _sendTheLatestHalf(ticket, ticketId, wallet, token);
+            if (latestHalfLeft) takeANewHalf(ticket, ticketId);
+            sendTheLatestHalf(ticket, ticketId, wallet, token);
             return;
         }
 
@@ -233,8 +262,8 @@ library SecondHalfLib {
         // Past its valid until by now: a half pinned to a pair the chain no longer has goes to the current pair, as a
         // new half, since its old away token can no longer be asked.
         if (!_pinnedToTheCurrentPair(ticketId, ticket.half, chainKey, token)) {
-            _takeANewHalf(ticket, ticketId);
-            _sendTheLatestHalf(ticket, ticketId, wallet, token);
+            takeANewHalf(ticket, ticketId);
+            sendTheLatestHalf(ticket, ticketId, wallet, token);
             return;
         }
 
@@ -370,6 +399,7 @@ library SecondHalfLib {
         ticket.fromIdentity = identity;
         ticket.toIdentity = identity;
         ticket.status = ITickets.TicketStatus.Open;
+        ticket.written = true;
         ticket.secondHalfToKey = ticket.fromKey;
         ticket.relocation = !ComplianceLedgerLib.reservePending(identity, identity, amount);
 
@@ -465,15 +495,8 @@ library SecondHalfLib {
         IToken(token).putOnHold(awayWallet, ticket.moved, ticketId);
         TicketLib.reserveTheHold(ticket);
         ticket.newHalves = 0;
-        _takeANewHalf(ticket, ticketId);
-        _trySendInsideTheDelivery(ticket, ticketId, awayWallet, token);
-    }
-
-    /// @dev Whether the ticket is a bring home whose half is still out: its half burns, every other half mints.
-    function _isAnOpenBringHome(ITickets.Ticket storage ticket) private view returns (bool) {
-        bool aBringHome = ticket.kind == ITickets.TicketKind.BRING_HOME;
-        bool open = ticket.status == ITickets.TicketStatus.Open;
-        return aBringHome && open;
+        takeANewHalf(ticket, ticketId);
+        trySendInsideTheDelivery(ticket, ticketId, awayWallet, token);
     }
 
     /// @dev The ERC-7930 envelope of a wallet on this chain.
@@ -544,6 +567,19 @@ library SecondHalfLib {
         return ComplianceLedgerLib.currentOwner(token, homeReceiver, registryIdentity, 0);
     }
 
+    /// @dev Where the money on hold goes: to the receiver when it may take it now, back to the sender otherwise. Writes
+    ///  the destination and the `OnHold` row that goes with it.
+    /// @return forward whether it goes to the receiver
+    function _chooseWhereItGoes(ITickets.Ticket storage ticket, bytes calldata to, address token)
+        private
+        returns (bool forward)
+    {
+        forward = _receiverMayTakeIt(ticket, to, ticket.moved, token);
+        ticket.secondHalfToKey = ticket.fromKey;
+        if (forward) ticket.secondHalfToKey = ticket.toKey;
+        TicketLib.reserveTheHold(ticket);
+    }
+
     /// @dev Whether the receiver may take the money now: it is eligible, its chain takes second halves (a home wallet
     ///  needs none), and the rules allow the amount, unless both wallets are one identity's.
     function _receiverMayTakeIt(ITickets.Ticket storage ticket, bytes calldata to, uint256 amount, address token)
@@ -587,8 +623,10 @@ library SecondHalfLib {
         return routeOpen && !blocked && hasAWaitingTime;
     }
 
+    /* ----- Sending a half, shared with {HoldLib} ----- */
+
     /// @dev Numbers a new second half, within the bound of new halves per money on hold, and announces the last one.
-    function _takeANewHalf(ITickets.Ticket storage ticket, bytes32 ticketId) private {
+    function takeANewHalf(ITickets.Ticket storage ticket, bytes32 ticketId) internal {
         require(ticket.newHalves < MAX_NEW_HALVES, ErrorsLib.NoNewHalfLeft(ticketId));
         ticket.newHalves += 1;
         ticket.half += 1;
@@ -604,8 +642,8 @@ library SecondHalfLib {
     }
 
     /// @dev Sends the latest half for the first time. A send that reverts reverts the caller's transaction.
-    function _sendTheLatestHalf(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata wallet, address token)
-        private
+    function sendTheLatestHalf(ITickets.Ticket storage ticket, bytes32 ticketId, bytes memory wallet, address token)
+        internal
     {
         bytes32 chainKey = _chainKeyOf(wallet);
         _writeTheFirstSend(ticket, chainKey);
@@ -615,12 +653,12 @@ library SecondHalfLib {
     /// @dev Sends the latest half for the first time inside a receipt's delivery. Below `SECOND_HALF_SEND_GAS` the
     ///  whole delivery reverts and stays deliverable. A send that fails is caught: the receipt stays applied, and the
     ///  half stays owed under its own number for anyone to send.
-    function _trySendInsideTheDelivery(
+    function trySendInsideTheDelivery(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
-        bytes calldata wallet,
+        bytes memory wallet,
         address token
-    ) private {
+    ) internal {
         bytes32 chainKey = _chainKeyOf(wallet);
         _writeTheFirstSend(ticket, chainKey);
         bytes memory body = _moveOutBody(ticket, ticketId, wallet);
@@ -630,7 +668,12 @@ library SecondHalfLib {
         require(gasLeft >= SECOND_HALF_SEND_GAS, ErrorsLib.NotEnoughGasForTheSecondHalf(gasLeft, SECOND_HALF_SEND_GAS));
         try IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.MOVE_OUT, body) {
             emit EventsLib.SecondHalfSent(
-                ticketId, ticket.half, chainKey, wallet, ticket.moved, ticket.secondHalfValidUntil
+                ticketId,
+                ticket.half,
+                chainKey,
+                wallet,
+                TicketLib.amountOfTheLatestHalf(ticket),
+                ticket.secondHalfValidUntil
             );
         } catch {
             ticket.secondHalfSends = 0;
@@ -639,18 +682,18 @@ library SecondHalfLib {
         }
     }
 
-    /// @dev Sends the latest half as recorded: its number, its wallet, its amount and its valid until. The half of an
-    ///  open bring home burns what it may take; any other half mints the money on hold.
+    /// @dev Sends the latest half as recorded: its number, its wallet, its amount and its valid until. A half that
+    ///  burns, see {TicketLib-aBringHomeIsOut}, burns what it may take; any other half mints what it moves.
     function _send(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
         bytes32 chainKey,
-        bytes calldata wallet,
+        bytes memory wallet,
         address token
     ) private {
         bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, ticket.half);
 
-        if (_isAnOpenBringHome(ticket)) {
+        if (TicketLib.aBringHomeIsOut(ticket)) {
             emit EventsLib.SecondHalfSent(
                 ticketId, ticket.half, chainKey, wallet, ticket.amountMax, ticket.secondHalfValidUntil
             );
@@ -660,14 +703,19 @@ library SecondHalfLib {
         }
 
         emit EventsLib.SecondHalfSent(
-            ticketId, ticket.half, chainKey, wallet, ticket.moved, ticket.secondHalfValidUntil
+            ticketId,
+            ticket.half,
+            chainKey,
+            wallet,
+            TicketLib.amountOfTheLatestHalf(ticket),
+            ticket.secondHalfValidUntil
         );
         bytes memory moveOutBody = _moveOutBody(ticket, ticketId, wallet);
         IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.MOVE_OUT, moveOutBody);
     }
 
-    /// @dev The `BRING_HOME` of an open bring home's latest half, encoded.
-    function _bringHomeBody(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata wallet)
+    /// @dev The `BRING_HOME` of the latest half that burns, encoded.
+    function _bringHomeBody(ITickets.Ticket storage ticket, bytes32 ticketId, bytes memory wallet)
         private
         view
         returns (bytes memory)
@@ -684,7 +732,7 @@ library SecondHalfLib {
     }
 
     /// @dev The `MOVE_OUT` of the latest half, encoded.
-    function _moveOutBody(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata wallet)
+    function _moveOutBody(ITickets.Ticket storage ticket, bytes32 ticketId, bytes memory wallet)
         private
         view
         returns (bytes memory)
@@ -694,7 +742,7 @@ library SecondHalfLib {
                 ticketId: ticketId,
                 half: ticket.half,
                 toWallet: wallet,
-                amount: ticket.moved,
+                amount: TicketLib.amountOfTheLatestHalf(ticket),
                 validUntil: ticket.secondHalfValidUntil
             })
         );

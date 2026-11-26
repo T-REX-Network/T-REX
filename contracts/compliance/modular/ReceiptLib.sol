@@ -66,6 +66,7 @@ import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
+import { HoldLib } from "./HoldLib.sol";
 import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
@@ -78,7 +79,8 @@ import { IModule } from "./modules/IModule.sol";
  * @title ReceiptLib
  * @dev How a ticket ends, deployed once and linked: {receiveReceipt} records what an away token reports it did,
  * {applyWaitingReceipt} applies a good receipt that could not be applied when it arrived, and {cancelTickets}
- * releases what an away token never did. A move that leaves its away chain goes on through {SecondHalfLib}.
+ * releases what an away token never did. A move that leaves its away chain goes on through {SecondHalfLib}; a
+ * receipt that no ticket home sent answers is put on hold through {HoldLib}.
  *
  * Home records what a receipt reports, not what home allowed: the away token's balances already moved, and a
  * refused receipt would leave home's records wrong for good. The terms check only decides whether the away chain
@@ -124,24 +126,34 @@ library ReceiptLib {
             return;
         }
 
-        // 3. An id home has no record of reverts and stays deliverable at the bridge.
-        require(TicketLib.isRecorded(store, receipt.ticketId), ErrorsLib.UnknownTicket(receipt.ticketId));
-        ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
+        // 3. A second half of an id home has no record of is refused and announced; it blocks nobody.
+        bool recorded = TicketLib.isRecorded(store, receipt.ticketId);
+        if (!recorded && receipt.half != 0) {
+            emit EventsLib.ReceiptUnknown(halfKey, originChainKey);
+            return;
+        }
 
-        // 4. A bad receipt is refused and blocks the chain that sent it.
+        // 4. A first-half receipt that no ticket home sent answers is put on hold under its sender, see {HoldLib}.
+        ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
+        if (_answersNoTicketHomeSent(ticket, recorded, receipt)) {
+            _receiveWithoutTicket(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt, token);
+            return;
+        }
+
+        // 5. A bad receipt is refused and blocks the chain that sent it.
         if (_isBadReceipt(store, ticket, halfKey, originChainKey, receipt)) {
             emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
             TicketLib.blockAwayChain(originChainKey);
             return;
         }
 
-        // 5. A good receipt that cannot be applied yet waits, tagged with the bridge and peer that delivered it.
-        if (!_canBeAppliedNow(ticket, originChainKey, receipt, token)) {
+        // 6. A good receipt that cannot be applied yet waits, tagged with the bridge and peer that delivered it.
+        if (!_canBeAppliedNow(originChainKey, receipt, token)) {
             _keepWaiting(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt);
             return;
         }
 
-        // 6. Applied as it happened.
+        // 7. Applied as it happened.
         store.receiptHashes[halfKey] = receiptHash;
         _apply(ticket, originChainKey, receipt, token);
     }
@@ -159,13 +171,20 @@ library ReceiptLib {
         require(receiptHash == waiting.bodyHash, ErrorsLib.NoWaitingReceipt(halfKey));
 
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
-        _requireCanBeAppliedNow(ticket, halfKey, waiting.chainKey, receipt, token);
+        bool recorded = TicketLib.isRecorded(store, receipt.ticketId);
+        bool withoutTicket = _answersNoTicketHomeSent(ticket, recorded, receipt);
+        if (withoutTicket) HoldLib.requireCanBeBookedNow(waiting.chainKey, receipt, token);
+        if (!withoutTicket) _requireCanBeAppliedNow(receipt, waiting.chainKey, token);
         ITREXMessaging(token)
             .checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey, waiting.arrivedAt);
 
         delete store.waitingReceipts[halfKey];
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, waiting.chainKey);
+        if (withoutTicket) {
+            HoldLib.bookWithoutTicket(waiting.chainKey, receipt, token);
+            return;
+        }
         _apply(ticket, waiting.chainKey, receipt, token);
     }
 
@@ -194,7 +213,11 @@ library ReceiptLib {
     ) private {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
-        if (!_canBeAppliedNow(ticket, originChainKey, receipt, token)) {
+        bool recorded = TicketLib.isRecorded(store, receipt.ticketId);
+        bool withoutTicket = _answersNoTicketHomeSent(ticket, recorded, receipt);
+        bool canBeAppliedNow = _canBeAppliedNow(originChainKey, receipt, token);
+        if (withoutTicket) canBeAppliedNow = HoldLib.canBeBookedNow(originChainKey, receipt, token);
+        if (!canBeAppliedNow) {
             emit EventsLib.ReceiptDuplicate(receipt.ticketId, originChainKey);
             return;
         }
@@ -202,7 +225,74 @@ library ReceiptLib {
         delete store.waitingReceipts[halfKey];
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, originChainKey);
+        if (withoutTicket) {
+            HoldLib.bookWithoutTicket(originChainKey, receipt, token);
+            return;
+        }
         _apply(ticket, originChainKey, receipt, token);
+    }
+
+    /// @dev Whether a receipt answers no ticket home sent: an id home has no record of, or a first-half receipt for
+    ///  a move home wrote and never sent, waiting for approval or cancelled before it left. Such a receipt is never
+    ///  applied as a move: it is put on hold, see {HoldLib}.
+    function _answersNoTicketHomeSent(
+        ITickets.Ticket storage ticket,
+        bool recorded,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private view returns (bool) {
+        if (!recorded) return true;
+        bool aMove = ticket.kind == ITickets.TicketKind.MOVE;
+        bool neverSent = ticket.written && ticket.askBlockHash == bytes32(0);
+        return receipt.half == 0 && aMove && neverSent;
+    }
+
+    /// @dev A first-half receipt that no ticket home sent answers. It is a bad receipt, refused and blocking the
+    ///  chain that sent it, when another body came for the id, when its sender is not on that chain, when an expired
+    ///  answer still moved something, or, for a ticket home wrote, when it names other wallets. A good one waits
+    ///  until it can be booked; its hash is written before it is booked, so the same receipt again changes nothing.
+    function _receiveWithoutTicket(
+        bytes32 halfKey,
+        bytes32 receiptHash,
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) private {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        if (_isBadReceiptWithoutTicket(store, halfKey, originChainKey, receipt)) {
+            emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
+            TicketLib.blockAwayChain(originChainKey);
+            return;
+        }
+        if (!HoldLib.canBeBookedNow(originChainKey, receipt, token)) {
+            _keepWaiting(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt);
+            return;
+        }
+        store.receiptHashes[halfKey] = receiptHash;
+        HoldLib.bookWithoutTicket(originChainKey, receipt, token);
+    }
+
+    /// @dev See {_receiveWithoutTicket}. With no ticket to compare it to, a receipt is held to the chain that holds its
+    ///  sender: no other away chain can move that sender's tokens.
+    function _isBadReceiptWithoutTicket(
+        TicketLib.ValidationStorage storage store,
+        bytes32 halfKey,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private view returns (bool) {
+        bool anotherBodyApplied =
+            store.receiptHashes[halfKey] != bytes32(0);
+        bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
+        bool fromTheSendersChain = _chainKeyOf(receipt.from) == originChainKey;
+        bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
+        if (anotherBodyApplied || anotherBodyWaiting || !fromTheSendersChain || expiredYetMoved) return true;
+
+        ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
+        if (!TicketLib.isRecorded(store, receipt.ticketId)) return false;
+        bool fromTheTicketsSender = keccak256(receipt.from) == ticket.fromKey;
+        bool toTheTicketsReceiver = keccak256(receipt.to) == ticket.toKey;
+        return !fromTheTicketsSender || !toTheTicketsReceiver;
     }
 
     /// @dev A still open answer: the away token holds the ticket unexecuted, valid until `seenValidUntil`. It is not
@@ -261,16 +351,18 @@ library ReceiptLib {
         bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
         if (anotherBodyApplied || anotherBodyWaiting) return true;
         bool aBringHome = ticket.kind == ITickets.TicketKind.BRING_HOME;
-        if (aBringHome) return !_answersTheBringHome(ticket, originChainKey, receipt);
+        bool heldWithoutTicket = !ticket.written;
+        if (aBringHome || heldWithoutTicket) return !_answersTheBringHome(ticket, originChainKey, receipt);
         if (receipt.half == 0) return !_answersTheTicket(ticket, originChainKey, receipt);
         return !_answersASecondHalf(ticket, originChainKey, receipt);
     }
 
-    /// @dev Whether a receipt answers a bring home. It has no half 0: its first half is home's `BRING_HOME`. A receipt
-    ///  naming no sender answers the move out that returns what it burned, and exists only once something was burned.
-    ///  Any other must come from the away wallet's chain, name the burned wallet and no receiver, and either burn at
-    ///  most the bring home's amount for its latest half while it is open, or be a zero answer that a half expired
-    ///  unexecuted. A burn for an older half would be a second burn of one bring home.
+    /// @dev Whether a receipt answers a half home sent for a bring home, or for the cancel of money on hold with no
+    ///  ticket, whose halves burn from the receiver, then return what burned. Half 0 is never such an answer. A
+    ///  receipt naming no sender answers the move out that returns what was burned, and exists only once that move
+    ///  out is due. Any other must come from the burned wallet's chain, name that wallet and no receiver, and either
+    ///  burn at most the half's amount for its latest half while it is out, or be a zero answer that a half expired
+    ///  unexecuted. A burn for an older half would be a second burn.
     function _answersTheBringHome(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
@@ -279,15 +371,18 @@ library ReceiptLib {
         if (receipt.half == 0) return false;
         bool namesTheBurnedWallet = receipt.from.length != 0;
         if (!namesTheBurnedWallet) {
-            bool somethingWasBurned = ticket.moved != 0;
-            return somethingWasBurned && _answersASecondHalf(ticket, originChainKey, receipt);
+            bool returnsWhatWasBurned =
+                ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.fromKey;
+            return returnsWhatWasBurned && _answersASecondHalf(ticket, originChainKey, receipt);
         }
+        // A bring home burns from its away wallet; the cancel of money on hold, from the receiver on the same chain.
+        bytes32 burnedWalletKey = ticket.fromKey;
+        if (!ticket.written) burnedWalletKey = ticket.toKey;
         bool fromTheWalletsChain = originChainKey == ticket.fromChainKey;
-        bool burnedTheBringHomesWallet = keccak256(receipt.from) == ticket.fromKey;
+        bool burnedTheHalfsWallet = keccak256(receipt.from) == burnedWalletKey;
         bool namesNoReceiver = receipt.to.length == 0;
 
-        bool stillOpen = ticket.status == ITickets.TicketStatus.Open;
-        bool answersTheLatestHalf = stillOpen && receipt.half == ticket.half;
+        bool answersTheLatestHalf = TicketLib.aBringHomeIsOut(ticket) && receipt.half == ticket.half;
         bool answersAnOlderHalf = receipt.half < ticket.half;
         bool executed = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
         bool burnedAtMostItsAmount = executed && receipt.amount <= ticket.amountMax;
@@ -295,7 +390,7 @@ library ReceiptLib {
         bool answersTheLatestHalfRightly = answersTheLatestHalf && (burnedAtMostItsAmount || expiredUnexecuted);
         bool answersAnOlderHalfRightly = answersAnOlderHalf && expiredUnexecuted;
         bool answersAHalfRightly = answersTheLatestHalfRightly || answersAnOlderHalfRightly;
-        return fromTheWalletsChain && burnedTheBringHomesWallet && namesNoReceiver && answersAHalfRightly;
+        return fromTheWalletsChain && burnedTheHalfsWallet && namesNoReceiver && answersAHalfRightly;
     }
 
     /// @dev Whether a first-half receipt answers the ticket: from the chain the ticket went to, for the ticket's
@@ -331,7 +426,8 @@ library ReceiptLib {
         bool latestHalfLeft = ticket.secondHalfSends != 0;
         bool answersTheLatestHalf = receipt.half == ticket.half && latestHalfLeft;
         bool answersAnOlderHalf = receipt.half < ticket.half;
-        bool mintedTheHalf = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed && receipt.amount == ticket.moved;
+        bool mintedTheHalf = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed
+            && receipt.amount == TicketLib.amountOfTheLatestHalf(ticket);
         bool expiredUnexecuted = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount == 0;
         bool answersTheLatestHalfRightly = answersTheLatestHalf && (mintedTheHalf || expiredUnexecuted);
         bool answersAnOlderHalfRightly = answersAnOlderHalf && expiredUnexecuted;
@@ -339,8 +435,9 @@ library ReceiptLib {
         return fromTheChainTheHalfWentTo && namesNoSender && answersAHalfRightly;
     }
 
-    /// @dev Applies a good receipt as it happened. A second half's receipt, a bring home's included, is
-    ///  {SecondHalfLib}'s. A first-half receipt for a ticket that was sent, open or cancelled, blocks its away chain
+    /// @dev Applies a good receipt as it happened. A half of the cancel of money on hold with no ticket is
+    ///  {HoldLib}'s, any other second half's receipt, a bring home's included, {SecondHalfLib}'s. A first-half receipt
+    ///  for a ticket that was sent, open or cancelled, blocks its away chain
     ///  when it breaks its terms. A zero receipt ends the ticket with nothing moved and is never a bad receipt,
     ///  whatever terms it echoes. Any other receipt is checked against the copy it echoes: home's own, or an older one
     ///  from a home block a reorg dropped. A move inside one away chain is then done; a move to another chain goes on
@@ -351,6 +448,10 @@ library ReceiptLib {
         MessageTypesLib.ReceiptMessage calldata receipt,
         address token
     ) private {
+        if (!ticket.written) {
+            HoldLib.applyHoldReceipt(receipt.ticketId, originChainKey, receipt, token);
+            return;
+        }
         if (receipt.half != 0) {
             SecondHalfLib.applySecondHalfReceipt(receipt.ticketId, originChainKey, receipt, token);
             return;
@@ -460,34 +561,28 @@ library ReceiptLib {
 
     /* ----- Waiting receipts ----- */
 
-    /// @dev Whether a good receipt can be applied now: the token runs and its away chain is not blocked; for a
-    ///  first-half receipt, its ticket was sent and the sender's away balance covers what it moved. A second half's
-    ///  money is already on hold at home, so no away balance is read for it. Otherwise it waits.
-    function _canBeAppliedNow(
-        ITickets.Ticket storage ticket,
-        bytes32 chainKey,
-        MessageTypesLib.ReceiptMessage calldata receipt,
-        address token
-    ) private view returns (bool) {
+    /// @dev Whether a good receipt for a ticket home sent can be applied now: the token runs and its away chain is
+    ///  not blocked; for a first-half receipt, the sender's away balance covers what it moved. A second half's money
+    ///  is already on hold at home, so no away balance is read for it. Otherwise it waits.
+    function _canBeAppliedNow(bytes32 chainKey, MessageTypesLib.ReceiptMessage calldata receipt, address token)
+        private
+        view
+        returns (bool)
+    {
         bool tokenRunning = !IToken(token).paused();
         bool awayChainBlocked = TicketLib.layout().blockedAwayChains[chainKey];
         bool canBeAppliedNow = tokenRunning && !awayChainBlocked;
         if (receipt.half != 0) return canBeAppliedNow;
-        bool ticketSent = ticket.askBlockHash != bytes32(0);
         bool awayBalanceCoversIt = receipt.amount <= IToken(token).awayBalanceOf(receipt.from);
-        return canBeAppliedNow && ticketSent && awayBalanceCoversIt;
+        return canBeAppliedNow && awayBalanceCoversIt;
     }
 
     /// @dev {_canBeAppliedNow} as requirements, each with its own error, for {applyWaitingReceipt}.
-    function _requireCanBeAppliedNow(
-        ITickets.Ticket storage ticket,
-        bytes32 halfKey,
-        bytes32 chainKey,
-        MessageTypesLib.ReceiptMessage calldata receipt,
-        address token
-    ) private view {
+    function _requireCanBeAppliedNow(MessageTypesLib.ReceiptMessage calldata receipt, bytes32 chainKey, address token)
+        private
+        view
+    {
         bool answersTheTicket = receipt.half == 0;
-        if (answersTheTicket) require(ticket.askBlockHash != bytes32(0), ErrorsLib.NoWaitingReceipt(halfKey));
         TicketLib.requireTokenRunning(token);
         TicketLib.requireAwayChainNotBlocked(chainKey);
         if (!answersTheTicket) return;

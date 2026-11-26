@@ -71,6 +71,7 @@ import { WalletKeyLib } from "../../libraries/WalletKeyLib.sol";
 import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
+import { HoldLib } from "./HoldLib.sol";
 import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { SecondHalfLib } from "./SecondHalfLib.sol";
@@ -135,6 +136,12 @@ library TicketLib {
         mapping(address identity => IdentityAsks asks) identityAsks;
         /// The bring home open on each away wallet, zero when none: one at a time per wallet.
         mapping(bytes32 walletKey => bytes32 ticketId) openBringHome;
+        /// What each away wallet holds on its chain that home does not count for it yet: receipts with no ticket that
+        /// named it as the receiver, see {HoldLib}. Never part of its away balance, so never asked to move.
+        mapping(bytes32 walletKey => uint256 amount) uncountedCredit;
+        /// The latest money on hold that gave the wallet uncounted credit: a receipt with no ticket that spends that
+        /// credit carries it from there.
+        mapping(bytes32 walletKey => bytes32 ticketId) uncountedCreditFrom;
     }
 
     /// @dev What one identity asked, counted against {ITickets-AskLimits}.
@@ -184,9 +191,11 @@ library TicketLib {
         uint64 waitingTime;
     }
 
-    /// @dev Issues a validation, see {ITickets-askToMove}. Five questions, in order:
-    ///  where is this going, may the caller ask for it, by when must it happen, how much may actually move, and
-    ///  may the named spender execute it. Only then is anything written.
+    /// @dev Issues a validation, see {ITickets-askToMove}. Where is this going and may the caller ask for it; then the
+    ///  id of the request, and the take of money on hold a receipt for that id put there first, before any question
+    ///  on limits or balances: those tokens already left the sender's wallet, so asking for them again would refuse
+    ///  the ask. Then by when must it happen, how much may actually move, and may the named spender execute it.
+    ///  Only then is anything written.
     /// @param salt the requester's nonce, see {ITickets-askToMove}
     /// @param token the token the compliance is bound to
     /// @param authority the compliance's AccessManager
@@ -210,13 +219,51 @@ library TicketLib {
         draft.requestedMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
         _requireCallerOwnsTheWallet(draft, from, token, authority);
+
+        ticketId = ticketIdOf(
+            ITickets.TicketKind.MOVE,
+            draft.fromKey,
+            draft.toKey,
+            keccak256(spender),
+            draft.amountMin,
+            draft.requestedMax,
+            salt
+        );
+        if (_mayTakeTheHold(ticketId)) {
+            _takeTheHold(ticketId, from, to, spender, salt, draft, token);
+            return ticketId;
+        }
+        require(!isRecorded(layout(), ticketId), ErrorsLib.TicketAlreadyWritten(ticketId));
+
         _requireWithinAskLimits(draft);
         (draft.validUntil, draft.waitingTime) = _expiryAndWindow(token, _firstChainOf(draft));
         _narrowAmountRange(draft, from, to, spender, token);
         _requireSpenderAllowed(draft, to, spender);
 
         // Issued and sent at once, or kept awaiting approval while an `APPROVAL` module is bound.
-        ticketId = _issue(from, to, spender, salt, draft, token);
+        _issue(ticketId, from, to, spender, salt, draft, token);
+    }
+
+    /// @dev The ask takes the money on hold under its id, see {HoldLib-take}, with the range it asked for. In its own
+    ///  call frame: {request} has no stack room left for the call.
+    function _takeTheHold(
+        bytes32 ticketId,
+        bytes calldata from,
+        bytes calldata to,
+        bytes calldata spender,
+        bytes32 salt,
+        Draft memory draft,
+        address token
+    ) private {
+        HoldLib.take(ticketId, from, to, spender, draft.amountMin, draft.requestedMax, salt, token);
+    }
+
+    /// @dev Whether the ask may take the money on hold under its id: a record a receipt created, still on hold with no
+    ///  destination and no cancel started, while no approval module is bound, since an approver never saw that move.
+    function _mayTakeTheHold(bytes32 ticketId) private view returns (bool) {
+        ITickets.Ticket storage ticket = layout().validations[ticketId];
+        bool noApprovalModule = _approvalModule() == address(0);
+        return HoldLib.isATakeableHold(ticket) && noApprovalModule;
     }
 
     /// @dev Where the move goes: both envelopes parse, and at most one of the two wallets is a home wallet. A move
@@ -234,6 +281,8 @@ library TicketLib {
         draft.homeWallet = homeWallet;
         draft.fromChainKey = _chainKeyOf(from);
         draft.toChainKey = _chainKeyOf(to);
+        draft.fromKey = WalletKeyLib.canonicalKey(from);
+        draft.toKey = WalletKeyLib.canonicalKey(to);
         if (spender.length == 0) return;
         require(!fromHome, ErrorsLib.ValidationSpenderRefused(spender));
         WalletKeyLib.parse(spender);
@@ -324,8 +373,6 @@ library TicketLib {
         ITREXRegistry registry = _registryOf(token);
         require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
         draft.toIdentity = address(registry.resolveIdentity(to));
-        draft.fromKey = WalletKeyLib.canonicalKey(from);
-        draft.toKey = WalletKeyLib.canonicalKey(to);
 
         _requireRequestWithinTheFreeBalance(draft, from, token);
         _capAtWhatTheRulesAllow(draft, to, spender);
@@ -383,42 +430,33 @@ library TicketLib {
         require(ModuleSetLib.spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
-    /// @dev Turns a settled draft into a validation: build its id from the whole request, refuse an id
-    ///  already taken, keep its terms and reserve the amount. With no `APPROVAL` module bound, issue it at once:
-    ///  build the object the away token will execute against, announce it and send it to the sender's away
-    ///  chain. With one bound, keep it `WaitingForApproval` instead, sent nowhere until {answerApproval}.
+    /// @dev Turns a settled draft into a validation under its id: keep its terms and reserve the amount. With no
+    ///  `APPROVAL` module bound, issue it at once: build the object the away token will execute against, announce it
+    ///  and send it to the sender's away chain. With one bound, keep it `WaitingForApproval` instead, sent nowhere
+    ///  until {answerApproval}.
+    /// @param ticketId the id of the whole request, see {ticketIdOf}
     /// @param salt the requester's nonce, see {ITickets-askToMove}
     /// @param token the token the compliance is bound to
-    /// @return ticketId the id of the whole request, see {ticketIdOf}
     function _issue(
+        bytes32 ticketId,
         bytes calldata from,
         bytes calldata to,
         bytes calldata spender,
         bytes32 salt,
         Draft memory draft,
         address token
-    ) private returns (bytes32 ticketId) {
-        ticketId = ticketIdOf(
-            ITickets.TicketKind.MOVE,
-            draft.fromKey,
-            draft.toKey,
-            keccak256(spender),
-            draft.amountMin,
-            draft.requestedMax,
-            salt
-        );
-        require(!isRecorded(layout(), ticketId), ErrorsLib.TicketAlreadyWritten(ticketId));
+    ) private {
         _record(ticketId, from, spender, draft, token);
         layout().validations[ticketId].salt = salt;
 
         address approvalModule = _approvalModule();
         if (approvalModule != address(0)) {
             _awaitApproval(ticketId, from, to, spender, draft, approvalModule);
-            return ticketId;
+            return;
         }
         if (draft.homeWallet != address(0)) {
             SecondHalfLib.moveOutFromHome(ticketId, to, token);
-            return ticketId;
+            return;
         }
 
         bytes memory body = _issueRecorded(
@@ -455,6 +493,10 @@ library TicketLib {
         );
         require(msg.sender == _approvalModule(), ErrorsLib.NotTheApprovalModule(msg.sender));
         require(block.timestamp < validation.validUntil, ErrorsLib.ValidationExpired(ticketId, validation.validUntil));
+        // A receipt that came before the answer answers no copy home sent: it is booked on hold once it can be,
+        // never applied as this ticket's move, so the ticket is not sent over it.
+        ITickets.WaitingReceipt storage waiting = store.waitingReceipts[MessageTypesLib.halfKeyOf(ticketId, 0)];
+        require(waiting.bodyHash == bytes32(0), ErrorsLib.ApplyWaitingReceiptFirst(ticketId, waiting.chainKey));
 
         if (approvedMax == 0 || approvedMax < validation.amountMin) {
             moveTo(validation, ITickets.TicketStatus.Cancelled, token);
@@ -825,6 +867,7 @@ library TicketLib {
         stored.requestedMax = draft.requestedMax;
         // Open unless an approval module is bound, see {_awaitApproval}.
         stored.status = ITickets.TicketStatus.Open;
+        stored.written = true;
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
         stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
 
@@ -859,8 +902,8 @@ library TicketLib {
         body = abi.encode(issued);
     }
 
-    /// @dev Sends a written ticket to the sender's away chain, unless that chain already answered it while it was
-    ///  not sent: that away token executed it already, its receipt waits here, and
+    /// @dev Sends a written ticket to the sender's away chain, unless that chain already answered it: an ask mined
+    ///  again after a reorg, whose dropped copy the away token executed and whose receipt waits here, and
     ///  {ReceiptLib-applyWaitingReceipt} applies it instead. The token is the wire's only author: it pins the
     ///  half and refuses a closed chain. As the compliance's DELEGATECALL target, this library reaches the token
     ///  with the compliance as the caller. The latest valid until sent toward the chain is kept for the cap
@@ -947,10 +990,29 @@ library TicketLib {
     }
 
     /// @dev Whether the money on hold is kept against the receiver's identity: it goes to the receiver, and the two
-    ///  wallets are not one identity's.
+    ///  wallets are not one identity's. Money on hold with no ticket goes to nobody: while it is cancelled, its half
+    ///  burns from the receiver, and nothing was kept against it.
     function _holdReservesForTheReceiver(ITickets.Ticket storage ticket) private view returns (bool) {
         bool goesToTheReceiver = ticket.secondHalfToKey == ticket.toKey;
-        return goesToTheReceiver && !ticket.relocation;
+        return goesToTheReceiver && !ticket.relocation && ticket.written;
+    }
+
+    /// @dev Whether a half that burns is out for the ticket: an open bring home's, or the bring home of a cancel of
+    ///  money on hold with no ticket, sent and not yet answered.
+    function aBringHomeIsOut(ITickets.Ticket storage ticket) internal view returns (bool) {
+        bool anOpenBringHome =
+            ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
+        if (anOpenBringHome) return true;
+        bool burnsFromTheReceiver = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
+        bool notAnswered = !ticket.secondHalfOwed && !ticket.shortCancel;
+        return ticket.status == ITickets.TicketStatus.OnHold && burnsFromTheReceiver && notAnswered;
+    }
+
+    /// @dev What the latest second half moves: the money on hold, or, while money on hold with no ticket is
+    ///  cancelled, what that cancel's half moves.
+    function amountOfTheLatestHalf(ITickets.Ticket storage ticket) internal view returns (uint256) {
+        if (!ticket.written) return ticket.amountMax;
+        return ticket.moved;
     }
 
     /// @dev Whether a ticket in `status` holds the ask's reservation: the table of {moveTo}.

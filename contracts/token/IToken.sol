@@ -129,10 +129,10 @@ interface IToken is IERC3643 {
     /// @notice Takes `amount` out of `from`'s away balance and puts it on hold against `ticketId`: the away chain
     ///  burned it for the first half of a move, and the second half has not landed. `totalAwayBalance` and
     ///  `totalSupply` do not move; the amount is still the sender's. `finishMove` for the same ticket later takes
-    ///  it from the hold.
+    ///  it from the hold. A hold the ticket already has grows by `amount`.
     /// @dev Callable by the bound compliance only; reverts with `OnlyBoundCompliance` otherwise. Reverts with
-    ///  `TransitAlreadyHeld` when the ticket already holds an amount, with `InsufficientBridgedBalance` when `from`'s
-    ///  away balance no longer covers `amount`, and with `EnforcedPause` while the token is paused.
+    ///  `InsufficientBridgedBalance` when `from`'s away balance no longer covers `amount`, and with `EnforcedPause`
+    ///  while the token is paused.
     /// @param from the ERC-7930 envelope of the sender, an away wallet
     /// @param amount the exact amount the away chain burned
     /// @param ticketId the ticket of the move

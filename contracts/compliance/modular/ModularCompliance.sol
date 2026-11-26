@@ -75,6 +75,7 @@ import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
+import { HoldLib } from "./HoldLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
 import { ITickets } from "./ITickets.sol";
@@ -327,6 +328,13 @@ contract ModularCompliance is
         returns (bytes32)
     {
         return SecondHalfLib.bringHome(awayWallet, amount, homeWallet, salt, _getTokenBound());
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev Not `restricted`: anyone may cancel money on hold with no ticket, once its clock allows it, see
+    ///  {HoldLib-cancelHold}.
+    function cancelHold(bytes32 ticketId, bytes calldata receiver) external {
+        HoldLib.cancelHold(ticketId, receiver, _getTokenBound());
     }
 
     /**

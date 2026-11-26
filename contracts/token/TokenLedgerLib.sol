@@ -146,14 +146,14 @@ library TokenLedgerLib {
 
     /// @dev Takes `amount` out of `fromWallet`'s away balance and holds it against `ticketId`: the first half of a
     ///  move landed, its away chain burned the amount, and the second half has not. The amount stays counted in
-    ///  `totalAwayBalance` and stays the sender's; only the wallet no longer holds it. One hold per ticket.
+    ///  `totalAwayBalance` and stays the sender's; only the wallet no longer holds it. A hold may grow: money on hold
+    ///  that carried another's credit holds that part too once the other is taken.
     function putOnHold(bytes calldata fromWallet, uint256 amount, bytes32 ticketId) external {
         bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
 
         TokenStorage storage s = layout();
-        require(s.inTransit[ticketId] == 0, ErrorsLib.TransitAlreadyHeld(ticketId));
         _debit(s, fromWallet, fromKey, amount);
-        s.inTransit[ticketId] = amount;
+        s.inTransit[ticketId] += amount;
         s.totalOnHold += amount;
 
         emit EventsLib.HeldInTransit(fromKey, ticketId, fromWallet, amount);
