@@ -1,0 +1,53 @@
+{
+  "_comment": "Local anvil config. Owners and the Bootstrap Operator are anvil's public default accounts (keys printed by anvil); never use them anywhere real.",
+  "chainId": 31337,
+  "release": "v5.0.0",
+  "genesisSalt": "0x7b4a11ac503cb5c7de807994e8797297a83f88b604b554952965fb04a81157ae",
+  "create2Salt": "0x44e4a7721ec185eaf5f8fa6cffe8642b8ed028e6000000000000000000000000",
+  "initialVersion": [
+    5,
+    0,
+    0
+  ],
+  "maxBatchGas": 12000000,
+  "delays": {
+    "code": 432000,
+    "power": 172800,
+    "config": 86400
+  },
+  "bootstrapOperator": "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+  "safes": {
+    "deployment": {
+      "owners": [
+        "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+      ],
+      "threshold": 2,
+      "saltNonce": 0
+    },
+    "protocolAdmin": {
+      "owners": [
+        "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+        "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+      ],
+      "threshold": 2,
+      "saltNonce": 0
+    },
+    "upgradeCouncil": {
+      "owners": [
+        "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+        "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+      ],
+      "threshold": 2,
+      "saltNonce": 0
+    },
+    "operations": {
+      "owners": [
+        "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+        "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
+      ],
+      "threshold": 1,
+      "saltNonce": 0
+    }
+  }
+}

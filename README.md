@@ -76,6 +76,45 @@ forge test               # Run tests
 forge test --gas-report  # Run tests with gas report
 ```
 
+#### Fork tests
+
+The fork tests run the full deterministic deployment (`scripts/deploy/`, see [deploy/README.md](deploy/README.md))
+on a fork of **Base Sepolia** (or Ethereum mainnet with `TREX_FORK_ENV=mainnet`): Genesis, protocol, configuration and handover to the Safes, then what can happen
+after launch (upgrades and rollbacks, incident response, governance changes, months of activity, a new chain
+joining at the same addresses). Every contract, ONCHAINID v3 included, is deployed fresh from the build, so nothing
+already deployed on the chain is reused. Build the ONCHAINID profile first (`deploy/README.md`, step 0).
+
+They are opt-in and not part of CI. Plain `forge test` skips them. To run them:
+
+```bash
+# ALCHEMY_KEY (from .env) selects the foundry.toml `baseSepolia` endpoint
+TREX_FORK_TESTS=true forge test --match-path "test/fork/*" --threads 1
+
+# or any Base Sepolia RPC that serves historical state
+TREX_FORK_TESTS=true TREX_FORK_RPC_URL=https://base-sepolia.g.alchemy.com/v2/<key> \
+  forge test --match-path "test/fork/*" --threads 1
+
+# the same suite on an Ethereum mainnet fork (needs a mainnet RPC that serves historical state)
+TREX_FORK_TESTS=true TREX_FORK_ENV=mainnet TREX_FORK_RPC_URL=<mainnet RPC> \
+  forge test --match-path "test/fork/*" --threads 1
+
+# one file, with logs
+TREX_FORK_TESTS=true forge test --match-path test/fork/ForkLongRun.t.sol -vv
+```
+
+| Variable | Meaning |
+|---|---|
+| `TREX_FORK_TESTS` | `true` enables the fork tests |
+| `ALCHEMY_KEY` | used for the `baseSepolia` RPC endpoint when `TREX_FORK_RPC_URL` is not set |
+| `TREX_FORK_ENV` | `baseSepolia` (default) or `mainnet`: the chain and its `deploy/config/<env>.json` |
+| `TREX_FORK_RPC_URL` | any RPC for that chain; overrides `ALCHEMY_KEY` |
+| `TREX_FORK_BLOCK` | fork block (default: the block pinned in `test/fork/ForkBase.sol`) |
+
+`--threads 1` runs one suite at a time: RPC free tiers, Alchemy's included, answer parallel suites with
+HTTP 429. The deployment-tooling unit tests (`test/unit/deploy/`) need no RPC and run with plain `forge test` once
+the ONCHAINID profile is built; without it they skip and say which command to run (CI builds it and refuses the
+skip).
+
 ### Coverage
 
 ```bash

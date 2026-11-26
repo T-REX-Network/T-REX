@@ -1,0 +1,59 @@
+{
+  "_comment": "PLACEHOLDERS. Every Safe owner, threshold and salt nonce, the Bootstrap Operator, genesisSalt and create2Salt become part of the deployed addresses and are frozen at the first real deployment. Replace the placeholder addresses (0x...1001 and so on) with the real ones and regenerate the address table (AddressTable.s.sol run(baseSepolia)) before any real run.",
+  "chainId": 84532,
+  "release": "v5.0.0",
+  "genesisSalt": "0x7b4a11ac503cb5c7de807994e8797297a83f88b604b554952965fb04a81157ae",
+  "create2Salt": "0x44e4a7721ec185eaf5f8fa6cffe8642b8ed028e6000000000000000000000000",
+  "initialVersion": [
+    5,
+    0,
+    0
+  ],
+  "maxBatchGas": 12000000,
+  "delays": {
+    "code": 432000,
+    "power": 172800,
+    "config": 86400
+  },
+  "bootstrapOperator": "0x000000000000000000000000000000000000b007",
+  "safes": {
+    "deployment": {
+      "owners": [
+        "0x0000000000000000000000000000000000001001",
+        "0x0000000000000000000000000000000000001002",
+        "0x0000000000000000000000000000000000001003"
+      ],
+      "threshold": 2,
+      "saltNonce": 0
+    },
+    "protocolAdmin": {
+      "owners": [
+        "0x0000000000000000000000000000000000002001",
+        "0x0000000000000000000000000000000000002002",
+        "0x0000000000000000000000000000000000002003",
+        "0x0000000000000000000000000000000000002004",
+        "0x0000000000000000000000000000000000002005"
+      ],
+      "threshold": 3,
+      "saltNonce": 0
+    },
+    "upgradeCouncil": {
+      "owners": [
+        "0x0000000000000000000000000000000000003001",
+        "0x0000000000000000000000000000000000003002",
+        "0x0000000000000000000000000000000000003003"
+      ],
+      "threshold": 2,
+      "saltNonce": 0
+    },
+    "operations": {
+      "owners": [
+        "0x0000000000000000000000000000000000004001",
+        "0x0000000000000000000000000000000000004002",
+        "0x0000000000000000000000000000000000004003"
+      ],
+      "threshold": 2,
+      "saltNonce": 0
+    }
+  }
+}
