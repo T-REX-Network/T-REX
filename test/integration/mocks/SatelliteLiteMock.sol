@@ -58,11 +58,12 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
  *
  * What it enforces: only its own gateway delivers (`msg.sender`); the author is the reference token, or the peer
  * Lite for a burn message, at the envelope the loopback gateway presents (it attributes every message to its own
- * chain, so the expected envelopes are built with that chain id); a validation executes once, before its expiry,
- * inside its range, for its wallets, by its sender or its named spender; a mint leg is minted only on the sending
- * Lite's burn message; a mint instruction mints once per `delegationId`, and the same id with other contents is
- * refused; a recall burns once per `recallId`, stores its proof, and answers any repetition with the stored proof;
- * every settlement it reports is stored and can be resent unchanged.
+ * chain, so the expected envelopes are built with that chain id); the first copy of a ticket is kept and a later
+ * copy under the same id is ignored; a validation executes once, before its expiry, inside its range, for its wallets,
+ * by its sender or its named spender; a mint leg is minted only on the sending Lite's burn message; a mint instruction
+ * mints once per `delegationId`, and the same id with other contents is refused; a recall burns once per `recallId`,
+ * stores its proof, and answers any repetition with the stored proof; every settlement it reports echoes the copy it
+ * executed, and is stored and can be resent unchanged.
  */
 contract SatelliteLiteMock is IERC7786Recipient {
 
@@ -103,8 +104,6 @@ contract SatelliteLiteMock is IERC7786Recipient {
 
     mapping(bytes32 receiveId => bool) public delivered;
     mapping(bytes32 ticketId => MessageTypesLib.TicketMessage) internal _validations;
-    /// @dev `MessageTypesLib.hashValidation` of the body held under the id: what every report for it carries.
-    mapping(bytes32 ticketId => bytes32) public hashOf;
     mapping(bytes32 ticketId => bool) public known;
     mapping(bytes32 ticketId => bool) public consumed;
     mapping(bytes32 ticketId => uint256) public burnReceived;
@@ -229,17 +228,14 @@ contract SatelliteLiteMock is IERC7786Recipient {
 
     /* ----- Private ----- */
 
-    /// @dev Rule 3 of `docs/satellite-lite.md`. An unknown id is stored. A known id with the same hash is a
-    ///  resend, ignored. A known id with another hash, not yet consumed, replaces what is held: the reference
-    ///  chain re-issued it after a reorg, and the later body is the canonical one. Once consumed nothing changes:
-    ///  the report already names the hash executed under.
+    /// @dev Rule 3 of `docs/satellite-lite.md`. An unknown id is stored. A known id is never replaced: a resend
+    ///  repeats the copy held, and a later copy of the same ask, mined again in another block after a reorg, is
+    ///  ignored. The receipt echoes the copy held, and home tells which one it was.
     function _hold(MessageTypesLib.TicketMessage memory validation) private {
-        bytes32 id = validation.ticketId;
-        bytes32 hash = MessageTypesLib.hashValidation(validation);
-        if (known[id] && (consumed[id] || hashOf[id] == hash)) return;
-        _validations[id] = validation;
-        hashOf[id] = hash;
-        known[id] = true;
+        bytes32 ticketId = validation.ticketId;
+        if (known[ticketId]) return;
+        _validations[ticketId] = validation;
+        known[ticketId] = true;
     }
 
     /// @dev Once per delegation id; the same id again with the same body is a no-op, with another body a conflict.
@@ -297,11 +293,21 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _report(message.ticketId, "", message.to, message.amount);
     }
 
-    /// @dev Rule 7: every report carries the hash of the body it was executed under, and is kept for a resend.
+    /// @dev Rule 7: every report echoes the copy it was executed under (its ask block hash, maximum and valid
+    ///  until), says it executed, and is kept for a resend.
     function _report(bytes32 ticketId, bytes memory from, bytes memory to, uint256 amount) private {
+        MessageTypesLib.TicketMessage storage executedCopy = _validations[ticketId];
         bytes memory settlement = MessageTypesLib.encodeSettlement(
             MessageTypesLib.ReceiptMessage({
-                ticketId: ticketId, from: from, to: to, amount: amount, hash: hashOf[ticketId]
+                ticketId: ticketId,
+                from: from,
+                to: to,
+                amount: amount,
+                askBlockHash: executedCopy.askBlockHash,
+                seenMax: executedCopy.amountMax,
+                seenValidUntil: executedCopy.validUntil,
+                half: 0,
+                answer: MessageTypesLib.ReceiptAnswer.Executed
             })
         );
         _settlements[ticketId] = settlement;

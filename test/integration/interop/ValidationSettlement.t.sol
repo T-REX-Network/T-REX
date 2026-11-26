@@ -184,7 +184,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     // ==== mismatch Tests: the leg is consumed, nothing moves, and the chain that executed it is paused ====
 
-    /// @notice A leg outside the issued bounds, carrying the issued hash, is rejected: the validation stays
+    /// @notice A leg outside the issued bounds, carrying the issued ask block hash, is rejected: the validation stays
     ///         `Open`, nothing moves, and the chain that executed it is paused. Once lifted, the next
     ///         out-of-bounds leg is rejected the same way.
     function test_handleSettlement_Success_WhenAmountIsOutsideTheBoundsTheLegIsRejected() public {
@@ -208,7 +208,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
     }
 
     /// @notice A leg naming a wallet other than the issued ones, or leaving one empty on a same-chain validation,
-    ///         is rejected under the issued hash: the validation stays `Open` and the chain is paused.
+    ///         is rejected under the issued ask block hash: the validation stays `Open` and the chain is paused.
     function test_handleSettlement_Success_WhenAWalletIsNotTheIssuedOneTheLegIsRejected() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         bytes memory carolSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("carolOnPolygon"));
@@ -244,8 +244,8 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
-    /// @notice A leg outside the bounds under a hash this chain never issued is the trace of a body a reorg
-    ///         orphaned: while nothing had landed the validation ends `Orphaned`, its reservation comes back on
+    /// @notice A leg outside the bounds under an ask block hash this chain never issued is the trace of a copy a
+    ///         reorg dropped: while nothing had landed the validation ends `Orphaned`, its reservation comes back on
     ///         both sides, nothing moves, and the chain that executed it is paused.
     function test_handleSettlement_Success_WhenAnOutOfBoundsLegUnderAnotherHashOrphansTheValidation() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
@@ -272,8 +272,8 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
-    /// @notice A leg inside the issued terms under another hash settles as any other, and says so: the body the
-    ///         Lite executed diverged from the one issued, but the ledger can absorb what it reports.
+    /// @notice A leg inside the issued terms under another ask block hash settles as any other, and says so: the
+    ///         copy the Lite executed diverged from the one issued, but the ledger can absorb what it reports.
     function test_handleSettlement_Success_WhenAnInRangeLegUnderAnotherHashSettlesAndReportsTheDivergence() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         bytes32 otherHash = keccak256("other body");
@@ -360,7 +360,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(unknown, polygon);
         assertTrue(parked.exists);
         assertEq(parked.amount, 95);
-        assertEq(parked.hash, hash);
+        assertEq(parked.askBlockHash, hash);
         assertEq(parked.from, aliceSat);
         assertEq(parked.to, bobSat);
         assertEq(boundCompliance.ticketOf(unknown).moved, 0);
@@ -475,13 +475,13 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertFalse(token.messageReceived(address(gateway), gateway.receiveIdFor(index)));
     }
 
-    /// @dev Relays a leg carrying the issued hash that fails the substantive gate: it is rejected, consumed, and
-    ///  pauses the inbound of `chainKey`.
+    /// @dev Relays a leg carrying the issued ask block hash that fails the substantive gate: it is rejected,
+    ///  consumed, and pauses the inbound of `chainKey`.
     function _relayRejected(ERC7786GatewayMock gateway, bytes32 chainKey, uint256 index, bytes32 id, uint256 amount)
         private
     {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).hash);
+        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(chainKey);
         gateway.relay(index);

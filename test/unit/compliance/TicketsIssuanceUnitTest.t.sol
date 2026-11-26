@@ -44,6 +44,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
@@ -132,7 +133,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         bytes32 id = mc.askToMove(fromSat, toSat, 10, 90, "", salt);
 
-        assertEq(id, _validationId(fromSat, salt));
+        assertEq(id, _ticketId(fromSat, toSat, "", 10, 90, salt));
         assertEq(mc.ticketOf(id).fromIdentity, aliceIdentity);
     }
 
@@ -171,7 +172,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
         mc.askToMove(nativeAlice, toSat, 10, 40, "", _salt());
 
-        _assertNothingRecorded(nativeAlice);
+        _assertNothingRecorded(nativeAlice, toSat, "", 10, 40);
     }
 
     function test_requestTransferValidation_RevertWhen_BothWalletsAreNative() public configured {
@@ -232,7 +233,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         bytes32 salt = _salt();
         vm.prank(aliceIdentity);
-        assertEq(mc.askToMove(fromSat, toSat, 10, 90, "", salt), _validationId(fromSat, salt));
+        assertEq(mc.askToMove(fromSat, toSat, 10, 90, "", salt), _ticketId(fromSat, toSat, "", 10, 90, salt));
     }
 
     // ==== eligibility Tests ====
@@ -278,7 +279,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 150, BRIDGED_BALANCE));
         mc.askToMove(fromSat, toSat, 150, 200, "", _salt());
 
-        _assertNothingRecorded(fromSat);
+        _assertNothingRecorded(fromSat, toSat, "", 150, 200);
     }
 
     /// @notice A validation authorizing nothing is never issued, whichever step made the maximum zero.
@@ -292,7 +293,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(ErrorsLib.ZeroValue.selector);
         mc.askToMove(fromSat, toSat, 0, 90, "", _salt());
 
-        _assertNothingRecorded(fromSat);
+        _assertNothingRecorded(fromSat, toSat, "", 0, 90);
     }
 
     /// @notice Two wallets of one identity: issued, recorded, but no module consulted.
@@ -375,7 +376,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
 
         assertEq(WritingRuleModule(module).writes(), 0);
-        _assertNothingRecorded(fromSat);
+        _assertNothingRecorded(fromSat, toSat, "", 10, 90);
     }
 
     /// @notice A named spender is carried on the wire for the satellite to enforce, not resolved here: a
@@ -399,7 +400,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         bytes32 salt = _salt();
         vm.prank(aliceIdentity);
-        assertEq(mc.askToMove(fromSat, toSat, 10, 90, spender, salt), _validationId(fromSat, salt));
+        assertEq(mc.askToMove(fromSat, toSat, 10, 90, spender, salt), _ticketId(fromSat, toSat, spender, 10, 90, salt));
     }
 
     /// @notice A rule capping the range sees who will execute it, as the spender modules do.
@@ -530,11 +531,10 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     // ==== record, event and dispatch Tests ====
 
     /// @notice The id is a function of the request alone: the same request lands under the same id whatever
-    ///         was issued before it, and the same wallet cannot take a salt twice.
+    ///         was issued before it.
     function test_requestTransferValidation_Success_WhenTheIdDependsOnTheRequestAlone() public configured {
         bytes32 salt = _salt();
-        bytes32 expected = _validationId(fromSat, salt);
-        assertTrue(expected != _validationId(toSat, salt), "another wallet, another id");
+        bytes32 expected = _ticketId(fromSat, toSat, "", 10, 30, salt);
 
         vm.startPrank(aliceIdentity);
         mc.askToMove(fromSat, toSat, 1, 5, "", _salt());
@@ -545,19 +545,91 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         assertEq(id, expected, "independent of the number of earlier issuances");
     }
 
-    function test_requestTransferValidation_RevertWhen_TheSaltWasAlreadyUsedForTheWallet() public configured {
+    /// @notice The same request with the same salt is the same id: asked again, it is refused and the first
+    ///         request stands.
+    function test_askToMove_RevertWhen_TheSaltIsReused() public configured {
         bytes32 salt = _salt();
         vm.startPrank(aliceIdentity);
         bytes32 id = mc.askToMove(fromSat, toSat, 10, 30, "", salt);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TicketAlreadyWritten.selector, id));
         mc.askToMove(fromSat, toSat, 10, 30, "", salt);
-        // Other terms under the same salt are refused all the same: the id is taken.
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TicketAlreadyWritten.selector, id));
-        mc.askToMove(fromSat, toOptimism, 1, 5, "", salt);
         vm.stopPrank();
 
         assertEq(mc.ticketOf(id).amountMax, 30, "the first request stands");
+    }
+
+    /// @notice The id covers the whole request: the same wallet and salt with another amount or another receiver
+    ///         is another request, under another id, and is recorded beside the first.
+    function test_askToMove_givesAnotherId_whenTheAmountOrTheReceiverDiffers() public configured {
+        bytes32 salt = _salt();
+        vm.startPrank(aliceIdentity);
+        bytes32 first = mc.askToMove(fromSat, toSat, 10, 20, "", salt);
+        bytes32 otherMaximum = mc.askToMove(fromSat, toSat, 10, 21, "", salt);
+        bytes32 otherMinimum = mc.askToMove(fromSat, toSat, 11, 20, "", salt);
+        bytes32 otherReceiver = mc.askToMove(fromSat, toOptimism, 10, 20, "", salt);
+        vm.stopPrank();
+
+        assertTrue(first != otherMaximum, "another maximum, another id");
+        assertTrue(first != otherMinimum, "another minimum, another id");
+        assertTrue(first != otherReceiver, "another receiver, another id");
+        assertEq(otherMaximum, _ticketId(fromSat, toSat, "", 10, 21, salt), "the id of the second request");
+        assertEq(mc.ticketOf(first).amountMax, 20, "the first request stands");
+        assertEq(mc.ticketOf(otherMaximum).amountMax, 21, "the second request is recorded");
+    }
+
+    /// @notice A reorg drops the block of an ask and the same request is mined again one block later: the id is
+    ///         the same, and the ask block hash, which names the copy, is not.
+    function test_askToMove_givesTheSameId_whenTheSameRequestIsMinedInAnotherBlock() public configured {
+        bytes32 salt = _salt();
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(aliceIdentity);
+        bytes32 idInTheFirstBlock = mc.askToMove(fromSat, toSat, 10, 90, "", salt);
+        bytes32 firstCopy = mc.ticketOf(idInTheFirstBlock).askBlockHash;
+
+        vm.revertToState(snapshot);
+        vm.roll(block.number + 1);
+        vm.prank(aliceIdentity);
+        bytes32 idInTheNextBlock = mc.askToMove(fromSat, toSat, 10, 90, "", salt);
+
+        assertEq(idInTheNextBlock, idInTheFirstBlock, "same request, same id");
+        assertTrue(mc.ticketOf(idInTheNextBlock).askBlockHash != firstCopy, "another block, another copy");
+    }
+
+    /// @notice The ask block hash is built from the ask's block and the terms home sent: the block number, the
+    ///         hash of the block before, the narrowed maximum and the valid until.
+    function test_askToMove_recordsAnAskBlockHashThatChangesWithTheTerms() public configured {
+        vm.warp(1_700_000_000);
+        uint64 validUntil = 1_700_000_000 + VALIDITY_WINDOW;
+        uint256 narrowedMax = BRIDGED_BALANCE;
+        vm.prank(aliceIdentity);
+        bytes32 id = mc.askToMove(fromSat, toSat, 10, 150, "", _salt());
+
+        bytes32 expected = keccak256(abi.encode(block.number, blockhash(block.number - 1), narrowedMax, validUntil));
+        assertEq(mc.ticketOf(id).askBlockHash, expected, "the ask block hash of the copy sent");
+        assertEq(mc.ticketOf(id).amountMax, narrowedMax, "home narrowed the maximum");
+        assertEq(mc.ticketOf(id).requestedMax, 150, "the asked maximum is kept");
+
+        bytes32 otherMaximum = keccak256(abi.encode(block.number, blockhash(block.number - 1), 99, validUntil));
+        bytes32 otherValidUntil =
+            keccak256(abi.encode(block.number, blockhash(block.number - 1), narrowedMax, validUntil + 1));
+        assertTrue(expected != otherMaximum, "another maximum, another ask block hash");
+        assertTrue(expected != otherValidUntil, "another valid until, another ask block hash");
+    }
+
+    /// @notice A holder's move and an agent's bring home asked with the same wallet and salt never share an id.
+    ///         Bring home is not asked as a ticket yet, so the kind is checked on the id itself.
+    function test_ticketId_differsBetweenAMoveAndABringHome_withTheSameWalletAndSalt() public {
+        bytes32 salt = _salt();
+        bytes32 fromKey = WalletKeyLib.canonicalKey(fromSat);
+        bytes32 toKey = WalletKeyLib.canonicalKey(nativeAlice);
+        bytes32 noSpender = keccak256("");
+
+        bytes32 moveId = TicketLib.ticketIdOf(ITickets.TicketKind.MOVE, fromKey, toKey, noSpender, 0, 50, salt);
+        bytes32 bringHomeId =
+            TicketLib.ticketIdOf(ITickets.TicketKind.BRING_HOME, fromKey, toKey, noSpender, 0, 50, salt);
+
+        assertTrue(moveId != bringHomeId, "the kind is in the id");
     }
 
     function test_requestTransferValidation_Success_WhenIdsFollowTheSaltAndNeverRepeat() public configured {
@@ -568,10 +640,9 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 second = mc.askToMove(fromSat, toSat, 10, 90, "", saltB);
         vm.stopPrank();
 
-        assertEq(first, _validationId(fromSat, saltA));
-        assertEq(second, _validationId(fromSat, saltB));
+        assertEq(first, _ticketId(fromSat, toSat, "", 10, 90, saltA));
+        assertEq(second, _ticketId(fromSat, toSat, "", 10, 90, saltB));
         assertTrue(first != second);
-        assertTrue(mc.ticketOf(first).hash != mc.ticketOf(second).hash);
     }
 
     function test_requestTransferValidation_Success_WhenSnapshottingTheDeadlines() public configured {
@@ -637,23 +708,25 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
         _bind(spender, makeAddr("SpenderIdentity"));
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
-        MessageTypesLib.TicketMessage memory expected =
-            _expected(id, salt, fromSat, toSat, spender, 10, 90, POLYGON_WINDOW);
+        bytes32 id = _ticketId(fromSat, toSat, spender, 10, 90, salt);
+        MessageTypesLib.TicketMessage memory expected = _expected(id, salt, fromSat, toSat, spender, 10, 90);
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.TicketWritten(id, fromSat, toSat, spender, 10, 90, expected.validUntil, POLYGON_WINDOW, salt);
+        emit EventsLib.TicketWritten(
+            id, fromSat, toSat, spender, 10, 90, 90, expected.validUntil, expected.askBlockHash, salt
+        );
         vm.prank(aliceIdentity);
         mc.askToMove(fromSat, toSat, 10, 90, spender, salt);
 
-        assertEq(mc.ticketOf(id).hash, MessageTypesLib.hashValidation(expected));
+        assertEq(mc.ticketOf(id).askBlockHash, expected.askBlockHash);
+        assertEq(mc.ticketOf(id).requestedMax, 90);
     }
 
     function test_requestTransferValidation_Success_WhenDispatchingOneLegForASameChainMovement() public configured {
         vm.warp(1_700_000_000);
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
-        MessageTypesLib.TicketMessage memory expected = _expected(id, salt, fromSat, toSat, "", 10, 90, POLYGON_WINDOW);
+        bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
+        MessageTypesLib.TicketMessage memory expected = _expected(id, salt, fromSat, toSat, "", 10, 90);
 
         vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, abi.encode(expected))), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
@@ -664,9 +737,8 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_requestTransferValidation_Success_WhenDispatchingTwoLegsForACrossChainMovement() public configured {
         vm.warp(1_700_000_000);
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
-        MessageTypesLib.TicketMessage memory expected =
-            _expected(id, salt, fromSat, toOptimism, "", 10, 90, OPTIMISM_WINDOW);
+        bytes32 id = _ticketId(fromSat, toOptimism, "", 10, 90, salt);
+        MessageTypesLib.TicketMessage memory expected = _expected(id, salt, fromSat, toOptimism, "", 10, 90);
         bytes memory body = abi.encode(expected);
 
         vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, body)), 1);
@@ -677,7 +749,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     function test_requestTransferValidation_Success_WhenDispatchingToTheSatelliteSideOnly() public configured {
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, nativeBob, "", 10, 40, salt);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector, polygon, id), 1);
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
         vm.prank(aliceIdentity);
@@ -696,7 +768,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
 
-        _assertNothingRecorded(fromSat);
+        _assertNothingRecorded(fromSat, toSat, "", 10, 90);
     }
 
     function _expected(
@@ -706,9 +778,9 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes memory to,
         bytes memory spender,
         uint256 min,
-        uint256 max,
-        uint64 window
+        uint256 max
     ) private view returns (MessageTypesLib.TicketMessage memory) {
+        uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
         return MessageTypesLib.TicketMessage({
             ticketId: id,
             salt: salt,
@@ -717,9 +789,10 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
             spender: spender,
             amountMin: min,
             amountMax: max,
+            requestedMax: max,
             token: token,
-            validUntil: uint64(block.timestamp) + VALIDITY_WINDOW,
-            reconciliationWindow: window
+            validUntil: validUntil,
+            askBlockHash: TicketLib.askBlockHashOf(max, validUntil)
         });
     }
 

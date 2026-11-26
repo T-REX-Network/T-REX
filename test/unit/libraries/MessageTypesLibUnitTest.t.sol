@@ -183,22 +183,44 @@ contract MessageTypesLibUnitTest is Test {
         harness.decode(payload);
     }
 
+    /// @dev A message in the format before this one, a peer that was not upgraded, is refused instead of decoded
+    ///  wrong: its receipt has no ask block hash and no echo of the copy.
+    function test_decode_RevertWhen_TheMessageIsVersionOne() public {
+        assertEq(MessageTypesLib.VERSION, 2, "this format is version 2");
+        uint8 versionOne = 1;
+        bytes memory payload = abi.encode(MessageTypesLib.Message.RECEIPT, versionOne, abi.encode(_settlement()));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, versionOne));
+        harness.decode(payload);
+    }
+
     /* ----- Typed bodies ----- */
 
     function testSettlementRoundTrip() public view {
-        MessageTypesLib.ReceiptMessage memory n = MessageTypesLib.ReceiptMessage({
-            ticketId: bytes32(uint256(7)), from: hex"0001000001890114", to: "", amount: 42, hash: bytes32(uint256(99))
-        });
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement();
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
-            harness.decode(MessageTypesLib.encodeSettlement(n));
+            harness.decode(MessageTypesLib.encodeSettlement(receipt));
         MessageTypesLib.ReceiptMessage memory back = harness.decodeSettlement(decodedBody);
 
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.RECEIPT));
-        assertEq(back.ticketId, n.ticketId);
-        assertEq(back.from, n.from);
-        assertEq(back.to, n.to);
-        assertEq(back.amount, n.amount);
+        assertEq(back.ticketId, receipt.ticketId);
+        assertEq(back.from, receipt.from);
+        assertEq(back.to, receipt.to);
+        assertEq(back.amount, receipt.amount);
+        assertEq(back.askBlockHash, receipt.askBlockHash);
+        assertEq(back.seenMax, receipt.seenMax);
+        assertEq(back.seenValidUntil, receipt.seenValidUntil);
+        assertEq(back.half, receipt.half);
+        assertEq(uint8(back.answer), uint8(receipt.answer));
+    }
+
+    /// @dev The answer travels as its member position, so a reorder must not pass unnoticed.
+    function testReceiptAnswerNumberingIsTheWireFormat() public pure {
+        assertEq(uint8(MessageTypesLib.ReceiptAnswer.Executed), 0);
+        assertEq(uint8(MessageTypesLib.ReceiptAnswer.Expired), 1);
+        assertEq(uint8(MessageTypesLib.ReceiptAnswer.StillOpen), 2);
+        assertEq(uint8(type(MessageTypesLib.ReceiptAnswer).max), 2);
     }
 
     function testBurnProofRoundTrip() public view {
@@ -260,9 +282,11 @@ contract MessageTypesLibUnitTest is Test {
         assertEq(back.spender, v.spender);
         assertEq(back.amountMin, v.amountMin);
         assertEq(back.amountMax, v.amountMax);
+        assertEq(back.requestedMax, v.requestedMax);
         assertEq(back.token, v.token);
         assertEq(back.validUntil, v.validUntil);
-        assertEq(back.reconciliationWindow, v.reconciliationWindow);
+        assertEq(back.askBlockHash, v.askBlockHash);
+        assertEq(back.salt, v.salt);
     }
 
     function testValidationRoundTripPreservesAnEmptySpender() public view {
@@ -272,77 +296,6 @@ contract MessageTypesLibUnitTest is Test {
 
         assertEq(back.spender.length, 0);
         assertEq(back.from, v.from);
-    }
-
-    function testValidationTypehashMatchesItsTypeString() public pure {
-        assertEq(
-            MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
-            keccak256(
-                "ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,uint256 amountMax,address token)"
-            )
-        );
-    }
-
-    /// @dev EIP-712 hashStruct of the terms: dynamic members hash to their keccak256, static members encode in
-    ///  place, and the two clock-derived fields are not part of it.
-    function testHashValidationIsTheEip712StructHashOfTheTerms() public pure {
-        MessageTypesLib.TicketMessage memory v = _validation(hex"0001000001890114");
-        bytes32 expected = keccak256(
-            abi.encode(
-                MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
-                v.ticketId,
-                keccak256(v.from),
-                keccak256(v.to),
-                keccak256(v.spender),
-                v.amountMin,
-                v.amountMax,
-                v.token
-            )
-        );
-
-        assertEq(MessageTypesLib.hashValidation(v), expected);
-    }
-
-    function testHashValidationChangesWithEveryTerm() public pure {
-        MessageTypesLib.TicketMessage memory v = _validation("");
-        bytes32 base = MessageTypesLib.hashValidation(v);
-
-        v.ticketId = bytes32(uint256(8));
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.ticketId = bytes32(uint256(7));
-        v.from = hex"00010000010a0114";
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.from = hex"0001000001890114";
-        v.to = hex"0001000001890114";
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.to = hex"00010000010a0114";
-        v.amountMin -= 1;
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.amountMin += 1;
-        v.amountMax += 1;
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.amountMax -= 1;
-        v.token = address(0xCAFE);
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.token = address(0xBEEF);
-        v.spender = hex"0001000001890114";
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-    }
-
-    /// @dev A body re-issued after a reorg dropped the first issuance carries a later `validUntil`; the terms it
-    ///  commits to are the same, so it must hash the same, or the hash could not tell an orphaned body from a
-    ///  re-issued one.
-    function testHashValidationIgnoresExpiryAndReconciliationWindow() public pure {
-        MessageTypesLib.TicketMessage memory v = _validation("");
-        bytes32 base = MessageTypesLib.hashValidation(v);
-
-        v.validUntil += 1 days;
-        assertEq(MessageTypesLib.hashValidation(v), base);
-        v.reconciliationWindow += 1 hours;
-        assertEq(MessageTypesLib.hashValidation(v), base);
-        // The id commits to the salt already.
-        v.salt = bytes32(uint256(6));
-        assertEq(MessageTypesLib.hashValidation(v), base);
     }
 
     function testTypedDecodeRevertsOnAForeignBody() public {
@@ -371,15 +324,24 @@ contract MessageTypesLibUnitTest is Test {
             spender: spender,
             amountMin: 9,
             amountMax: 11,
+            requestedMax: 12,
             token: address(0xBEEF),
             validUntil: 1_700_000_000,
-            reconciliationWindow: 3600
+            askBlockHash: bytes32(uint256(13))
         });
     }
 
     function _settlement() private pure returns (MessageTypesLib.ReceiptMessage memory) {
         return MessageTypesLib.ReceiptMessage({
-            ticketId: bytes32(uint256(7)), from: hex"0001000001890114", to: "", amount: 42, hash: bytes32(uint256(99))
+            ticketId: bytes32(uint256(7)),
+            from: hex"0001000001890114",
+            to: "",
+            amount: 42,
+            askBlockHash: bytes32(uint256(99)),
+            seenMax: 50,
+            seenValidUntil: 1_700_000_000,
+            half: 0,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
         });
     }
 

@@ -270,13 +270,12 @@ library ErrorsLib {
     error ValidationExpired(bytes32 ticketId, uint64 deadline);
     /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
     error ChainNotPartOfValidation(bytes32 ticketId, bytes32 chainKey);
-    /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id. The bound token is part
-    ///  of the hash too, so a compliance bound to another token since the issuance gets this for every old id.
+    /// @dev The supplied `to` or `spender` is not the one the ticket was asked with: the ticket recorded under this
+    ///  id keeps the key of the first and the second itself.
     error ValidationBodyMismatch(bytes32 ticketId);
     /// @dev The id was never issued by this compliance.
     error UnknownTicket(bytes32 ticketId);
-    /// @dev `keccak256(canonicalKey(from), salt)` is already recorded: the same request was sent twice, or the
-    ///  salt was reused for another movement out of the same wallet.
+    /// @dev The id of the whole request is already recorded: the same request, salt included, was asked twice.
     error TicketAlreadyWritten(bytes32 ticketId);
     /// @dev No leg is parked under this id for this chain, or nothing is issued under the id yet.
     error NoWaitingReceipt(bytes32 ticketId, bytes32 chainKey);

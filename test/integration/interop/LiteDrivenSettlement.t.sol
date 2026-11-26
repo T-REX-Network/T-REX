@@ -42,8 +42,10 @@ pragma solidity 0.8.30;
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
@@ -127,6 +129,37 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
 
     function _status(bytes32 id) private view returns (ITickets.TicketStatus) {
         return boundCompliance.statusOf(id);
+    }
+
+    /// @dev A copy of an ask from `aliceSat` to `bobSat` written in the current block, with `amountMax` as home
+    ///      narrowed it, as the token would send it.
+    function _copy(bytes32 id, bytes32 salt, uint256 amountMax)
+        private
+        view
+        returns (MessageTypesLib.TicketMessage memory copy)
+    {
+        uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
+        copy = MessageTypesLib.TicketMessage({
+            ticketId: id,
+            salt: salt,
+            from: aliceSat,
+            to: bobSat,
+            spender: "",
+            amountMin: 1,
+            amountMax: amountMax,
+            requestedMax: 1000,
+            token: address(token),
+            validUntil: validUntil,
+            askBlockHash: TicketLib.askBlockHashOf(amountMax, validUntil)
+        });
+    }
+
+    /// @dev Delivers a ticket copy to the polygon Lite, authored by the token as the gateway attributes it.
+    function _deliverToLite(MessageTypesLib.TicketMessage memory copy) private {
+        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
+        vm.prank(address(token));
+        polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(copy), new bytes[](0));
+        polygonGateway.relay(_last(polygonGateway));
     }
 
     /* ----- Two legs ----- */
@@ -329,6 +362,46 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         vm.prank(aliceOnPolygon.addr);
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.AmountOutOfRange.selector, id, 51));
         polygonLite.execute(id, 51);
+    }
+
+    /// @notice The receipt names the copy the Lite executed: its ask block hash, its maximum and its valid until,
+    ///         and says it executed.
+    function test_execute_echoesTheCopyItExecuted() public {
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
+        ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
+
+        _execute(id, 30);
+
+        (, bytes memory body) = MessageTypesLib.decode(polygonGateway.queuedMessage(_last(polygonGateway)).payload);
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.decodeSettlement(body);
+        assertEq(receipt.ticketId, id);
+        assertEq(receipt.amount, 30);
+        assertEq(receipt.askBlockHash, issued.askBlockHash, "the copy home wrote");
+        assertEq(receipt.seenMax, 50, "the maximum of that copy");
+        assertEq(receipt.seenValidUntil, issued.validUntil, "the valid until of that copy");
+        assertEq(receipt.half, 0, "the away token's execution of the ticket");
+        assertEq(uint8(receipt.answer), uint8(MessageTypesLib.ReceiptAnswer.Executed));
+    }
+
+    /// @notice A later copy of a ticket under the same id never takes the place of the first: here the first
+    ///         copy, a maximum of 10, has expired, and a later copy with a maximum of 1000 must not bring it back.
+    function test_hold_keepsTheFirstCopy_whenALaterCopyArrives() public {
+        bytes32 salt = _salt();
+        bytes32 id = _ticketId(aliceSat, bobSat, "", 1, 1000, salt);
+        MessageTypesLib.TicketMessage memory firstCopy = _copy(id, salt, 10);
+        _deliverToLite(firstCopy);
+
+        vm.warp(firstCopy.validUntil);
+        vm.roll(block.number + 1);
+        MessageTypesLib.TicketMessage memory laterCopy = _copy(id, salt, 1000);
+        _deliverToLite(laterCopy);
+
+        assertEq(polygonLite.ticketOf(id).amountMax, 10, "the first copy is kept");
+        assertEq(polygonLite.ticketOf(id).askBlockHash, firstCopy.askBlockHash, "the first copy is kept");
+        vm.prank(aliceOnPolygon.addr);
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.ValidationExpired.selector, id));
+        polygonLite.execute(id, 500);
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "nothing moved");
     }
 
     function test_receiveMessage_RevertWhen_NotDeliveredByItsGateway() public {

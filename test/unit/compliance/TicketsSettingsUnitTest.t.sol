@@ -206,7 +206,7 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     function test_views_Success_WhenNothingWasIssued() public view {
         ITickets.Ticket memory record = mc.ticketOf(bytes32(uint256(1)));
-        assertEq(record.hash, bytes32(0));
+        assertEq(record.askBlockHash, bytes32(0));
         assertEq(record.validUntil, 0);
         assertEq(record.waitingEndsAt, 0);
     }

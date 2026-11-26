@@ -78,8 +78,9 @@ interface ITickets {
         bytes spender,
         uint256 amountMin,
         uint256 amountMax,
+        uint256 requestedMax,
         uint64 validUntil,
-        uint64 reconciliationWindow,
+        bytes32 askBlockHash,
         bytes32 salt
     );
     event ReceiptReceived(
@@ -92,11 +93,11 @@ interface ITickets {
     event ReceiptDuplicate(bytes32 indexed ticketId, bytes32 indexed chainKey);
     event TicketCancelled(bytes32 indexed ticketId);
     event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
-    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
     event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
-    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
-    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 hash);
+    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
+    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
+    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 askBlockHash);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error SenderNotOnSatellite(bytes wallet);
@@ -118,6 +119,15 @@ interface ITickets {
     error NonCanonicalInteroperableAddress(bytes envelope);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
+
+    /// @dev What a ticket is for. Part of the ticket id, so a holder's move and an agent's bring home asked with the
+    /// same wallet and salt never share an id.
+    enum TicketKind {
+        /// A holder's move out of an away wallet.
+        MOVE,
+        /// An agent's bring home of an away wallet.
+        BRING_HOME
+    }
 
     /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
     /// the keeper gave up, and what is still reserved are all read off this one value.
@@ -160,8 +170,8 @@ interface ITickets {
         /// not issued yet and sent nowhere. `answerApproval` issues it (`Open`) or refuses it (`Cancelled`);
         /// past `validUntil`, the deadline for the answer, `cancelTickets` discards it.
         WaitingForApproval,
-        /// A leg arrived whose wallets or amount fail the issued terms and whose hash is not the issued one: the
-        /// satellite executed a body this chain never canonically issued, one a reorg orphaned. Reached only while
+        /// A leg arrived whose wallets or amount fail the issued terms and whose ask block hash is not the issued
+        /// one: the satellite executed a copy this chain no longer holds, one a reorg dropped. Reached only while
         /// no leg had landed; nothing was applied, the reservation was released, and the leg's chain was paused
         /// for inbound. Terminal: any leg arriving now is a replay.
         Orphaned
@@ -177,16 +187,16 @@ interface ITickets {
     struct Ticket {
         /* ----- Written once, at issuance ----- */
 
-        /// `MessageTypesLib.hashValidation` of the issued `TicketMessage`: the terms the satellite executes
-        /// under. Zero until the validation is issued and sent.
-        bytes32 hash;
+        /// Names the copy of the ticket home sent, see {TicketLib-askBlockHashOf}. Zero until the ticket is
+        /// issued and sent.
+        bytes32 askBlockHash;
         /// Final inclusive lower bound, so a settlement's executed amount can be classified.
         uint256 amountMin;
         /// Final inclusive upper bound, what the reservation was taken at.
         uint256 amountMax;
         /// The satellite's hard deadline: no execution at or after it.
         uint64 validUntil;
-        /// `validUntil + reconciliationWindow`: past it, the reservation may be released and the validation discarded.
+        /// `validUntil` plus the waiting time: past it, the reservation may be released and the validation discarded.
         uint64 waitingEndsAt;
         /// `from`'s satellite chain, keyed as `MessageTypesLib.chainKey` computes it.
         bytes32 fromChainKey;
@@ -227,20 +237,22 @@ interface ITickets {
 
         /// The requester's nonce the id was derived from, carried in the issued body and kept for a resend.
         bytes32 salt;
+        /// The upper bound as asked, before it was narrowed to `amountMax`: part of the id, and carried in the ticket.
+        uint256 requestedMax;
     }
 
     /// @dev A settlement leg that arrived for an id with no issued body, kept so that once the request is sent
-    /// again with the same salt after a reorg dropped its issuance, `applyWaitingReceipt` can settle it. One per origin
-    /// chain, so a pair can park both its legs. The delivery that carried it is consumed; this is all that is left
-    /// of it.
+    /// again with the same terms and salt after a reorg dropped its issuance, `applyWaitingReceipt` can settle it.
+    /// One per origin chain, so a pair can park both its legs. The delivery that carried it is consumed; this is all
+    /// that is left of it.
     struct WaitingReceipt {
         /// ERC-7930; empty on the mint leg.
         bytes from;
         /// ERC-7930; empty on the burn leg.
         bytes to;
         uint256 amount;
-        /// The hash of the body the Lite executed under, as it reported it.
-        bytes32 hash;
+        /// The ask block hash of the ticket copy the Lite executed, as it reported it.
+        bytes32 askBlockHash;
         /// Whether a leg is parked here, since every other field may legitimately be zero or empty.
         bool exists;
     }
@@ -253,18 +265,19 @@ interface ITickets {
     /// bridged position less what is already pending out of it, then at the smallest `checkTransfer` answer any module
     /// answers (skipped when both wallets belong to one identity).
     ///
-    /// The id is `keccak256(abi.encode(canonicalKey(from), salt))`, a function of the request and never of this
-    /// chain's ordering or clock: the same request lands under the same id in whatever block and whatever order,
-    /// so a validation attested to a satellite before this chain's finality keeps its id through a reorg. The
-    /// requester chooses the salt; a salt reused for the same wallet is refused, which also refuses a replayed
-    /// request instead of reserving twice. A request a reorg dropped is sent again with the same salt, by the
+    /// The id is built from the whole request, see {TicketLib-ticketIdOf}: the kind, both wallets, the spender, the
+    /// asked minimum and maximum, and the salt. Never from this chain's ordering or clock: the same request lands
+    /// under the same id in whatever block and whatever order, so a ticket sent before this chain's finality keeps
+    /// its id through a reorg. The requester chooses the salt; a salt reused for the same request is refused, which
+    /// also refuses a replayed request instead of reserving twice. A request a reorg dropped is sent again with the
+    /// same terms and salt, by the
     /// requester or by an agent reading the salt off the body the Lite holds: it issues the same id, sends nothing
-    /// to a chain that already reported a leg for it, and `applyWaitingReceipt` settles that leg, see `waitingReceiptOf`.
+    /// to a chain that already reported a leg for it, and `applyWaitingReceipt` settles that leg, see
+    /// `waitingReceiptOf`.
     ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
-    /// - `keccak256(abi.encode(canonicalKey(from), salt))` not yet recorded; otherwise reverts with
-    ///   `TicketAlreadyWritten`.
+    /// - The id of the request not yet recorded; otherwise reverts with `TicketAlreadyWritten`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
@@ -290,8 +303,8 @@ interface ITickets {
     /// @param requestedMin Inclusive lower bound the caller proposes.
     /// @param requestedMax Inclusive upper bound the caller proposes.
     /// @param spender ERC-7930 address allowed to execute through `transferFrom`, or empty for `from` alone.
-    /// @param salt The requester's nonce for this movement; with `from`, it is the id.
-    /// @return ticketId `keccak256(abi.encode(canonicalKey(from), salt))`, the single-use id of the validation.
+    /// @param salt The requester's nonce for this movement; with the rest of the request, it is the id.
+    /// @return ticketId The single-use id of the ticket, built from the whole request.
     function askToMove(
         bytes calldata from,
         bytes calldata to,
@@ -420,8 +433,9 @@ interface ITickets {
     /// @dev Sends the leg of an issued validation toward `chainKey` again, byte for byte, through the gateway the
     /// issuance pinned. The way to recover a leg the transport lost before the satellite's deadline, instead of
     /// waiting for `waitingEndsAt` and asking for a new validation. `to` is the one envelope the record does not keep;
-    /// it is read off `TicketWritten`, like `spender`, and both must rebuild the issued hash, so a
-    /// resend can neither widen nor retarget the movement. Nothing is written.
+    /// it is read off `TicketWritten`, like `spender`, and both must be the ones the ticket was asked with, so a
+    /// resend can neither widen nor retarget the movement. The copy sent is the one recorded, ask block hash
+    /// included. Nothing is written.
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
@@ -438,8 +452,8 @@ interface ITickets {
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
     /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `AwayChainBlocked`.
-    /// - `to` and `spender` must rebuild the stored hash; otherwise reverts with `ValidationBodyMismatch`. The
-    ///   bound token is part of the hash, so a compliance bound to another token since cannot resend old ids.
+    /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
+    ///   `ValidationBodyMismatch`.
     /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `chainKey` is the
     ///   recipient's chain, or authorised by the AccessManager for this selector; otherwise reverts with
     ///   `NotAuthorizedForWallet`.
@@ -484,7 +498,7 @@ interface ITickets {
     /// issued. Once the keeper resolved the pair after the second window, the parked leg ends as a replay.
     ///
     /// Requirements:
-    /// - A leg must be parked under `(ticketId, chainKey)` and the validation issued (its hash written);
+    /// - A leg must be parked under `(ticketId, chainKey)` and the validation issued (its ask block hash written);
     ///   otherwise reverts with `NoWaitingReceipt`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered leg waits under the pause
     ///   the same way.

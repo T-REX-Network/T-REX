@@ -340,11 +340,20 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(aliceIdentity);
         id = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
         // Read before the prank: the lookup is an external call too and would consume it.
-        bytes32 hash = mc.ticketOf(id).hash;
+        ITickets.Ticket memory issued = mc.ticketOf(id);
+        MessageTypesLib.ReceiptMessage memory burnLeg = MessageTypesLib.ReceiptMessage({
+            ticketId: id,
+            from: fromSat,
+            to: "",
+            amount: 50,
+            askBlockHash: issued.askBlockHash,
+            seenMax: issued.amountMax,
+            seenValidUntil: issued.validUntil,
+            half: 0,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
         vm.prank(token);
-        mc.receiveReceipt(
-            polygon, MessageTypesLib.ReceiptMessage({ ticketId: id, from: fromSat, to: "", amount: 50, hash: hash })
-        );
+        mc.receiveReceipt(polygon, burnLeg);
     }
 
     function _ids(bytes32 id) private pure returns (bytes32[] memory ids) {

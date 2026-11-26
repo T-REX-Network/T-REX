@@ -79,8 +79,8 @@ import { IModule } from "./modules/IModule.sol";
 /**
  * @title TicketLib
  * @dev The layout of the compliance's validation record, and the issuance half of a validation's life,
- * deployed once and linked: the questions a request must answer, then the id derived from the sender and the
- * salt, the record, the reservation, the announcement and the legs the satellites will execute against; the
+ * deployed once and linked: the questions a request must answer, then the id built from the whole request,
+ * the record, the reservation, the announcement and the legs the satellites will execute against; the
  * answer of an approval; a resend.
  *
  * That is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept it over
@@ -101,7 +101,7 @@ library TicketLib {
         /// Per-chain issuance pause, set by the manager or a breaching late reconciliation, lifted by the manager
         /// only.
         mapping(bytes32 chainKey => bool paused) issuancePaused;
-        /// Every requested validation, kept forever, under `keccak256(abi.encode(fromKey, salt))`.
+        /// Every requested validation, kept forever, under its id, see {ticketIdOf}.
         mapping(bytes32 ticketId => ITickets.Ticket validation) validations;
         /// The recipient's and the spender's envelopes, for a validation `WaitingForApproval` alone: what it is
         /// issued with once approved. Deleted by the answer.
@@ -134,10 +134,12 @@ library TicketLib {
         address fromIdentity;
         address toIdentity;
         bytes32 fromKey;
+        bytes32 toKey;
         uint256 amountMin;
         uint256 amountMax;
+        uint256 requestedMax;
         uint64 validUntil;
-        uint64 reconciliationWindow;
+        uint64 waitingTime;
     }
 
     /// @dev Issues a validation, see {ITickets-askToMove}. Five questions, in order:
@@ -146,7 +148,7 @@ library TicketLib {
     /// @param salt the requester's nonce, see {ITickets-askToMove}
     /// @param token the token the compliance is bound to
     /// @param authority the compliance's AccessManager
-    /// @return ticketId `keccak256(abi.encode(canonicalKey(from), salt))`
+    /// @return ticketId the id of the whole request, see {ticketIdOf}
     function request(
         bytes calldata from,
         bytes calldata to,
@@ -162,9 +164,10 @@ library TicketLib {
         Draft memory draft;
         draft.amountMin = requestedMin;
         draft.amountMax = requestedMax;
+        draft.requestedMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
         _requireCallerOwnsTheWallet(draft, from, token, authority);
-        (draft.validUntil, draft.reconciliationWindow) =
+        (draft.validUntil, draft.waitingTime) =
             _expiryAndWindow(token, draft.fromChainKey, draft.toChainKey, draft.twoLegs);
         _narrowAmountRange(draft, from, to, spender, token);
         _requireSpenderAllowed(draft, to, spender);
@@ -226,6 +229,7 @@ library TicketLib {
         require(registry.isWalletVerified(to), ErrorsLib.UnverifiedWallet(to));
         draft.toIdentity = address(registry.resolveIdentity(to));
         draft.fromKey = WalletKeyLib.canonicalKey(from);
+        draft.toKey = WalletKeyLib.canonicalKey(to);
 
         _capAtWhatTheWalletCanSend(draft, from, token);
         _capAtWhatTheRulesAllow(draft, to, spender);
@@ -277,13 +281,13 @@ library TicketLib {
         require(ModuleSetLib.spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
-    /// @dev Turns a settled draft into a validation: derive its id from the sender and the salt, refuse an id
+    /// @dev Turns a settled draft into a validation: build its id from the whole request, refuse an id
     ///  already taken, keep its terms and reserve the amount. With no `APPROVAL` module bound, issue it at once:
     ///  build the object the satellite will execute against, announce it and send one leg per satellite chain
     ///  involved. With one bound, keep it `WaitingForApproval` instead, sent nowhere until {answerApproval}.
     /// @param salt the requester's nonce, see {ITickets-askToMove}
     /// @param token the token the compliance is bound to
-    /// @return ticketId `keccak256(abi.encode(draft.fromKey, salt))`
+    /// @return ticketId the id of the whole request, see {ticketIdOf}
     function _issue(
         bytes calldata from,
         bytes calldata to,
@@ -292,9 +296,17 @@ library TicketLib {
         Draft memory draft,
         address token
     ) private returns (bytes32 ticketId) {
-        ticketId = keccak256(abi.encode(draft.fromKey, salt));
+        ticketId = ticketIdOf(
+            ITickets.TicketKind.MOVE,
+            draft.fromKey,
+            draft.toKey,
+            keccak256(spender),
+            draft.amountMin,
+            draft.requestedMax,
+            salt
+        );
         require(!isRecorded(layout(), ticketId), ErrorsLib.TicketAlreadyWritten(ticketId));
-        _record(ticketId, from, to, spender, draft, token);
+        _record(ticketId, from, spender, draft, token);
         layout().validations[ticketId].salt = salt;
 
         address approvalModule = _approvalModule();
@@ -313,9 +325,10 @@ library TicketLib {
                 spender: spender,
                 amountMin: draft.amountMin,
                 amountMax: draft.amountMax,
+                requestedMax: draft.requestedMax,
+                token: token,
                 validUntil: draft.validUntil,
-                reconciliationWindow: draft.reconciliationWindow,
-                token: token
+                askBlockHash: askBlockHashOf(draft.amountMax, draft.validUntil)
             })
         );
         _dispatch(token, ticketId, draft.fromChainKey, draft.toChainKey, draft.twoLegs, body);
@@ -369,9 +382,10 @@ library TicketLib {
                 spender: store.awaitedTerms[ticketId].spender,
                 amountMin: validation.amountMin,
                 amountMax: validation.amountMax,
+                requestedMax: validation.requestedMax,
+                token: token,
                 validUntil: validation.validUntil,
-                reconciliationWindow: validation.waitingEndsAt - validation.validUntil,
-                token: token
+                askBlockHash: askBlockHashOf(validation.amountMax, validation.validUntil)
             })
         );
         delete store.awaitedTerms[ticketId];
@@ -380,9 +394,10 @@ library TicketLib {
     }
 
     /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the caller supplies
-    ///  again, for a resend. The rebuilt object must hash to what was issued, so a resend repeats the issuance
-    ///  byte for byte and can neither widen nor retarget it. Announces the resend and sends it through the token,
-    ///  which as the compliance's DELEGATECALL target sees the compliance as its caller, as {_record} relies on.
+    ///  again, for a resend. The envelopes must be the ones the ticket was asked with and the ask block hash is the
+    ///  recorded one, so a resend repeats the copy sent byte for byte and can neither widen nor retarget it. Announces
+    ///  the resend and sends it through the token, which as the compliance's DELEGATECALL target sees the compliance as
+    ///  its caller, as {_record} relies on.
     ///
     ///  While `Open` either leg may go again, before `validUntil`, since past it no satellite may execute. Once the
     ///  burn landed and the mint is owed, the recipient's leg alone may go again, before `waitingEndsAt`: the receiving
@@ -422,6 +437,9 @@ library TicketLib {
             ErrorsLib.NotAuthorizedForWallet(msg.sender, validation.fromWallet)
         );
 
+        require(WalletKeyLib.canonicalKey(to) == validation.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
+        require(keccak256(spender) == keccak256(validation.spender), ErrorsLib.ValidationBodyMismatch(ticketId));
+
         MessageTypesLib.TicketMessage memory rebuilt = MessageTypesLib.TicketMessage({
             ticketId: ticketId,
             salt: validation.salt,
@@ -430,11 +448,11 @@ library TicketLib {
             spender: spender,
             amountMin: validation.amountMin,
             amountMax: validation.amountMax,
+            requestedMax: validation.requestedMax,
+            token: token,
             validUntil: validation.validUntil,
-            reconciliationWindow: validation.waitingEndsAt - validation.validUntil,
-            token: token
+            askBlockHash: validation.askBlockHash
         });
-        require(MessageTypesLib.hashValidation(rebuilt) == validation.hash, ErrorsLib.ValidationBodyMismatch(ticketId));
 
         emit EventsLib.TicketSent(ticketId, chainKey);
 
@@ -539,6 +557,29 @@ library TicketLib {
         return store.validations[ticketId].fromIdentity != address(0);
     }
 
+    /// @dev The id of a ticket: a hash of the whole request, never of the block it is mined in. The same request
+    ///  gets the same id in any block, so a ticket sent before a reorg keeps its id when the ask is mined again.
+    ///  `requestedMax` is the maximum as asked: home narrows `amountMax` from the state of the block, so it is left
+    ///  out. `spenderKey` is `keccak256` of the spender's envelope, of empty bytes when there is none.
+    function ticketIdOf(
+        ITickets.TicketKind kind,
+        bytes32 fromKey,
+        bytes32 toKey,
+        bytes32 spenderKey,
+        uint256 amountMin,
+        uint256 requestedMax,
+        bytes32 salt
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(kind, fromKey, toKey, spenderKey, amountMin, requestedMax, salt));
+    }
+
+    /// @dev The ask block hash: names the copy of a ticket written in this block, the ask's own block, or the
+    ///  answer's for a ticket that waited for approval. Two copies of one ask mined in two blocks share the id and
+    ///  differ here; two sibling blocks share number and parent, so the terms are in it too.
+    function askBlockHashOf(uint256 amountMax, uint64 validUntil) internal view returns (bytes32) {
+        return keccak256(abi.encode(block.number, blockhash(block.number - 1), amountMax, validUntil));
+    }
+
     function layout() internal pure returns (ValidationStorage storage $) {
         assembly ("memory-safe") {
             $.slot := VALIDATION_STORAGE_LOCATION
@@ -560,40 +601,36 @@ library TicketLib {
     }
 
     /// @dev Keeps the validation forever and reserves its amount. Everything written here is the issuance half
-    ///  of the lifecycle; the hash is written once the validation is issued, see {_issueRecorded}.
-    function _record(
-        bytes32 ticketId,
-        bytes calldata from,
-        bytes calldata to,
-        bytes calldata spender,
-        Draft memory draft,
-        address token
-    ) private {
+    ///  of the lifecycle; the ask block hash is written once the validation is issued, see {_issueRecorded}.
+    function _record(bytes32 ticketId, bytes calldata from, bytes calldata spender, Draft memory draft, address token)
+        private
+    {
         ITickets.Ticket storage stored = layout().validations[ticketId];
         stored.amountMin = draft.amountMin;
         stored.amountMax = draft.amountMax;
         stored.validUntil = draft.validUntil;
-        stored.waitingEndsAt = draft.validUntil + draft.reconciliationWindow;
+        stored.waitingEndsAt = draft.validUntil + draft.waitingTime;
         stored.fromChainKey = draft.fromChainKey;
         stored.toChainKey = draft.toChainKey;
         stored.fromKey = draft.fromKey;
         stored.fromWallet = from;
-        stored.toKey = WalletKeyLib.canonicalKey(to);
+        stored.toKey = draft.toKey;
         stored.twoLegs = draft.twoLegs;
         stored.fromIdentity = draft.fromIdentity;
         stored.toIdentity = draft.toIdentity;
         stored.spender = spender;
+        stored.requestedMax = draft.requestedMax;
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
         stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
         IToken(token).reserveForTicket(from, draft.amountMax);
     }
 
-    /// @dev Writes the hash of what the satellite will execute against, announces it, and encodes it.
+    /// @dev Writes the ask block hash of the copy the away token will execute against, announces it, and encodes it.
     function _issueRecorded(bytes32 ticketId, MessageTypesLib.TicketMessage memory issued)
         private
         returns (bytes memory body)
     {
-        layout().validations[ticketId].hash = MessageTypesLib.hashValidation(issued);
+        layout().validations[ticketId].askBlockHash = issued.askBlockHash;
 
         emit EventsLib.TicketWritten(
             ticketId,
@@ -602,8 +639,9 @@ library TicketLib {
             issued.spender,
             issued.amountMin,
             issued.amountMax,
+            issued.requestedMax,
             issued.validUntil,
-            issued.reconciliationWindow,
+            issued.askBlockHash,
             issued.salt
         );
 

@@ -118,7 +118,7 @@ contract PendingReservationTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
         boundCompliance.askToMove(aliceSat, bobSat, 1, 1, "", _salt());
 
-        _assertNothingRecorded(aliceSat);
+        _assertNothingRecorded(aliceSat, bobSat, "", 1, 1);
     }
 
     /// @notice A rule that keeps no counter of its own is never told about a reservation: the compliance

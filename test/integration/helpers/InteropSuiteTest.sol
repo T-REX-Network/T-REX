@@ -42,7 +42,9 @@ pragma solidity 0.8.30;
 import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -121,14 +123,37 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return lastSalt;
     }
 
-    /// @dev The id a request from `from` with `salt` gets, as the compliance derives it.
-    function _validationId(bytes memory from, bytes32 salt) internal pure returns (bytes32) {
-        return keccak256(abi.encode(WalletKeyLib.canonicalKey(from), salt));
+    /// @dev The id a request gets, as the compliance builds it: a move, the keys of both wallets and of the
+    ///  spender, the asked bounds and the salt.
+    function _ticketId(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        bytes32 salt
+    ) internal pure returns (bytes32) {
+        return TicketLib.ticketIdOf(
+            ITickets.TicketKind.MOVE,
+            WalletKeyLib.canonicalKey(from),
+            WalletKeyLib.canonicalKey(to),
+            keccak256(spender),
+            requestedMin,
+            requestedMax,
+            salt
+        );
     }
 
-    /// @dev The request `from` sent with the last salt was refused: nothing was recorded under its id.
-    function _assertNothingRecorded(bytes memory from) internal view {
-        assertEq(boundCompliance.ticketOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded");
+    /// @dev The request sent with the last salt was refused: nothing was recorded under its id.
+    function _assertNothingRecorded(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 requestedMin,
+        uint256 requestedMax
+    ) internal view {
+        bytes32 refusedId = _ticketId(from, to, spender, requestedMin, requestedMax, lastSalt);
+        assertEq(boundCompliance.ticketOf(refusedId).fromIdentity, address(0), "nothing recorded");
     }
 
     /// @dev The validation a queued message carries, as the Lite would decode it.
@@ -181,23 +206,37 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return _queue(gateway, address(_token), _token, payload);
     }
 
-    /// @dev A leg carrying the issued hash, as a Lite that executed the issued body reports it; zero when the
-    ///  id was never issued here.
+    /// @dev A leg echoing the issued copy, as a Lite that executed it reports it; zero when the id was never
+    ///  issued here.
     function _settlement(bytes32 ticketId, bytes memory from, bytes memory to, uint256 amount)
         internal
         view
         returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return _settlementUnder(ticketId, from, to, amount, boundCompliance.ticketOf(ticketId).hash);
+        return _settlementUnder(ticketId, from, to, amount, boundCompliance.ticketOf(ticketId).askBlockHash);
     }
 
-    /// @dev A leg carrying `hash`: what a Lite that executed another body than the issued one reports.
-    function _settlementUnder(bytes32 ticketId, bytes memory from, bytes memory to, uint256 amount, bytes32 hash)
-        internal
-        pure
-        returns (MessageTypesLib.ReceiptMessage memory)
-    {
-        return MessageTypesLib.ReceiptMessage({ ticketId: ticketId, from: from, to: to, amount: amount, hash: hash });
+    /// @dev A leg echoing the copy named by `askBlockHash`, with the issued maximum and valid until: what a Lite
+    ///  that executed another copy than the issued one reports.
+    function _settlementUnder(
+        bytes32 ticketId,
+        bytes memory from,
+        bytes memory to,
+        uint256 amount,
+        bytes32 askBlockHash
+    ) internal view returns (MessageTypesLib.ReceiptMessage memory) {
+        ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
+        return MessageTypesLib.ReceiptMessage({
+            ticketId: ticketId,
+            from: from,
+            to: to,
+            amount: amount,
+            askBlockHash: askBlockHash,
+            seenMax: issued.amountMax,
+            seenValidUntil: issued.validUntil,
+            half: 0,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
     }
 
     function _sameChainSettlement(bytes32 ticketId, uint256 chainId, uint256 amount)

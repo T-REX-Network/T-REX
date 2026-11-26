@@ -39,7 +39,9 @@
 
 pragma solidity 0.8.30;
 
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { AccessManagerHelper } from "test/integration/helpers/AccessManagerHelper.sol";
@@ -89,22 +91,45 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
         return lastSalt;
     }
 
-    /// @dev The id a request from `from` with `salt` gets, as the compliance derives it.
-    function _validationId(bytes memory from, bytes32 salt) internal pure returns (bytes32) {
-        return keccak256(abi.encode(WalletKeyLib.canonicalKey(from), salt));
+    /// @dev The id a request gets, as the compliance builds it: a move, the keys of both wallets and of the
+    ///  spender, the asked bounds and the salt.
+    function _ticketId(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        bytes32 salt
+    ) internal pure returns (bytes32) {
+        return TicketLib.ticketIdOf(
+            ITickets.TicketKind.MOVE,
+            WalletKeyLib.canonicalKey(from),
+            WalletKeyLib.canonicalKey(to),
+            keccak256(spender),
+            requestedMin,
+            requestedMax,
+            salt
+        );
     }
 
-    /// @dev The issued hash of `id`, read straight off the compliance's storage so that building a leg makes no
-    ///  call and consumes neither a prank nor an expected emit. `validations` is the namespace's fourth field
-    ///  and `hash` the record's first.
-    function _issuedHash(bytes32 id) internal view returns (bytes32) {
+    /// @dev The issued ask block hash of `id`, read straight off the compliance's storage so that building a leg
+    ///  makes no call and consumes neither a prank nor an expected emit. `validations` is the namespace's fourth
+    ///  field and `askBlockHash` the record's first.
+    function _issuedAskBlockHash(bytes32 id) internal view returns (bytes32) {
         bytes32 base = 0x518dcda4927033bd42da8dd6047b92b4a950cebbc5bdd8461a5e9bb9c0545400;
         return vm.load(address(mc), keccak256(abi.encode(id, uint256(base) + 3)));
     }
 
-    /// @dev The request `from` sent with the last salt was refused: nothing was recorded under its id.
-    function _assertNothingRecorded(bytes memory from) internal view {
-        assertEq(mc.ticketOf(_validationId(from, lastSalt)).fromIdentity, address(0), "nothing recorded");
+    /// @dev The request sent with the last salt was refused: nothing was recorded under its id.
+    function _assertNothingRecorded(
+        bytes memory from,
+        bytes memory to,
+        bytes memory spender,
+        uint256 requestedMin,
+        uint256 requestedMax
+    ) internal view {
+        bytes32 refusedId = _ticketId(from, to, spender, requestedMin, requestedMax, lastSalt);
+        assertEq(mc.ticketOf(refusedId).fromIdentity, address(0), "nothing recorded");
     }
 
 }

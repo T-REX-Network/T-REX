@@ -278,11 +278,11 @@ contract CrossChainSettlementTest is InteropSuiteTest {
         assertEq(token.onHoldOf(id), 0);
     }
 
-    /// @dev Relays a leg carrying the issued hash that fails the substantive gate: it is rejected, consumed, and
-    ///  pauses the inbound of `chainKey` while the token keeps running.
+    /// @dev Relays a leg carrying the issued ask block hash that fails the substantive gate: it is rejected,
+    ///  consumed, and pauses the inbound of `chainKey` while the token keeps running.
     function _relayRejected(ERC7786GatewayMock gateway, bytes32 chainKey, uint256 index, uint256 amount) private {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).hash);
+        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(chainKey);
         gateway.relay(index);

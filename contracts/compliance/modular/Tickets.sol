@@ -81,7 +81,7 @@ import { TicketLib } from "./TicketLib.sol";
  * hold the position it moves, where a native balance stays free to leave between issuance and settlement. A native
  * position reaches a satellite through delegation-out instead, which burns before it instructs.
  *
- * `validUntil` is the satellite's hard deadline; `validUntil + reconciliationWindow` is when T-REX may release the
+ * `validUntil` is the satellite's hard deadline; `validUntil` plus the waiting time is when T-REX may release the
  * reservation, never a refusal of a late leg. Validations expire; settlements never do.
  */
 abstract contract Tickets is ITickets, ComplianceLedger {
@@ -114,8 +114,8 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    /// @dev The record does not keep `to`, which the caller supplies again with `spender`; the rebuilt leg
-    ///  must hash to what was issued, see {TicketLib-resend}. Nothing is written: the
+    /// @dev The record does not keep `to`, which the caller supplies again with `spender`; both must be the ones
+    ///  the ticket was asked with, see {TicketLib-resend}. Nothing is written: the
     ///  reservation, the id and the pinned route are those of the issuance, and the token refuses the send once
     ///  the leg's pinned gateway or peer is no longer the chain's.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external {

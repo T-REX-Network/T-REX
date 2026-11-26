@@ -43,6 +43,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -99,10 +100,11 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(sent.spender.length, 0);
         assertEq(sent.amountMin, 10);
         assertEq(sent.amountMax, 90);
+        assertEq(sent.requestedMax, 90);
         assertEq(sent.token, address(token));
         assertEq(sent.validUntil, 1_700_000_000 + VALIDITY_WINDOW);
-        assertEq(sent.reconciliationWindow, POLYGON_WINDOW);
-        assertEq(boundCompliance.ticketOf(id).hash, MessageTypesLib.hashValidation(sent));
+        assertEq(sent.askBlockHash, TicketLib.askBlockHashOf(90, 1_700_000_000 + VALIDITY_WINDOW));
+        assertEq(boundCompliance.ticketOf(id).askBlockHash, sent.askBlockHash);
     }
 
     function test_requestTransferValidation_Success_WhenCrossChainQueuesOneLegPerChain() public {
@@ -117,8 +119,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         MessageTypesLib.TicketMessage memory mintLeg = _decodeQueuedValidation(optimismGateway, 0);
         assertEq(burnLeg.ticketId, id);
         assertEq(mintLeg.ticketId, id);
-        assertEq(MessageTypesLib.hashValidation(burnLeg), MessageTypesLib.hashValidation(mintLeg));
-        assertEq(burnLeg.reconciliationWindow, OPTIMISM_WINDOW);
+        assertEq(keccak256(abi.encode(burnLeg)), keccak256(abi.encode(mintLeg)), "one copy to both chains");
 
         ITickets.Ticket memory record = boundCompliance.ticketOf(id);
         assertEq(record.waitingEndsAt, record.validUntil + OPTIMISM_WINDOW);
@@ -137,7 +138,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         boundCompliance.askToMove(nativeAlice, bobSat, 10, 200, "", _salt());
 
         assertEq(polygonGateway.queueLength(), 0);
-        _assertNothingRecorded(aliceSat);
+        _assertNothingRecorded(nativeAlice, bobSat, "", 10, 200);
     }
 
     function test_requestTransferValidation_Success_WhenTheSpenderTravelsWithTheObject() public {
@@ -172,7 +173,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
     function test_requestTransferValidation_Success_WhenAnAgentAsksForAnotherWallet() public {
         bytes32 id = _requestValidation(agent, aliceSat, bobSat, 10, 90);
-        assertEq(id, _validationId(aliceSat, lastSalt));
+        assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
     }
 
     function test_requestTransferValidation_RevertWhen_AStrangerAsks() public {
@@ -196,7 +197,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         _revokeWallet(aliceIdentity, aliceSat);
 
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
-        assertEq(id, _validationId(aliceSat, lastSalt));
+        assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
     }
 
     /* ----- Eligibility checks disabled ----- */
@@ -261,8 +262,8 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         boundCompliance.askToMove(aliceSat, bobSat, 10, 90, "", _salt());
 
-        _assertNothingRecorded(aliceSat);
-        assertEq(boundCompliance.ticketOf(bytes32(uint256(1))).hash, bytes32(0));
+        _assertNothingRecorded(aliceSat, bobSat, "", 10, 90);
+        assertEq(boundCompliance.ticketOf(bytes32(uint256(1))).askBlockHash, bytes32(0));
         assertEq(polygonGateway.queueLength(), 0);
     }
 
@@ -276,7 +277,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         boundCompliance.askToMove(aliceSat, bobOptimism, 10, 90, "", _salt());
 
         assertEq(polygonGateway.queueLength(), 0);
-        _assertNothingRecorded(aliceSat);
+        _assertNothingRecorded(aliceSat, bobOptimism, "", 10, 90);
     }
 
     function test_requestTransferValidation_Success_WhenARouteSwitchPinsTheNewGatewayForNewIdsOnly() public {
@@ -303,7 +304,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         boundCompliance.setIssuancePaused(polygon, false);
 
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
-        assertEq(id, _validationId(aliceSat, lastSalt));
+        assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
         assertEq(polygonGateway.queueLength(), 1);
     }
 
@@ -320,18 +321,19 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(optimismGateway.queueLength(), 0);
 
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
-        assertEq(id, _validationId(aliceSat, lastSalt));
+        assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
         assertEq(polygonGateway.queueLength(), 1);
     }
 
     function test_requestTransferValidation_Success_WhenAnnouncingBeforeDispatching() public {
         vm.warp(1_700_000_000);
         bytes32 salt = _salt();
-        bytes32 id = _validationId(aliceSat, salt);
+        bytes32 id = _ticketId(aliceSat, bobSat, "", 10, 90, salt);
+        uint64 validUntil = 1_700_000_000 + VALIDITY_WINDOW;
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.TicketWritten(
-            id, aliceSat, bobSat, "", 10, 90, uint64(1_700_000_000 + VALIDITY_WINDOW), POLYGON_WINDOW, salt
+            id, aliceSat, bobSat, "", 10, 90, 90, validUntil, TicketLib.askBlockHashOf(90, validUntil), salt
         );
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.HalfPinned(id, polygon, address(polygonGateway));

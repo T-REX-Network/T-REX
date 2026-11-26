@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
+import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -16,9 +17,10 @@ import { SatelliteLiteMock } from "test/integration/mocks/SatelliteLiteMock.sol"
 
 /// @dev The reference chain against Lites that execute a validation attested before this chain's finality, so a
 ///      reorg can reorder, drop or re-issue an issuance after a Lite acted on it. Three things hold it together: the
-///      id is a function of the request (`keccak256(fromKey, salt)`), a leg reported for an id nothing is issued
-///      under is parked and settled once the request is sent again with the same salt, and the hash a leg carries tells
-///      a body a reorg orphaned from a Lite that broke a rule. See `docs/satellite-lite.md`, "Lanes".
+///      id is a function of the whole request, never of its block; a leg reported for an id nothing is issued
+///      under is parked and settled once the request is sent again with the same terms and salt; and the ask block
+///      hash a leg echoes tells a copy from a block a reorg dropped from a Lite that broke a rule. See
+///      `docs/satellite-lite.md`, "Lanes".
 ///
 ///      The issuance a reorg dropped is replayed here by delivering, authored by the token, the body the orphaned
 ///      fork would have sent: the Lite cannot tell it from one that survived.
@@ -77,8 +79,8 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     function test_reorg_Success_WhenIssuancesAreReorderedTheIdsStay() public {
         bytes32 saltA = _salt();
         bytes32 saltB = _salt();
-        bytes32 a = _validationId(aliceSat, saltA);
-        bytes32 b = _validationId(aliceSat, saltB);
+        bytes32 a = _ticketId(aliceSat, bobSat, "", 50, 60, saltA);
+        bytes32 b = _ticketId(aliceSat, bobSat, "", 90, 100, saltB);
 
         // B lands before A: on the orphaned fork it was the other way round.
         vm.startPrank(address(aliceIdentity));
@@ -102,8 +104,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     /* ----- Case 2: the issuance is dropped from the canonical chain ----- */
 
     /// @notice The Lite executed an issuance the canonical chain never saw. Its leg is parked under the id and the
-    ///         chain paused, the token untouched. The request sent again with the same salt issues the same id,
-    ///         sends nothing to the chain that already executed, and settles the parked leg.
+    ///         chain paused, the token untouched. The request sent again with the same terms and salt issues the
+    ///         same id in a later block, sends nothing to the chain that already executed, and settles the parked
+    ///         leg, which echoes the copy of the dropped block.
     function test_reorg_Success_WhenADroppedIssuanceIsResubmittedWithTheSameSalt() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
@@ -114,7 +117,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         _execute(id, 95);
         uint256 report = _last(polygonGateway);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(id, polygon, 95, MessageTypesLib.hashValidation(orphaned));
+        emit EventsLib.ReceiptWaiting(id, polygon, 95, orphaned.askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(report);
@@ -126,7 +129,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(id, polygon);
         assertTrue(parked.exists);
         assertEq(parked.amount, 95);
-        assertEq(parked.hash, MessageTypesLib.hashValidation(orphaned));
+        assertEq(parked.askBlockHash, orphaned.askBlockHash);
 
         // The operator lifts the pause once the reorg is understood; the requester sends the request again.
         vm.prank(agent);
@@ -147,10 +150,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 95);
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
         assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
-        assertEq(
-            boundCompliance.ticketOf(id).hash,
-            MessageTypesLib.hashValidation(orphaned),
-            "same terms, same hash, whatever the clock said"
+        assertTrue(
+            boundCompliance.ticketOf(id).askBlockHash != orphaned.askBlockHash,
+            "same request, same id; another block, another copy"
         );
         assertFalse(token.isInboundPaused(polygon));
     }
@@ -213,9 +215,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
     }
 
-    /// @notice The other way out of a drop. The Lite executed the dropped body above what the request, sent
-    ///         again, is issued at: the parked leg fits no issued terms and its hash is not the issued one, so
-    ///         the validation ends `Orphaned` at issuance, nothing moves, and the chain is paused again.
+    /// @notice The other way out of a drop. The Lite executed the dropped copy above what home narrows the same
+    ///         request to when it is mined again: the parked leg fits no issued terms and its ask block hash is
+    ///         not the issued one, so the validation ends `Orphaned`, nothing moves, and the chain is paused again.
     function test_reorg_OrphansTheValidation_WhenTheResubmittedTermsNoLongerCoverTheParkedLeg() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
@@ -225,11 +227,16 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
 
-        vm.prank(address(aliceIdentity));
-        boundCompliance.askToMove(aliceSat, bobSat, 90, 95, "", salt);
+        // Another ask reserved part of the wallet in the meantime: the same request is now narrowed to 95.
+        uint256 reservedByTheOtherAsk = DELEGATED - 95;
+        vm.startPrank(address(aliceIdentity));
+        boundCompliance.askToMove(aliceSat, bobSat, 1, reservedByTheOtherAsk, "", _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
+        vm.stopPrank();
+        assertEq(boundCompliance.ticketOf(id).amountMax, 95, "narrowed by home");
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationOrphaned(id, polygon, 98, MessageTypesLib.hashValidation(orphaned));
+        emit EventsLib.ValidationOrphaned(id, polygon, 98, orphaned.askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         boundCompliance.applyWaitingReceipt(id, polygon);
@@ -237,8 +244,8 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Orphaned));
         assertTrue(token.isInboundPaused(polygon));
         assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
-        assertEq(token.reservedOf(aliceSat), 0, "the reservation is released");
-        assertEq(boundCompliance.pendingInOf(address(bobIdentity)), 0);
+        assertEq(token.reservedOf(aliceSat), reservedByTheOtherAsk, "the orphaned ticket's reservation is released");
+        assertEq(boundCompliance.pendingInOf(address(bobIdentity)), reservedByTheOtherAsk);
         assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
     }
 
@@ -347,8 +354,8 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         boundCompliance.applyWaitingReceipt(id, polygon);
     }
 
-    /// @notice The requester need not come back: the body the Lite holds carries the salt, so an agent sends the
-    ///         request again on their behalf from the parked leg's wallets and the Lite's copy.
+    /// @notice The requester need not come back: the copy the Lite holds carries the whole request, the asked
+    ///         maximum and the salt included, so an agent sends the request again on their behalf from it.
     function test_reorg_Success_WhenAnAgentResubmitsFromTheLitesCopy() public {
         bytes32 salt = _salt();
         bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
@@ -361,42 +368,48 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(id, polygon);
         assertEq(held.salt, salt, "the salt is final on the satellite");
 
+        assertEq(parked.from, held.from, "the parked leg names the wallets of the copy held");
         vm.prank(agent);
-        assertEq(boundCompliance.askToMove(parked.from, parked.to, parked.amount, parked.amount, "", held.salt), id);
+        assertEq(
+            boundCompliance.askToMove(held.from, held.to, held.amountMin, held.requestedMax, held.spender, held.salt),
+            id
+        );
         boundCompliance.applyWaitingReceipt(id, polygon);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
     }
 
-    /* ----- Case 3: the same id, another body ----- */
+    /* ----- Case 3: the same id, another copy ----- */
 
-    /// @notice The Lite holds the wider body of the orphaned fork and has not executed when the canonical one
-    ///         lands under the same id: it replaces what it holds, executes the canonical terms, and the leg
-    ///         settles as any other.
-    function test_reorg_Success_WhenTheCanonicalBodyReplacesTheOrphanedOneBeforeExecution() public {
+    /// @notice The Lite holds the copy of the dropped block and has not executed when the copy mined again lands
+    ///         under the same id: it keeps the first copy, executes it, and its receipt echoes it. The amount
+    ///         sits inside the issued terms, so the leg settles, with the other copy on record.
+    function test_reorg_Success_WhenTheLiteKeepsTheDroppedCopyAndIgnoresTheCopyMinedAgain() public {
         bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 80, 100).ticketId;
-        assertEq(polygonLite.ticketOf(id).amountMin, 80);
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
+        bytes32 id = orphaned.ticketId;
 
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
         _relayAll(polygonGateway);
-        assertEq(polygonLite.ticketOf(id).amountMin, 90, "the later body replaced the orphaned one");
-        assertEq(polygonLite.hashOf(id), boundCompliance.ticketOf(id).hash);
+        assertEq(polygonLite.ticketOf(id).askBlockHash, orphaned.askBlockHash, "the first copy is kept");
+        assertEq(polygonLite.ticketOf(id).validUntil, orphaned.validUntil, "with its own valid until");
 
         _execute(id, 95);
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.SettlementBodyDiverged(id, polygon, orphaned.askBlockHash);
         _relayAll(polygonGateway);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertFalse(token.isInboundPaused(polygon));
     }
 
-    /// @notice The Lite executed the wider orphaned body at an amount the canonical terms also cover: the leg
-    ///         settles, with the divergence on record.
+    /// @notice The Lite executed the copy of the dropped block at an amount the copy mined again also covers:
+    ///         the leg settles, with the divergence on record.
     function test_reorg_Success_WhenTheLegExecutedUnderAnotherBodyFitsTheIssuedTerms() public {
         bytes32 salt = _salt();
-        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 80, 100);
+        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
         bytes32 id = orphaned.ticketId;
         _execute(id, 95);
         polygonGateway.relay(_last(polygonGateway));
@@ -407,14 +420,14 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementBodyDiverged(id, polygon, MessageTypesLib.hashValidation(orphaned));
+        emit EventsLib.SettlementBodyDiverged(id, polygon, orphaned.askBlockHash);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.WaitingReceiptApplied(id, polygon);
         boundCompliance.applyWaitingReceipt(id, polygon);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
-        assertTrue(boundCompliance.ticketOf(id).hash != MessageTypesLib.hashValidation(orphaned));
+        assertTrue(boundCompliance.ticketOf(id).askBlockHash != orphaned.askBlockHash);
     }
 
     /// @notice A resend repeats the issuance byte for byte: the Lite ignores it, and so does a Lite that already
@@ -423,7 +436,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 80, 100);
         bytes32 id = orphaned.ticketId;
-        bytes32 executedUnder = MessageTypesLib.hashValidation(orphaned);
+        bytes32 executedUnder = orphaned.askBlockHash;
         _execute(id, 95);
 
         // `orphaned` is a memory reference: `later` is the same body, narrowed in place, so the Lite sees another
@@ -433,7 +446,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         _deliverToLite(polygonGateway, polygonLite, later);
 
         assertEq(polygonLite.ticketOf(id).amountMin, 80, "consumed: the body held is the one executed");
-        assertEq(polygonLite.hashOf(id), executedUnder);
+        assertEq(polygonLite.ticketOf(id).askBlockHash, executedUnder);
     }
 
     /* ----- Helpers ----- */
@@ -460,26 +473,31 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         return boundCompliance.statusOf(id);
     }
 
-    /// @dev What the issuance a reorg orphaned sent to the sending Lite: the body the reference chain built on
-    ///      the fork that did not survive, under the id the request derives, authored by the token as the gateway
-    ///      attributes it. Nothing is recorded on this chain for it.
-    function _orphanedIssuance(bytes32 salt, bytes memory to, uint256 amountMin, uint256 amountMax)
+    /// @dev What the ask a reorg dropped sent to the sending Lite: the copy home wrote in the block that did not
+    ///      survive, under the id the request gets, authored by the token as the gateway attributes it. Nothing is
+    ///      recorded on this chain for it. The asked maximum is not narrowed. The chain then moves on one block and
+    ///      one slot, where the same request can be mined again under another ask block hash.
+    function _orphanedIssuance(bytes32 salt, bytes memory to, uint256 amountMin, uint256 requestedMax)
         private
         returns (MessageTypesLib.TicketMessage memory body)
     {
+        uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
         body = MessageTypesLib.TicketMessage({
-            ticketId: _validationId(aliceSat, salt),
+            ticketId: _ticketId(aliceSat, to, "", amountMin, requestedMax, salt),
             salt: salt,
             from: aliceSat,
             to: to,
             spender: "",
             amountMin: amountMin,
-            amountMax: amountMax,
+            amountMax: requestedMax,
+            requestedMax: requestedMax,
             token: address(token),
-            validUntil: uint64(block.timestamp) + VALIDITY_WINDOW,
-            reconciliationWindow: POLYGON_WINDOW
+            validUntil: validUntil,
+            askBlockHash: TicketLib.askBlockHashOf(requestedMax, validUntil)
         });
         _deliverToLite(polygonGateway, polygonLite, body);
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 12);
     }
 
     function _deliverToLite(

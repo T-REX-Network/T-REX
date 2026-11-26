@@ -150,7 +150,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, compliance);
         emit EventsLib.ReceiptReceived(optimism, neverIssued, "", to, amount);
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptWaiting(neverIssued, optimism, amount, mintLeg.hash);
+        emit EventsLib.ReceiptWaiting(neverIssued, optimism, amount, mintLeg.askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(optimism);
         optimismGateway.relay(mintIndex);
@@ -164,7 +164,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, compliance);
         emit EventsLib.ReceiptReceived(polygon, neverIssued, from, "", amount);
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptWaiting(neverIssued, polygon, amount, burnLeg.hash);
+        emit EventsLib.ReceiptWaiting(neverIssued, polygon, amount, burnLeg.askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         routedGateway.relay(burnIndex);
@@ -193,10 +193,10 @@ contract InboundMessagingTest is InteropSuiteTest {
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(leg));
 
         vm.expectCall(compliance, abi.encodeCall(IReceiptHandler.receiveReceipt, (originChain, leg)), 1);
-        // Not the issued wallets, under the issued hash: the compliance rejects the leg and pauses the chain
+        // Not the issued wallets, under the issued ask block hash: the compliance rejects the leg and pauses the chain
         // that reported it. The delivery is consumed, nothing applied, the validation untouched.
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptRefused(ticketId, originChain, amount, leg.hash);
+        emit EventsLib.ReceiptRefused(ticketId, originChain, amount, leg.askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(originChain);
         routedGateway.relay(index);
@@ -528,7 +528,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     }
 
     function testUnsupportedVersionReachesNoHandler() public {
-        uint8 futureVersion = 2;
+        uint8 futureVersion = MessageTypesLib.VERSION + 1;
         uint256 index =
             _liteSends(routedGateway, token, abi.encode(MessageTypesLib.Message.RECEIPT, futureVersion, "x"));
 

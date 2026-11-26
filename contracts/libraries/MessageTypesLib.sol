@@ -86,34 +86,35 @@ library MessageTypesLib {
         BURN_PROOF
     }
 
-    /// @dev The envelope version this library serves. A payload carrying any other version is refused. The body
-    ///  shapes changed while no token or Lite was live (the id became salt-derived and the settlement gained the
-    ///  hash of the body executed), so the version stayed 1. Once anything is live, a change to a body's shape bumps
-    ///  it, so a peer on the old shape refuses the new one instead of decoding it wrong.
-    uint8 internal constant VERSION = 1;
+    /// @dev The envelope version this library serves. A payload carrying any other version is refused, so a peer on
+    ///  another shape refuses a message instead of decoding it wrong. Version 2: the ticket id is built from the whole
+    ///  request, the TICKET and the RECEIPT carry the ask block hash, and the RECEIPT echoes the copy it answers.
+    uint8 internal constant VERSION = 2;
 
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
     bytes2 internal constant EVM_CHAIN_TYPE = 0x0000;
 
-    /// @dev EIP-712 type hash of the terms of a `TicketMessage`, see {hashValidation}. The type string is part of
-    ///  the wire format the away chain hashes too, so it keeps its first names:
-    ///  keccak256("ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,
-    ///  uint256 amountMax,address token)")
-    bytes32 internal constant COMPLIANCE_VALIDATION_TYPEHASH =
-        0xafd18733126d2336f2b9ca999b9c8ad036ae2ed6021708f89e163f1c7fdce926;
+    /// @dev Why a receipt says what it says. A receipt of amount zero is either an executed ticket that moved
+    ///  nothing or a ticket never executed, and home must tell the two apart.
+    enum ReceiptAnswer {
+        /// The away token executed the ticket copy it echoes, for `amount`, which may be zero.
+        Executed,
+        /// The ticket was never executed and its valid until has passed: it never will be. `amount` is zero.
+        Expired,
+        /// The ticket was never executed and its valid until has not passed: it still may be. `amount` is zero.
+        StillOpen
+    }
 
-    /// @dev Body of a `TICKET`: the reference chain's authorization for one movement, the only thing
-    /// a satellite executes a transfer against.
-    /// Validations expire; settlements never do.
+    /// @dev Body of a `TICKET`: home's authorization for one move, the only thing an away token executes a
+    /// transfer against. Tickets expire; receipts never do.
     struct TicketMessage {
-        /// `keccak256(abi.encode(canonicalKey(from), salt))`, the salt supplied by the requester: a function of the
-        /// request and never of the reference chain's ordering or clock, so a reorg that re-includes or drops the
-        /// issuance leaves the id the satellite executed under unchanged. Single-use: consumed on the satellite, keys
-        /// the record on T-REX.
+        /// Built from the whole request, see {TicketLib-ticketIdOf}: a function of what was asked and never of
+        /// home's ordering or clock, so the same ask mined again after a reorg keeps its id. Single-use: consumed on
+        /// the away chain, keys the record at home.
         bytes32 ticketId;
-        /// The requester's nonce the id was derived from. Carried so that the satellite chain, where the body is
-        /// final, holds what it takes to send the request again should a reorg drop its issuance: an agent reads
-        /// it off the Lite and re-issues the same id. Not part of {hashValidation}: the id commits to it.
+        /// The requester's nonce the id was built from. Carried so that the away chain, where the ticket is final,
+        /// holds what it takes to ask again should a reorg drop the ask: an agent reads it off the away token and
+        /// asks again under the same id.
         bytes32 salt;
         /// ERC-7930 sender. Its chain reference against `to`'s decides same-chain transfer or burn-and-mint.
         bytes from;
@@ -121,22 +122,25 @@ library MessageTypesLib {
         bytes to;
         /// ERC-7930 address allowed to execute through `transferFrom`; empty means `from` alone.
         bytes spender;
-        /// Inclusive lower bound, caller-proposed and engine-narrowed.
+        /// Inclusive lower bound, as asked.
         uint256 amountMin;
-        /// Inclusive upper bound, caller-proposed, engine-narrowed, capped at `from`'s recorded balance so no
-        /// settlement carries an amount the ledger cannot absorb, and none is ever rejected to protect it. Tokens
-        /// invented on a satellite obtain no validation only if the Lite consumes one per transfer and the bridged
-        /// ledger is correct.
+        /// Inclusive upper bound, the asked maximum narrowed by home, capped at `from`'s recorded balance so no
+        /// receipt carries an amount the ledger cannot absorb. Tokens invented on an away chain obtain no ticket
+        /// only if the away token consumes one per transfer and the away balance is correct.
         uint256 amountMax;
-        /// The asset's reference-chain address, its canonical identifier everywhere.
+        /// The upper bound as asked, before home narrowed it. Part of the id, so a copy mined again after a reorg
+        /// keeps the id even when home narrows it to another `amountMax`.
+        uint256 requestedMax;
+        /// The asset's home address, its canonical identifier everywhere.
         address token;
-        /// Absolute timestamp: the satellite executes strictly before it.
+        /// Absolute timestamp: the away token executes strictly before it.
         uint64 validUntil;
-        /// Seconds T-REX keeps the slot reserved past `validUntil` for the reconciliation.
-        uint64 reconciliationWindow;
+        /// Names the copy home wrote, see {TicketLib-askBlockHashOf}. Two copies of one ask mined in two blocks share
+        /// the id and differ here.
+        bytes32 askBlockHash;
     }
 
-    /// @dev Body of a `RECEIPT`: a satellite reporting that one leg of a validation executed.
+    /// @dev Body of a `RECEIPT`: an away chain reporting what it did with one ticket copy.
     struct ReceiptMessage {
         bytes32 ticketId;
         /// ERC-7930; empty on the mint leg.
@@ -144,10 +148,17 @@ library MessageTypesLib {
         /// ERC-7930; empty on the burn leg.
         bytes to;
         uint256 amount;
-        /// {hashValidation} of the body the Lite executed under. Evidence, not a gate: the reference chain judges the
-        /// leg on its wallets and amount, and reads the hash to tell a body it never canonically issued (a reorg
-        /// orphaned it) from a Lite that broke a rule on the body it did issue.
-        bytes32 hash;
+        /// The `askBlockHash` of the ticket copy the away token holds: which copy home wrote this receipt answers.
+        bytes32 askBlockHash;
+        /// The `amountMax` of that copy.
+        uint256 seenMax;
+        /// The `validUntil` of that copy.
+        uint64 seenValidUntil;
+        /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket. Read by home
+        /// once second halves exist.
+        uint8 half;
+        /// Why the receipt says what it says, so a zero receipt says why it is zero.
+        ReceiptAnswer answer;
     }
 
     /// @dev Body of a `MOVE_OUT`: the reference chain already burned `amount` of `holder`'s native balance
@@ -201,26 +212,6 @@ library MessageTypesLib {
         (messageType, messageVersion, body) = abi.decode(payload, (Message, uint8, bytes));
 
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
-    }
-
-    /// @dev EIP-712 `hashStruct` of a validation's terms, without a domain: a commitment, not something to sign.
-    ///  The terms are the id, the wallets, the spender, the range and the token. `validUntil` and `reconciliationWindow`
-    ///  are left out on purpose: both are read off the issuing block's clock, so a body re-issued after a reorg
-    ///  dropped the first issuance would otherwise hash differently for the same movement, and the hash could no
-    ///  longer say whether the satellite executed the terms this chain issued.
-    function hashValidation(TicketMessage memory validation) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                COMPLIANCE_VALIDATION_TYPEHASH,
-                validation.ticketId,
-                keccak256(validation.from),
-                keccak256(validation.to),
-                keccak256(validation.spender),
-                validation.amountMin,
-                validation.amountMax,
-                validation.token
-            )
-        );
     }
 
     /// @dev Wraps a compliance validation in the envelope, as the compliance does before dispatching a leg.

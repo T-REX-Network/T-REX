@@ -289,8 +289,8 @@ contract SeedInterop is Script {
     }
 
     function _seedValidations() internal {
-        // The salt is the requester's nonce: the id is `keccak256(canonicalKey(from), salt)`, so a seed run
-        // that is replayed takes a fresh one.
+        // The salt is the requester's nonce: the id is built from the whole request, salt included, so a seed
+        // run that is replayed takes a fresh one.
         settledValidation =
             compliance.askToMove(satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "", _salt("settled"));
         _liteSends(
@@ -300,7 +300,11 @@ contract SeedInterop is Script {
                     from: satellites[0],
                     to: satellites[1],
                     amount: 30 * UNIT,
-                    hash: compliance.ticketOf(settledValidation).hash
+                    askBlockHash: compliance.ticketOf(settledValidation).askBlockHash,
+                    seenMax: compliance.ticketOf(settledValidation).amountMax,
+                    seenValidUntil: compliance.ticketOf(settledValidation).validUntil,
+                    half: 0,
+                    answer: MessageTypesLib.ReceiptAnswer.Executed
                 })
             )
         );

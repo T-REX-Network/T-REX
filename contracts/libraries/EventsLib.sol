@@ -207,7 +207,8 @@ library EventsLib {
     event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
     event ValidationIssuancePaused(bytes32 indexed chainKey);
     event ValidationIssuanceUnpaused(bytes32 indexed chainKey);
-    /// @notice Emitted on issuance with the full envelopes and the final bounds, so indexers need no reverse table.
+    /// @notice Emitted on issuance with the full envelopes, the asked and the final bounds, and the ask block hash
+    ///         of the copy sent, so indexers need no reverse table.
     event TicketWritten(
         bytes32 indexed ticketId,
         bytes from,
@@ -215,8 +216,9 @@ library EventsLib {
         bytes spender,
         uint256 amountMin,
         uint256 amountMax,
+        uint256 requestedMax,
         uint64 validUntil,
-        uint64 reconciliationWindow,
+        bytes32 askBlockHash,
         bytes32 salt
     );
     /// @notice Warning: a reconciliation of `ticketId` arrived from `chainKey` after its release deadline.
@@ -265,23 +267,25 @@ library EventsLib {
     /// @notice A leg arrived from `chainKey` for an id with no issued body: the satellite executed a validation
     ///         this chain never sent, which a reorg that dropped the issuance explains as well as a hostile Lite.
     ///         The leg is kept under its id and the token pauses its inbound from `chainKey`. Once the request is
-    ///         sent again with the same salt, `applyWaitingReceipt` settles it.
-    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
+    ///         sent again with the same terms and salt, `applyWaitingReceipt` settles it.
+    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
     /// @notice A parked leg from `chainKey` was settled, once its validation was issued.
     event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    /// @notice A leg from `chainKey` carries the issued hash but wallets or an amount outside the issued terms:
+    /// @notice A leg from `chainKey` carries the issued ask block hash but wallets or an amount outside the issued
+    /// terms:
     ///         the Lite broke a rule on the body this chain issued. Nothing is applied, the validation stands,
     ///         and the token pauses its inbound from `chainKey`.
-    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
-    /// @notice A leg from `chainKey` fails the issued terms and carries another hash: the satellite executed a body
+    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
+    /// @notice A leg from `chainKey` fails the issued terms and carries another ask block hash: the satellite executed
+    /// a body
     ///         this chain never canonically issued, one a reorg orphaned. Nothing is applied and the token pauses
     ///         its inbound from `chainKey`. While no leg had landed yet the validation ends `Orphaned`, its
     ///         reservation released; otherwise it stands and the keeper resolves the pair after the second window.
-    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);
-    /// @notice Information: a leg from `chainKey` settled inside the issued terms but carries another hash, so the
-    ///         satellite executed a body that differed in something the terms do not cover, or a wider range
-    ///         the canonical issuance narrowed, inside which the executed amount still sits.
-    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 hash);
+    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
+    /// @notice Information: a leg from `chainKey` settled inside the issued terms but carries another ask block
+    ///         hash, so the satellite executed a copy of the ask mined in another block, before a reorg, inside
+    ///         whose terms the executed amount still sits.
+    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 askBlockHash);
     // TREXAccessManager Events
 
     event DomainCreated(uint32 indexed domainId, string name);

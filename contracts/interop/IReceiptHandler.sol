@@ -104,8 +104,8 @@ interface IReceiptHandler {
     /// an `Open` validation settles it, whatever the clock says; one for a `Cancelled` validation reconciles it
     /// late: applied anyway, since the satellite execution is final, the modules caught up with no live
     /// reservation, `LateReconciliation` emitted and the leg's chain paused for issuance until the manager
-    /// unpauses it. The hash the leg carries is evidence, never the gate: a leg inside the terms settles whatever
-    /// hash it names (`SettlementBodyDiverged` when it is not the issued one).
+    /// unpauses it. The ask block hash the leg echoes is evidence, never the gate: a leg inside the terms settles
+    /// whatever copy it names (`SettlementBodyDiverged` when it is not the issued one).
     ///
     /// Nothing on this path reverts for good. A validation may travel to a satellite before this chain's finality,
     /// so a leg the token cannot account for has a reorg as a possible cause as well as a Lite breaking a rule,
@@ -120,16 +120,16 @@ interface IReceiptHandler {
     ///
     /// Any other leg the token cannot account for is one of four cases:
     /// - An id with no issued body: the leg is parked under its id and origin chain (`ReceiptWaiting`), so the
-    ///   request, sent again with the same salt, issues the same id, and `applyWaitingReceipt` then judges it as any
-    ///   leg. A second, different leg from the same chain for a parked id is a replay.
+    ///   request, sent again with the same terms and salt, issues the same id, and `applyWaitingReceipt` then judges it
+    ///   as any leg. A second, different leg from the same chain for a parked id is a replay.
     /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
     ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
-    /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
-    ///   issued (`ReceiptRefused`); the validation stands, the discard and resolution paths still apply.
-    /// - A leg outside the issued terms carrying another hash, from a chain the validation involves: the satellite
-    ///   executed a body this chain never canonically issued (`ValidationOrphaned`). While `Open` the validation
-    ///   ends `Orphaned` and its reservation is released; otherwise it stands. From any other chain the leg is
-    ///   rejected whatever hash it names: that chain could not have executed anything under the id.
+    /// - A leg outside the issued terms carrying the issued ask block hash: the Lite broke a rule on the copy this
+    ///   chain issued (`ReceiptRefused`); the validation stands, the discard and resolution paths still apply.
+    /// - A leg outside the issued terms carrying another ask block hash, from a chain the validation involves: the
+    ///   satellite executed a copy of the ask mined in a block a reorg dropped (`ValidationOrphaned`). While `Open`
+    ///   the validation ends `Orphaned` and its reservation is released; otherwise it stands. From any other chain
+    ///   the leg is rejected whatever it echoes: that chain could not have executed anything under the id.
     /// A revert, from a tracker module for instance, leaves the message deliverable again; a silent failure would
     /// instead leave it marked as received and unretryable.
     /// @param originChainKey The key of the chain the notification came from.

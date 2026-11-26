@@ -114,8 +114,9 @@ library ReceiptLib {
         Apply,
         /// Outside them: nothing is applied, the chain is paused, the validation stands.
         Refuse,
-        /// Outside them, under another hash, from a chain the validation involves, while `Open`: nothing is
-        /// applied, the chain is paused, and the validation ends `Orphaned` with its reservation released.
+        /// Outside them, under another ask block hash, from a chain the validation involves, while `Open`:
+        /// nothing is applied, the chain is paused, and the validation ends `Orphaned` with its reservation
+        /// released.
         Orphan
     }
 
@@ -172,17 +173,17 @@ library ReceiptLib {
 
     /// @dev The one classification, for a leg delivered now and for a leg parked earlier and settled once its id
     ///  is issued. In order: no body issued under the id, so the leg is parked; the substantive gate, wallets and
-    ///  amount against the issued terms, failed, so the leg is refused with the hash as the evidence of why; a
-    ///  leg already accounted for, so a replay; and only then the leg is applied, late or not.
+    ///  amount against the issued terms, failed, so the leg is refused with the ask block hash as the evidence of
+    ///  why; a leg already accounted for, so a replay; and only then the leg is applied, late or not.
     function _classify(bytes32 originChainKey, MessageTypesLib.ReceiptMessage memory notification, address token)
         private
         returns (IReceiptHandler.Verdict)
     {
         ITickets.Ticket storage validation = TicketLib.layout().validations[notification.ticketId];
-        // The hash is written when a validation is issued and sent, so a record without one was never sent
+        // The ask block hash is written when a ticket is issued and sent, so a record without one was never sent
         // anywhere: an id never taken, or a request still awaiting approval, refused, or left unanswered. The
         // satellite executed a body this chain did not issue, which a reorg explains as well as a hostile Lite.
-        if (validation.hash == bytes32(0)) {
+        if (validation.askBlockHash == bytes32(0)) {
             _park(originChainKey, notification);
             return IReceiptHandler.Verdict.PauseChain;
         }
@@ -258,23 +259,27 @@ library ReceiptLib {
     }
 
     /// @dev Judges a leg against the issued terms: the wallets it carries and the chain it comes from say which
-    ///  leg it is, and its amount must sit inside the range. Inside the terms it is applied whatever hash it
-    ///  names (`SettlementBodyDiverged` when not the issued one): the hash is evidence, never the gate.
+    ///  leg it is, and its amount must sit inside the range. Inside the terms it is applied whatever ask block hash
+    ///  it echoes (`SettlementBodyDiverged` when not the issued one): the hash is evidence, never the gate.
     ///
-    ///  Outside the terms nothing is applied and the chain is paused; the hash and the origin say which event
-    ///  records it. A chain the validation does not involve could not have executed anything under it, whatever
-    ///  hash it names: rejected. The issued hash from an involved chain: the Lite broke rule 5 or 6 on the body
-    ///  this chain issued; rejected, and the validation stands, so the discard and the resolution still have
-    ///  their say. Another hash from an involved chain: the Lite executed a body this chain never canonically
-    ///  issued, which a reorg orphaned. While `Open` the validation ends `Orphaned` and what it reserved comes
+    ///  Outside the terms nothing is applied and the chain is paused; the ask block hash and the origin say which
+    ///  event records it. A chain the validation does not involve could not have executed anything under it,
+    ///  whatever it echoes: rejected. The issued ask block hash from an involved chain: the Lite broke rule 5 or 6
+    ///  on the copy this chain issued; rejected, and the validation stands, so the discard and the resolution still
+    ///  have their say. Another ask block hash from an involved chain: the Lite executed a copy of the ask mined in
+    ///  a block a reorg dropped. While `Open` the validation ends `Orphaned` and what it reserved comes
     ///  back, since the tokens moved under terms this chain never reserved for and the ledger cannot absorb an
     ///  amount outside them. In any other state it stands: a leg already landed and the keeper resolves the pair
     ///  after the second window, or the discard already gave the reservation back.
     ///
-    ///  The hash is the Lite's word, which is why the orphaned reading is confined to the chains the validation
-    ///  names. On one leg, the most a lying Lite gets is ending its own validation early, on its own chain, which
-    ///  is paused for it. On a pair, the honest leg from the other chain then lands as a replay and pauses that
-    ///  chain too: a hostile involved peer, answered as any hostile peer is, by distrusting its gateway.
+    ///  The ask block hash compared is the one written at the ask, never a block hash read now, so the check holds
+    ///  past the 8,191 blocks for which the chain serves old block hashes (EIP-2935).
+    ///
+    ///  The echoed ask block hash is the Lite's word, which is why the orphaned reading is confined to the chains
+    ///  the validation names. On one leg, the most a lying Lite gets is ending its own validation early, on its
+    ///  own chain, which is paused for it. On a pair, the honest leg from the other chain then lands as a replay
+    ///  and pauses that chain too: a hostile involved peer, answered as any hostile peer is, by distrusting its
+    ///  gateway.
     function _judge(
         ITickets.Ticket storage validation,
         bytes32 originChainKey,
@@ -284,23 +289,27 @@ library ReceiptLib {
         (leg, matches) = _matchLeg(validation, originChainKey, notification);
         bool inRange = validation.amountMin <= notification.amount && notification.amount <= validation.amountMax;
         if (matches && inRange) {
-            if (notification.hash != validation.hash) {
-                emit EventsLib.SettlementBodyDiverged(notification.ticketId, originChainKey, notification.hash);
+            if (notification.askBlockHash != validation.askBlockHash) {
+                emit EventsLib.SettlementBodyDiverged(notification.ticketId, originChainKey, notification.askBlockHash);
             }
             return (Judgement.Apply, leg);
         }
 
         bool chainHoldsALeg = originChainKey == validation.fromChainKey
             || (validation.twoLegs && originChainKey == validation.toChainKey);
-        bool executedTheIssuedBody = notification.hash == validation.hash;
+        bool executedTheIssuedBody = notification.askBlockHash == validation.askBlockHash;
         // The chain could not have executed anything under this id, or it executed the very body this chain
         // issued and left its terms.
         bool noReorgExplainsTheLeg = !chainHoldsALeg || executedTheIssuedBody;
         if (noReorgExplainsTheLeg) {
-            emit EventsLib.ReceiptRefused(notification.ticketId, originChainKey, notification.amount, notification.hash);
+            emit EventsLib.ReceiptRefused(
+                notification.ticketId, originChainKey, notification.amount, notification.askBlockHash
+            );
             return (Judgement.Refuse, leg);
         }
-        emit EventsLib.ValidationOrphaned(notification.ticketId, originChainKey, notification.amount, notification.hash);
+        emit EventsLib.ValidationOrphaned(
+            notification.ticketId, originChainKey, notification.amount, notification.askBlockHash
+        );
         bool pending = validation.status == ITickets.TicketStatus.Open;
         return (pending ? Judgement.Orphan : Judgement.Refuse, leg);
     }
@@ -331,9 +340,9 @@ library ReceiptLib {
     /* ----- Parked legs ----- */
 
     /// @dev Keeps a leg reported for an id nothing was issued under, one per origin chain, so that once the
-    ///  request is sent again with the same salt it can be settled, see {applyWaitingReceipt}. A second leg from the
-    ///  same chain is a replay; the parked leg delivered again never reaches here, see {_recordDelivery}. Either
-    ///  way the caller pauses the chain: it executed what this chain never sent.
+    ///  request is sent again with the same terms and salt it can be settled, see {applyWaitingReceipt}. A second
+    ///  leg from the same chain is a replay; the parked leg delivered again never reaches here, see
+    ///  {_recordDelivery}. Either way the caller pauses the chain: it executed what this chain never sent.
     function _park(bytes32 originChainKey, MessageTypesLib.ReceiptMessage memory notification) private {
         ITickets.WaitingReceipt storage parked =
             TicketLib.layout().waitingReceipts[notification.ticketId][originChainKey];
@@ -344,9 +353,11 @@ library ReceiptLib {
         parked.from = notification.from;
         parked.to = notification.to;
         parked.amount = notification.amount;
-        parked.hash = notification.hash;
+        parked.askBlockHash = notification.askBlockHash;
         parked.exists = true;
-        emit EventsLib.ReceiptWaiting(notification.ticketId, originChainKey, notification.amount, notification.hash);
+        emit EventsLib.ReceiptWaiting(
+            notification.ticketId, originChainKey, notification.amount, notification.askBlockHash
+        );
     }
 
     /// @dev Takes the leg parked under `(ticketId, chainKey)` out of storage and hands it back as the
@@ -360,17 +371,20 @@ library ReceiptLib {
         ITickets.WaitingReceipt memory parked = store.waitingReceipts[ticketId][chainKey];
         // A leg is parked under the id for this chain.
         require(parked.exists, ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
-        // The id is issued: a record without a hash was never sent anywhere, and there is nothing to judge against.
-        require(store.validations[ticketId].hash != bytes32(0), ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
+        // The id is issued: a record without an ask block hash was never sent anywhere, and there is nothing to
+        // judge against.
+        require(store.validations[ticketId].askBlockHash != bytes32(0), ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
         TicketLib.requireTokenRunning(token);
         // A delivered leg from a paused chain waits at the gateway; a parked one from it waits here, for the same
         // investigation. The re-request is refused under the pause too, see
         // {TicketLib-requireInboundOpen}.
         TicketLib.requireInboundOpen(token, chainKey);
         delete store.waitingReceipts[ticketId][chainKey];
-        notification = MessageTypesLib.ReceiptMessage({
-            ticketId: ticketId, from: parked.from, to: parked.to, amount: parked.amount, hash: parked.hash
-        });
+        notification.ticketId = ticketId;
+        notification.from = parked.from;
+        notification.to = parked.to;
+        notification.amount = parked.amount;
+        notification.askBlockHash = parked.askBlockHash;
     }
 
     /// @dev The first of the two chains to report, whichever it is: the amount and the wallet it carries are

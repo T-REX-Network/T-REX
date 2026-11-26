@@ -313,7 +313,7 @@ contract NamespaceFieldsTest is Test {
         validationStorage.waitingTimes[KEY] = 12;
         validationStorage.issuancePaused[KEY] = true;
         ITickets.Ticket storage validation = validationStorage.validations[bytes32(NUMBER)];
-        validation.hash = bytes32(uint256(21));
+        validation.askBlockHash = bytes32(uint256(21));
         validation.amountMin = 22;
         validation.amountMax = 23;
         validation.validUntil = 24;
@@ -332,12 +332,13 @@ contract NamespaceFieldsTest is Test {
         validation.legWallet = hex"02";
         validation.spender = hex"03";
         validation.salt = bytes32(uint256(33));
+        validation.requestedMax = 34;
         validationStorage.awaitedTerms[bytes32(NUMBER)] = TicketLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
         ITickets.WaitingReceipt storage parked = validationStorage.waitingReceipts[bytes32(NUMBER)][KEY];
         parked.from = hex"05";
         parked.to = hex"06";
         parked.amount = 31;
-        parked.hash = bytes32(uint256(32));
+        parked.askBlockHash = bytes32(uint256(32));
         parked.exists = true;
         validationStorage.reportedLegs[KEY] = true;
 
@@ -353,12 +354,12 @@ contract NamespaceFieldsTest is Test {
         assertEq(_slot(_field(leg, 0)), _shortBytes(0x05), "waitingReceipts.from");
         assertEq(_slot(_field(leg, 1)), _shortBytes(0x06), "waitingReceipts.to");
         assertEq(_word(_field(leg, 2)), 31, "waitingReceipts.amount");
-        assertEq(_word(_field(leg, 3)), 32, "waitingReceipts.hash");
+        assertEq(_word(_field(leg, 3)), 32, "waitingReceipts.askBlockHash");
         assertEq(_word(_field(leg, 4)), 1, "waitingReceipts.exists");
         assertEq(_word(_entry(_field(base, 6), KEY)), 1, "reportedLegs");
 
         bytes32 entry = _entry(_field(base, 3), bytes32(NUMBER));
-        assertEq(_word(_field(entry, 0)), 21, "validations.hash");
+        assertEq(_word(_field(entry, 0)), 21, "validations.askBlockHash");
         assertEq(_word(_field(entry, 1)), 22, "validations.amountMin");
         assertEq(_word(_field(entry, 2)), 23, "validations.amountMax");
         // validUntil fills bytes 0 to 7, waitingEndsAt bytes 8 to 15.
@@ -380,6 +381,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_slot(_field(entry, 12)), _shortBytes(0x02), "validations.legWallet");
         assertEq(_slot(_field(entry, 13)), _shortBytes(0x03), "validations.spender");
         assertEq(_word(_field(entry, 14)), 33, "validations.salt");
+        assertEq(_word(_field(entry, 15)), 34, "validations.requestedMax");
     }
 
     function test_AbstractModuleUpgradeable() public {

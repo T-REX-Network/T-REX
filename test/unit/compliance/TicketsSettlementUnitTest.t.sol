@@ -133,7 +133,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     /* ----- Leg matching: a leg outside the issued terms is consumed with a verdict, never left deliverable ----- */
 
-    /// @notice Wrong or missing wallets under the issued hash: the Lite broke rule 6 on the body it was sent.
+    /// @notice Wrong or missing wallets under the issued ask block hash: the Lite broke rule 6 on the body it was sent.
     ///         Rejected, the chain paused, the validation untouched.
     function test_handleSettlement_Success_WhenAWalletIsMissingOrForeign() public {
         bytes32 id = _issue();
@@ -157,7 +157,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         _assertUntouched(id);
     }
 
-    /// @notice An amount outside the range under the issued hash: the Lite broke rule 5. Same outcome.
+    /// @notice An amount outside the range under the issued ask block hash: the Lite broke rule 5. Same outcome.
     function test_handleSettlement_Success_WhenAmountIsOutsideTheBounds() public {
         bytes32 id = _issue();
 
@@ -169,7 +169,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         _assertUntouched(id);
     }
 
-    /// @notice An amount outside the range under another hash: the Lite executed a body this chain never
+    /// @notice An amount outside the range under another ask block hash: the Lite executed a body this chain never
     ///         canonically issued, which a reorg orphaned. No leg had landed, so the validation ends there and
     ///         what it reserved comes back; the chain is paused.
     function test_handleSettlement_Success_WhenAnOrphanedBodyWasExecutedBeforeAnyLeg() public {
@@ -199,8 +199,8 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         );
     }
 
-    /// @notice A chain the validation does not involve could not have executed anything under it: whatever hash
-    ///         it names, its leg is rejected, never orphaned, so no peer can end another chain's validation.
+    /// @notice A chain the validation does not involve could not have executed anything under it: whatever ask
+    ///         block hash it names, its leg is rejected, never orphaned, so no peer can end another chain's validation.
     function test_handleSettlement_Success_WhenAnUninvolvedChainNamesAnotherHash() public {
         bytes32 id = _issue();
 
@@ -251,7 +251,8 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.ticketOf(id).moved, 50);
     }
 
-    /// @notice A leg inside the terms under another hash settles: the hash is evidence, the terms are the gate.
+    /// @notice A leg inside the terms under another ask block hash settles: the ask block hash is evidence, the
+    ///         terms are the gate.
     function test_handleSettlement_Success_WhenTheBodyDivergedButTheLegFitsTheTerms() public {
         _track();
         bytes32 id = _issue();
@@ -740,7 +741,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ReceiptWaiting(unknown, polygon, 50, leg.hash);
+        emit EventsLib.ReceiptWaiting(unknown, polygon, 50, leg.askBlockHash);
         vm.prank(token);
         IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, leg);
 
@@ -750,7 +751,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(parked.from, fromSat);
         assertEq(parked.to, toSat);
         assertEq(parked.amount, 50);
-        assertEq(parked.hash, leg.hash);
+        assertEq(parked.askBlockHash, leg.askBlockHash);
         assertEq(mc.ticketOf(unknown).fromIdentity, address(0), "the unknown id recorded nothing");
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
         mc.statusOf(unknown);
@@ -782,7 +783,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     function test_settleParkedLeg_Success_WhenTheRequestWasIssuedAgain() public {
         _track();
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
         bytes32 executedUnder = keccak256("the body the dropped issuance sent");
         vm.prank(token);
         mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, executedUnder));
@@ -812,7 +813,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     ///         it executed was orphaned, the validation ends there, and the token is told to pause the chain.
     function test_settleParkedLeg_Success_WhenTheLegFallsOutsideTheReissuedTerms() public {
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
         bytes32 executedUnder = keccak256("a wider body");
         vm.prank(token);
         mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 95, executedUnder));
@@ -833,7 +834,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     /// @notice On a pair, only the chain that has not reported is sent to; the parked leg settles on its own.
     function test_settleParkedLeg_Success_WhenOneLegOfAPairIsParked() public {
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toOptimism, "", 10, 90, salt);
         vm.prank(token);
         mc.receiveReceipt(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
 
@@ -854,7 +855,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     ///         stays parked for the keeper instead of keeping the id from ever being issued.
     function test_settleParkedLeg_RevertWhen_TheSecondParkedLegCarriesAnotherAmount() public {
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toOptimism, "", 10, 90, salt);
         vm.startPrank(token);
         mc.receiveReceipt(polygon, _legUnder(id, fromSat, "", 50, keccak256("body")));
         mc.receiveReceipt(optimism, _legUnder(id, "", toOptimism, 51, keccak256("body")));
@@ -874,7 +875,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     function test_settleParkedLeg_RevertWhen_NothingIsParkedOrNothingIsIssued() public {
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
         mc.applyWaitingReceipt(id, polygon);
 
@@ -894,7 +895,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     function test_settleParkedLeg_RevertWhen_TheChainsInboundIsPaused() public {
         _track();
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
         vm.prank(token);
         mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
         vm.prank(aliceIdentity);
@@ -912,7 +913,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     function test_settleParkedLeg_RevertWhen_TheTokenIsPaused() public {
         bytes32 salt = _salt();
-        bytes32 id = _validationId(fromSat, salt);
+        bytes32 id = _ticketId(fromSat, toSat, "", 10, 90, salt);
         vm.prank(token);
         mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, keccak256("body")));
         vm.prank(aliceIdentity);
@@ -1087,29 +1088,40 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         id = mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
     }
 
-    /// @dev A leg carrying the issued hash: what a Lite that executed the issued body reports.
+    /// @dev A leg echoing the issued copy: what a Lite that executed it reports.
     function _leg(bytes32 id, bytes memory from, bytes memory to, uint256 amount)
         private
         view
         returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return _legUnder(id, from, to, amount, _issuedHash(id));
+        return _legUnder(id, from, to, amount, _issuedAskBlockHash(id));
     }
 
-    /// @dev A leg carrying `hash`: what a Lite that executed another body reports.
-    function _legUnder(bytes32 id, bytes memory from, bytes memory to, uint256 amount, bytes32 hash)
+    /// @dev A leg echoing the copy named by `askBlockHash`: what a Lite that executed another copy reports. The
+    ///  echoed maximum and valid until are left at zero: home does not read them yet.
+    function _legUnder(bytes32 id, bytes memory from, bytes memory to, uint256 amount, bytes32 askBlockHash)
         private
         pure
         returns (MessageTypesLib.ReceiptMessage memory)
     {
-        return MessageTypesLib.ReceiptMessage({ ticketId: id, from: from, to: to, amount: amount, hash: hash });
+        return MessageTypesLib.ReceiptMessage({
+            ticketId: id,
+            from: from,
+            to: to,
+            amount: amount,
+            askBlockHash: askBlockHash,
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: 0,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
     }
 
-    /// @dev A leg outside the issued terms under the issued hash: rejected with the chain paused. Runs under the
-    ///  caller's prank.
+    /// @dev A leg outside the issued terms under the issued ask block hash: rejected with the chain paused. Runs
+    ///  under the caller's prank.
     function _assertRejected(bytes32 id, bytes32 chainKey, MessageTypesLib.ReceiptMessage memory leg) private {
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ReceiptRefused(id, chainKey, leg.amount, leg.hash);
+        emit EventsLib.ReceiptRefused(id, chainKey, leg.amount, leg.askBlockHash);
         assertEq(uint8(mc.receiveReceipt(chainKey, leg)), uint8(IReceiptHandler.Verdict.PauseChain));
     }
 

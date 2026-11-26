@@ -181,7 +181,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, spender));
         boundCompliance.askToMove(aliceSat, bobSat, 10, 200, spender, _salt());
 
-        _assertNothingRecorded(aliceSat);
+        _assertNothingRecorded(aliceSat, bobSat, spender, 10, 200);
     }
 
     /// @notice The same policy lets the issuance through once it accepts the named spender.
