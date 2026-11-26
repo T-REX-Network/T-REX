@@ -139,7 +139,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| ticket (an ask for its receipt) | anyone | `sendTicket(ticketId, chainKey, to, spender)`: while `Open`, three asks at most, the first one waiting time after the later of `validUntil` and `seenValidUntil`, each next one a waiting time later; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the ask did, on the ticket route when one is set and on the receipt route otherwise, and only while the receipt route and the peer are still the ones the ask pinned; refused while that away chain is blocked or the token is paused; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
+| ticket (an ask for its receipt) | anyone | `sendTicket(ticketId, chainKey, to, spender)`: while `Open`, three asks at most, the first one waiting time after the later of `validUntil` and `seenValidUntil`, each next one a waiting time later; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out on the ticket route when one is set and on the receipt route otherwise, to the pinned pair while it is the current pair or the former pair inside its window, and to the current pair otherwise; refused while that away chain is blocked or the token is paused; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -147,10 +147,27 @@ Nothing is written off; a lost message is sent again.
 
 A resend never retargets: it is refused (`PeerChanged`) once the chain's peer is no longer the one the instruction
 was addressed to. A resend after a route switch is the expected way to recover a recall whose original gateway is gone.
-A ticket is the exception: its receipt is matched against the bridge and the peer it was pinned to, so after a route
-switch or a peer change the ticket is not resent (`ValidationAlreadyRouted`). Its reservation comes back through a
-cancel once an ask for its receipt went unanswered, and a new ticket is asked for. The ticket already sent keeps its receipt from the peer it
-was sent to.
+A ticket is the exception: its receipt is taken from the bridge and the peer it was pinned to, so after a route
+switch or a peer change an ask for its receipt still goes to the pinned pair while that pair is the former one inside
+its window (the away token holding the ticket is the one that answers), and to the current pair after. Its
+reservation comes back through a cancel once an ask for its receipt went unanswered.
+
+## Changing a route or a peer
+
+A planned change (`setReceiptRoute` on an open route, or `setPeer`) is made on home first. Home keeps the route and
+peer the chain had as its former pair and takes every receipt from it for four waiting times of that away chain
+(`FormerRouteKept`, the waiting time read from the compliance at the change). The Lite switches only after home's
+change is final, early enough that its last receipts on the old pair land inside those four waiting times. A second
+change of route or peer on that chain inside the window is refused (`RouteChangedTooRecently`): it would drop the
+former pair. A receipt that came on the former pair inside the window and then waited (chain blocked, token stopped)
+stays applicable after the window ends. The accepted cost: an old peer that turns hostile inside the window can have
+home apply receipts it forges, for any ticket of that chain. When an away chain is first opened, set its peer before
+its receipt route: a change on a chain that has a route starts a change window.
+
+A hostile peer is replaced with `replaceHostilePeer`, never with `setPeer`. Home keeps no former pair, and for four
+waiting times of that away chain no ask, no ticket send, no ask for a receipt and no cancel runs for it
+(`HostileChangeNotOver`); receipts still land. Halves pinned to the hostile peer keep their receipt from it: for full
+containment the operator also distrusts its bridge.
 
 ## What the reference chain does with a Lite that breaks a rule
 
@@ -194,6 +211,7 @@ stays deliverable too. The remedy against a peer abusing its chain is to distrus
 |---|---|---|---|
 | token pause, `pause` | every balance movement between wallets, native or satellite; every inbound receipt waits at home and every proof reverts; new tickets, approvals into issuance and asks for receipts; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
 | block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home) and its proofs; delegations, new tickets and asks for receipts toward it; cancels of its tickets | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms; the token on a conflicting proof from that chain | the pauser, `unblockAwayChain` |
+| hostile peer replaced, `replaceHostilePeer` | asks, ticket sends, asks for receipts and cancels for one away chain, for four of its waiting times (`HostileChangeNotOver`); receipts still land | the identity manager | nobody: it ends by itself at `hostileChangeEndsAt` |
 | receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled meanwhile | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
 | bridge distrust, `distrustBridge` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled meanwhile | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 
@@ -205,7 +223,7 @@ that brought it, so one from a bridge distrusted meanwhile is never applied.
 
 A peer replaced with `setPeer` while recalls are open keeps the authority to settle those recalls, through their
 pinned gateway, for up to the instructed amounts: that is what lets a recall survive a planned peer change. When the
-peer is replaced because it is hostile, the operator first distrusts its gateway in `TrustedGatewayRegistry`, since a
+peer is replaced because it is hostile (`replaceHostilePeer`), the operator first distrusts its gateway in `TrustedGatewayRegistry`, since a
 distrusted gateway is refused even when pinned, or drains the open recalls before switching.
 
 ## Assumptions and accepted limitations

@@ -125,16 +125,24 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
+    function hostileChangeEndsAt(bytes32 chainKey) public view returns (uint64) {
+        return TREXMessagingLib.layout().hostileChangeEndsAt[chainKey];
+    }
+
+    /// @inheritdoc ITREXMessaging
     function isChainOpen(bytes32 chainKey) public view returns (bool) {
         return TREXMessagingLib.isChainOpen(chainKey);
     }
 
     /// @inheritdoc ITREXMessaging
-    function checkReceiptOrigin(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes32 halfKey)
-        external
-        view
-    {
-        TREXMessagingLib.checkReceiptOrigin(chainKey, bridge, senderPeerKey, halfKey);
+    function checkReceiptOrigin(
+        bytes32 chainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        bytes32 halfKey,
+        uint64 arrivedAt
+    ) external view {
+        TREXMessagingLib.checkReceiptOrigin(chainKey, bridge, senderPeerKey, halfKey, arrivedAt);
     }
 
     /// @dev Whether `gateway` has already delivered `receiveId` to this token. Always false for a zero id, which
@@ -211,6 +219,10 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
         TREXMessagingLib.setPeer(chainKey, peer);
+    }
+
+    function _replaceHostilePeer(bytes32 chainKey, bytes calldata peer) internal {
+        TREXMessagingLib.replaceHostilePeer(chainKey, peer);
     }
 
     /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to

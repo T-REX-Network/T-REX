@@ -123,6 +123,7 @@ interface ITickets {
     error NoWaitingReceipt(bytes32 halfKey);
     error AwayChainNotBlocked(bytes32 chainKey);
     error AwayChainBlocked(bytes32 chainKey);
+    error HostileChangeNotOver(bytes32 chainKey, uint64 endsAt);
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
     error TokenPaused();
@@ -258,6 +259,8 @@ interface ITickets {
         bytes32 peerKey;
         /// What it moved, so a cancel can tell whether the sender's away balance covers it now.
         uint256 amount;
+        /// When it was delivered, so the route check run again takes the former pair it came on inside its window.
+        uint64 arrivedAt;
     }
 
     /// @dev The two validity windows: a ticket is valid until the ask's time plus the window of the route it travels.
@@ -338,6 +341,8 @@ interface ITickets {
     /// - A validity window set, and `from`'s chain with a waiting time; otherwise `ValidityWindowNotSet` or
     ///   `WaitingTimeNotSet`.
     /// - `from`'s chain not blocked; otherwise `AwayChainBlocked`.
+    /// - No hostile change running on `from`'s chain, see {ITREXMessaging-hostileChangeEndsAt}; otherwise
+    ///   `HostileChangeNotOver`.
     /// - The sender's identity below its open tickets and its asks in the current window; otherwise
     ///   `TooManyOpenTickets` or `AskLimitReached`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
@@ -384,7 +389,7 @@ interface ITickets {
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
     /// - On an approval, the token not paused, otherwise `TokenPaused`, and the sender's chain still open,
-    ///   configured and not blocked, as at a request.
+    ///   configured, not blocked and with no hostile change running, as at a request.
     ///
     /// Emits `TicketWritten` and sends the ticket, unless a receipt for it already waits here, as `askToMove`
     /// does, or emits `ValidationApprovalRefused`.
@@ -543,6 +548,9 @@ interface ITickets {
     ///   one that answers the ticket may be among them. This holds for a ticket `WaitingForApproval` too.
     /// - The sender's away chain not blocked; otherwise reverts with `AwayChainBlocked`: its receipts wait, and may
     ///   answer the ticket. This holds for a ticket `WaitingForApproval` too.
+    /// - No hostile change running on the sender's away chain; otherwise reverts with `HostileChangeNotOver`: an
+    ///   honest receipt still on the replaced pair may answer the ticket. This holds for a ticket `WaitingForApproval`
+    ///   too.
     /// - The sender's away chain open on the token: a receipt route set, through a bridge still recorded as a
     ///   receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
     ///   taken as missing.
@@ -570,10 +578,12 @@ interface ITickets {
     /// - `block.timestamp` at or after the next ask's time; otherwise reverts with `SendNotDue`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - `chainKey` must not be blocked; otherwise reverts with `AwayChainBlocked`.
+    /// - No hostile change may run on `chainKey`; otherwise reverts with `HostileChangeNotOver`.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
-    /// - The pinned bridge and peer must still be the chain's route and peer; otherwise the token reverts with
-    ///   `ValidationAlreadyRouted`.
+    ///
+    /// The ask goes to the pinned pair while it is the chain's current pair or its former pair inside the window of a
+    /// planned change, and to the current pair otherwise.
     ///
     /// Emits `ReceiptAsked`, then the token's `ProtocolMessageSent`.
     /// @param ticketId The ticket sent again.

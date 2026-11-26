@@ -159,7 +159,8 @@ library ReceiptLib {
 
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
         _requireCanBeAppliedNow(ticket, halfKey, waiting.chainKey, receipt, token);
-        ITREXMessaging(token).checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey);
+        ITREXMessaging(token)
+            .checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey, waiting.arrivedAt);
 
         delete store.waitingReceipts[halfKey];
         store.receiptHashes[halfKey] = receiptHash;
@@ -455,6 +456,7 @@ library ReceiptLib {
         waiting.deliveredBy = bridge;
         waiting.peerKey = senderPeerKey;
         waiting.amount = receipt.amount;
+        waiting.arrivedAt = uint64(block.timestamp);
         emit EventsLib.ReceiptWaiting(halfKey, originChainKey, bridge, receipt);
     }
 
@@ -462,11 +464,11 @@ library ReceiptLib {
 
     /// @dev Anyone may cancel: an `Open` ticket once an ask for its receipt went unanswered, see {_cancelDueAt}; a
     ///  ticket `WaitingForApproval` once past `validUntil`. One refused id reverts the whole batch.
-    ///  No ticket is cancelled while the away chain that owes its receipt is
-    ///  blocked or the token is stopped, a ticket waiting for approval included: its receipt may be waiting, see
-    ///  {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot deliver its receipt, see
-    ///  {_requireReceiptRouteOpen}. Nor while a receipt for it waits and can be applied now, see
-    ///  {_requireNoWaitingReceiptToApply}.
+    ///  No ticket is cancelled while the away chain that owes its receipt is blocked, its peer was replaced as hostile
+    ///  less than four waiting times ago, or the token is stopped, a ticket waiting for approval included: its receipt
+    ///  may be waiting or on its way, see {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot
+    ///  deliver its receipt, see {_requireReceiptRouteOpen}. Nor while a receipt for it waits and can be applied now,
+    ///  see {_requireNoWaitingReceiptToApply}.
     /// @param token the token the compliance is bound to
     function cancelTickets(bytes32[] calldata validationIds, address token) external {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
@@ -533,7 +535,8 @@ library ReceiptLib {
         view
         returns (bool)
     {
-        try ITREXMessaging(token).checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey) {
+        try ITREXMessaging(token)
+            .checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey, waiting.arrivedAt) {
             return true;
         } catch (bytes memory reason) {
             bool ranOutOfGas = reason.length == 0;

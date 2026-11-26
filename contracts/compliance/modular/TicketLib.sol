@@ -442,7 +442,7 @@ library TicketLib {
         // is checked again, since it may have been blocked while the request waited, and so is the token: all
         // of it before anything is written. Both rows hold the ask, so the narrowing alone gives something back.
         requireTokenRunning(token);
-        _openChainWindow(store, validation.fromChainKey);
+        _openChainWindow(store, token, validation.fromChainKey);
 
         if (approvedMax < validation.amountMax) {
             _release(validation, validation.amountMax - approvedMax, token);
@@ -474,8 +474,8 @@ library TicketLib {
     /// @dev Asks the away token for the ticket's receipt, see {ITickets-sendTicket}: the ticket rebuilt from its
     ///  record and the two envelopes the caller supplies again, which must be the ones it was asked with, sent byte for
     ///  byte, ask block hash included. Anyone may ask, at the fixed times {nextAskDueAt} gives, at most
-    ///  `MAX_RECEIPT_ASKS` times. A blocked `chainKey` refuses an ask as it refuses an ask to move, and so does the
-    ///  token's own pause, see {requireTokenRunning}.
+    ///  `MAX_RECEIPT_ASKS` times. A blocked `chainKey` refuses an ask as it refuses an ask to move, and so do a hostile
+    ///  change running on it, see {requireNoHostileChange}, and the token's own pause, see {requireTokenRunning}.
     /// @param token the token the compliance is bound to
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender, address token)
         external
@@ -486,6 +486,7 @@ library TicketLib {
         _requireReceiptCanBeAsked(ticket, ticketId, chainKey);
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
+        requireNoHostileChange(token, chainKey);
         require(WalletKeyLib.canonicalKey(to) == ticket.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
         require(keccak256(spender) == keccak256(ticket.spender), ErrorsLib.ValidationBodyMismatch(ticketId));
 
@@ -548,7 +549,7 @@ library TicketLib {
     {
         requireTokenRunning(token);
         ValidationStorage storage store = layout();
-        window = _openChainWindow(store, fromChainKey);
+        window = _openChainWindow(store, token, fromChainKey);
         uint64 validityWindow = _validityWindowOf(store, token, fromChainKey);
         require(validityWindow != 0, ErrorsLib.ValidityWindowNotSet());
         validUntil = uint64(block.timestamp) + validityWindow;
@@ -570,9 +571,15 @@ library TicketLib {
         return store.validityWindows.onTicketRoute;
     }
 
-    /// @dev The waiting time of a chain a ticket may go to: not blocked, and a window configured.
-    function _openChainWindow(ValidationStorage storage store, bytes32 chainKey) private view returns (uint64 window) {
+    /// @dev The waiting time of a chain a ticket may go to: not blocked, no hostile change running, and a window
+    ///  configured.
+    function _openChainWindow(ValidationStorage storage store, address token, bytes32 chainKey)
+        private
+        view
+        returns (uint64 window)
+    {
         requireAwayChainNotBlocked(chainKey);
+        requireNoHostileChange(token, chainKey);
         window = store.waitingTimes[chainKey];
         require(window != 0, ErrorsLib.WaitingTimeNotSet(chainKey));
     }
@@ -677,10 +684,21 @@ library TicketLib {
     ///  waiting from that chain may already answer it: cancelling on their absence would release what they move.
     ///  The token's own pause holds every chain's receipts the same way, so nothing is decided under it either: a
     ///  pause that outlasts `waitingEndsAt` would otherwise release a reservation whose receipt is waiting, and the
-    ///  room it frees could be reserved again before that receipt is applied.
+    ///  room it frees could be reserved again before that receipt is applied. Nor while a hostile change runs on
+    ///  that chain, see {requireNoHostileChange}.
     function requireTicketCanBeDecided(address token, ITickets.Ticket storage ticket) internal view {
         requireTokenRunning(token);
         requireAwayChainNotBlocked(ticket.fromChainKey);
+        requireNoHostileChange(token, ticket.fromChainKey);
+    }
+
+    /// @dev Nothing is asked, sent or cancelled for an away chain whose peer was replaced as hostile, until four of
+    ///  its waiting times have passed: home keeps no former pair then, so an honest receipt still on the old pair is
+    ///  refused until the away token switches, and a cancel meanwhile could release a ticket it executed. Its
+    ///  receipts still land. The freeze is the token's, see {ITREXMessaging-hostileChangeEndsAt}.
+    function requireNoHostileChange(address token, bytes32 chainKey) internal view {
+        uint64 endsAt = ITREXMessaging(token).hostileChangeEndsAt(chainKey);
+        require(block.timestamp >= endsAt, ErrorsLib.HostileChangeNotOver(chainKey, endsAt));
     }
 
     /// @dev Blocks an away chain. The same state again changes nothing and emits nothing.

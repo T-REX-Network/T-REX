@@ -308,6 +308,11 @@ library ErrorsLib {
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error AwayChainBlocked(bytes32 chainKey);
+    /// @dev The route or peer of `chainKey` changed less than four waiting times ago: a change now would drop the
+    ///  former pair while receipts sent on it may still be on their way. Allowed from `allowedAt`.
+    error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
+    /// @dev The peer of `chainKey` was replaced as hostile: asks, ticket sends and cancels for it wait until `endsAt`.
+    error HostileChangeNotOver(bytes32 chainKey, uint64 endsAt);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
@@ -331,6 +336,5 @@ library ErrorsLib {
     error SenderNotCompliance(address sender);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
     error UnsupportedMessageVersion(uint8 messageVersion);
-    error ValidationAlreadyRouted(bytes32 ticketId, bytes32 chainKey, address gateway);
 
 }

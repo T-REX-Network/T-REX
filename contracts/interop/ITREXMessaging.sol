@@ -71,6 +71,8 @@ interface ITREXMessaging {
     event ReceiptRouteClosed(bytes32 indexed chainKey);
     event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
+    event FormerRouteKept(bytes32 indexed chainKey, address indexed bridge, bytes32 peerKey, uint64 acceptedUntil);
+    event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
     event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event BurnProofReceived(
@@ -85,13 +87,13 @@ interface ITREXMessaging {
     error NotAReceiptBridge(address bridge);
     error NotATicketBridge(address bridge);
     error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
+    error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
     error MessageTypeNotInbound(MessageTypesLib.Message messageType);
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error ValidationAlreadyRouted(bytes32 ticketId, bytes32 chainKey, address gateway);
     error UnsupportedMessageVersion(uint8 messageVersion);
 
     error InteroperableAddressParsingError(bytes);
@@ -106,6 +108,11 @@ interface ITREXMessaging {
     /// the receiving policy checks it, so the token reads that policy rather than a label. A receipt route is
     /// never set to zero; `closeReceiptRoute` closes it. Changing the bridge is one call to this setter.
     ///
+    /// A change of an open route is a planned change, made on home first: the route and peer the chain had are kept
+    /// as its former pair and taken for every receipt during four waiting times of the away chain (read from the
+    /// compliance), so the receipts the away token sends before it switches still land. A hostile peer is replaced
+    /// with `replaceHostilePeer` instead.
+    ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - `bridge` must be recorded as a receipt bridge in the registry; otherwise reverts with `NotAReceiptBridge`.
@@ -114,8 +121,11 @@ interface ITREXMessaging {
     ///   `InvalidChainReference`.
     /// - The receiving policy of `bridge` for `awayChainSelector` and `awayReceiptBridge` must admit full finality
     ///   only; otherwise reverts with `ReceiptBridgeNotFullFinality`.
+    /// - The last planned change of the chain's route or peer must be four waiting times old; otherwise reverts with
+    ///   `RouteChangedTooRecently`, since this change would drop the former pair.
     ///
-    /// Emits `ChainRegistered` on first sight of the prefix, then `ReceiptRouteSet`.
+    /// Emits `ChainRegistered` on first sight of the prefix, `FormerRouteKept` when the route was open, then
+    /// `ReceiptRouteSet`.
     /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
     /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
     /// @param bridge The receipt bridge on this chain.
@@ -179,14 +189,36 @@ interface ITREXMessaging {
     /// - A non-empty `peer` must be a canonical ERC-7930 v1 address with an account part, 20 bytes on EVM,
     ///   and no trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
+    /// - The last planned change of the chain's route or peer must be four waiting times old; otherwise reverts with
+    ///   `RouteChangedTooRecently`.
     ///
-    /// A half already sent keeps its receipt accepted from the peer it was sent to, as well as from the new one;
-    /// what is sent after the change goes to the new peer.
+    /// A planned change, made on home first. A half already sent keeps its receipt accepted from the peer it was
+    /// sent to, as well as from the new one; while the route is open, the former peer is also taken for every receipt
+    /// during four waiting times of the away chain. What is sent after the change goes to the new peer.
     ///
-    /// Emits `ChainRegistered` on first sight of the prefix, then `PeerSet`.
+    /// Emits `ChainRegistered` on first sight of the prefix, `FormerRouteKept` when the route is open, then `PeerSet`.
     /// @param chainKey The chain the peer is on.
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
+
+    /// @dev Replaces the peer of `chainKey` because the old one is hostile. No former pair is kept, a former pair of an
+    /// earlier planned change included: home cannot tell a receipt of the hostile peer from an honest one. For four
+    /// waiting times of the away chain the compliance takes no ask, sends no ticket and cancels nothing for it, so an
+    /// honest receipt still on the old pair cannot be beaten by a cancel; receipts still land. Never refused for a
+    /// recent change.
+    ///
+    /// Requirements: those of `setPeer` on the peer, and the role bound to this selector by the AccessManager.
+    ///
+    /// Emits `ChainRegistered` on first sight of the prefix, `PeerSet`, then `HostilePeerReplaced`.
+    /// @param chainKey The chain the peer is on.
+    /// @param peer The new Lite as an ERC-7930 address, or empty to restore the default.
+    function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external;
+
+    /// @dev Until when asks, ticket sends and cancels for `chainKey` stay frozen after its peer was replaced as
+    /// hostile; the compliance reads it. Frozen while the time is before it.
+    /// @param chainKey The away chain to look up.
+    /// @return The end of the freeze, or zero when the peer was never replaced as hostile.
+    function hostileChangeEndsAt(bytes32 chainKey) external view returns (uint64);
 
     /// @dev The bridge registry this token resolves trust against. It is the network's, wired at
     /// deployment, and no role on the token can move it: distrusting a bridge in the registry severs
@@ -218,8 +250,8 @@ interface ITREXMessaging {
     function peerFor(bytes32 chainKey) external view returns (bytes memory);
 
     /// @dev The receipt route and the peer a half left through, written when it first left, even when the ticket
-    /// itself travelled on the ticket route. Its receipt is accepted from this pair or from the chain's current
-    /// one, so a route or peer change never strands a half in flight.
+    /// itself travelled on the ticket route. Its receipt is accepted from this pair, from the chain's current one,
+    /// or from the chain's former one during the window of a planned change.
     /// @param halfKey The half to look up, see {MessageTypesLib-halfKeyOf}: the ticket id itself for the ticket,
     /// the first half of its move.
     /// @return bridge The pinned receipt bridge, or zero when the half never left.
@@ -235,9 +267,10 @@ interface ITREXMessaging {
 
     /// @dev Runs the route check a receipt passes at delivery again, for a receipt the compliance kept waiting:
     /// `bridge` must still be a receipt bridge of the network, the away chain's receipt route must be open, the
-    /// pair must be the one the half was pinned to or the chain's current route and peer, and the bridge's
-    /// receiving policy must still admit that away chain at full finality only. A bridge distrusted, a route
-    /// closed or changed, or a peer replaced since the receipt arrived therefore refuses it.
+    /// pair must be the one the half was pinned to, the chain's current route and peer, or its former ones as long as
+    /// the receipt arrived inside the window of their planned change, and the bridge's receiving policy must still
+    /// admit that away chain at full finality only. A bridge distrusted, a route closed or changed, or a peer replaced
+    /// since the receipt arrived therefore refuses it; so does a hostile change, which drops the former pair.
     ///
     /// Reverts with `NotAReceiptBridge`, `ChainNotOpen`, `PeerChanged`, `BridgeNotOnRoute` or
     /// `ReceiptBridgeNotFullFinality`; returns nothing when the receipt may be applied.
@@ -245,6 +278,13 @@ interface ITREXMessaging {
     /// @param bridge The bridge that delivered it.
     /// @param senderPeerKey The `keccak256` of the peer that sent it.
     /// @param halfKey The half it answers, see {MessageTypesLib-halfKeyOf}.
-    function checkReceiptOrigin(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes32 halfKey) external view;
+    /// @param arrivedAt When it was delivered: the former pair is taken if its window still ran then.
+    function checkReceiptOrigin(
+        bytes32 chainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        bytes32 halfKey,
+        uint64 arrivedAt
+    ) external view;
 
 }

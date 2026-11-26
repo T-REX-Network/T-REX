@@ -184,6 +184,12 @@ library EventsLib {
     /// @notice Emitted when the ticket route of `chainKey`, which carries tickets only, is set; zero unsets it.
     event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
+    /// @notice Emitted when a planned change keeps the route and peer `chainKey` had as its former pair, taken for
+    ///  every receipt until `acceptedUntil`.
+    event FormerRouteKept(bytes32 indexed chainKey, address indexed bridge, bytes32 peerKey, uint64 acceptedUntil);
+    /// @notice Emitted when the peer of `chainKey` is replaced as hostile: no former pair is kept, and asks, ticket
+    ///  sends and cancels for that away chain wait until `endsAt`.
+    event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
     /// @notice Emitted when the half of `ticketId` toward `chainKey` is pinned to `gateway`, the chain's receipt
     ///         route when it left, and to the peer it went to, whichever route carried the ticket out.
     event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);

@@ -277,6 +277,7 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(token, ITREXMessaging.closeReceiptRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setTicketRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.replaceHostilePeer.selector, identityManagerRole);
 
         // Cross-chain instructions.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);

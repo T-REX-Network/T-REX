@@ -182,6 +182,11 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _setPeer(chainKey, peer);
     }
 
+    /// @inheritdoc ITREXMessaging
+    function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external restricted {
+        _replaceHostilePeer(chainKey, peer);
+    }
+
     /* ----- Interop Dispatch ----- */
 
     /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to the
@@ -194,8 +199,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /// Callable by the bound compliance alone, for a ticket's first send and each ask for its receipt. No role
     /// opens this door: a ticket body and the id it travels under are the compliance's to author, and a human
     /// holding the selector could otherwise forge either, or pin a route under an id the compliance has not
-    /// reached yet. Reverts when the chain was never opened, or when this ticket already went out toward
-    /// `chainKey` through another gateway.
+    /// reached yet. Reverts when the chain was never opened.
     function sendOnTicketRoute(bytes32 chainKey, bytes32 ticketId, bytes calldata body) external returns (bytes32) {
         require(_msgSender() == address(_getCompliance()), ErrorsLib.SenderNotCompliance(_msgSender()));
 
