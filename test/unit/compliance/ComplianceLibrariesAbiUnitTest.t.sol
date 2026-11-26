@@ -63,8 +63,14 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITransferValidation.ValidationSettled.selector, EventsLib.ValidationSettled.selector);
         assertEq(ITransferValidation.LateReconciliation.selector, EventsLib.LateReconciliation.selector);
         assertEq(ITransferValidation.ReplayedSettlement.selector, EventsLib.ReplayedSettlement.selector);
+        assertEq(ITransferValidation.SettlementDuplicate.selector, EventsLib.SettlementDuplicate.selector);
         assertEq(ITransferValidation.ValidationDiscarded.selector, EventsLib.ValidationDiscarded.selector);
         assertEq(ITransferValidation.ValidationResolved.selector, EventsLib.ValidationResolved.selector);
+        assertEq(ITransferValidation.SettlementParked.selector, EventsLib.SettlementParked.selector);
+        assertEq(ITransferValidation.ParkedLegSettled.selector, EventsLib.ParkedLegSettled.selector);
+        assertEq(ITransferValidation.SettlementRejected.selector, EventsLib.SettlementRejected.selector);
+        assertEq(ITransferValidation.ValidationOrphaned.selector, EventsLib.ValidationOrphaned.selector);
+        assertEq(ITransferValidation.SettlementBodyDiverged.selector, EventsLib.SettlementBodyDiverged.selector);
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
@@ -84,8 +90,10 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITransferValidation.EmptyValidationRange.selector, ErrorsLib.EmptyValidationRange.selector);
         assertEq(ITransferValidation.ZeroValue.selector, ErrorsLib.ZeroValue.selector);
         assertEq(ITransferValidation.ValidationSpenderRefused.selector, ErrorsLib.ValidationSpenderRefused.selector);
-        assertEq(ITransferValidation.SettlementLegMismatch.selector, ErrorsLib.SettlementLegMismatch.selector);
-        assertEq(ITransferValidation.SettlementOutOfBounds.selector, ErrorsLib.SettlementOutOfBounds.selector);
+        assertEq(ITransferValidation.ValidationAlreadyRequested.selector, ErrorsLib.ValidationAlreadyRequested.selector);
+        assertEq(ITransferValidation.ParkedLegNotSettleable.selector, ErrorsLib.ParkedLegNotSettleable.selector);
+        assertEq(ITransferValidation.ParkedLegAwaitsSettlement.selector, ErrorsLib.ParkedLegAwaitsSettlement.selector);
+        assertEq(ITransferValidation.TokenPaused.selector, ErrorsLib.TokenPaused.selector);
         assertEq(ITransferValidation.SettlementAmountMismatch.selector, ErrorsLib.SettlementAmountMismatch.selector);
         assertEq(ITransferValidation.ValidationNotDiscardable.selector, ErrorsLib.ValidationNotDiscardable.selector);
         assertEq(ITransferValidation.ValidationNotReleasable.selector, ErrorsLib.ValidationNotReleasable.selector);

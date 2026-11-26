@@ -61,7 +61,8 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
  * chain, so the expected envelopes are built with that chain id); a validation executes once, before its expiry,
  * inside its range, for its wallets, by its sender or its named spender; a mint leg is minted only on the sending
  * Lite's burn message; a mint instruction mints once per `delegationId`, and the same id with other contents is
- * refused; a recall burns once per `recallId`, stores its proof, and answers any repetition with the stored proof.
+ * refused; a recall burns once per `recallId`, stores its proof, and answers any repetition with the stored proof;
+ * every settlement it reports is stored and can be resent unchanged.
  */
 contract SatelliteLiteMock is IERC7786Recipient {
 
@@ -69,23 +70,24 @@ contract SatelliteLiteMock is IERC7786Recipient {
     error NotTheReferenceToken(bytes sender);
     error NotThePeerLite(bytes sender);
     error AlreadyDelivered(bytes32 receiveId);
-    error UnknownValidation(uint256 validationId);
-    error ValidationConsumed(uint256 validationId);
-    error ValidationExpired(uint256 validationId);
-    error AmountOutOfRange(uint256 validationId, uint256 amount);
-    error NotTheExecutor(uint256 validationId, address caller);
+    error UnknownValidation(bytes32 validationId);
+    error ValidationConsumed(bytes32 validationId);
+    error ValidationExpired(bytes32 validationId);
+    error AmountOutOfRange(bytes32 validationId, uint256 amount);
+    error NotTheExecutor(bytes32 validationId, address caller);
     error InsufficientBalance(bytes wallet, uint256 balance, uint256 amount);
-    error BurnNotReceived(uint256 validationId);
-    error AlreadyMinted(uint256 validationId);
-    error RecipientMismatch(uint256 validationId);
+    error BurnNotReceived(bytes32 validationId);
+    error AlreadyMinted(bytes32 validationId);
+    error RecipientMismatch(bytes32 validationId);
     error DelegationConflict(uint256 delegationId);
     error RecallConflict(uint256 recallId);
     error NoStoredProof(uint256 recallId);
+    error NoStoredSettlement(bytes32 validationId);
     error UnexpectedMessage(uint8 messageType);
 
     /// @dev A burn message between two Lites. Travels under `LITE_BURN`, outside the protocol's type range.
     struct BurnMessage {
-        uint256 validationId;
+        bytes32 validationId;
         bytes to;
         uint256 amount;
     }
@@ -100,14 +102,18 @@ contract SatelliteLiteMock is IERC7786Recipient {
     ERC7786GatewayMock public peerGateway;
 
     mapping(bytes32 receiveId => bool) public delivered;
-    mapping(uint256 validationId => MessageTypesLib.ComplianceValidation) internal _validations;
-    mapping(uint256 validationId => bool) public known;
-    mapping(uint256 validationId => bool) public consumed;
-    mapping(uint256 validationId => uint256) public burnReceived;
-    mapping(uint256 validationId => bool) public minted;
+    mapping(bytes32 validationId => MessageTypesLib.ComplianceValidation) internal _validations;
+    /// @dev `MessageTypesLib.hashValidation` of the body held under the id: what every report for it carries.
+    mapping(bytes32 validationId => bytes32) public hashOf;
+    mapping(bytes32 validationId => bool) public known;
+    mapping(bytes32 validationId => bool) public consumed;
+    mapping(bytes32 validationId => uint256) public burnReceived;
+    mapping(bytes32 validationId => bool) public minted;
     mapping(uint256 delegationId => bytes32) public delegationSeen;
     mapping(uint256 recallId => bytes32) public recallSeen;
     mapping(uint256 recallId => bytes) internal _proofs;
+    /// @dev The settlement this Lite reported for each validation, kept so it can be sent again unchanged.
+    mapping(bytes32 validationId => bytes) internal _settlements;
     mapping(uint256 recallId => uint256) public burnedFor;
     mapping(bytes32 walletKey => uint256) internal _balances;
 
@@ -130,7 +136,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
         return _balances[keccak256(wallet)];
     }
 
-    function validationOf(uint256 validationId) external view returns (MessageTypesLib.ComplianceValidation memory) {
+    function validationOf(bytes32 validationId) external view returns (MessageTypesLib.ComplianceValidation memory) {
         return _validations[validationId];
     }
 
@@ -158,11 +164,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
         require(_isAuthor(sender, seenFrom, referenceToken), NotTheReferenceToken(sender));
 
         if (messageType == uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION)) {
-            MessageTypesLib.ComplianceValidation memory validation = MessageTypesLib.decodeValidation(body);
-            if (!known[validation.validationId]) {
-                _validations[validation.validationId] = validation;
-                known[validation.validationId] = true;
-            }
+            _hold(MessageTypesLib.decodeValidation(body));
         } else if (messageType == uint8(MessageTypesLib.Message.MINT_INSTRUCTION)) {
             _mint(MessageTypesLib.decodeMintInstruction(body), keccak256(body));
         } else if (messageType == uint8(MessageTypesLib.Message.RECALL_INSTRUCTION)) {
@@ -175,7 +177,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
     }
 
     /// @notice The satellite user executes `validationId` for `amount`: the sender, or the named spender.
-    function execute(uint256 validationId, uint256 amount) external {
+    function execute(bytes32 validationId, uint256 amount) external {
         require(known[validationId], UnknownValidation(validationId));
         require(!consumed[validationId], ValidationConsumed(validationId));
         MessageTypesLib.ComplianceValidation storage validation = _validations[validationId];
@@ -207,7 +209,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
     }
 
     /// @notice What a Lite that ignored the two-leg rule would do: mint from the validation alone. Refused.
-    function mintWithoutBurn(uint256 validationId) external view {
+    function mintWithoutBurn(bytes32 validationId) external view {
         require(known[validationId], UnknownValidation(validationId));
         require(burnReceived[validationId] != 0, BurnNotReceived(validationId));
         revert AlreadyMinted(validationId);
@@ -220,7 +222,29 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _send(proof);
     }
 
+    /// @notice A retry of a settlement the reference chain may not have received: the stored report, byte for byte,
+    ///  as T-REX-Lite's `resendSettlement` sends it. The reference chain applies the leg once and recognises the
+    ///  repeat (`SettlementDuplicate`).
+    function resendSettlement(bytes32 validationId) external {
+        bytes memory settlement = _settlements[validationId];
+        require(settlement.length != 0, NoStoredSettlement(validationId));
+        _send(settlement);
+    }
+
     /* ----- Private ----- */
+
+    /// @dev Rule 3 of `docs/satellite-lite.md`. An unknown id is stored. A known id with the same hash is a
+    ///  resend, ignored. A known id with another hash, not yet consumed, replaces what is held: the reference
+    ///  chain re-issued it after a reorg, and the later body is the canonical one. Once consumed nothing changes:
+    ///  the report already names the hash executed under.
+    function _hold(MessageTypesLib.ComplianceValidation memory validation) private {
+        bytes32 id = validation.validationId;
+        bytes32 hash = MessageTypesLib.hashValidation(validation);
+        if (known[id] && (consumed[id] || hashOf[id] == hash)) return;
+        _validations[id] = validation;
+        hashOf[id] = hash;
+        known[id] = true;
+    }
 
     /// @dev Once per delegation id; the same id again with the same body is a no-op, with another body a conflict.
     function _mint(MessageTypesLib.MintInstruction memory instruction, bytes32 bodyHash) private {
@@ -262,7 +286,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
     ///      the validation this Lite holds is what the message is checked against. Without it the message is refused
     ///      and redelivered once the leg arrives.
     function _receiveBurn(BurnMessage memory message) private {
-        uint256 validationId = message.validationId;
+        bytes32 validationId = message.validationId;
         require(known[validationId], UnknownValidation(validationId));
         MessageTypesLib.ComplianceValidation storage validation = _validations[validationId];
         require(keccak256(message.to) == keccak256(validation.to), RecipientMismatch(validationId));
@@ -277,14 +301,15 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _report(message.validationId, "", message.to, message.amount);
     }
 
-    function _report(uint256 validationId, bytes memory from, bytes memory to, uint256 amount) private {
-        _send(
-            MessageTypesLib.encodeSettlement(
-                MessageTypesLib.SettlementNotification({
-                    validationId: validationId, from: from, to: to, amount: amount
-                })
-            )
+    /// @dev Rule 7: every report carries the hash of the body it was executed under, and is kept for a resend.
+    function _report(bytes32 validationId, bytes memory from, bytes memory to, uint256 amount) private {
+        bytes memory settlement = MessageTypesLib.encodeSettlement(
+            MessageTypesLib.SettlementNotification({
+                validationId: validationId, from: from, to: to, amount: amount, hash: hashOf[validationId]
+            })
         );
+        _settlements[validationId] = settlement;
+        _send(settlement);
     }
 
     function _send(bytes memory payload) private {

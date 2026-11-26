@@ -161,7 +161,7 @@ We welcome contributions from the community. Please refer to the [CONTRIBUTING](
 
 ## Security and audits
 
-T-REX v5 has been audited by OpenZeppelin. The audit report will be linked here once published.
+T-REX v5 has been audited by OpenZeppelin. Read the [audit report](https://www.openzeppelin.com/news/trex-v5-audit).
 
 Please report security vulnerabilities responsibly to security@t-rex.network rather than opening a public issue.
 

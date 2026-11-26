@@ -73,8 +73,8 @@ import { TransferValidationLib } from "./TransferValidationLib.sol";
  *
  * Three flows, each readable top to bottom, each in a library deployed once and linked so the compliance stays
  * under the contract size limit: {TransferValidationLib-request} issues, {TransferSettlementLib-handleSettlement}
- * applies what a satellite executed, {TransferSettlementLib-discardExpiredValidations} rolls back what it never
- * did. What stays here is the entry points of the first, the views and the settings. The reservation involves no
+ * applies what a satellite executed, or parks what it executed under an id nothing is issued under,
+ * {TransferSettlementLib-discardExpiredValidations} rolls back what it never did. What stays here is the entry points of the first, the views and the settings. The reservation involves no
  * module: issuance writes the pending amounts into the ledger and the other two flows release them once.
  *
  * `from` is always a satellite wallet, never a native one: the Lite that executes a validation has to physically
@@ -90,22 +90,26 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
 
     /// @inheritdoc ITransferValidation
     /// @dev The questions asked before anything is written, and the issuance, live in
-    ///  {TransferValidationLib-request}.
+    ///  {TransferValidationLib-request}. A chain that already reported a leg under this id, parked while nothing
+    ///  was issued, is not sent to; the parked leg is settled by {settleParkedLeg}, its own call, so nothing it
+    ///  may revert on can keep the request from issuing.
     function requestTransferValidation(
         bytes calldata from,
         bytes calldata to,
         uint256 requestedMin,
         uint256 requestedMax,
-        bytes calldata spender
-    ) external returns (uint256 validationId) {
+        bytes calldata spender,
+        bytes32 salt
+    ) external returns (bytes32 validationId) {
         return TransferValidationLib.request(
-            from, to, requestedMin, requestedMax, spender, address(_boundToken()), _authority()
+            from, to, requestedMin, requestedMax, spender, salt, address(_boundToken()), _authority()
         );
     }
 
     /// @inheritdoc ITransferValidation
-    /// @dev The answer, the narrowing and the legs live in {TransferValidationLib-answerApproval}.
-    function answerApproval(uint256 validationId, uint256 approvedMax) external {
+    /// @dev The answer, the narrowing and the legs live in {TransferValidationLib-answerApproval}; a leg parked
+    ///  under the id waits for {settleParkedLeg} once it is issued, and stays parked when it is refused.
+    function answerApproval(bytes32 validationId, uint256 approvedMax) external {
         TransferValidationLib.answerApproval(validationId, approvedMax, address(_boundToken()));
     }
 
@@ -114,7 +118,7 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     ///  must hash to what was issued, see {TransferValidationLib-resend}. Nothing is written: the
     ///  reservation, the id and the pinned route are those of the issuance, and the token refuses the send once
     ///  the leg's pinned gateway or peer is no longer the chain's.
-    function resendValidation(uint256 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
+    function resendValidation(bytes32 validationId, bytes32 chainKey, bytes calldata to, bytes calldata spender)
         external
     {
         TransferValidationLib.resend(
@@ -145,17 +149,17 @@ abstract contract TransferValidation is ITransferValidation, ComplianceLedger {
     }
 
     /// @inheritdoc ITransferValidation
-    function lastValidationId() public view returns (uint256) {
-        return _validationStorage().lastValidationId;
+    function parkedLegOf(bytes32 validationId, bytes32 chainKey) public view returns (ParkedLeg memory) {
+        return _validationStorage().parkedLegs[validationId][chainKey];
     }
 
     /// @inheritdoc ITransferValidation
-    function validationOf(uint256 validationId) public view returns (Validation memory) {
+    function validationOf(bytes32 validationId) public view returns (Validation memory) {
         return _validationStorage().validations[validationId];
     }
 
     /// @inheritdoc ITransferValidation
-    function statusOf(uint256 validationId) public view returns (ValidationStatus) {
+    function statusOf(bytes32 validationId) public view returns (ValidationStatus) {
         TransferValidationLib.ValidationStorage storage store = _validationStorage();
         require(TransferValidationLib.isRecorded(store, validationId), ErrorsLib.UnknownValidation(validationId));
         Validation storage validation = store.validations[validationId];

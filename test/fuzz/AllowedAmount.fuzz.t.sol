@@ -102,6 +102,7 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
         vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
+        vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(false));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", from), abi.encode(aliceIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", to), abi.encode(bobIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", to), abi.encode(true));
@@ -131,17 +132,17 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
                 expectedMin > expectedMax ? ErrorsLib.EmptyValidationRange.selector : ErrorsLib.ZeroValue.selector;
             vm.prank(aliceIdentity);
             vm.expectPartialRevert(expected);
-            mc.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+            mc.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
             vm.prank(aliceIdentity);
             vm.expectPartialRevert(expected);
-            reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+            reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
             return;
         }
 
         vm.prank(aliceIdentity);
-        uint256 id = mc.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+        bytes32 id = mc.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
         vm.prank(aliceIdentity);
-        uint256 reversedId = reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "");
+        bytes32 reversedId = reversed.requestTransferValidation(from, to, requestedMin, requestedMax, "", _salt());
         ITransferValidation.Validation memory validation = mc.validationOf(id);
         ITransferValidation.Validation memory reversedValidation = reversed.validationOf(reversedId);
 
