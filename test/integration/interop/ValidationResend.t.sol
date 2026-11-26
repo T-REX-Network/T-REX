@@ -59,7 +59,6 @@ contract ValidationResendTest is InteropSuiteTest {
     ERC7786GatewayMock internal optimismGateway;
     bytes internal aliceSat;
     bytes internal bobSat;
-    bytes internal bobOptimism;
     address internal stranger = makeAddr("stranger");
     bytes32 internal id;
 
@@ -72,7 +71,6 @@ contract ValidationResendTest is InteropSuiteTest {
 
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
-        bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
 
         vm.prank(agent);
         token.unpause();
@@ -94,7 +92,7 @@ contract ValidationResendTest is InteropSuiteTest {
 
         assertEq(polygonGateway.queueLength(), 2);
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload);
-        assertEq(_pinnedBridgeOf(id, polygon), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(id), address(polygonGateway));
         _assertNotPinnedAgain();
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
@@ -120,51 +118,13 @@ contract ValidationResendTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 50);
     }
 
-    /// @notice On two legs each chain's leg is resent on its own; the other queue is untouched.
-    function test_resendValidation_Success_WhenOnlyTheMintLegIsResent() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        optimismGateway.drop(0);
-
-        vm.prank(address(aliceIdentity));
-        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
-
-        assertEq(optimismGateway.queueLength(), 2);
-        assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
-        assertEq(polygonGateway.queueLength(), 2, "the burn leg's queue holds the two issued legs only");
-    }
-
-    /// @notice Once the burn landed the receiving Lite still needs its leg to check the burn message against, so the
-    ///         recipient's leg goes again past `validUntil`, until `waitingEndsAt`; the mint it then reports settles the pair.
-    function test_resendValidation_Success_WhenTheRecipientsLegIsResentAfterTheBurnLanded() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        optimismGateway.drop(0);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.AwaitingMint));
-        vm.warp(boundCompliance.ticketOf(crossChain).validUntil + 1);
-
-        vm.prank(address(aliceIdentity));
-        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
-
-        assertEq(optimismGateway.queueLength(), 2);
-        assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
-
-        optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(crossChain, token, bobOptimism, 10)));
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.Done));
-        assertEq(token.awayBalanceOf(bobOptimism), 10);
-    }
-
-    /// @notice After the burn the recipient is the one left waiting, so their identity may resend the leg toward
-    ///         their chain; the sender's leg stays the sender's.
+    /// @notice The receiver on the same away chain is left waiting too, so their identity may resend the ticket.
     function test_resendValidation_Success_WhenTheRecipientResendsTheLegTowardTheirChain() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        optimismGateway.drop(0);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-
         vm.prank(address(bobIdentity));
-        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
-        assertEq(optimismGateway.queueLength(), 2);
-        assertEq(optimismGateway.queuedMessage(1).payload, optimismGateway.queuedMessage(0).payload);
+        assertEq(polygonGateway.queueLength(), 2);
+        assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload);
     }
 
     /// @notice A spender travels with the object, so it is part of what must be supplied again.
@@ -210,76 +170,16 @@ contract ValidationResendTest is InteropSuiteTest {
         boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
+    /// @notice A home receiver's identity waits on no away chain: it may not resend the sender's ticket.
     function test_resendValidation_RevertWhen_TheRecipientAsksForTheSendersLeg() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
+        bytes memory nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
+        bytes32 toHome = _requestValidation(address(aliceIdentity), aliceSat, nativeBob, 1, 5);
 
         vm.prank(address(bobIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(bobIdentity), aliceSat)
         );
-        boundCompliance.sendTicket(crossChain, polygon, aliceSat, "");
-    }
-
-    /// @notice A leg resent from `waitingEndsAt` on could land after the pair was resolved and the burned amount
-    ///         returned, and mint it a second time; the resend stops one window ahead of the resolution.
-    function test_resendValidation_RevertWhen_TheRecipientsLegIsResentFromReleaseAtOn() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        optimismGateway.drop(0);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-        uint64 waitingEndsAt = boundCompliance.ticketOf(crossChain).waitingEndsAt;
-        vm.warp(waitingEndsAt);
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, crossChain, waitingEndsAt));
-        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
-        assertEq(optimismGateway.queueLength(), 1);
-    }
-
-    /// @notice A burn that lands after a discard is past `waitingEndsAt` by definition, so the discarded pair is out of
-    ///         the resend's reach; only `resolveStuckValidation` ends it.
-    function test_resendValidation_RevertWhen_TheBurnLandedAfterADiscard() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        optimismGateway.drop(0);
-        uint256 burn = _liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10));
-        vm.warp(boundCompliance.ticketOf(crossChain).waitingEndsAt + 1);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = crossChain;
-        vm.prank(keeper);
-        boundCompliance.cancelTickets(ids);
-        polygonGateway.relay(burn);
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.DiscardedAwaitingMint));
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotResendable.selector,
-                crossChain,
-                uint8(ITickets.TicketStatus.DiscardedAwaitingMint)
-            )
-        );
-        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
-    }
-
-    /// @notice Once the keeper resolved the pair the burned amount is back with the sender; a leg sent now could
-    ///         only make the receiving chain mint against it.
-    function test_resendValidation_RevertWhen_ThePairWasResolved() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        optimismGateway.drop(0);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-        ITickets.Ticket memory stored = boundCompliance.ticketOf(crossChain);
-        vm.warp(stored.waitingEndsAt + (stored.waitingEndsAt - stored.validUntil) + 1);
-        vm.prank(keeper);
-        boundCompliance.resolveStuckValidation(crossChain);
-        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotResendable.selector, crossChain, uint8(ITickets.TicketStatus.Resolved)
-            )
-        );
-        boundCompliance.sendTicket(crossChain, optimism, bobOptimism, "");
-        assertEq(optimismGateway.queueLength(), 1);
+        boundCompliance.sendTicket(toHome, polygon, nativeBob, "");
     }
 
     function test_resendValidation_RevertWhen_PastTheSatelliteDeadline() public {
@@ -300,20 +200,6 @@ contract ValidationResendTest is InteropSuiteTest {
             abi.encodeWithSelector(ErrorsLib.ValidationNotResendable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
         boundCompliance.sendTicket(id, polygon, bobSat, "");
-    }
-
-    /// @notice The sender's leg was consumed by the burn: sending it again could only make the Lite execute twice.
-    function test_resendValidation_RevertWhen_TheSendersLegIsResentAfterTheBurnLanded() public {
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, 10)));
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotResendable.selector, crossChain, uint8(ITickets.TicketStatus.AwaitingMint)
-            )
-        );
-        boundCompliance.sendTicket(crossChain, polygon, aliceSat, "");
     }
 
     /// @notice A chain whose inbound is paused holds its reports at the gateway; a leg sent now could only add to

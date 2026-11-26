@@ -239,7 +239,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         if (issued.length == 0) return;
         bytes32 id = issued[idSeed % issued.length];
         ITickets.Ticket memory validation = boundCompliance.ticketOf(id);
-        if (_burnLegArrived(validation.status)) return;
+        if (_receiptLanded(validation.status)) return;
         uint256 amount = bound(amountSeed, validation.amountMin, validation.amountMax);
 
         (bytes memory from, bytes memory to) = _walletsOf(validation);
@@ -417,23 +417,20 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     /// @dev The reservation rules, spelled out here rather than read back from the compliance. A harness that
     ///      asked the contract what it still reserves would agree with it by construction and prove nothing;
     ///      these are the rules the lifecycle is supposed to follow, written independently.
-    function _burnLegArrived(ITickets.TicketStatus status) private pure returns (bool) {
-        return status == ITickets.TicketStatus.AwaitingMint || status == ITickets.TicketStatus.DiscardedAwaitingMint
-            || status == ITickets.TicketStatus.Done || status == ITickets.TicketStatus.LateReconciled;
+    function _receiptLanded(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.Done;
     }
 
-    /// @dev The identities' pending amounts are outstanding while the movement is still expected, and never on
-    ///      a relocation, where nothing was reserved against them in the first place.
+    /// @dev The identities' pending amounts are outstanding while the move is still expected, and never on a
+    ///      relocation, where nothing was reserved against them in the first place.
     function _reservesIdentities(ITickets.Ticket memory v) private pure returns (bool) {
         if (v.relocation) return false;
-        return v.status == ITickets.TicketStatus.Open || v.status == ITickets.TicketStatus.AwaitingMint
-            || v.status == ITickets.TicketStatus.AwaitingBurn;
+        return v.status == ITickets.TicketStatus.WaitingForApproval || v.status == ITickets.TicketStatus.Open;
     }
 
-    /// @dev The sender wallet's share is outstanding until its burn leg arrives, which moves the amount into
-    ///      transit on the token instead.
+    /// @dev The sender wallet's share is outstanding while the move is still expected.
     function _reservesWallet(ITickets.Ticket memory v) private pure returns (bool) {
-        return v.status == ITickets.TicketStatus.Open || v.status == ITickets.TicketStatus.AwaitingBurn;
+        return v.status == ITickets.TicketStatus.WaitingForApproval || v.status == ITickets.TicketStatus.Open;
     }
 
     function _openPendingOf(address identity) private view returns (uint256 pendingIn, uint256 pendingOut) {

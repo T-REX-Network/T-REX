@@ -443,20 +443,15 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(_ledger().pendingInOf(address(bobIdentity)), 0);
     }
 
-    /// @notice A request nobody answered by its deadline reads `Expired`, as an `Open` validation past its
-    ///         release does: either can now be discarded.
+    /// @notice A request nobody answered by its deadline still reads `WaitingForApproval`: the clock moves no
+    ///         ticket, and the cancel is what ends it.
     function test_statusOf_Success_WhenAnUnansweredRequestPassedItsDeadline() public {
         bytes32 id = _request(10, 150);
         vm.warp(block.timestamp + VALIDITY_WINDOW - 1);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
 
         vm.warp(block.timestamp + 1);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
-        assertEq(
-            uint8(boundCompliance.ticketOf(id).status),
-            uint8(ITickets.TicketStatus.WaitingForApproval),
-            "derived, never stored"
-        );
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
     }
 
     function test_discardExpiredValidations_RevertWhen_TheRequestIsBeforeItsDeadline() public {
@@ -561,7 +556,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         gateway.relay(index);
 
         assertFalse(token.paused(), "the token keeps running");
-        assertTrue(token.isInboundPaused(polygon), "the chain that executed what was never sent is paused");
+        assertFalse(token.isInboundPaused(polygon), "nothing blocks the chain by itself");
         assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
@@ -577,7 +572,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         gateway.relay(_liteSettles(gateway, token, _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body"))));
 
         assertFalse(token.paused());
-        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.isInboundPaused(polygon));
         assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "left for the operator");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");

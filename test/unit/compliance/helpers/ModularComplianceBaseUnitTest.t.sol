@@ -116,8 +116,21 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
     ///  makes no call and consumes neither a prank nor an expected emit. `validations` is the namespace's fourth
     ///  field and `askBlockHash` the record's first.
     function _issuedAskBlockHash(bytes32 id) internal view returns (bytes32) {
+        return vm.load(address(mc), _ticketSlot(id));
+    }
+
+    /// @dev The `amountMax` and `validUntil` recorded for `id`, read off storage like {_issuedAskBlockHash}: the
+    ///  record's third field, and the low 8 bytes of its fourth.
+    function _issuedMaximumAndValidUntil(bytes32 id) internal view returns (uint256 amountMax, uint64 validUntil) {
+        bytes32 recordSlot = _ticketSlot(id);
+        amountMax = uint256(vm.load(address(mc), bytes32(uint256(recordSlot) + 2)));
+        validUntil = uint64(uint256(vm.load(address(mc), bytes32(uint256(recordSlot) + 3))));
+    }
+
+    /// @dev The first slot of the record of `id`: `validations` is the namespace's fourth field.
+    function _ticketSlot(bytes32 id) private pure returns (bytes32) {
         bytes32 base = 0x518dcda4927033bd42da8dd6047b92b4a950cebbc5bdd8461a5e9bb9c0545400;
-        return vm.load(address(mc), keccak256(abi.encode(id, uint256(base) + 3)));
+        return keccak256(abi.encode(id, uint256(base) + 3));
     }
 
     /// @dev The request sent with the last salt was refused: nothing was recorded under its id.

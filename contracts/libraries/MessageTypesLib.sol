@@ -80,7 +80,7 @@ library MessageTypesLib {
         MOVE_OUT,
         /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF` under its id.
         BRING_HOME,
-        /// Inbound. A satellite reporting that a validation's leg executed.
+        /// Inbound. An away chain reporting what it did with one half of a move.
         RECEIPT,
         /// Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.
         BURN_PROOF
@@ -143,9 +143,9 @@ library MessageTypesLib {
     /// @dev Body of a `RECEIPT`: an away chain reporting what it did with one ticket copy.
     struct ReceiptMessage {
         bytes32 ticketId;
-        /// ERC-7930; empty on the mint leg.
+        /// ERC-7930 wallet the tokens left.
         bytes from;
-        /// ERC-7930; empty on the burn leg.
+        /// ERC-7930 wallet the tokens reached.
         bytes to;
         uint256 amount;
         /// The `askBlockHash` of the ticket copy the away token holds: which copy home wrote this receipt answers.
@@ -154,8 +154,7 @@ library MessageTypesLib {
         uint256 seenMax;
         /// The `validUntil` of that copy.
         uint64 seenValidUntil;
-        /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket. Read by home
-        /// once second halves exist.
+        /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket.
         uint8 half;
         /// Why the receipt says what it says, so a zero receipt says why it is zero.
         ReceiptAnswer answer;
@@ -214,7 +213,7 @@ library MessageTypesLib {
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
     }
 
-    /// @dev Wraps a compliance validation in the envelope, as the compliance does before dispatching a leg.
+    /// @dev Wraps a ticket in the envelope, as the compliance does before sending it.
     function encodeValidation(TicketMessage memory validation) internal pure returns (bytes memory) {
         return abi.encode(Message.TICKET, VERSION, abi.encode(validation));
     }
@@ -252,6 +251,13 @@ library MessageTypesLib {
     /// @dev Unwraps a `BURN_PROOF` body. Reverts on a body that is not one.
     function decodeBurnProof(bytes memory body) internal pure returns (BurnProof memory) {
         return abi.decode(body, (BurnProof));
+    }
+
+    /// @dev The key of one half of a move: what one away chain answers with one receipt. Half 0, the away token's
+    ///  execution of the ticket, is keyed by the ticket id itself.
+    function halfKeyOf(bytes32 ticketId, uint8 half) internal pure returns (bytes32) {
+        if (half == 0) return ticketId;
+        return keccak256(abi.encode(ticketId, half));
     }
 
     /// @dev The per-chain key every route, peer and per-chain setting is stored under.

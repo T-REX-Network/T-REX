@@ -144,7 +144,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     }
 
     /// @notice A compliance that is modular but cannot receive settlements is refused as well.
-    function testTokenSetComplianceRevertsWhenNoSettlementHandler() public {
+    function test_setCompliance_reverts_when_theComplianceDoesNotDeclareTheReceiptHandler() public {
         address noSettlement = makeAddr("NoSettlementCompliance");
         vm.mockCall(noSettlement, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(

@@ -72,9 +72,8 @@ import { TicketLib } from "./TicketLib.sol";
  * late-reconciliation surface. Own ERC-7201 namespace, so the module registry's layout is untouched.
  *
  * Three flows, each readable top to bottom, each in a library deployed once and linked so the compliance stays
- * under the contract size limit: {TicketLib-request} issues, {ReceiptLib-receiveReceipt}
- * applies what a satellite executed, or parks what it executed under an id nothing is issued under,
- * {ReceiptLib-cancelTickets} rolls back what it never did. What stays here is the entry points of the first, the views and the settings. The reservation involves no
+ * under the contract size limit: {TicketLib-request} issues, {ReceiptLib-receiveReceipt} records what an away
+ * token reports it did, {ReceiptLib-cancelTickets} rolls back what it never did. What stays here is the entry points of the first, the views and the settings. The reservation involves no
  * module: issuance writes the pending amounts into the ledger and the other two flows release them once.
  *
  * `from` is always a satellite wallet, never a native one: the Lite that executes a validation has to physically
@@ -82,17 +81,14 @@ import { TicketLib } from "./TicketLib.sol";
  * position reaches a satellite through delegation-out instead, which burns before it instructs.
  *
  * `validUntil` is the satellite's hard deadline; `validUntil` plus the waiting time is when T-REX may release the
- * reservation, never a refusal of a late leg. Validations expire; settlements never do.
+ * reservation, never a refusal of a late receipt. Tickets expire; receipts never do.
  */
 abstract contract Tickets is ITickets, ComplianceLedger {
 
     /* ----- Issuance ----- */
 
     /// @inheritdoc ITickets
-    /// @dev The questions asked before anything is written, and the issuance, live in
-    ///  {TicketLib-request}. A chain that already reported a leg under this id, parked while nothing
-    ///  was issued, is not sent to; the parked leg is settled by {applyWaitingReceipt}, its own call, so nothing it
-    ///  may revert on can keep the request from issuing.
+    /// @dev The questions asked before anything is written, and the issuance, live in {TicketLib-request}.
     function askToMove(
         bytes calldata from,
         bytes calldata to,
@@ -107,8 +103,8 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    /// @dev The answer, the narrowing and the legs live in {TicketLib-answerApproval}; a leg parked
-    ///  under the id waits for {applyWaitingReceipt} once it is issued, and stays parked when it is refused.
+    /// @dev The answer, the narrowing and the send live in {TicketLib-answerApproval}; a receipt waiting under
+    ///  the id is applied by {applyWaitingReceipt} once the ticket is sent, and stays waiting when it is refused.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external {
         TicketLib.answerApproval(ticketId, approvedMax, address(_boundToken()));
     }
@@ -117,7 +113,7 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     /// @dev The record does not keep `to`, which the caller supplies again with `spender`; both must be the ones
     ///  the ticket was asked with, see {TicketLib-resend}. Nothing is written: the
     ///  reservation, the id and the pinned route are those of the issuance, and the token refuses the send once
-    ///  the leg's pinned gateway or peer is no longer the chain's.
+    ///  the pinned bridge or peer is no longer the chain's.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external {
         TicketLib.resend(
             ticketId,
@@ -147,6 +143,11 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
+    function ticketLimitsOf(bytes32 chainKey) public view returns (TicketLimits memory) {
+        return _validationStorage().ticketLimits[chainKey];
+    }
+
+    /// @inheritdoc ITickets
     function waitingReceiptOf(bytes32 ticketId, bytes32 chainKey) public view returns (WaitingReceipt memory) {
         return _validationStorage().waitingReceipts[ticketId][chainKey];
     }
@@ -160,15 +161,7 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     function statusOf(bytes32 ticketId) public view returns (TicketStatus) {
         TicketLib.ValidationStorage storage store = _validationStorage();
         require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
-        Ticket storage validation = store.validations[ticketId];
-        // `Expired` is the one status never stored: it is `Open` once the clock has passed `waitingEndsAt`, or
-        // `WaitingForApproval` once its deadline for an answer passed. Either way it can now be discarded. Every
-        // other state is returned as it stands, including which leg a pair is still waiting for.
-        bool pendingPastRelease = validation.status == TicketStatus.Open && block.timestamp > validation.waitingEndsAt;
-        bool unansweredPastDeadline =
-            validation.status == TicketStatus.WaitingForApproval && block.timestamp >= validation.validUntil;
-        if (pendingPastRelease || unansweredPastDeadline) return TicketStatus.Expired;
-        return validation.status;
+        return store.validations[ticketId].status;
     }
 
     /* ----- Settings ----- */
@@ -183,6 +176,19 @@ abstract contract Tickets is ITickets, ComplianceLedger {
         require(duration != 0, ErrorsLib.ZeroDuration());
         _validationStorage().waitingTimes[chainKey] = duration;
         emit EventsLib.WaitingTimeSet(chainKey, duration);
+    }
+
+    function _setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) internal {
+        TicketLib.ValidationStorage storage store = _validationStorage();
+        TicketLimits storage limits = store.ticketLimits[chainKey];
+        bool lowersThePerTicketCap = perTicketCap < limits.perTicketCap;
+        if (lowersThePerTicketCap) {
+            uint64 allowedAt = store.latestValidUntilSent[chainKey];
+            require(block.timestamp >= allowedAt, ErrorsLib.PerTicketCapLoweredTooEarly(chainKey, allowedAt));
+        }
+        limits.perTicketCap = perTicketCap;
+        limits.perWindowCap = perWindowCap;
+        emit EventsLib.TicketLimitsSet(chainKey, perTicketCap, perWindowCap);
     }
 
     /* ----- What the compliance provides ----- */

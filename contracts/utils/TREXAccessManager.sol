@@ -390,16 +390,16 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(compliance, ITickets.setDefaultValidityWindow.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setWaitingTime.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setIssuancePaused.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setTicketLimits.selector, complianceManagerRole);
 
-        // Issuing a validation, and sending a lost leg of one again.
+        // Issuing a ticket, and sending a lost one again.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(compliance, ITickets.askToMove.selector, agentRole);
         _setTargetFunctionRole(compliance, ITickets.sendTicket.selector, agentRole);
 
-        // Cleaning up expired or stuck validations.
+        // Cancelling overdue tickets.
         uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);
         _setTargetFunctionRole(compliance, ITickets.cancelTickets.selector, validationKeeperRole);
-        _setTargetFunctionRole(compliance, ITickets.resolveStuckValidation.selector, validationKeeperRole);
     }
 
     /// @dev Who hands out which role. The key that appoints never acts: `AGENT_ADMIN` and `SUITE_ADMIN` open

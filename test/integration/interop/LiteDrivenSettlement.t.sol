@@ -67,7 +67,6 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     Account aliceOnPolygon;
     bytes aliceSat;
     bytes bobSat;
-    bytes bobOptimism;
     bytes nativeBob;
 
     function setUp() public override {
@@ -89,7 +88,6 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         aliceOnPolygon = makeAccount("aliceOnPolygon");
         aliceSat = _linkSatelliteWallet(aliceIdentity, POLYGON, aliceOnPolygon);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
-        bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
         nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
 
         vm.startPrank(agent);
@@ -160,122 +158,6 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         vm.prank(address(token));
         polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(copy), new bytes[](0));
         polygonGateway.relay(_last(polygonGateway));
-    }
-
-    /* ----- Two legs ----- */
-
-    /// @notice The sending Lite burns and tells both the reference chain and the receiving Lite; the receiving Lite
-    ///         mints on that word and tells the reference chain; the pair settles at the amount the sender chose.
-    function test_twoLegs_Success_WhenTheLitesDriveBothLegs() public {
-        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
-        assertTrue(polygonLite.known(id));
-        assertTrue(optimismLite.known(id));
-
-        _execute(id, 95);
-        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED - 95, "burned on the sending chain");
-
-        _relayAll(polygonGateway);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.AwaitingMint));
-        assertEq(token.onHoldOf(id), 95);
-
-        _relayAll(optimismGateway);
-        _relayAll(optimismGateway);
-        assertEq(optimismLite.balanceOf(bobOptimism), 95, "minted on the receiving chain, from the burn message");
-
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
-        assertEq(token.awayBalanceOf(bobOptimism), 95);
-        assertEq(token.onHoldOf(id), 0);
-        assertEq(token.totalAwayBalance(), DELEGATED);
-        assertEq(token.totalSupply(), MINTED);
-    }
-
-    /// @notice The receiving Lite's copy of the validation was lost. The sender burns anyway; the burn message is
-    ///         refused for want of the terms to check it against, the leg is sent again, and the pair settles.
-    function test_twoLegs_Success_WhenTheReceivingLegIsLostAndResentAfterTheBurn() public {
-        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 90, 100);
-        optimismGateway.drop(_last(optimismGateway));
-        _relayAll(polygonGateway);
-        assertTrue(polygonLite.known(id));
-        assertFalse(optimismLite.known(id));
-
-        _execute(id, 95);
-        _relayAll(polygonGateway);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.AwaitingMint));
-        uint256 burnMessage = _last(optimismGateway);
-        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.UnknownTicket.selector, id));
-        optimismGateway.relay(burnMessage);
-
-        vm.prank(address(aliceIdentity));
-        boundCompliance.sendTicket(id, optimism, bobOptimism, "");
-        optimismGateway.relay(_last(optimismGateway));
-        assertTrue(optimismLite.known(id));
-        optimismGateway.relay(burnMessage);
-        _relayAll(optimismGateway);
-
-        assertEq(optimismLite.balanceOf(bobOptimism), 95, "minted once the leg and the burn message were both held");
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(token.awayBalanceOf(bobOptimism), 95);
-    }
-
-    function test_twoLegs_RevertWhen_TheReceivingLiteMintsBeforeTheBurnMessage() public {
-        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
-
-        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.BurnNotReceived.selector, id));
-        optimismLite.mintWithoutBurn(id);
-
-        assertEq(optimismLite.balanceOf(bobOptimism), 0);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
-    }
-
-    /// @notice A lost burn message leaves the pair waiting; after the second window the keeper returns the hold.
-    function test_twoLegs_Resolved_WhenTheBurnMessageIsLost() public {
-        uint256 issuedAt = block.timestamp;
-        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
-        _execute(id, 95);
-        optimismGateway.drop(_last(optimismGateway));
-        _relayAll(polygonGateway);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.AwaitingMint));
-
-        vm.warp(issuedAt + VALIDITY_WINDOW + 2 * OPTIMISM_WINDOW + 1);
-        vm.prank(keeper);
-        boundCompliance.resolveStuckValidation(id);
-
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Resolved));
-        assertEq(token.awayBalanceOf(aliceSat), DELEGATED, "the hold went back to the sender on this chain");
-    }
-
-    /// @notice The receiving chain is paused with its mint report held at the gateway. The keeper cannot resolve
-    ///         the pair on that report's absence, so once the pause is lifted the report lands and the pair
-    ///         settles: the ledger never credits the sender for what the receiving chain minted.
-    function test_twoLegs_Success_WhenTheReceivingChainIsPausedAcrossTheSecondWindow() public {
-        uint256 issuedAt = block.timestamp;
-        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
-        _execute(id, 95);
-        _relayAll(polygonGateway);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.AwaitingMint));
-
-        vm.prank(agent);
-        token.setInboundPaused(optimism, true);
-        optimismGateway.relay(_last(optimismGateway));
-        uint256 mintReport = _last(optimismGateway);
-        assertEq(optimismLite.balanceOf(bobOptimism), 95, "the receiving Lite minted on the burn message");
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
-        optimismGateway.relay(mintReport);
-
-        vm.warp(issuedAt + VALIDITY_WINDOW + 2 * OPTIMISM_WINDOW + 1);
-        vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
-        boundCompliance.resolveStuckValidation(id);
-
-        vm.prank(agent);
-        token.setInboundPaused(optimism, false);
-        optimismGateway.relay(mintReport);
-
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95, "the ledger follows the burn");
-        assertEq(token.awayBalanceOf(bobOptimism), 95, "and the mint");
-        assertFalse(token.isInboundPaused(optimism), "the honest chain stays open");
     }
 
     /* ----- One leg ----- */
@@ -544,28 +426,6 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertFalse(token.paused());
         assertEq(token.awayBalanceOf(bobSat), 50, "credited once");
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 50, "debited once");
-    }
-
-    /// @notice Both Lites of a pair resend their legs after the pair settled: each is a duplicate from the chain that
-    ///         sent it, and neither chain is paused.
-    function test_resendSettlement_Success_WhenBothLitesResendAfterThePairSettled() public {
-        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
-        _execute(id, 95);
-        _relayAll(polygonGateway);
-        _relayAll(optimismGateway);
-        _relayAll(optimismGateway);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-
-        polygonLite.resendSettlement(id);
-        optimismLite.resendSettlement(id);
-        _relayAll(polygonGateway);
-        _relayAll(optimismGateway);
-
-        assertFalse(token.isInboundPaused(polygon));
-        assertFalse(token.isInboundPaused(optimism));
-        assertEq(token.awayBalanceOf(bobOptimism), 95, "credited once");
-        assertEq(token.onHoldOf(id), 0);
-        assertEq(token.totalAwayBalance(), DELEGATED);
     }
 
 }

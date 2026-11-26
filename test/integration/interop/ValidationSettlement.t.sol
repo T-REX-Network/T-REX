@@ -57,10 +57,9 @@ import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/C
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 import { ReentrantModule } from "test/integration/mocks/ReentrantModule.sol";
 
-/// @dev One-leg settlements through the real messaging layer: a same-chain movement, a native sender, a native
-///      recipient, the deadline that never refuses a leg, every mismatch that is rejected or orphans the validation,
-///      and the two emergencies: a replay pauses its chain's inbound, a never-issued id parks the leg and pauses the
-///      chain that executed it. The token itself is never halted by a settlement.
+/// @dev Receipts through the real messaging layer: a same-chain move, a native recipient, the deadline that never
+///      refuses a receipt, every bad receipt that is refused, every broken term that is applied and blocks its chain,
+///      and an id home does not know, which blocks nobody. The token itself is never stopped by a receipt.
 contract ValidationSettlementTest is InteropSuiteTest {
 
     uint256 internal constant BALANCE = 1000;
@@ -173,7 +172,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95));
 
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1 days);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         polygonGateway.relay(index);
 
@@ -184,31 +183,27 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     // ==== mismatch Tests: the leg is consumed, nothing moves, and the chain that executed it is paused ====
 
-    /// @notice A leg outside the issued bounds, carrying the issued ask block hash, is rejected: the validation stays
-    ///         `Open`, nothing moves, and the chain that executed it is paused. Once lifted, the next
-    ///         out-of-bounds leg is rejected the same way.
-    function test_handleSettlement_Success_WhenAmountIsOutsideTheBoundsTheLegIsRejected() public {
+    /// @notice A receipt outside the bounds of home's own copy breaks its terms: it is applied as it happened,
+    ///         because the away token's balances already moved, and the chain that executed it is blocked.
+    function test_handleSettlement_AppliesAndBlocks_WhenTheAmountIsOutsideTheBounds() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
-
         uint256 below = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 80));
-        _relayRejected(polygonGateway, polygon, below, id, 80);
 
-        uint256 above = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 101));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        polygonGateway.relay(above);
-        _assertNothingApplied(polygonGateway, above);
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptApplied(id, polygon, 80);
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.InboundPaused(polygon);
+        polygonGateway.relay(below);
 
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
-        _relayRejected(polygonGateway, polygon, above, id, 101);
-
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
-        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
-        assertEq(token.awayBalanceOf(bobSat), 0);
+        assertTrue(token.isInboundPaused(polygon), "the chain that broke the terms is blocked");
+        assertFalse(token.paused(), "the token keeps running");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 80);
+        assertEq(token.awayBalanceOf(bobSat), 80);
     }
 
-    /// @notice A leg naming a wallet other than the issued ones, or leaving one empty on a same-chain validation,
-    ///         is rejected under the issued ask block hash: the validation stays `Open` and the chain is paused.
+    /// @notice A receipt naming a wallet other than the ticket's, or leaving one empty, is a bad receipt: refused,
+    ///         nothing applied, the ticket stays `Open` and the chain is blocked.
     function test_handleSettlement_Success_WhenAWalletIsNotTheIssuedOneTheLegIsRejected() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         bytes memory carolSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("carolOnPolygon"));
@@ -231,8 +226,8 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(carolSat), 0);
     }
 
-    /// @notice A leg from a chain neither wallet lives on is rejected: that chain's inbound is paused, the
-    ///         sender's chain is untouched and the validation stays `Open`.
+    /// @notice A receipt from a chain the ticket was not sent to is a bad receipt: that chain is blocked, the
+    ///         sender's chain is untouched and the ticket stays `Open`.
     function test_handleSettlement_Success_WhenTheLegComesFromAnotherChainItIsRejected() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         uint256 index = _liteSettles(optimismGateway, token, _settlement(id, aliceSat, bobSat, 95));
@@ -244,19 +239,19 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 0);
     }
 
-    /// @notice A leg outside the bounds under an ask block hash this chain never issued is the trace of a copy a
-    ///         reorg dropped: while nothing had landed the validation ends `Orphaned`, its reservation comes back on
-    ///         both sides, nothing moves, and the chain that executed it is paused.
-    function test_handleSettlement_Success_WhenAnOutOfBoundsLegUnderAnotherHashOrphansTheValidation() public {
+    /// @notice A receipt under another ask block hash answers a copy from a home block a reorg dropped. One that
+    ///         moved more than the copy it echoes allowed breaks its terms: it is applied as it happened, the ticket's
+    ///         reservation is released, and the chain that executed it is blocked.
+    function test_handleSettlement_AppliesAndBlocks_WhenAnOutOfBoundsLegUnderAnotherHashBreaksItsTerms() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
         assertEq(ledger.pendingInOf(address(bobIdentity)), 100, "reserved at the maximum while pending");
         assertEq(token.reservedOf(aliceSat), 100, "and held on the sender's wallet");
-        bytes32 orphanedHash = keccak256("orphaned body");
-        uint256 index = _liteSettles(polygonGateway, token, _settlementUnder(id, aliceSat, bobSat, 101, orphanedHash));
+        bytes32 olderHash = keccak256("older copy");
+        uint256 index = _liteSettles(polygonGateway, token, _settlementUnder(id, aliceSat, bobSat, 101, olderHash));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationOrphaned(id, polygon, 101, orphanedHash);
+        emit EventsLib.ReceiptOnOlderTerms(id, polygon, 100);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(index);
@@ -264,23 +259,25 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
         assertTrue(token.isInboundPaused(polygon));
         assertFalse(token.paused());
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Orphaned));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "the recipient's reservation is released");
         assertEq(token.reservedOf(aliceSat), 0, "and so is the sender's hold");
-        assertEq(boundCompliance.ticketOf(id).moved, 0);
-        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
-        assertEq(token.awayBalanceOf(bobSat), 0);
+        assertEq(boundCompliance.ticketOf(id).moved, 101);
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 101);
+        assertEq(token.awayBalanceOf(bobSat), 101);
     }
 
-    /// @notice A leg inside the issued terms under another ask block hash settles as any other, and says so: the
-    ///         copy the Lite executed diverged from the one issued, but the ledger can absorb what it reports.
+    /// @notice A receipt inside the terms of an older copy, under the away chain's per-ticket cap, is applied and
+    ///         says so; the honest away chain stays open.
     function test_handleSettlement_Success_WhenAnInRangeLegUnderAnotherHashSettlesAndReportsTheDivergence() public {
+        vm.prank(deployer);
+        boundCompliance.setTicketLimits(polygon, 100, 100);
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         bytes32 otherHash = keccak256("other body");
         uint256 index = _liteSettles(polygonGateway, token, _settlementUnder(id, aliceSat, bobSat, 95, otherHash));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementBodyDiverged(id, polygon, otherHash);
+        emit EventsLib.ReceiptOnOlderTerms(id, polygon, 100);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(id, polygon, 95);
         polygonGateway.relay(index);
@@ -295,16 +292,15 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     // ==== emergency Tests ====
 
-    /// @notice Another body under a settled id, delivered as a fresh message, applies nothing and pauses the
-    ///         inbound of the chain it came from; the token itself keeps running. The replay is consumed, not left
-    ///         deliverable.
+    /// @notice Another receipt for a half that already has one applies nothing and blocks the chain it came from;
+    ///         the token itself keeps running. It is consumed, not left deliverable.
     function test_handleSettlement_Success_WhenAReplayedSettlementPausesTheChain() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95)));
         uint256 replay = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 96));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReplayedSettlement(id, polygon);
+        emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.InboundPaused(polygon);
         polygonGateway.relay(replay);
@@ -338,45 +334,22 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
-    /// @notice A notification for an id never issued applies nothing to the ledger: the leg is parked under its
-    ///         id for the request that may still issue it, the chain that executed it is paused, and the token
-    ///         itself keeps running. A second, different leg from the same chain for the parked id is a replay.
-    function test_handleSettlement_Success_WhenANeverIssuedIdParksTheLegAndPausesTheChain() public {
+    /// @notice A receipt for an id home has no record of applies nothing and blocks nobody: it reverts and stays
+    ///         deliverable at the bridge, and the token keeps running.
+    function test_handleSettlement_RevertWhen_TheIdWasNeverIssued_AndBlocksNobody() public {
         bytes32 unknown = bytes32(uint256(999));
-        bytes32 hash = keccak256("body");
-        uint256 index = _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 95, hash));
+        uint256 index =
+            _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 95, keccak256("body")));
 
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(unknown, polygon, 95, hash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
         polygonGateway.relay(index);
 
-        assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
+        _assertNothingApplied(polygonGateway, index);
         assertFalse(token.paused());
-        assertTrue(token.isInboundPaused(polygon));
+        assertFalse(token.isInboundPaused(polygon), "no chain is blocked over an unknown id");
         assertEq(token.awayBalanceOf(aliceSat), BALANCE);
         assertEq(token.awayBalanceOf(bobSat), 0);
-        ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(unknown, polygon);
-        assertTrue(parked.exists);
-        assertEq(parked.amount, 95);
-        assertEq(parked.askBlockHash, hash);
-        assertEq(parked.from, aliceSat);
-        assertEq(parked.to, bobSat);
-        assertEq(boundCompliance.ticketOf(unknown).moved, 0);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
-        boundCompliance.statusOf(unknown);
-
-        uint256 replay = _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 94, hash));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReplayedSettlement(unknown, polygon);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
-        polygonGateway.relay(replay);
-        assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(replay)));
-        assertEq(boundCompliance.waitingReceiptOf(unknown, polygon).amount, 95, "the first leg stays parked");
+        assertFalse(boundCompliance.waitingReceiptOf(unknown, polygon).exists, "nothing waits");
     }
 
     /// @notice While the token is paused a valid leg is refused and stays deliverable; once unpaused it settles.

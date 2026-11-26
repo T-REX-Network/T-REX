@@ -185,10 +185,10 @@ library TokenDelegationLib {
     ///  move and nothing to report.
     ///
     ///  With no open recall: the very proof that settled it, from the same chain, is a duplicate and changes
-    ///  nothing; anything else is a message the token cannot account for, judged as a replayed settlement is. A
-    ///  different proof for a recall the token issued and settled is `PauseChain`: the chain that sent it is at
-    ///  fault. A proof for a recall never issued is `HaltToken`, see {IReceiptHandler-Verdict}.
-    /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the pause.
+    ///  nothing. A different proof for a recall the token issued and settled is `PauseChain`: the chain that sent
+    ///  it is at fault. A proof for a recall never issued reverts with `RecallNotPending`: nothing stops the token
+    ///  or blocks a chain over an id it does not know.
+    /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the block.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.
     function consumeBurnProof(bytes32 originChainKey, bytes memory body)
@@ -207,9 +207,11 @@ library TokenDelegationLib {
                 emit EventsLib.BurnProofDuplicate(proof.recallId, originChainKey);
                 return (IReceiptHandler.Verdict.None, address(0), 0);
             }
-            emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
+            // A proof for a recall never sent stops nothing: it reverts and stays deliverable at the bridge.
             bool issued = proof.recallId != 0 && proof.recallId <= s.lastRecallId;
-            return (issued ? IReceiptHandler.Verdict.PauseChain : IReceiptHandler.Verdict.HaltToken, address(0), 0);
+            require(issued, ErrorsLib.RecallNotPending(proof.recallId));
+            emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
+            return (IReceiptHandler.Verdict.PauseChain, address(0), 0);
         }
 
         require(

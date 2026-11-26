@@ -94,7 +94,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
 
     // ==== .statusOf Tests ====
 
-    /// @notice Open until the release deadline passes, Expired after it, stored Open throughout.
+    /// @notice A ticket stays `Open` past its deadlines until something moves it: the clock moves nothing.
     function test_statusOf_Success_WhenTheClockMovesPastTheDeadlines() public {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
@@ -102,8 +102,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
-        assertEq(uint8(boundCompliance.ticketOf(id).status), uint8(ITickets.TicketStatus.Open));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
     // ==== .cancelTickets Tests ====
@@ -144,7 +143,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         boundCompliance.cancelTickets(_ids(id));
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
@@ -178,7 +177,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
             abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, later, laterPublicAt)
         );
         boundCompliance.cancelTickets(ids);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.prank(keeper);
         boundCompliance.cancelTickets(ids);
@@ -206,7 +205,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.prank(keeper);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         boundCompliance.cancelTickets(_ids(id));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
@@ -231,7 +230,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, pending, pendingReleaseAt));
         boundCompliance.cancelTickets(ids);
 
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
@@ -252,33 +251,18 @@ contract ValidationDiscardTest is InteropSuiteTest {
         boundCompliance.cancelTickets(_ids(bytes32(uint256(999))));
     }
 
-    /// @notice A consumed leg pins the validation: no clock makes it discardable.
-    function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLeg() public {
+    /// @notice A ticket its receipt ended is done: no clock makes it cancellable.
+    function test_discardExpiredValidations_RevertWhen_TheTicketIsDone() public {
         ERC7786GatewayMock polygonGateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
-        _openEvmChain(token, OPTIMISM, address(_newReceiptBridge(OPTIMISM)));
-        bytes memory bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
-        // The validation from setUp already holds bob's whole cap, and the cap is per identity, not per
-        // wallet. Raise it so this second one can be issued at all.
-        vm.prank(deployer);
-        boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (2 * CAP)), address(cappedRule));
-        bytes32 crossChain = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, CAP);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(crossChain, token, aliceSat, CAP)));
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, CAP)));
         vm.warp(issuedAt + 100 * VALIDITY_WINDOW);
 
-        assertEq(uint8(boundCompliance.statusOf(crossChain)), uint8(ITickets.TicketStatus.AwaitingMint));
         vm.prank(keeper);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.TicketNotCancellable.selector, crossChain, uint8(ITickets.TicketStatus.AwaitingMint)
-            )
+            abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
-        boundCompliance.cancelTickets(_ids(crossChain));
-        assertEq(
-            IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)),
-            2 * CAP,
-            "both validations toward bob are still outstanding"
-        );
-        assertEq(token.onHoldOf(crossChain), CAP, "the burned amount stays in transit");
+        boundCompliance.cancelTickets(_ids(id));
+        assertEq(token.awayBalanceOf(bobSat), CAP, "the receipt stands");
     }
 
     /// @notice While the receipt route is closed the ticket's receipt cannot land, so the ticket is not cancelled:

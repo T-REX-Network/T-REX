@@ -79,8 +79,8 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         _openEvmChain(token, POLYGON, address(routedGateway));
 
-        // A never-issued id is parked and pauses its chain's inbound, so the transport cases below run on a real
-        // one, which settles for good.
+        // A never-issued id reverts at the compliance, so the transport cases below run on a real one, which
+        // settles for good.
         vm.prank(agent);
         token.unpause();
         satelliteFrom = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), 1000);
@@ -110,7 +110,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertFalse(token.messageReceived(address(gateway), gateway.receiveIdFor(index)));
     }
 
-    /* ----- Settlement delivery: one leg, two legs ----- */
+    /* ----- Receipt delivery ----- */
 
     /// @dev Same-chain transfer: one notification with real `from` and `to`, forwarded as decoded and settled.
     function testOneLegSettlementReachesTheBoundComplianceIntact() public {
@@ -127,57 +127,18 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertFalse(token.paused());
     }
 
-    /// @dev Cross-chain transfer: a burn leg from one chain and a mint leg from another, under one id. Each
-    ///      arrives through its own chain's gateway and each reaches the compliance on its own, in any order.
-    ///      The id was never issued here, so each leg is parked under its own chain and that chain's inbound
-    ///      pauses; the token itself stays open, and the first leg's pause does not hold the other chain's back.
-    function testTwoLegSettlementDeliversBothLegsUnderOneId() public {
-        ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
-        _openEvmChain(token, OPTIMISM, address(optimismGateway));
+    /// @dev A receipt for an id this token has no record of reaches the compliance, which refuses it: the delivery
+    ///      reverts and stays deliverable at the bridge, and no chain is blocked over an id home does not know.
+    function testAReceiptForAnUnknownIdRevertsAndBlocksNobody() public {
         bytes32 neverIssued = bytes32(uint256(ticketId) + 1);
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement(neverIssued, satelliteFrom, satelliteTo, amount);
+        uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(receipt));
 
-        bytes memory from = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From"));
-        bytes memory to = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("To"));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, neverIssued));
+        routedGateway.relay(index);
 
-        MessageTypesLib.ReceiptMessage memory burnLeg = _settlement(neverIssued, from, "", amount);
-        MessageTypesLib.ReceiptMessage memory mintLeg = _settlement(neverIssued, "", to, amount);
-
-        uint256 burnIndex = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(burnLeg));
-        uint256 mintIndex = _liteSends(optimismGateway, token, MessageTypesLib.encodeSettlement(mintLeg));
-
-        // The mint leg lands first: the transport imposes no ordering, the lifecycle does.
-        vm.expectCall(compliance, abi.encodeCall(IReceiptHandler.receiveReceipt, (optimism, mintLeg)));
-        vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptReceived(optimism, neverIssued, "", to, amount);
-        vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptWaiting(neverIssued, optimism, amount, mintLeg.askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(optimism);
-        optimismGateway.relay(mintIndex);
-
-        assertTrue(token.messageReceived(address(optimismGateway), optimismGateway.receiveIdFor(mintIndex)));
-        assertTrue(token.isInboundPaused(optimism));
-        assertFalse(token.isInboundPaused(polygon), "the other chain is not held back");
-        assertFalse(token.paused());
-
-        vm.expectCall(compliance, abi.encodeCall(IReceiptHandler.receiveReceipt, (polygon, burnLeg)));
-        vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptReceived(polygon, neverIssued, from, "", amount);
-        vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptWaiting(neverIssued, polygon, amount, burnLeg.askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
-        routedGateway.relay(burnIndex);
-
-        assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(burnIndex)));
-        ITickets.WaitingReceipt memory parkedMint = boundCompliance.waitingReceiptOf(neverIssued, optimism);
-        ITickets.WaitingReceipt memory parkedBurn = boundCompliance.waitingReceiptOf(neverIssued, polygon);
-        assertTrue(parkedMint.exists);
-        assertEq(parkedMint.to, to);
-        assertTrue(parkedBurn.exists);
-        assertEq(parkedBurn.from, from);
-        assertTrue(token.isInboundPaused(optimism));
-        assertTrue(token.isInboundPaused(polygon));
+        _assertNothingApplied(routedGateway, index);
+        assertFalse(token.isInboundPaused(originChain), "no chain is blocked");
         assertFalse(token.paused());
     }
 
@@ -250,18 +211,19 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(satelliteFrom), 900);
     }
 
-    /// @dev A proof answering a recall this token never issued is the never-issued emergency: nothing moves and
-    ///      the token pauses itself.
-    function testBurnProofForANeverIssuedRecallHaltsTheToken() public {
+    /// @dev A proof answering a recall this token never issued stops nothing: the delivery reverts and stays
+    ///      deliverable, the token keeps running and the chain stays open.
+    function testBurnProofForANeverIssuedRecallStopsNothing() public {
         uint256 index =
             _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(99, satelliteFrom, amount)));
         uint256 nativeBefore = token.balanceOf(alice);
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ReplayedBurnProof(99, originChain);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RecallNotPending.selector, 99));
         routedGateway.relay(index);
 
-        assertTrue(token.paused());
+        _assertNothingApplied(routedGateway, index);
+        assertFalse(token.paused());
+        assertFalse(token.isInboundPaused(originChain));
         assertEq(token.balanceOf(alice), nativeBefore);
         assertEq(token.awayBalanceOf(satelliteFrom), 1000);
     }
@@ -454,27 +416,6 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertFalse(token.paused());
         assertEq(token.awayBalanceOf(satelliteTo), amount, "applied once");
         assertEq(token.awayBalanceOf(satelliteFrom), 1000 - amount, "debited once");
-    }
-
-    /// @dev The first leg of a pair delivered twice under a zero id is judged by the compliance too: the burn is
-    ///      held in transit once, and the second delivery is a duplicate, consumed with nothing paused.
-    function testZeroReceiveIdBurnLegRedeliveryIsADuplicateHeldOnce() public {
-        ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
-        _openEvmChain(token, OPTIMISM, address(optimismGateway));
-        bytes memory bobOnOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
-        bytes32 pairId = _requestValidation(address(aliceIdentity), satelliteFrom, bobOnOptimism, 1, 100);
-        bytes memory burnLeg = MessageTypesLib.encodeSettlement(_burnLeg(pairId, token, satelliteFrom, 100));
-
-        _deliverWithZeroReceiveId(burnLeg);
-
-        vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptDuplicate(pairId, originChain);
-        _deliverWithZeroReceiveId(burnLeg);
-
-        assertFalse(token.isInboundPaused(originChain), "a duplicate pauses nothing");
-        assertFalse(token.paused());
-        assertEq(token.onHoldOf(pairId), 100, "held once");
-        assertEq(token.awayBalanceOf(satelliteFrom), 900, "debited once");
     }
 
     /// @dev A burn proof delivered twice under a zero id is recognised by the settled proof's hash: credited once,

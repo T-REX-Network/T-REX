@@ -91,7 +91,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 1);
         assertEq(optimismGateway.queueLength(), 0);
         assertEq(polygonGateway.queuedMessage(0).recipient, token.peerFor(polygon));
-        assertEq(_pinnedBridgeOf(id, polygon), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(id), address(polygonGateway));
 
         MessageTypesLib.TicketMessage memory sent = _decodeQueuedValidation(polygonGateway, 0);
         assertEq(sent.ticketId, id);
@@ -107,24 +107,16 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).askBlockHash, sent.askBlockHash);
     }
 
-    function test_requestTransferValidation_Success_WhenCrossChainQueuesOneLegPerChain() public {
-        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
+    /// @notice A move between two away chains is done in two halves, the second sent by home once the first is
+    ///         done; until home sends second halves the ask is refused, and nothing is sent.
+    function test_askToMove_reverts_when_theReceiverIsOnAnotherAwayChain() public {
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
+        boundCompliance.askToMove(aliceSat, bobOptimism, 10, 90, "", _salt());
 
-        assertEq(polygonGateway.queueLength(), 1);
-        assertEq(optimismGateway.queueLength(), 1);
-        assertEq(_pinnedBridgeOf(id, polygon), address(polygonGateway));
-        assertEq(_pinnedBridgeOf(id, optimism), address(optimismGateway));
-
-        MessageTypesLib.TicketMessage memory burnLeg = _decodeQueuedValidation(polygonGateway, 0);
-        MessageTypesLib.TicketMessage memory mintLeg = _decodeQueuedValidation(optimismGateway, 0);
-        assertEq(burnLeg.ticketId, id);
-        assertEq(mintLeg.ticketId, id);
-        assertEq(keccak256(abi.encode(burnLeg)), keccak256(abi.encode(mintLeg)), "one copy to both chains");
-
-        ITickets.Ticket memory record = boundCompliance.ticketOf(id);
-        assertEq(record.waitingEndsAt, record.validUntil + OPTIMISM_WINDOW);
-        assertEq(record.fromChainKey, polygon);
-        assertEq(record.toChainKey, optimism);
+        assertEq(polygonGateway.queueLength(), 0);
+        assertEq(optimismGateway.queueLength(), 0);
+        _assertNothingRecorded(aliceSat, bobOptimism, "", 10, 90);
     }
 
     /// @notice Nothing would keep a native balance in place between issuance and settlement, so no satellite is
@@ -286,8 +278,8 @@ contract ValidationIssuanceTest is InteropSuiteTest {
 
         bytes32 second = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
 
-        assertEq(_pinnedBridgeOf(first, polygon), address(polygonGateway));
-        assertEq(_pinnedBridgeOf(second, polygon), address(replacement));
+        assertEq(_pinnedBridgeOf(first), address(polygonGateway));
+        assertEq(_pinnedBridgeOf(second), address(replacement));
         assertEq(replacement.queueLength(), 1);
     }
 
@@ -311,14 +303,15 @@ contract ValidationIssuanceTest is InteropSuiteTest {
     ///         chains are issued to as before.
     function test_requestTransferValidation_RevertWhen_AnInvolvedChainsInboundIsPaused() public {
         vm.prank(agent);
-        token.setInboundPaused(optimism, true);
+        token.setInboundPaused(polygon, true);
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
-        boundCompliance.askToMove(aliceSat, bobOptimism, 10, 90, "", _salt());
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.askToMove(aliceSat, bobSat, 10, 90, "", _salt());
         assertEq(polygonGateway.queueLength(), 0);
-        assertEq(optimismGateway.queueLength(), 0);
 
+        vm.prank(agent);
+        token.setInboundPaused(polygon, false);
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
         assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
         assertEq(polygonGateway.queueLength(), 1);

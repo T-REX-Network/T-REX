@@ -88,6 +88,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     bytes internal fromSat;
     bytes internal toSat;
     bytes internal toOptimism;
+    bytes internal bobOnPolygonToo;
     bytes internal toArbitrum;
     bytes internal nativeAlice;
     bytes internal nativeBob;
@@ -98,6 +99,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         fromSat = InteroperableAddress.formatEvmV1(POLYGON, satelliteAlice);
         toSat = InteroperableAddress.formatEvmV1(POLYGON, satelliteBob);
         toOptimism = InteroperableAddress.formatEvmV1(OPTIMISM, satelliteBob);
+        bobOnPolygonToo = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("bobOnPolygonToo"));
         toArbitrum = InteroperableAddress.formatEvmV1(ARBITRUM, satelliteBob);
         nativeAlice = InteroperableAddress.formatEvmV1(block.chainid, alice);
         nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
@@ -117,6 +119,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
+        _bind(bobOnPolygonToo, bobIdentity);
         _bind(toArbitrum, bobIdentity);
         _bind(nativeBob, bobIdentity);
     }
@@ -205,10 +208,14 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
     }
 
+    /// @notice The waiting time that counts is the sender's away chain's, which owes the receipt.
     function test_requestTransferValidation_RevertWhen_ReconciliationWindowIsNotSet() public configured {
+        bytes memory fromArbitrum = InteroperableAddress.formatEvmV1(ARBITRUM, satelliteAlice);
+        _bind(fromArbitrum, aliceIdentity);
+
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WaitingTimeNotSet.selector, arbitrum));
-        mc.askToMove(fromSat, toArbitrum, 10, 90, "", _salt());
+        mc.askToMove(fromArbitrum, toArbitrum, 10, 90, "", _salt());
     }
 
     function test_requestTransferValidation_RevertWhen_FromChainIsPaused() public configured {
@@ -216,15 +223,17 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(aliceIdentity);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
-        mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
+        mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
     }
 
-    function test_requestTransferValidation_RevertWhen_ToChainIsPaused() public configured {
-        mc.setIssuancePaused(optimism, true);
-
+    /// @notice A move between two away chains is done in two halves, the second sent by home once the first is
+    ///         done; until home sends second halves the ask is refused, and nothing is recorded.
+    function test_askToMove_reverts_when_theReceiverIsOnAnotherAwayChain() public configured {
         vm.prank(aliceIdentity);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, optimism));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
         mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
+
+        _assertNothingRecorded(fromSat, toOptimism, "", 10, 90);
     }
 
     function test_requestTransferValidation_Success_AfterTheChainIsUnpaused() public configured {
@@ -447,7 +456,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.startPrank(aliceIdentity);
         mc.askToMove(fromSat, toSat, 10, 30, "", _salt());
-        mc.askToMove(fromSat, toOptimism, 10, 40, "", _salt());
+        mc.askToMove(fromSat, bobOnPolygonToo, 10, 40, "", _salt());
         vm.stopPrank();
 
         assertEq(mc.pendingOutOf(aliceIdentity), 70);
@@ -505,7 +514,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         vm.startPrank(aliceIdentity);
         bytes32 first = mc.askToMove(fromSat, toSat, 10, 30, "", _salt());
-        bytes32 second = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
+        bytes32 second = mc.askToMove(fromSat, bobOnPolygonToo, 10, 90, "", _salt());
         vm.stopPrank();
 
         assertEq(mc.ticketOf(first).amountMax, 30);
@@ -567,7 +576,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 first = mc.askToMove(fromSat, toSat, 10, 20, "", salt);
         bytes32 otherMaximum = mc.askToMove(fromSat, toSat, 10, 21, "", salt);
         bytes32 otherMinimum = mc.askToMove(fromSat, toSat, 11, 20, "", salt);
-        bytes32 otherReceiver = mc.askToMove(fromSat, toOptimism, 10, 20, "", salt);
+        bytes32 otherReceiver = mc.askToMove(fromSat, bobOnPolygonToo, 10, 20, "", salt);
         vm.stopPrank();
 
         assertTrue(first != otherMaximum, "another maximum, another id");
@@ -662,16 +671,17 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.ticketOf(id).waitingEndsAt, 1_700_000_000 + VALIDITY_WINDOW + POLYGON_WINDOW);
     }
 
+    /// @notice A ticket's waiting time is the sender's away chain's: that chain owes its receipt.
     function test_requestTransferValidation_Success_WhenCrossChainTakesTheLargerWindow() public configured {
         vm.warp(1_700_000_000);
 
         vm.prank(aliceIdentity);
-        bytes32 id = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
+        bytes32 id = mc.askToMove(fromSat, nativeBob, 10, 40, "", _salt());
 
         ITickets.Ticket memory record = mc.ticketOf(id);
-        assertEq(record.waitingEndsAt, 1_700_000_000 + VALIDITY_WINDOW + OPTIMISM_WINDOW);
+        assertEq(record.waitingEndsAt, 1_700_000_000 + VALIDITY_WINDOW + POLYGON_WINDOW);
         assertEq(record.fromChainKey, polygon);
-        assertEq(record.toChainKey, optimism);
+        assertEq(record.toChainKey, referenceChain);
     }
 
     function test_requestTransferValidation_Success_WhenTheNativeRecipientKeepsTheReferenceKey() public configured {
@@ -683,24 +693,15 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         assertEq(record.toChainKey, referenceChain);
         assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
         assertEq(record.toKey, WalletKeyLib.canonicalKey(nativeBob));
-        assertFalse(record.twoLegs);
     }
 
     function test_requestTransferValidation_Success_WhenRecordingTheWalletKeysAndTheLegCount() public configured {
-        vm.startPrank(aliceIdentity);
+        vm.prank(aliceIdentity);
         bytes32 sameChain = mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
-        bytes32 crossChain = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
-        vm.stopPrank();
 
         ITickets.Ticket memory record = mc.ticketOf(sameChain);
         assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
         assertEq(record.toKey, WalletKeyLib.canonicalKey(toSat));
-        assertFalse(record.twoLegs);
-
-        record = mc.ticketOf(crossChain);
-        assertEq(record.fromKey, WalletKeyLib.canonicalKey(fromSat));
-        assertEq(record.toKey, WalletKeyLib.canonicalKey(toOptimism));
-        assertTrue(record.twoLegs);
     }
 
     function test_requestTransferValidation_Success_WhenTheEventAndRecordMatchTheObject() public configured {
@@ -732,19 +733,6 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.expectCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), 1);
         vm.prank(aliceIdentity);
         mc.askToMove(fromSat, toSat, 10, 90, "", salt);
-    }
-
-    function test_requestTransferValidation_Success_WhenDispatchingTwoLegsForACrossChainMovement() public configured {
-        vm.warp(1_700_000_000);
-        bytes32 salt = _salt();
-        bytes32 id = _ticketId(fromSat, toOptimism, "", 10, 90, salt);
-        MessageTypesLib.TicketMessage memory expected = _expected(id, salt, fromSat, toOptimism, "", 10, 90);
-        bytes memory body = abi.encode(expected);
-
-        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (polygon, id, body)), 1);
-        vm.expectCall(token, abi.encodeCall(Token.dispatchComplianceValidation, (optimism, id, body)), 1);
-        vm.prank(aliceIdentity);
-        mc.askToMove(fromSat, toOptimism, 10, 90, "", salt);
     }
 
     function test_requestTransferValidation_Success_WhenDispatchingToTheSatelliteSideOnly() public configured {

@@ -89,8 +89,6 @@ library ErrorsLib {
     error TokenCirculating();
     error TicketsStillReserved();
     error NothingInTransit(bytes32 ticketId);
-    error ValidationNotStuck(bytes32 ticketId, uint8 status);
-    error ValidationNotYetResolvable(bytes32 ticketId, uint64 resolvableAt);
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -238,11 +236,11 @@ library ErrorsLib {
     error ValidationSpenderRefused(bytes spender);
     /// @dev A validity or reconciliation window must be positive.
     error ZeroDuration();
-    /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
+    /// @dev Issuance involving this chain is paused by the manager.
     error ValidationIssuancePaused(bytes32 chainKey);
     /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused,
-    ///  none that may have a leg in flight is discarded or resolved, and a parked leg, like a delivered one, is
-    ///  settled only once it is unpaused.
+    ///  none whose receipt may be in flight is cancelled, and a waiting receipt, like a delivered one, is applied
+    ///  only once it is unpaused.
     error TokenPaused();
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
@@ -262,13 +260,11 @@ library ErrorsLib {
     error ValidationNotAwaitingApproval(bytes32 ticketId, uint8 status);
     /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
     error NotTheApprovalModule(address caller);
-    /// @dev A leg can be sent again while the validation is stored `Open`, or, the recipient's leg only, while
-    ///  it is `AwaitingMint`; `status` is the `TicketStatus` found instead.
+    /// @dev A ticket can be sent again while it is stored `Open`; `status` is the `TicketStatus` found instead.
     error ValidationNotResendable(bytes32 ticketId, uint8 status);
-    /// @dev The deadline for a resend has passed: `validUntil` while `Open`, since past it no satellite may execute;
-    ///  `waitingEndsAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
+    /// @dev The deadline for a resend has passed: `validUntil`, since past it no away token may execute.
     error ValidationExpired(bytes32 ticketId, uint64 deadline);
-    /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
+    /// @dev `chainKey` is not the sender's chain, the only one a ticket goes to.
     error ChainNotPartOfValidation(bytes32 ticketId, bytes32 chainKey);
     /// @dev The supplied `to` or `spender` is not the one the ticket was asked with: the ticket recorded under this
     ///  id keeps the key of the first and the second itself.
@@ -277,10 +273,10 @@ library ErrorsLib {
     error UnknownTicket(bytes32 ticketId);
     /// @dev The id of the whole request is already recorded: the same request, salt included, was asked twice.
     error TicketAlreadyWritten(bytes32 ticketId);
-    /// @dev No leg is parked under this id for this chain, or nothing is issued under the id yet.
+    /// @dev No receipt waits under this id for this chain, or the ticket is not sent yet.
     error NoWaitingReceipt(bytes32 ticketId, bytes32 chainKey);
-    /// @dev A leg `chainKey` reported for this validation is parked: it is settled first, so that the validation is
-    ///  not discarded over a report this chain already holds.
+    /// @dev A receipt `chainKey` sent for this ticket waits here: it is applied first, so that the ticket is not
+    ///  cancelled over a receipt this chain already holds.
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
     /// @dev Only a stored `Open` validation can be discarded; `status` is the `TicketStatus` found instead.
     error TicketNotCancellable(bytes32 ticketId, uint8 status);
@@ -289,8 +285,9 @@ library ErrorsLib {
     /// @dev Between `waitingEndsAt` and the end of the second window only the keeper may discard; `publicAt` is when
     ///  anyone may.
     error ValidationNotPubliclyDiscardable(bytes32 ticketId, uint64 publicAt);
-    /// @dev The second leg of a cross-chain validation does not repeat the first one's amount.
-    error SettlementAmountMismatch(bytes32 ticketId, uint256 expected, uint256 amount);
+    /// @dev The per-ticket cap toward `chainKey` is lowered while a ticket sent under the higher cap may still be
+    ///  executed: an honest receipt of it would then block that away chain. Allowed from `allowedAt`.
+    error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error AwayChainBlocked(bytes32 chainKey);

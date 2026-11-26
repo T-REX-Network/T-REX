@@ -86,18 +86,15 @@ interface ITickets {
     event ReceiptReceived(
         bytes32 indexed originChainKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
-    event ValidationLegConfirmed(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
     event ReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
-    event LateReconciliation(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    event ReplayedSettlement(bytes32 indexed ticketId, bytes32 indexed chainKey);
     event ReceiptDuplicate(bytes32 indexed ticketId, bytes32 indexed chainKey);
     event TicketCancelled(bytes32 indexed ticketId);
-    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
     event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
     event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
     event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 askBlockHash);
+    event ReceiptOnOlderTerms(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 seenMax);
+    event MoveBreachedRule(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
+    event TicketLimitsSet(bytes32 indexed chainKey, uint256 perTicketCap, uint256 perWindowCap);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error SenderNotOnSatellite(bytes wallet);
@@ -110,13 +107,12 @@ interface ITickets {
     error NoWaitingReceipt(bytes32 ticketId, bytes32 chainKey);
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
     error TokenPaused();
-    error SettlementAmountMismatch(bytes32 ticketId, uint256 expected, uint256 amount);
     error TicketNotCancellable(bytes32 ticketId, uint8 status);
     error CancelNotDue(bytes32 ticketId, uint64 waitingEndsAt);
     error ValidationNotPubliclyDiscardable(bytes32 ticketId, uint64 publicAt);
-    error ValidationNotStuck(bytes32 ticketId, uint8 status);
-    error ValidationNotYetResolvable(bytes32 ticketId, uint64 resolvableAt);
     error ChainNotOpen(bytes32 chainKey);
+    error UnknownTicket(bytes32 ticketId);
+    error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
@@ -130,61 +126,29 @@ interface ITickets {
         BRING_HOME
     }
 
-    /// @dev Every state a validation can be in. This is the whole lifecycle: which legs have arrived, whether
-    /// the keeper gave up, and what is still reserved are all read off this one value.
-    ///
-    /// What is reserved is derived rather than stored, so the two can never disagree:
-    /// - the identities' pending amounts are outstanding in `Open`, `AwaitingMint`, `AwaitingBurn` and
-    ///   `WaitingForApproval`, and
-    ///   never on a relocation, where nothing was reserved for them in the first place;
-    /// - the sender wallet's pending amount is outstanding in `Open`, `AwaitingBurn` and `WaitingForApproval`
-    ///   alone, because a burn
-    ///   leg has already taken the tokens out of that wallet and into transit.
+    /// @dev Every state a ticket can be in. What each state keeps reserved is one table, see
+    /// {TicketLib-moveTo}, so a release can neither run twice nor be skipped.
     enum TicketStatus {
-        /// Issued, amounts reserved, waiting for the settlement notification(s).
-        Open,
-        /// Two-leg only: the burn leg arrived, the mint leg is still owed. The amount has left the sender's
-        /// position and waits in transit on the token. Never discardable and never derived `Expired`, because a
-        /// consumed leg proves the satellite has irreversibly executed its half.
-        AwaitingMint,
-        /// Two-leg only: the mint leg arrived, the burn leg is still owed.
-        AwaitingBurn,
-        /// Every expected leg arrived: reservation released, positions and token ledger updated.
-        Done,
-        /// Derived, never stored: `Open` and past `waitingEndsAt`, or `WaitingForApproval` and at or past `validUntil`
-        /// with no answer; not yet discarded.
-        Expired,
-        /// Cancelled and the reservation released; issuance proceeds as if it never happened.
-        Cancelled,
-        /// Cancelled, then the burn leg arrived late. Still owed the mint leg.
-        DiscardedAwaitingMint,
-        /// Cancelled, then the mint leg arrived late. Still owed the burn leg.
-        DiscardedAwaitingBurn,
-        /// Every leg arrived after the discard: applied anyway, `LateReconciliation` emitted per late leg, and
-        /// that leg's chain paused for issuance when the executed amount breached a rule.
-        LateReconciled,
-        /// The keeper gave up on a pair whose other leg never arrived: whatever was held in transit went back to
-        /// the wallet it was burned from, and the reservation was released. A leg arriving now is a replay: the
-        /// token stops taking its chain's messages.
-        Resolved,
-        /// Requested while an `APPROVAL` module is bound: narrowed and reserved like an issued validation, but
-        /// not issued yet and sent nowhere. `answerApproval` issues it (`Open`) or refuses it (`Cancelled`);
-        /// past `validUntil`, the deadline for the answer, `cancelTickets` discards it.
+        /// Written and reserved, sent nowhere: an `APPROVAL` module is bound and has not answered. `answerApproval`
+        /// opens and sends it, or cancels it; past `validUntil`, `cancelTickets` cancels it.
         WaitingForApproval,
-        /// A leg arrived whose wallets or amount fail the issued terms and whose ask block hash is not the issued
-        /// one: the satellite executed a copy this chain no longer holds, one a reorg dropped. Reached only while
-        /// no leg had landed; nothing was applied, the reservation was released, and the leg's chain was paused
-        /// for inbound. Terminal: any leg arriving now is a replay.
-        Orphaned
+        /// Written, reserved and sent: waiting for its receipt.
+        Open,
+        /// Its reservation released: refused by the approver, or cancelled once its receipt was overdue. A late
+        /// receipt for a ticket that was sent is still applied as the move it is.
+        Cancelled,
+        /// Money left a wallet and is held between two halves of a move.
+        OnHold,
+        /// The money is where it ends, or nothing moved.
+        Done
     }
 
     /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
     /// stays classifiable against its stored status for good, which is what makes the emergency responses
     /// possible.
     ///
-    /// The fields come in two groups. The first twelve are written once, at issuance, and never change: the
-    /// terms of the movement. The last seven are the lifecycle: where the validation stands, what was released,
-    /// what a satellite actually executed.
+    /// The fields come in two groups: the terms of the move, written once, and the lifecycle: where the ticket
+    /// stands and what the away token reported it moved.
     struct Ticket {
         /* ----- Written once, at issuance ----- */
 
@@ -203,15 +167,13 @@ interface ITickets {
         bytes32 fromChainKey;
         /// Same for `to`'s chain; the reference chain's own key for a native wallet.
         bytes32 toChainKey;
-        /// `keccak256` of the canonical `from` envelope: what a settlement leg's `from` is matched against.
+        /// `keccak256` of the canonical `from` envelope: what a receipt's `from` is matched against.
         bytes32 fromKey;
         /// The sender's wallet envelope itself, kept so the reservation it holds on the token can be given back
         /// without the caller having to supply it again.
         bytes fromWallet;
         /// Same for `to`.
         bytes32 toKey;
-        /// Both sides on distinct satellite chains: two legs are expected, the burn one and the mint one.
-        bool twoLegs;
         /// The identity `from` resolved to at issuance: whose pending amount was reserved and whose position
         /// settlement debits.
         address fromIdentity;
@@ -223,13 +185,10 @@ interface ITickets {
         /// Both wallets belong to one identity, so nothing was ever reserved against the identities. Written
         /// once at issuance: it is the one thing the status cannot say on its own.
         bool relocation;
-        /// Where the validation stands. Which legs have arrived and what is still reserved are read off this;
-        /// `Expired` is never stored, it is derived from `Open` and the clock.
+        /// Where the ticket stands. What is still reserved is read off this.
         TicketStatus status;
-        /// Exact amount transferred, written by the first leg and repeated by the second.
+        /// What the away token reported it moved.
         uint256 moved;
-        /// On a two-leg validation, the wallet the first consumed leg carried, kept for the second one.
-        bytes legWallet;
         /// The spender the validation names, empty when `from` executes itself. Kept so the `AFTER` modules
         /// are told who executed it when it settles.
         bytes spender;
@@ -242,24 +201,35 @@ interface ITickets {
         uint256 requestedMax;
     }
 
-    /// @dev A settlement leg that arrived for an id with no issued body, kept so that once the request is sent
-    /// again with the same terms and salt after a reorg dropped its issuance, `applyWaitingReceipt` can settle it.
-    /// One per origin chain, so a pair can park both its legs. The delivery that carried it is consumed; this is all
-    /// that is left of it.
+    /// @dev A receipt that arrived for a ticket written and not sent, kept so that once the ticket is sent
+    /// `applyWaitingReceipt` can apply it. The delivery that carried it is consumed; this is all that is left of it.
     struct WaitingReceipt {
-        /// ERC-7930; empty on the mint leg.
+        /// ERC-7930 wallet the tokens left.
         bytes from;
-        /// ERC-7930; empty on the burn leg.
+        /// ERC-7930 wallet the tokens reached.
         bytes to;
         uint256 amount;
         /// The ask block hash of the ticket copy the Lite executed, as it reported it.
         bytes32 askBlockHash;
-        /// Whether a leg is parked here, since every other field may legitimately be zero or empty.
+        /// Whether a receipt waits here, since every other field may legitimately be zero or empty.
         bool exists;
+        /// The `amountMax` of the ticket copy the away token executed, as it reported it.
+        uint256 seenMax;
+        /// The `validUntil` of that copy, as it reported it.
+        uint64 seenValidUntil;
     }
 
-    /// @dev Issues a `TicketMessage` for a movement out of a satellite wallet, toward another satellite
-    /// wallet or a native one, and dispatches one leg per involved satellite chain through the token. A sender on
+    /// @dev The caps on tickets toward one away chain.
+    struct TicketLimits {
+        /// The most one ticket toward the away chain may carry. A receipt on older terms whose `seenMax` is above it
+        /// blocks the away chain.
+        uint256 perTicketCap;
+        /// The most the ticket route toward the away chain may carry in one window of one waiting time.
+        uint256 perWindowCap;
+    }
+
+    /// @dev Issues a `TicketMessage` for a movement out of an away wallet, toward a wallet on the same away chain or
+    /// a home wallet, and sends it to the sender's away chain through the token. A sender on
     /// the reference chain is refused: the Lite that executes a validation must physically hold the position it
     /// moves, where a native balance stays free to leave between issuance and settlement. The caller derives the
     /// requested range from an amount and a slippage tolerance; the range is only ever narrowed: capped at `from`'s
@@ -271,29 +241,27 @@ interface ITickets {
     /// under the same id in whatever block and whatever order, so a ticket sent before this chain's finality keeps
     /// its id through a reorg. The requester chooses the salt; a salt reused for the same request is refused, which
     /// also refuses a replayed request instead of reserving twice. A request a reorg dropped is sent again with the
-    /// same terms and salt, by the
-    /// requester or by an agent reading the salt off the body the Lite holds: it issues the same id, sends nothing
-    /// to a chain that already reported a leg for it, and `applyWaitingReceipt` settles that leg, see
-    /// `waitingReceiptOf`.
+    /// same terms and salt, by the requester or by an agent reading the salt off the body the away token holds: it
+    /// issues the same id, and the away token's receipt, delivered again, is applied on older terms, see
+    /// {IReceiptHandler-receiveReceipt}.
     ///
     /// Requirements:
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
     /// - The id of the request not yet recorded; otherwise reverts with `TicketAlreadyWritten`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - `from` on a satellite chain; otherwise reverts with `SenderNotOnSatellite`.
+    /// - `to` at home or on `from`'s away chain; otherwise reverts with `ChainNotOpen` for `to`'s chain.
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
     ///   otherwise reverts with `NotAuthorizedForWallet`.
     /// - The token not paused; otherwise reverts with `TokenPaused`.
-    /// - A validity window set, no involved satellite chain paused, and each with a reconciliation window;
-    ///   otherwise `ValidityWindowNotSet`, `ValidationIssuancePaused` or `WaitingTimeNotSet`.
-    /// - No involved satellite chain with its inbound paused on the token; otherwise `AwayChainBlocked`.
+    /// - A validity window set, `from`'s chain not paused, and with a waiting time; otherwise
+    ///   `ValidityWindowNotSet`, `ValidationIssuancePaused` or `WaitingTimeNotSet`.
+    /// - `from`'s chain not blocked on the token; otherwise `AwayChainBlocked`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
-    /// - Every involved chain open on the token; otherwise the token reverts with `ChainNotOpen`.
+    /// - `from`'s chain open on the token; otherwise the token reverts with `ChainNotOpen`.
     ///
-    /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent` per leg
-    /// not already parked. No leg is sent to a chain that reported one for this id while nothing was issued: that
-    /// Lite executed it already, and the parked leg is settled by `applyWaitingReceipt` once this request issued it.
+    /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent`.
     ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
     /// reserved as `WaitingForApproval`, `TicketWaitingForApproval` is emitted, the module is told, and
@@ -321,7 +289,7 @@ interface ITickets {
     ///
     /// An answer below the requested minimum is a refusal: the reservation is released and the validation ends
     /// `Cancelled`. Any other answer lowers the maximum to `approvedMax` when it is lower, releases the
-    /// difference, and sends one leg to each satellite chain involved. No rule runs again: they ran at the
+    /// difference, and sends the ticket to the sender's away chain. No rule runs again: they ran at the
     /// request. The deadline stays the request's `validUntil`, so the time spent waiting comes out of the
     /// satellite's time to execute, and the rules are never older than the validity window when it does.
     ///
@@ -330,10 +298,10 @@ interface ITickets {
     /// - It must be stored `WaitingForApproval`; otherwise reverts with `ValidationNotAwaitingApproval`.
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
-    /// - On an approval, the token not paused, otherwise `TokenPaused`, and every involved chain still open,
+    /// - On an approval, the token not paused, otherwise `TokenPaused`, and the sender's chain still open,
     ///   configured and not paused, as at a request.
     ///
-    /// Emits `TicketWritten` and sends the legs not already parked, as `askToMove`
+    /// Emits `TicketWritten` and sends the ticket, unless a receipt for it already waits here, as `askToMove`
     /// does, or emits `ValidationApprovalRefused`.
     /// @param ticketId The validation awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
@@ -349,7 +317,7 @@ interface ITickets {
     /// @param duration The validity window in seconds.
     function setDefaultValidityWindow(uint64 duration) external;
 
-    /// @dev Sets how long T-REX keeps a reservation past `validUntil` for a leg on that chain. Snapshot at issuance,
+    /// @dev Sets how long T-REX keeps a reservation past `validUntil` for a ticket to that chain. Snapshot at issuance,
     /// so a later change never moves an outstanding deadline.
     ///
     /// Requirements:
@@ -361,9 +329,8 @@ interface ITickets {
     /// @param duration The window in seconds.
     function setWaitingTime(bytes32 chainKey, uint64 duration) external;
 
-    /// @dev Stops or resumes issuing validations involving `chainKey`. A late reconciliation from that chain
-    /// whose executed amount breaches a rule pauses it too; lifting the pause is the explicit step after the
-    /// exception is resolved. Setting the state it already has changes nothing and emits nothing.
+    /// @dev Stops or resumes issuing tickets involving `chainKey`. Setting the state it already has changes
+    /// nothing and emits nothing.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -373,111 +340,84 @@ interface ITickets {
     /// @param paused Whether issuance toward or from the chain is paused.
     function setIssuancePaused(bytes32 chainKey, bool paused) external;
 
-    /// @dev Discards expired validations in a batch: releases their reservations, so the next issuance is
-    /// computed as if the pre-approved transfers never happened. Rollback is never automatic. From `waitingEndsAt`
-    /// the keeper may discard; from the end of the second reconciliation window, one more window past
-    /// `waitingEndsAt`, anyone may. A discard turns a leg that lands afterwards into a late reconciliation, which
-    /// can pause its chain's issuance, so the first window is the keeper's to judge; past the second the pair
-    /// would be resolvable anyway, and a reservation never stays locked on a keeper that is gone. The batch is
-    /// atomic: one refused id reverts the whole call.
-    ///
-    /// A discard cannot know whether the satellite executed the validation before its deadline: the satellite
-    /// reports only what it executed. If it did and the report is still in flight, the wallet's room is given
-    /// back early, a newer validation may reserve it, and the late report still debits the wallet when it lands.
-    /// The newer one's settlement then reverts `InsufficientBridgedBalance` until the wallet is credited again;
-    /// it stays deliverable, so reconciliation is delayed, not lost. Set each chain's reconciliation window
-    /// above the longest delivery delay its gateway can have, so a report this late is not expected.
-    ///
-    /// Requirements:
-    /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - A validation `WaitingForApproval` may be discarded by anyone once its `validUntil` passed, since nothing was
-    ///   sent for it; otherwise reverts with `CancelNotDue`. The rules below do not apply to it.
-    /// - Each other id must be stored `Open`; otherwise reverts with `TicketNotCancellable`. A pair still
-    ///   awaiting a leg is refused whatever the clock says, since one satellite has already executed.
-    /// - `block.timestamp` must be past each id's `waitingEndsAt`; otherwise reverts with `CancelNotDue`.
-    /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
-    ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
-    /// - The token not paused; otherwise reverts with `TokenPaused`: every settlement waits at its gateway under
-    ///   the pause, so the leg that answers the validation may be among them.
-    /// - No chain an id still awaits with its inbound paused on the token; otherwise reverts with
-    ///   `AwayChainBlocked`: the reports held at that gateway may answer the validation.
-    /// - Every away chain an id was sent to open on the token: a receipt route set, through a bridge still recorded
-    ///   as a receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is
-    ///   not taken as missing; close by hand stays the way out.
-    /// - No leg parked under an id for a chain it involves; otherwise reverts with `ApplyWaitingReceiptFirst`:
-    ///   the report is already here, and {applyWaitingReceipt} takes it in or refuses it first.
-    ///
-    /// Emits `TicketCancelled` per id.
-    /// @param validationIds The validations to discard.
-    function cancelTickets(bytes32[] calldata validationIds) external;
-
-    /// @dev Gives up on a pair of which exactly one leg ever arrived, a second reconciliation window past
-    /// `waitingEndsAt` so a merely slow leg still reconciles late instead. The burned amount goes back to the wallet
-    /// it left, whatever is still reserved is released, and the validation ends in `Resolved`, where any leg
-    /// arriving afterwards pauses its chain's inbound. When it was the mint leg that landed there is nothing on this chain
-    /// to return, so the chain that owes the burn is paused for issuance instead.
+    /// @dev Sets the caps on tickets toward the away chain `chainKey`. A receipt on older terms whose `seenMax` is
+    /// above the per-ticket cap blocks that away chain. Raising a cap takes effect at once. Lowering the per-ticket
+    /// cap waits until the latest valid until of a ticket sent toward the chain has passed: an honest copy sent under
+    /// the higher cap would otherwise echo a `seenMax` above the new one and block an honest chain. The per-window
+    /// cap is kept for the route each ticket takes.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - The validation must be awaiting its other leg; otherwise reverts with `ValidationNotStuck`.
-    /// - `block.timestamp` must be past the second window; otherwise reverts with `ValidationNotYetResolvable`.
-    /// - The token must not be paused, otherwise `TokenPaused`, and the chain owing the missing leg must not have
-    ///   its inbound paused on the token, otherwise `AwayChainBlocked`: the leg may be waiting at that gateway,
-    ///   and returning the hold under it would leave the ledger crediting the sender for what the receiving chain
-    ///   minted.
+    /// - A lower per-ticket cap only from the latest valid until sent toward `chainKey`; otherwise reverts with
+    ///   `PerTicketCapLoweredTooEarly`.
     ///
-    /// A leg parked for the chain owing the missing leg does not block the resolution, unlike a discard: the keeper
-    /// settles it with {applyWaitingReceipt} first, and resolves only when it cannot be settled. A parked leg at another
-    /// amount than the leg that landed reverts there for good, as the same leg delivered would at the gateway, and
-    /// the resolution is the only way the pair ends.
-    ///
-    /// Emits `ClosedByHand`.
-    function resolveStuckValidation(bytes32 ticketId) external;
+    /// Emits `TicketLimitsSet`.
+    /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
+    /// @param perTicketCap The most one ticket toward the chain may carry.
+    /// @param perWindowCap The most the ticket route toward the chain may carry in one window of one waiting time.
+    function setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) external;
 
-    /// @dev Sends the leg of an issued validation toward `chainKey` again, byte for byte, through the gateway the
-    /// issuance pinned. The way to recover a leg the transport lost before the satellite's deadline, instead of
-    /// waiting for `waitingEndsAt` and asking for a new validation. `to` is the one envelope the record does not keep;
-    /// it is read off `TicketWritten`, like `spender`, and both must be the ones the ticket was asked with, so a
-    /// resend can neither widen nor retarget the movement. The copy sent is the one recorded, ask block hash
-    /// included. Nothing is written.
+    /// @dev Cancels overdue tickets in a batch: releases their reservations, so the next ask is computed as if
+    /// they never happened. From `waitingEndsAt` the keeper may cancel; from the end of the second window, one more
+    /// waiting time past `waitingEndsAt`, anyone may. A receipt that lands after the cancel is still applied as the
+    /// move it is. The batch is atomic: one refused id reverts the whole call.
+    ///
+    /// A cancel cannot know whether the away token executed the ticket before its deadline: the away token reports
+    /// only what it executed. If it did and the receipt is still in flight, the wallet's room is given back early, a
+    /// newer ticket may reserve it, and the late receipt still debits the wallet when it lands. Set each chain's
+    /// waiting time above the longest delivery delay its bridge can have, so a receipt this late is not expected.
+    ///
+    /// Requirements:
+    /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
+    /// - A ticket `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was
+    ///   sent for it; otherwise reverts with `CancelNotDue`. The rules below do not apply to it.
+    /// - Each other id must be stored `Open`; otherwise reverts with `TicketNotCancellable`.
+    /// - `block.timestamp` must be past each id's `waitingEndsAt`; otherwise reverts with `CancelNotDue`.
+    /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
+    ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
+    /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits at its bridge under the
+    ///   pause, so the one that answers the ticket may be among them.
+    /// - The sender's away chain not blocked on the token; otherwise reverts with `AwayChainBlocked`: the receipts
+    ///   held at that bridge may answer the ticket.
+    /// - The sender's away chain open on the token: a receipt route set, through a bridge still recorded as a
+    ///   receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
+    ///   taken as missing.
+    /// - No receipt waiting under an id; otherwise reverts with `ApplyWaitingReceiptFirst`: the receipt is already
+    ///   here, and {applyWaitingReceipt} applies it first.
+    ///
+    /// Emits `TicketCancelled` per id.
+    /// @param validationIds The tickets to cancel.
+    function cancelTickets(bytes32[] calldata validationIds) external;
+
+    /// @dev Sends an open ticket to the sender's away chain again, byte for byte, through the bridge the first send
+    /// pinned. The way to recover a ticket the bridge lost before its valid until, instead of waiting for
+    /// `waitingEndsAt` and asking again. `to` is the one envelope the record does not keep; it is read off
+    /// `TicketWritten`, like `spender`, and both must be the ones the ticket was asked with, so a resend can neither
+    /// widen nor retarget the move. The copy sent is the one recorded, ask block hash included. Nothing is written.
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - `chainKey` must be the sender's chain or, on two legs, the recipient's; otherwise reverts with
-    ///   `ChainNotPartOfValidation`.
-    /// - It must be stored `Open`, or, for the recipient's leg, `AwaitingMint`: the burn landed and the
-    ///   receiving Lite still needs the leg to check the burn message against; otherwise reverts with
-    ///   `ValidationNotResendable`. A discarded pair is never resendable: its burn landed past `waitingEndsAt`.
-    /// - `block.timestamp` must be before `validUntil` while `Open`, and before `waitingEndsAt` once the burn landed;
-    ///   otherwise reverts with `ValidationExpired`. Past `validUntil` no satellite may execute; past `waitingEndsAt` a
-    ///   resent leg could reach the Lite after the pair was resolved and the burned amount returned to the sender
-    ///   on the ledger, so the receiving chain would mint an amount the ledger attributes to the sender, and its
-    ///   report would land on a resolved id. The last resend stays one reconciliation window ahead of the resolution.
+    /// - `chainKey` must be the sender's chain; otherwise reverts with `ChainNotPartOfValidation`.
+    /// - It must be stored `Open`; otherwise reverts with `ValidationNotResendable`.
+    /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`: past it no away
+    ///   token may execute.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
-    /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `AwayChainBlocked`.
+    /// - `chainKey` must not be blocked on the token; otherwise reverts with `AwayChainBlocked`.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
-    /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `chainKey` is the
-    ///   recipient's chain, or authorised by the AccessManager for this selector; otherwise reverts with
+    /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `to` is on the same
+    ///   away chain, or authorised by the AccessManager for this selector; otherwise reverts with
     ///   `NotAuthorizedForWallet`.
-    /// - The leg's pinned gateway and peer must still be the chain's route and peer; otherwise the token reverts
-    ///   with `ValidationAlreadyRouted`. An `Open` validation then returns its reservation through discard at
-    ///   `waitingEndsAt`; one awaiting the mint cannot be discarded, and `resolveStuckValidation` returns the burned
-    ///   amount to the sender once the second window has passed.
+    /// - The pinned bridge and peer must still be the chain's route and peer; otherwise the token reverts with
+    ///   `ValidationAlreadyRouted`. The ticket then returns its reservation through a cancel at `waitingEndsAt`.
     ///
-    /// Nothing counts or spaces resends. The token forwards no value to the gateway, so a resend costs its caller
-    /// the gas and whatever the gateway charges, and the Lite ignores a leg it already holds. A deployment whose
-    /// relayer pays per message meters at the relayer.
-    ///
-    /// The leg goes to the peer the issuance pinned, the only one its settlement is accepted from: after a peer
-    /// change the leg already sent keeps settling from the previous peer, and a resend toward the new one is
-    /// refused. Neither the resend nor the issuance is gated by the token pause: the pause stops movements, and a
-    /// settlement is one.
+    /// Nothing counts or spaces resends. The token forwards no value to the bridge, so a resend costs its caller
+    /// the gas and whatever the bridge charges, and the away token ignores a copy it already holds.
     ///
     /// Emits `TicketSent`, then the token's `ProtocolMessageSent`.
-    /// @param ticketId The validation whose leg is sent again.
-    /// @param chainKey The chain the leg goes to, keyed as `MessageTypesLib.chainKey` computes it.
+    /// @param ticketId The ticket sent again.
+    /// @param chainKey The sender's away chain, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param to ERC-7930 interoperable address of the recipient, as issued.
     /// @param spender ERC-7930 address of the spender, as issued, or empty.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external;
@@ -485,7 +425,7 @@ interface ITickets {
     /// @dev The window added to the issuance timestamp to compute `validUntil`. Zero until set, which blocks issuance.
     function defaultValidityWindow() external view returns (uint64);
 
-    /// @dev The reconciliation window configured for `chainKey`, zero when unset, which blocks issuance.
+    /// @dev The waiting time configured for `chainKey`, zero when unset, which blocks issuance.
     /// @param chainKey The chain to look up.
     function waitingTimeOf(bytes32 chainKey) external view returns (uint64);
 
@@ -493,43 +433,40 @@ interface ITickets {
     /// @param chainKey The chain to look up.
     function isIssuancePaused(bytes32 chainKey) external view returns (bool);
 
-    /// @dev Settles the leg `chainKey` parked under `ticketId`, once a body is issued under the id. The leg is
-    /// judged exactly as it would have been at delivery, see {IReceiptHandler-receiveReceipt}: applied and
-    /// `WaitingReceiptApplied` emitted, or refused with its verdict applied on the token through `IToken.applyVerdict`.
-    /// Its own call, for anyone, rather than a step of the issuance: a leg that reverts here, the second leg of a
-    /// pair parked at another amount (`SettlementAmountMismatch`) or a tracker module that refuses it, stays
-    /// parked and can be tried again, where a revert inside the request would have kept the id from ever being
-    /// issued. Once the keeper resolved the pair after the second window, the parked leg ends as a replay.
+    /// @dev The caps on tickets toward `chainKey`, zero until set.
+    /// @param chainKey The away chain to look up.
+    function ticketLimitsOf(bytes32 chainKey) external view returns (TicketLimits memory);
+
+    /// @dev Applies the receipt `chainKey` sent for `ticketId` while the ticket was written and not sent, once it is
+    /// sent. The receipt is applied exactly as it would have been at delivery, see {IReceiptHandler-receiveReceipt}:
+    /// `WaitingReceiptApplied` is emitted, or, when it breaks its terms, the away chain is blocked through
+    /// `IToken.applyVerdict`. Its own call, for anyone, rather than a step of the send: a receipt that reverts here,
+    /// a tracker module that refuses it for instance, stays waiting and can be tried again.
     ///
     /// Requirements:
-    /// - A leg must be parked under `(ticketId, chainKey)` and the validation issued (its ask block hash written);
+    /// - A receipt must wait under `(ticketId, chainKey)` and the ticket be sent (its ask block hash written);
     ///   otherwise reverts with `NoWaitingReceipt`.
-    /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered leg waits under the pause
-    ///   the same way.
-    /// - `chainKey`'s inbound must not be paused on the token; otherwise reverts with `AwayChainBlocked`. The
-    ///   leg was parked under that very pause: lifting it is the pauser's word that the chain's reports may be
-    ///   taken again, for a parked leg as for one waiting at the gateway.
+    /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered receipt waits under the
+    ///   pause the same way.
+    /// - `chainKey` must not be blocked on the token; otherwise reverts with `AwayChainBlocked`.
     ///
-    /// Emits `WaitingReceiptApplied`, or the event of the verdict reached.
-    /// @param ticketId The validation the parked leg belongs to.
-    /// @param chainKey The chain the leg came from, keyed as `MessageTypesLib.chainKey` computes it.
+    /// Emits `WaitingReceiptApplied`, or the block of the away chain.
+    /// @param ticketId The ticket the waiting receipt belongs to.
+    /// @param chainKey The chain the receipt came from, keyed as `MessageTypesLib.chainKey` computes it.
     function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey) external;
 
-    /// @dev The leg `chainKey` reported for `ticketId` while no body was issued under it, `exists` false
-    /// when none is parked. Parked by a settlement for an id never issued, or recorded but not sent (awaiting
-    /// approval, refused, or unanswered); settled by `applyWaitingReceipt` once the id is issued; left parked for good
-    /// when the id is refused or never requested again. The body the Lite holds carries the `salt`, so an agent
-    /// can send the request again on the requester's behalf.
-    /// @param ticketId The validation to look up.
-    /// @param chainKey The chain the leg came from, keyed as `MessageTypesLib.chainKey` computes it.
+    /// @dev The receipt `chainKey` sent for `ticketId` while the ticket was written and not sent, `exists` false when
+    /// none waits. Applied by `applyWaitingReceipt` once the ticket is sent; left waiting for good when it is
+    /// refused or never answered.
+    /// @param ticketId The ticket to look up.
+    /// @param chainKey The chain the receipt came from, keyed as `MessageTypesLib.chainKey` computes it.
     function waitingReceiptOf(bytes32 ticketId, bytes32 chainKey) external view returns (WaitingReceipt memory);
 
     /// @dev Everything kept for `ticketId`, all zeros when the id was never issued.
     /// @param ticketId The validation to look up.
     function ticketOf(bytes32 ticketId) external view returns (Ticket memory);
 
-    /// @dev Where `ticketId` stands: the stored status, or `Expired` for a stored `Open` past `waitingEndsAt`
-    /// and for a stored `WaitingForApproval` at or past `validUntil`.
+    /// @dev Where `ticketId` stands.
     ///
     /// Requirements:
     /// - `ticketId` must have been taken; otherwise reverts with `UnknownTicket`.

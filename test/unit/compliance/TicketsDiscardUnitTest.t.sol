@@ -72,13 +72,11 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
     address internal bobId;
     bytes internal fromSat;
     bytes internal toSat;
-    bytes internal toOptimism;
 
     function setUp() public override {
         super.setUp();
         fromSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("aliceOnPolygon"));
         toSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("bobOnPolygon"));
-        toOptimism = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("bobOnOptimism"));
         aliceId = aliceIdentity;
         bobId = bobIdentity;
 
@@ -98,7 +96,6 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
-        _bind(toOptimism, bobIdentity);
 
         vm.warp(ISSUED_AT);
     }
@@ -112,7 +109,6 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         ITickets.Ticket memory state = mc.ticketOf(id);
         assertEq(uint8(state.status), uint8(ITickets.TicketStatus.Open));
         assertEq(state.moved, 0);
-        assertEq(state.legWallet.length, 0);
     }
 
     function test_statusOf_Success_WhenPastExpiryButNotPastReleaseAt() public {
@@ -125,21 +121,13 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
-    function test_statusOf_Success_WhenPastReleaseAtItDerivesExpired() public {
+    /// @notice The clock moves no ticket: past its waiting time it is still `Open`, and a cancel ends it.
+    function test_statusOf_Success_WhenPastReleaseAtItStaysOpen() public {
         bytes32 id = _issue();
 
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
-        assertEq(uint8(mc.ticketOf(id).status), uint8(ITickets.TicketStatus.Open));
-    }
-
-    function test_statusOf_Success_WhenAwaitingTheMintLegNeverDerivesExpired() public {
-        bytes32 id = _issueCrossChainWithBurnLeg();
-
-        vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
-
-        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.AwaitingMint));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
     function test_statusOf_RevertWhen_IdWasNeverIssued() public {
@@ -252,7 +240,7 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
         mc.cancelTickets(_ids(id));
 
-        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
     function test_discardExpiredValidations_Success_WhenAnyoneAfterTheSecondWindow() public {
@@ -300,20 +288,20 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         mc.cancelTickets(_ids(id));
     }
 
-    function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLegWhateverTheClock() public {
+    /// @notice A ticket its receipt ended is done: no clock makes it cancellable, and its reservation is released
+    ///         once, by the receipt.
+    function test_discardExpiredValidations_RevertWhen_TheReceiptEndedTheTicket() public {
         _track();
-        bytes32 id = _issueCrossChainWithBurnLeg();
+        bytes32 id = _issueAndReceive();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
         vm.prank(keeperAccount);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.AwaitingMint)
-            )
+            abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
         mc.cancelTickets(_ids(id));
 
-        assertEq(mc.pendingInOf(bobId), 90, "a pinned validation keeps its reservation");
+        assertEq(mc.pendingInOf(bobId), 0, "released once, by the receipt");
     }
 
     function test_discardExpiredValidations_RevertWhen_OneIdOfTheBatchIsRefused() public {
@@ -330,7 +318,7 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, pending, pendingReleaseAt));
         mc.cancelTickets(ids);
 
-        assertEq(uint8(mc.statusOf(expired)), uint8(ITickets.TicketStatus.Expired));
+        assertEq(uint8(mc.statusOf(expired)), uint8(ITickets.TicketStatus.Open));
         assertEq(mc.pendingInOf(bobId), 100, "the whole batch is rolled back");
     }
 
@@ -339,15 +327,14 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         id = mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
     }
 
-    function _issueCrossChainWithBurnLeg() private returns (bytes32 id) {
-        vm.prank(aliceIdentity);
-        id = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
+    function _issueAndReceive() private returns (bytes32 id) {
+        id = _issue();
         // Read before the prank: the lookup is an external call too and would consume it.
         ITickets.Ticket memory issued = mc.ticketOf(id);
-        MessageTypesLib.ReceiptMessage memory burnLeg = MessageTypesLib.ReceiptMessage({
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.ReceiptMessage({
             ticketId: id,
             from: fromSat,
-            to: "",
+            to: toSat,
             amount: 50,
             askBlockHash: issued.askBlockHash,
             seenMax: issued.amountMax,
@@ -355,8 +342,10 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
             half: 0,
             answer: MessageTypesLib.ReceiptAnswer.Executed
         });
+        // The token's side of the move is not what these tests are about.
+        vm.mockCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toSat, 50, id)), "");
         vm.prank(token);
-        mc.receiveReceipt(polygon, burnLeg);
+        mc.receiveReceipt(polygon, receipt);
     }
 
     function _ids(bytes32 id) private pure returns (bytes32[] memory ids) {

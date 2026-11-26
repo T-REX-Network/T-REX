@@ -202,10 +202,10 @@ interface IToken is IERC3643 {
         address accessManagerAddress
     ) external;
 
-    /// @notice Applies a verdict the compliance reached outside a delivery: a leg parked under an id, settled by
-    ///  `applyWaitingReceipt` once that id is issued, gets the same brake it would have got at delivery, see
+    /// @notice Applies a verdict the compliance reached outside a delivery: a receipt that waited for its ticket to
+    ///  be sent, applied by `applyWaitingReceipt`, gets the same block it would have got at delivery, see
     ///  {IReceiptHandler-Verdict}. Callable by the bound compliance alone.
-    /// @param chainKey the chain the judged leg came from
+    /// @param chainKey the chain the receipt came from
     /// @param verdict what to apply; `None` applies nothing
     function applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) external;
 

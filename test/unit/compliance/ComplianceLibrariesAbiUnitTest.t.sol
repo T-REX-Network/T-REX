@@ -59,18 +59,15 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(IModularCompliance.ModuleTypesRecorded.selector, EventsLib.ModuleTypesRecorded.selector);
         assertEq(ITickets.TicketWritten.selector, EventsLib.TicketWritten.selector);
         assertEq(ITickets.ReceiptReceived.selector, EventsLib.ReceiptReceived.selector);
-        assertEq(ITickets.ValidationLegConfirmed.selector, EventsLib.ValidationLegConfirmed.selector);
         assertEq(ITickets.ReceiptApplied.selector, EventsLib.ReceiptApplied.selector);
-        assertEq(ITickets.LateReconciliation.selector, EventsLib.LateReconciliation.selector);
-        assertEq(ITickets.ReplayedSettlement.selector, EventsLib.ReplayedSettlement.selector);
         assertEq(ITickets.ReceiptDuplicate.selector, EventsLib.ReceiptDuplicate.selector);
         assertEq(ITickets.TicketCancelled.selector, EventsLib.TicketCancelled.selector);
-        assertEq(ITickets.ClosedByHand.selector, EventsLib.ClosedByHand.selector);
         assertEq(ITickets.ReceiptWaiting.selector, EventsLib.ReceiptWaiting.selector);
         assertEq(ITickets.WaitingReceiptApplied.selector, EventsLib.WaitingReceiptApplied.selector);
         assertEq(ITickets.ReceiptRefused.selector, EventsLib.ReceiptRefused.selector);
-        assertEq(ITickets.ValidationOrphaned.selector, EventsLib.ValidationOrphaned.selector);
-        assertEq(ITickets.SettlementBodyDiverged.selector, EventsLib.SettlementBodyDiverged.selector);
+        assertEq(ITickets.ReceiptOnOlderTerms.selector, EventsLib.ReceiptOnOlderTerms.selector);
+        assertEq(ITickets.MoveBreachedRule.selector, EventsLib.MoveBreachedRule.selector);
+        assertEq(ITickets.TicketLimitsSet.selector, EventsLib.TicketLimitsSet.selector);
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
@@ -94,15 +91,14 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.NoWaitingReceipt.selector, ErrorsLib.NoWaitingReceipt.selector);
         assertEq(ITickets.ApplyWaitingReceiptFirst.selector, ErrorsLib.ApplyWaitingReceiptFirst.selector);
         assertEq(ITickets.TokenPaused.selector, ErrorsLib.TokenPaused.selector);
-        assertEq(ITickets.SettlementAmountMismatch.selector, ErrorsLib.SettlementAmountMismatch.selector);
         assertEq(ITickets.TicketNotCancellable.selector, ErrorsLib.TicketNotCancellable.selector);
         assertEq(ITickets.CancelNotDue.selector, ErrorsLib.CancelNotDue.selector);
         assertEq(
             ITickets.ValidationNotPubliclyDiscardable.selector, ErrorsLib.ValidationNotPubliclyDiscardable.selector
         );
-        assertEq(ITickets.ValidationNotStuck.selector, ErrorsLib.ValidationNotStuck.selector);
-        assertEq(ITickets.ValidationNotYetResolvable.selector, ErrorsLib.ValidationNotYetResolvable.selector);
         assertEq(ITickets.ChainNotOpen.selector, ErrorsLib.ChainNotOpen.selector);
+        assertEq(ITickets.UnknownTicket.selector, ErrorsLib.UnknownTicket.selector);
+        assertEq(ITickets.PerTicketCapLoweredTooEarly.selector, ErrorsLib.PerTicketCapLoweredTooEarly.selector);
         assertEq(
             ITickets.NonCanonicalInteroperableAddress.selector, ErrorsLib.NonCanonicalInteroperableAddress.selector
         );

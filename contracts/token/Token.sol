@@ -185,7 +185,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @inheritdoc ITREXMessaging
     /// @dev Bound to the pauser, like `pause` and `unpause`: it is the per-chain brake, the one the token pulls on
-    ///  its own when a chain reports something already accounted for, and only an agent releases it.
+    ///  its own when a chain sends a bad receipt, and only an agent releases it.
     function setInboundPaused(bytes32 chainKey, bool pause) external restricted {
         _setInboundPaused(chainKey, pause);
     }
@@ -197,8 +197,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///
     /// The reference side has two contracts with something to say, the compliance and the token, but
     /// the wire has one author: the token. Compliance therefore dispatches through here, and the peer
-    /// only ever has to trust a single reference address. A ticket over two away chains is sent once
-    /// per away chain, under the same `ticketId`, and each half pins its own route.
+    /// only ever has to trust a single reference address. A ticket goes to the sender's away chain only.
     ///
     /// Callable by the bound compliance alone. No role opens this door: a validation body and the id it
     /// travels under are the compliance's to author, and a human holding the selector could otherwise
@@ -596,12 +595,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      compliance's business, not the token's.
     ///
     ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
-    ///      incident under investigation settles nothing. When the compliance reports a replayed settlement, the
-    ///      chain that sent it is misbehaving and everything it reports is suspect: the token stops taking that
-    ///      chain's messages until an agent has investigated and called `setInboundPaused(chainKey, false)`. The
-    ///      same brake answers every leg the compliance cannot account for, an id never issued included: a
-    ///      validation id is a function of the request, so an unknown one is that chain's to explain, see
-    ///      {IReceiptHandler-receiveReceipt}.
+    ///      incident under investigation settles nothing. When the compliance finds a bad receipt, the chain that
+    ///      sent it is misbehaving: the token stops taking that chain's messages until an agent has investigated
+    ///      and called `setInboundPaused(chainKey, false)`, see {IReceiptHandler-receiveReceipt}.
     function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
         _applyVerdict(chainKey, TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body));
     }
@@ -615,7 +611,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      `consumeBurnProof` runs `syncOwner` before the mint, so the owner follow inside `agentTransferred`
     ///      finds nothing left to settle. Same pause policy as {_handleSettlement}: a paused token leaves the
     ///      proof deliverable, a proof for a recall already settled pauses the chain's inbound, a proof for a
-    ///      recall never issued pauses the token. A duplicate of a settled proof changes nothing.
+    ///      recall never issued reverts and stays deliverable. A duplicate of a settled proof changes nothing.
     function _handleBurnProof(bytes32 chainKey, bytes memory body)
         internal
         virtual
@@ -647,10 +643,10 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         IModularCompliance(address(_getCompliance())).agentTransferred(from, to, amount, kind);
     }
 
-    /// @dev The two brakes a handler can ask for, see {IReceiptHandler-Verdict}.
+    /// @dev The one brake a handler can ask for: block the away chain that sent a bad receipt. Nothing a message
+    ///  says stops the token itself, see {IReceiptHandler-Verdict}.
     function _applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) private {
-        if (verdict == IReceiptHandler.Verdict.HaltToken) _pause();
-        else if (verdict == IReceiptHandler.Verdict.PauseChain) _setInboundPaused(chainKey, true);
+        if (verdict == IReceiptHandler.Verdict.PauseChain) _setInboundPaused(chainKey, true);
     }
 
     /// @inheritdoc ERC3643Token

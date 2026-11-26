@@ -331,13 +331,11 @@ contract NamespaceFieldsTest is Test {
         validation.fromKey = bytes32(uint256(28));
         validation.fromWallet = hex"01";
         validation.toKey = bytes32(uint256(29));
-        validation.twoLegs = true;
         validation.fromIdentity = ALICE;
         validation.toIdentity = BOB;
         validation.relocation = true;
-        validation.status = ITickets.TicketStatus.AwaitingMint;
+        validation.status = ITickets.TicketStatus.OnHold;
         validation.moved = 30;
-        validation.legWallet = hex"02";
         validation.spender = hex"03";
         validation.salt = bytes32(uint256(33));
         validation.requestedMax = 34;
@@ -348,7 +346,11 @@ contract NamespaceFieldsTest is Test {
         parked.amount = 31;
         parked.askBlockHash = bytes32(uint256(32));
         parked.exists = true;
-        validationStorage.reportedLegs[KEY] = true;
+        parked.seenMax = 39;
+        parked.seenValidUntil = 40;
+        validationStorage.receiptHashes[KEY] = bytes32(uint256(35));
+        validationStorage.ticketLimits[KEY] = ITickets.TicketLimits({ perTicketCap: 36, perWindowCap: 37 });
+        validationStorage.latestValidUntilSent[KEY] = 38;
 
         assertEq(_word(_field(base, 0)), 11, "defaultValidityWindow");
         assertEq(_word(_entry(_field(base, 1), KEY)), 12, "waitingTimes");
@@ -364,7 +366,13 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_field(leg, 2)), 31, "waitingReceipts.amount");
         assertEq(_word(_field(leg, 3)), 32, "waitingReceipts.askBlockHash");
         assertEq(_word(_field(leg, 4)), 1, "waitingReceipts.exists");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 1, "reportedLegs");
+        assertEq(_word(_field(leg, 5)), 39, "waitingReceipts.seenMax");
+        assertEq(_word(_field(leg, 6)), 40, "waitingReceipts.seenValidUntil");
+        assertEq(_word(_entry(_field(base, 6), KEY)), 35, "receiptHashes");
+        bytes32 limits = _entry(_field(base, 7), KEY);
+        assertEq(_word(_field(limits, 0)), 36, "ticketLimits.perTicketCap");
+        assertEq(_word(_field(limits, 1)), 37, "ticketLimits.perWindowCap");
+        assertEq(_word(_entry(_field(base, 8), KEY)), 38, "latestValidUntilSent");
 
         bytes32 entry = _entry(_field(base, 3), bytes32(NUMBER));
         assertEq(_word(_field(entry, 0)), 21, "validations.askBlockHash");
@@ -377,19 +385,17 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_field(entry, 6)), 28, "validations.fromKey");
         assertEq(_slot(_field(entry, 7)), _shortBytes(0x01), "validations.fromWallet");
         assertEq(_word(_field(entry, 8)), 29, "validations.toKey");
-        // twoLegs fills byte 0, fromIdentity bytes 1 to 20.
-        assertEq(_word(_field(entry, 9)), 1 | (uint256(uint160(ALICE)) << 8), "validations.twoLegs and fromIdentity");
+        assertEq(_word(_field(entry, 9)), uint256(uint160(ALICE)), "validations.fromIdentity");
         // toIdentity fills bytes 0 to 19, relocation byte 20, status byte 21.
         assertEq(
             _word(_field(entry, 10)),
-            uint256(uint160(BOB)) | (1 << 160) | (uint256(ITickets.TicketStatus.AwaitingMint) << 168),
+            uint256(uint160(BOB)) | (1 << 160) | (uint256(ITickets.TicketStatus.OnHold) << 168),
             "validations.toIdentity, relocation and status"
         );
         assertEq(_word(_field(entry, 11)), 30, "validations.moved");
-        assertEq(_slot(_field(entry, 12)), _shortBytes(0x02), "validations.legWallet");
-        assertEq(_slot(_field(entry, 13)), _shortBytes(0x03), "validations.spender");
-        assertEq(_word(_field(entry, 14)), 33, "validations.salt");
-        assertEq(_word(_field(entry, 15)), 34, "validations.requestedMax");
+        assertEq(_slot(_field(entry, 12)), _shortBytes(0x03), "validations.spender");
+        assertEq(_word(_field(entry, 13)), 33, "validations.salt");
+        assertEq(_word(_field(entry, 14)), 34, "validations.requestedMax");
     }
 
     function test_AbstractModuleUpgradeable() public {

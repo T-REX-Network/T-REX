@@ -268,14 +268,13 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITickets
-    function resolveStuckValidation(bytes32 ticketId) external restricted {
-        ReceiptLib.resolveStuckValidation(ticketId, _getTokenBound());
+    function setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) external restricted {
+        _setTicketLimits(chainKey, perTicketCap, perWindowCap);
     }
 
     /// @inheritdoc ITickets
-    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, and it is
-    ///  judged as a delivery would be. The caller chooses when, as whoever relays a delivery does: a leg that is
-    ///  refused pauses its chain's inbound at that moment, the verdict the delivery would have reached.
+    /// @dev Not `restricted`: the receipt was sent by the chain's away token and admitted by the token already, and
+    ///  it is applied as a delivery would be. The caller chooses when, as whoever relays a delivery does.
     function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey) external {
         ReceiptLib.applyWaitingReceipt(ticketId, chainKey, _getTokenBound());
     }

@@ -90,10 +90,9 @@ library EventsLib {
     event RecallSettled(uint256 indexed recallId, bytes32 indexed originChainKey, uint256 amount);
     /// @notice Emitted when the proof that already settled a recall is delivered again: nothing is applied.
     event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
-    /// @notice Emitted when a burn proof answers a recall never issued, or differs from the proof that settled it.
-    ///  Nothing is applied. As on a replayed settlement, the token pauses its inbound from `originChainKey` when
-    ///  the recall is one it issued, and pauses itself when it is not, since an unknown id may as well mean the
-    ///  token's own records are out of step, see {IReceiptHandler-Verdict}.
+    /// @notice Emitted when a burn proof differs from the proof that settled its recall. Nothing is applied and the
+    ///  token blocks `originChainKey`, see {IReceiptHandler-Verdict}. A proof for a recall never issued reverts
+    ///  instead, and stops nothing.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
@@ -108,10 +107,6 @@ library EventsLib {
 
     /// A held amount went back to the wallet it was burned from.
     event ReturnedInTransit(bytes32 indexed walletKey, bytes32 indexed ticketId, bytes wallet, uint256 amount);
-
-    /// The keeper gave up on a pair whose other leg never arrived. `returnedAmount` went back to the wallet it
-    /// was burned from, or is zero when it was the mint leg that landed and nothing here could be returned.
-    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
 
     event HeldInTransit(bytes32 indexed fromKey, bytes32 indexed ticketId, bytes fromWallet, uint256 amount);
     /// @notice Emitted on a settled movement between two satellite wallets, under the validation it consumed.
@@ -232,10 +227,6 @@ library EventsLib {
         bytes32 askBlockHash,
         bytes32 salt
     );
-    /// @notice Warning: a reconciliation of `ticketId` arrived from `chainKey` after its release deadline.
-    ///         The settlement is recorded regardless. Issuance for that chain pauses only when the recorded state
-    ///         breaches a rule; otherwise this warning is the whole record.
-    event LateReconciliation(bytes32 indexed ticketId, bytes32 indexed chainKey);
     /// @notice Emitted when the keeper discards an expired validation and its slots are released.
     event TicketCancelled(bytes32 indexed ticketId);
     /// @notice Emitted when a validation is recorded and reserved while an `APPROVAL` module decides it.
@@ -251,11 +242,10 @@ library EventsLib {
     /// @notice Emitted when a validation awaiting approval is refused, or left unanswered past its deadline, and
     ///         its reservation released.
     event ValidationApprovalRefused(bytes32 indexed ticketId);
-    /// @notice Emitted when the leg of an issued validation toward `chainKey` is sent again, byte for byte.
+    /// @notice Emitted when an issued ticket is sent to `chainKey` again, byte for byte.
     event TicketSent(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    /// @notice Emitted when the first of the two legs of a cross-chain validation was consumed, whichever it was:
-    ///         the validation is pinned and can no longer be discarded.
-    event ValidationLegConfirmed(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
+    /// @notice Emitted when the caps on tickets toward `chainKey` are set.
+    event TicketLimitsSet(bytes32 indexed chainKey, uint256 perTicketCap, uint256 perWindowCap);
 
     /// The registry now names another identity for an empty wallet, and the ledger took note. `amount` is what
     /// moved between the two positions, zero: a wallet that holds tokens never changes identity in the ledger.
@@ -263,40 +253,30 @@ library EventsLib {
         address indexed wallet, address indexed previousIdentity, address indexed identity, uint256 amount
     );
 
-    /// @notice Emitted when every expected leg of a validation was received: slots committed, ledger updated.
-    ///         `chainKey` is the chain of the leg that completed it.
+    /// @notice Emitted when a receipt was applied: the ticket is done and the ledger moved by `amount`, zero for a
+    ///         receipt that moved nothing.
     event ReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
-    /// @notice Emergency: a trusted gateway delivered a leg already accounted for, or a second leg for an id
-    ///         whose first one is parked, other than a delivery consumed before (`ReceiptDuplicate`).
-    ///         Nothing is applied and the token pauses its inbound from `chainKey`, lifted by the pauser after an
-    ///         investigation.
-    event ReplayedSettlement(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    /// @notice A leg already consumed for `ticketId` from `chainKey`, whether it was applied, parked or
-    ///         refused, was delivered again, byte for byte, under another receive id: a gateway redelivery or a
-    ///         Lite resending its settlement. Nothing is applied and nothing is paused; the delivery is consumed.
+    /// @notice The receipt home already holds for this half came again from `chainKey`, byte for byte, under
+    ///         another receive id: a bridge delivering twice, or an away token sending its stored receipt again.
+    ///         Nothing changes; the delivery is consumed.
     event ReceiptDuplicate(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    /// @notice A leg arrived from `chainKey` for an id with no issued body: the satellite executed a validation
-    ///         this chain never sent, which a reorg that dropped the issuance explains as well as a hostile Lite.
-    ///         The leg is kept under its id and the token pauses its inbound from `chainKey`. Once the request is
-    ///         sent again with the same terms and salt, `applyWaitingReceipt` settles it.
+    /// @notice A receipt arrived from `chainKey` for a ticket written here and never sent: the away token executed a
+    ///         copy home never sent. It is kept under its id; once the ticket is sent, `applyWaitingReceipt`
+    ///         applies it.
     event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    /// @notice A parked leg from `chainKey` was settled, once its validation was issued.
+    /// @notice A waiting receipt from `chainKey` was applied, once its ticket was sent.
     event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    /// @notice A leg from `chainKey` carries the issued ask block hash but wallets or an amount outside the issued
-    /// terms:
-    ///         the Lite broke a rule on the body this chain issued. Nothing is applied, the validation stands,
-    ///         and the token pauses its inbound from `chainKey`.
+    /// @notice A bad receipt from `chainKey`: another body for a half that has one, from a chain that is not the
+    ///         sender's, for wallets that are not the ticket's, for a half never sent, or an expired answer that
+    ///         moved something. Nothing is applied, and the token blocks `chainKey`.
     event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    /// @notice A leg from `chainKey` fails the issued terms and carries another ask block hash: the satellite executed
-    /// a body
-    ///         this chain never canonically issued, one a reorg orphaned. Nothing is applied and the token pauses
-    ///         its inbound from `chainKey`. While no leg had landed yet the validation ends `Orphaned`, its
-    ///         reservation released; otherwise it stands and the keeper resolves the pair after the second window.
-    event ValidationOrphaned(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    /// @notice Information: a leg from `chainKey` settled inside the issued terms but carries another ask block
-    ///         hash, so the satellite executed a copy of the ask mined in another block, before a reorg, inside
-    ///         whose terms the executed amount still sits.
-    event SettlementBodyDiverged(bytes32 indexed ticketId, bytes32 indexed chainKey, bytes32 askBlockHash);
+    /// @notice A receipt from `chainKey` answers a copy of the ticket from another home block, one a home reorg
+    ///         dropped: it is applied as it happened, and blocks `chainKey` only above `requestedMax` or the away
+    ///         chain's per-ticket cap. `seenMax` is the maximum of the copy the away token executed.
+    event ReceiptOnOlderTerms(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 seenMax);
+    /// @notice A receipt from `chainKey` was applied although the rules would not allow `amount` now: the away
+    ///         token's balances already moved, so home records it and says so.
+    event MoveBreachedRule(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
     // TREXAccessManager Events
 
     event DomainCreated(uint32 indexed domainId, string name);

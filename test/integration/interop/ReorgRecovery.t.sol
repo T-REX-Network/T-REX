@@ -32,12 +32,10 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     ERC7786GatewayMock polygonGateway;
     ERC7786GatewayMock optimismGateway;
     SatelliteLiteMock polygonLite;
-    SatelliteLiteMock optimismLite;
 
     Account aliceOnPolygon;
     bytes aliceSat;
     bytes bobSat;
-    bytes bobOptimism;
     address backend = makeAddr("institutionBackend");
 
     function setUp() public override {
@@ -48,23 +46,22 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
-        optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway);
-        polygonLite.setPeer(optimismLite, optimismGateway);
-        optimismLite.setPeer(polygonLite, polygonGateway);
         vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)));
         vm.stopPrank();
 
         aliceOnPolygon = makeAccount("aliceOnPolygon");
         aliceSat = _linkSatelliteWallet(aliceIdentity, POLYGON, aliceOnPolygon);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
-        bobOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
 
         vm.startPrank(agent);
         token.mint(alice, MINTED);
         token.unpause();
         vm.stopPrank();
+
+        // A dropped copy carries at most the per-ticket cap of its away chain.
+        vm.prank(deployer);
+        boundCompliance.setTicketLimits(polygon, DELEGATED, DELEGATED);
 
         vm.prank(alice);
         token.delegateOut(alice, aliceSat, DELEGATED);
@@ -101,12 +98,12 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(token.isInboundPaused(polygon));
     }
 
-    /* ----- Case 2: the issuance is dropped from the canonical chain ----- */
+    /* ----- Case 2: the ask is dropped from the canonical chain ----- */
 
-    /// @notice The Lite executed an issuance the canonical chain never saw. Its leg is parked under the id and the
-    ///         chain paused, the token untouched. The request sent again with the same terms and salt issues the
-    ///         same id in a later block, sends nothing to the chain that already executed, and settles the parked
-    ///         leg, which echoes the copy of the dropped block.
+    /// @notice The away token executed a ticket from a home block a reorg dropped. Its receipt names an id home has
+    ///         no record of: it reverts and stays deliverable at the bridge, and no chain is blocked. The request
+    ///         sent again with the same terms and salt takes the same id in a later block, and the receipt, delivered
+    ///         again, is applied on the older terms it echoes.
     function test_reorg_Success_WhenADroppedIssuanceIsResubmittedWithTheSameSalt() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
@@ -115,41 +112,27 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).fromIdentity, address(0), "nothing recorded here");
 
         _execute(id, 95);
-        uint256 report = _last(polygonGateway);
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(id, polygon, 95, orphaned.askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
-        polygonGateway.relay(report);
+        uint256 receipt = _last(polygonGateway);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, id));
+        polygonGateway.relay(receipt);
 
         assertFalse(token.paused(), "the token keeps running");
-        assertTrue(token.isInboundPaused(polygon), "the chain that executed before finality is paused");
-        assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(report)), "consumed");
+        assertFalse(token.isInboundPaused(polygon), "the honest away chain is not blocked");
+        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(receipt)));
         assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
-        ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(id, polygon);
-        assertTrue(parked.exists);
-        assertEq(parked.amount, 95);
-        assertEq(parked.askBlockHash, orphaned.askBlockHash);
-
-        // The operator lifts the pause once the reorg is understood; the requester sends the request again.
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
-        uint256 queued = polygonGateway.queueLength();
 
         vm.prank(address(aliceIdentity));
         assertEq(boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt), id);
-        assertEq(polygonGateway.queueLength(), queued, "no leg toward the chain that already executed");
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.WaitingReceiptApplied(id, polygon);
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        emit EventsLib.ReceiptOnOlderTerms(id, polygon, 100);
+        polygonGateway.relay(receipt);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(boundCompliance.ticketOf(id).moved, 95);
         assertEq(token.awayBalanceOf(bobSat), 95);
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
-        assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
         assertTrue(
             boundCompliance.ticketOf(id).askBlockHash != orphaned.askBlockHash,
             "same request, same id; another block, another copy"
@@ -157,75 +140,40 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(token.isInboundPaused(polygon));
     }
 
-    /// @notice A validation is not discarded over the leg parked under its id: the report of the movement is
-    ///         already here, so the discard waits for it, for the public caller as for the keeper. Once the leg is
-    ///         settled the validation is `Done`, and never a late reconciliation.
-    function test_discardExpiredValidations_RevertWhen_ALegIsParkedUnderTheId_ThenTheLegSettles() public {
+    /// @notice The ticket mined again is cancelled before the receipt of the dropped copy lands: the receipt is still
+    ///         applied, as the move the away token made.
+    function test_reorg_Success_WhenTheTicketMinedAgainIsCancelledBeforeTheReceiptLands() public {
         bytes32 salt = _salt();
         bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
-        polygonGateway.relay(_last(polygonGateway));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        uint256 receipt = _last(polygonGateway);
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
-        // Nobody settled the parked leg, and the second window passed: the discard is open to anyone.
         ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
         vm.warp(uint256(issued.waitingEndsAt) + (issued.waitingEndsAt - issued.validUntil) + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, id, polygon));
         boundCompliance.cancelTickets(ids);
+        assertEq(token.reservedOf(aliceSat), 0, "the cancel released the reservation");
 
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        polygonGateway.relay(receipt);
+
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
-        assertFalse(boundCompliance.isIssuancePaused(polygon), "settled, not reconciled late");
+        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "a late receipt stops nothing");
     }
 
-    /// @notice The pause the parking set gates both steps of the recovery: the request sent again and the settling
-    ///         of the parked leg wait for the pauser, as a leg at the gateway does.
-    function test_reorg_RevertWhen_TheChainIsStillPausedForEitherStep() public {
-        bytes32 salt = _salt();
-        bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
-        _execute(id, 95);
-        polygonGateway.relay(_last(polygonGateway));
-        assertTrue(token.isInboundPaused(polygon));
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
-
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
-        vm.prank(address(aliceIdentity));
-        boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
-
-        // The pauser looks again before the parked leg is taken: it waits under the pause like any delivery.
-        vm.prank(agent);
-        token.setInboundPaused(polygon, true);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.applyWaitingReceipt(id, polygon);
-        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists);
-
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
-        boundCompliance.applyWaitingReceipt(id, polygon);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-    }
-
-    /// @notice The other way out of a drop. The Lite executed the dropped copy above what home narrows the same
-    ///         request to when it is mined again: the parked leg fits no issued terms and its ask block hash is
-    ///         not the issued one, so the validation ends `Orphaned`, nothing moves, and the chain is paused again.
-    function test_reorg_OrphansTheValidation_WhenTheResubmittedTermsNoLongerCoverTheParkedLeg() public {
+    /// @notice The away token executed the dropped copy above what home narrows the same request to when it is mined
+    ///         again. The receipt is applied on the older terms it echoes, as it happened, and the honest away chain
+    ///         stays open.
+    function test_reorg_AppliesOnOlderTerms_WhenTheResubmittedTermsNoLongerCoverTheExecutedAmount() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
         bytes32 id = orphaned.ticketId;
         _execute(id, 98);
-        polygonGateway.relay(_last(polygonGateway));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        uint256 receipt = _last(polygonGateway);
 
         // Another ask reserved part of the wallet in the meantime: the same request is now narrowed to 95.
         uint256 reservedByTheOtherAsk = DELEGATED - 95;
@@ -236,82 +184,37 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).amountMax, 95, "narrowed by home");
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ValidationOrphaned(id, polygon, 98, orphaned.askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
-        boundCompliance.applyWaitingReceipt(id, polygon);
-
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Orphaned));
-        assertTrue(token.isInboundPaused(polygon));
-        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
-        assertEq(token.reservedOf(aliceSat), reservedByTheOtherAsk, "the orphaned ticket's reservation is released");
-        assertEq(boundCompliance.pendingInOf(address(bobIdentity)), reservedByTheOtherAsk);
-        assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
-    }
-
-    /// @notice A dropped two-leg issuance: the sending Lite burned and the receiving Lite minted on its word,
-    ///         each leg parked on its own chain. The request sent again settles both and sends nothing.
-    function test_reorg_Success_WhenADroppedTwoLegIssuanceIsResubmitted() public {
-        bytes32 salt = _salt();
-        MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobOptimism, 90, 100);
-        bytes32 id = orphaned.ticketId;
-        _deliverToLite(optimismGateway, optimismLite, orphaned);
-
-        _execute(id, 95);
-        _relayAll(polygonGateway);
-        _relayAll(optimismGateway);
-        assertEq(optimismLite.balanceOf(bobOptimism), 95, "minted on the burn message");
-        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "the burn leg is parked");
-        assertTrue(boundCompliance.waitingReceiptOf(id, optimism).exists, "the mint leg is parked");
-        assertTrue(token.isInboundPaused(polygon));
-        assertTrue(token.isInboundPaused(optimism));
-        assertFalse(token.paused());
-        assertEq(token.onHoldOf(id), 0, "nothing applied");
-
-        vm.startPrank(agent);
-        token.setInboundPaused(polygon, false);
-        token.setInboundPaused(optimism, false);
-        vm.stopPrank();
-        uint256 polygonQueued = polygonGateway.queueLength();
-        uint256 optimismQueued = optimismGateway.queueLength();
-
-        vm.prank(address(aliceIdentity));
-        boundCompliance.askToMove(aliceSat, bobOptimism, 90, 100, "", salt);
-        assertEq(polygonGateway.queueLength(), polygonQueued, "nothing sent");
-        assertEq(optimismGateway.queueLength(), optimismQueued, "nothing sent");
-
-        // Either order: the mint leg first waits as it does at delivery.
+        emit EventsLib.ReceiptOnOlderTerms(id, polygon, orphaned.amountMax);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.WaitingReceiptApplied(id, optimism);
-        boundCompliance.applyWaitingReceipt(id, optimism);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.AwaitingBurn));
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.WaitingReceiptApplied(id, polygon);
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        emit EventsLib.ReceiptApplied(id, polygon, 98);
+        polygonGateway.relay(receipt);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
-        assertEq(token.awayBalanceOf(bobOptimism), 95);
-        assertEq(token.onHoldOf(id), 0);
-        assertEq(token.totalAwayBalance(), DELEGATED);
+        assertFalse(token.isInboundPaused(polygon));
+        assertEq(token.awayBalanceOf(bobSat), 98, "applied as it happened");
+        assertEq(token.reservedOf(aliceSat), reservedByTheOtherAsk, "the ticket's reservation is released");
+        assertEq(boundCompliance.pendingInOf(address(bobIdentity)), reservedByTheOtherAsk);
     }
 
-    /// @notice A parked leg for a request that then waits for approval stays parked until the answer: issued, it
-    ///         settles.
+    /// @notice The request sent again waits for approval: the receipt of the dropped copy now names a ticket written
+    ///         and not sent, so it waits here, and is applied once the approval sends the ticket.
     function test_reorg_Success_WhenTheResubmittedRequestWaitsForApproval() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
         bytes32 id = orphaned.ticketId;
         _execute(id, 95);
-        polygonGateway.relay(_last(polygonGateway));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        uint256 receipt = _last(polygonGateway);
 
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWaiting(id, polygon, 95, orphaned.askBlockHash);
+        polygonGateway.relay(receipt);
         assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "waits for the answer");
+        assertFalse(token.isInboundPaused(polygon), "nothing is blocked");
         assertEq(token.awayBalanceOf(bobSat), 0);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
@@ -322,6 +225,20 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         module.finalize(address(boundCompliance), id);
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
 
+        // A waiting receipt waits under a block of its chain, and under a stop of the token, as a delivery does.
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.applyWaitingReceipt(id, polygon);
+        vm.startPrank(agent);
+        token.setInboundPaused(polygon, false);
+        token.pause();
+        vm.stopPrank();
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
+        boundCompliance.applyWaitingReceipt(id, polygon);
+        vm.prank(agent);
+        token.unpause();
+
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.WaitingReceiptApplied(id, polygon);
         boundCompliance.applyWaitingReceipt(id, polygon);
@@ -331,18 +248,17 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
     }
 
-    /// @notice Refused, the request issues nothing and the leg stays parked for the operator to read.
+    /// @notice Refused, the request sends nothing and the receipt stays waiting for the operator to read.
     function test_reorg_LeavesTheLegParked_WhenTheResubmittedRequestIsRefused() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
         bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
-        polygonGateway.relay(_last(polygonGateway));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        uint256 receipt = _last(polygonGateway);
 
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
+        polygonGateway.relay(receipt);
         vm.prank(backend);
         module.refuseValidation(address(boundCompliance), id);
 
@@ -354,27 +270,23 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         boundCompliance.applyWaitingReceipt(id, polygon);
     }
 
-    /// @notice The requester need not come back: the copy the Lite holds carries the whole request, the asked
+    /// @notice The requester need not come back: the copy the away token holds carries the whole request, the asked
     ///         maximum and the salt included, so an agent sends the request again on their behalf from it.
     function test_reorg_Success_WhenAnAgentResubmitsFromTheLitesCopy() public {
         bytes32 salt = _salt();
         bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
         _execute(id, 95);
-        polygonGateway.relay(_last(polygonGateway));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        uint256 receipt = _last(polygonGateway);
 
         MessageTypesLib.TicketMessage memory held = polygonLite.ticketOf(id);
-        ITickets.WaitingReceipt memory parked = boundCompliance.waitingReceiptOf(id, polygon);
         assertEq(held.salt, salt, "the salt is final on the satellite");
 
-        assertEq(parked.from, held.from, "the parked leg names the wallets of the copy held");
         vm.prank(agent);
         assertEq(
             boundCompliance.askToMove(held.from, held.to, held.amountMin, held.requestedMax, held.spender, held.salt),
             id
         );
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        polygonGateway.relay(receipt);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
@@ -382,9 +294,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
     /* ----- Case 3: the same id, another copy ----- */
 
-    /// @notice The Lite holds the copy of the dropped block and has not executed when the copy mined again lands
-    ///         under the same id: it keeps the first copy, executes it, and its receipt echoes it. The amount
-    ///         sits inside the issued terms, so the leg settles, with the other copy on record.
+    /// @notice The away token holds the copy of the dropped block and has not executed when the copy mined again
+    ///         lands under the same id: it keeps the first copy, executes it, and its receipt echoes it. The receipt
+    ///         is applied on older terms.
     function test_reorg_Success_WhenTheLiteKeepsTheDroppedCopyAndIgnoresTheCopyMinedAgain() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
@@ -398,32 +310,28 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
         _execute(id, 95);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementBodyDiverged(id, polygon, orphaned.askBlockHash);
+        emit EventsLib.ReceiptOnOlderTerms(id, polygon, orphaned.amountMax);
         _relayAll(polygonGateway);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertFalse(token.isInboundPaused(polygon));
     }
 
-    /// @notice The Lite executed the copy of the dropped block at an amount the copy mined again also covers:
-    ///         the leg settles, with the divergence on record.
+    /// @notice The away token executed the copy of the dropped block at an amount the copy mined again also covers:
+    ///         the receipt is applied on the older terms it echoes.
     function test_reorg_Success_WhenTheLegExecutedUnderAnotherBodyFitsTheIssuedTerms() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
         bytes32 id = orphaned.ticketId;
         _execute(id, 95);
-        polygonGateway.relay(_last(polygonGateway));
-        vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        uint256 receipt = _last(polygonGateway);
 
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.SettlementBodyDiverged(id, polygon, orphaned.askBlockHash);
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.WaitingReceiptApplied(id, polygon);
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        emit EventsLib.ReceiptOnOlderTerms(id, polygon, orphaned.amountMax);
+        polygonGateway.relay(receipt);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);

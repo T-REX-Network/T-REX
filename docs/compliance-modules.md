@@ -172,13 +172,13 @@ and, once issued, the satellite's deadline: the time spent waiting comes out of 
 rules are never older than one validity window when the satellite executes.
 
 Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
-lowers the maximum when the answer is lower, releases the difference and sends the legs; no rule runs again,
-since every rule ran and the room was reserved at the request, but the chains are checked again, as one may
+lowers the maximum when the answer is lower, releases the difference and sends the ticket; no rule runs again,
+since every rule ran and the room was reserved at the request, but the chain is checked again, as it may
 have been paused while the request waited. An answer below the requested minimum is a refusal, which releases
 the reservation and ends the validation `Cancelled`. A request nobody answered is discarded past its deadline
-with `cancelTickets`, by anyone, since nothing was sent for it; `statusOf` reads it `Expired` from
-then on. A settlement for a validation that was never sent (still waiting, refused or unanswered) halts the
-token, as one for an id never taken does: no satellite could have executed it.
+with `cancelTickets`, by anyone, since nothing was sent for it. A receipt for a ticket that was never sent
+(still waiting, refused or unanswered) waits under its id and is applied once the approval sends the ticket; a
+receipt for an id never taken reverts and stays deliverable. Neither stops the token or blocks a chain.
 
 Because the request reserves while it waits, two waiting requests cannot jointly break a rule that reads the
 ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
@@ -194,7 +194,7 @@ the approvers stop answering. Requests already waiting keep waiting until their 
   `refuseValidation(compliance, id)`. They cannot change the recipient or the spender, or widen the range: the
   lowest maximum approved is the one issued, and the first refusal refuses at once.
 - The last approval only records the request as fully approved. Anyone then calls `finalize(compliance, id)`,
-  which answers the compliance and pays for sending the legs. An approver answering from a callback therefore
+  which answers the compliance and pays for sending the ticket. An approver answering from a callback therefore
   never reverts on a paused chain, nor carries the cost of the issuance, and a failed `finalize` can be tried
   again before the deadline.
 - An approver contract is told in the same transaction, through `IAsyncApprover.approvalAsked`, when its turn

@@ -46,6 +46,7 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { Version, VersionLib } from "contracts/libraries/VersionLib.sol";
 import { ITREXImplementationAuthority } from "contracts/proxy/beacon/ITREXImplementationAuthority.sol";
 import { TREXRegistry } from "contracts/registry/implementation/TREXRegistry.sol";
@@ -348,7 +349,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(_issue(10, CAP)).amountMax, 600, "the rest of the cap is free");
     }
 
-    /// @notice A late settlement above what the rule allows now is applied and reported, pausing that chain.
+    /// @notice A late receipt above what the rule allows now is applied and announced; nothing stops by itself.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 late = _issue(10, CAP);
@@ -360,11 +361,15 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
 
         _issue(10, CAP);
 
-        gateway.relay(_liteSettles(gateway, token, _settlement(late, aliceSat, bobSat, CAP)));
+        uint256 lateReceipt = _liteSettles(gateway, token, _settlement(late, aliceSat, bobSat, CAP));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.MoveBreachedRule(late, polygon, CAP);
+        gateway.relay(lateReceipt);
 
         assertEq(_position(address(bobIdentity)), CAP, "applied regardless: the satellite already executed it");
-        assertTrue(boundCompliance.isIssuancePaused(polygon), "the origin chain stopped issuing");
-        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.LateReconciled));
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "asks toward the chain go on");
+        assertFalse(token.isInboundPaused(polygon), "the away chain is not blocked");
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.Done));
     }
 
     // ==== Helpers ====

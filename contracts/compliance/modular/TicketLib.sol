@@ -80,8 +80,8 @@ import { IModule } from "./modules/IModule.sol";
  * @title TicketLib
  * @dev The layout of the compliance's validation record, and the issuance half of a validation's life,
  * deployed once and linked: the questions a request must answer, then the id built from the whole request,
- * the record, the reservation, the announcement and the legs the satellites will execute against; the
- * answer of an approval; a resend.
+ * the record, the reservation, the announcement and the ticket the away token will execute against; the
+ * answer of an approval; a resend; and the table of what each ticket state keeps reserved, {moveTo}.
  *
  * That is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept it over
  * EIP-170. The compliance reaches it by DELEGATECALL, so the storage is its own namespaces at the slots they
@@ -106,14 +106,17 @@ library TicketLib {
         /// The recipient's and the spender's envelopes, for a validation `WaitingForApproval` alone: what it is
         /// issued with once approved. Deleted by the answer.
         mapping(bytes32 ticketId => AwaitedTerms terms) awaitedTerms;
-        /// Legs reported for an id with no issued body, per origin chain, see {ITickets-WaitingReceipt}.
-        /// Written by the settlement path, consumed by {ReceiptLib-applyWaitingReceipt}.
-        mapping(bytes32 ticketId => mapping(bytes32 chainKey => ITickets.WaitingReceipt leg)) waitingReceipts;
-        /// Every settlement delivery consumed, by `keccak256(abi.encode(chainKey, notification))`, whatever its
-        /// outcome was: applied, parked, refused or a replay. Written once and kept, so the same leg delivered
-        /// again from the same chain, under another receive id, is told apart from a new one, as the token keeps
-        /// `settledProofs` for burn proofs.
-        mapping(bytes32 deliveryKey => bool consumed) reportedLegs;
+        /// Receipts for a ticket written and never sent, per away chain, see {ITickets-WaitingReceipt}.
+        /// Written by the receipt path, consumed by {ReceiptLib-applyWaitingReceipt}.
+        mapping(bytes32 ticketId => mapping(bytes32 chainKey => ITickets.WaitingReceipt receipt)) waitingReceipts;
+        /// The receipt home took in for each half, as `keccak256(abi.encode(chainKey, receipt))`, see
+        /// {MessageTypesLib-halfKeyOf}. The same receipt again changes nothing; another one is a bad receipt.
+        mapping(bytes32 halfKey => bytes32 receiptHash) receiptHashes;
+        /// The caps on tickets toward each away chain.
+        mapping(bytes32 chainKey => ITickets.TicketLimits limits) ticketLimits;
+        /// The latest `validUntil` of a ticket sent toward each away chain: the per-ticket cap is lowered only
+        /// once it has passed.
+        mapping(bytes32 chainKey => uint64 validUntil) latestValidUntilSent;
     }
 
     /// @dev The recipient's and the spender's envelopes of a validation awaiting approval.
@@ -130,7 +133,6 @@ library TicketLib {
     struct Draft {
         bytes32 fromChainKey;
         bytes32 toChainKey;
-        bool twoLegs;
         address fromIdentity;
         address toIdentity;
         bytes32 fromKey;
@@ -167,8 +169,7 @@ library TicketLib {
         draft.requestedMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
         _requireCallerOwnsTheWallet(draft, from, token, authority);
-        (draft.validUntil, draft.waitingTime) =
-            _expiryAndWindow(token, draft.fromChainKey, draft.toChainKey, draft.twoLegs);
+        (draft.validUntil, draft.waitingTime) = _expiryAndWindow(token, draft.fromChainKey);
         _narrowAmountRange(draft, from, to, spender, token);
         _requireSpenderAllowed(draft, to, spender);
 
@@ -176,9 +177,10 @@ library TicketLib {
         ticketId = _issue(from, to, spender, salt, draft, token);
     }
 
-    /// @dev Where the movement goes: both envelopes parse, the sender sits on a satellite, and the legs are
-    ///  two when the wallets are on two different satellite chains. The spender is parsed here and judged in
-    ///  {_requireSpenderAllowed}, once the range is known.
+    /// @dev Where the move goes: both envelopes parse, the sender sits on an away chain, and the receiver sits on
+    ///  the same away chain or at home. A move between two away chains is done in two halves, home sending the
+    ///  second one once the first is done, and is refused until home can send it. The spender is parsed here and
+    ///  judged in {_requireSpenderAllowed}, once the range is known.
     function _resolveRoute(Draft memory draft, bytes calldata from, bytes calldata to, bytes calldata spender)
         private
         view
@@ -188,7 +190,8 @@ library TicketLib {
         (bool toNative,) = WalletKeyLib.isReferenceChain(to);
         draft.fromChainKey = _chainKeyOf(from);
         draft.toChainKey = _chainKeyOf(to);
-        draft.twoLegs = !toNative && draft.fromChainKey != draft.toChainKey;
+        bool receiverOnTheSendersChain = draft.toChainKey == draft.fromChainKey;
+        require(toNative || receiverOnTheSendersChain, ErrorsLib.ChainNotOpen(draft.toChainKey));
         if (spender.length != 0) WalletKeyLib.parse(spender);
     }
 
@@ -283,8 +286,8 @@ library TicketLib {
 
     /// @dev Turns a settled draft into a validation: build its id from the whole request, refuse an id
     ///  already taken, keep its terms and reserve the amount. With no `APPROVAL` module bound, issue it at once:
-    ///  build the object the satellite will execute against, announce it and send one leg per satellite chain
-    ///  involved. With one bound, keep it `WaitingForApproval` instead, sent nowhere until {answerApproval}.
+    ///  build the object the away token will execute against, announce it and send it to the sender's away
+    ///  chain. With one bound, keep it `WaitingForApproval` instead, sent nowhere until {answerApproval}.
     /// @param salt the requester's nonce, see {ITickets-askToMove}
     /// @param token the token the compliance is bound to
     /// @return ticketId the id of the whole request, see {ticketIdOf}
@@ -331,12 +334,12 @@ library TicketLib {
                 askBlockHash: askBlockHashOf(draft.amountMax, draft.validUntil)
             })
         );
-        _dispatch(token, ticketId, draft.fromChainKey, draft.toChainKey, draft.twoLegs, body);
+        _dispatch(token, ticketId, draft.fromChainKey, draft.validUntil, body);
     }
 
     /// @dev Answers a validation awaiting approval, see {ITickets-answerApproval}. Issuing it runs
     ///  no rule again: every rule ran and the range was reserved at the request, so an approval only narrows,
-    ///  checks the chains are still open and sends the legs. The legs go through the token, which as the
+    ///  checks the sender's chain is still open and sends the ticket. It goes through the token, which as the
     ///  compliance's DELEGATECALL target sees the compliance as its caller.
     /// @param token the token the compliance is bound to
     function answerApproval(bytes32 ticketId, uint256 approvedMax, address token) external {
@@ -351,20 +354,18 @@ library TicketLib {
         require(block.timestamp < validation.validUntil, ErrorsLib.ValidationExpired(ticketId, validation.validUntil));
 
         if (approvedMax == 0 || approvedMax < validation.amountMin) {
-            _release(validation, validation.amountMax, token);
-            validation.status = ITickets.TicketStatus.Cancelled;
+            moveTo(validation, ITickets.TicketStatus.Cancelled, token);
             delete store.awaitedTerms[ticketId];
             emit EventsLib.ValidationApprovalRefused(ticketId);
             return;
         }
 
         // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
-        // satellite's time to execute rather than adding to how old the rules may be when it does. The chains
-        // are checked again, since one may have been paused while the request waited, and so is the token: all
-        // of it before anything is written.
+        // satellite's time to execute rather than adding to how old the rules may be when it does. The chain
+        // is checked again, since it may have been paused while the request waited, and so is the token: all
+        // of it before anything is written. Both rows hold the ask, so the narrowing alone gives something back.
         requireTokenRunning(token);
         _openChainWindow(store, token, validation.fromChainKey);
-        if (validation.twoLegs) _openChainWindow(store, token, validation.toChainKey);
 
         if (approvedMax < validation.amountMax) {
             _release(validation, validation.amountMax - approvedMax, token);
@@ -390,30 +391,18 @@ library TicketLib {
         );
         delete store.awaitedTerms[ticketId];
 
-        _dispatch(token, ticketId, validation.fromChainKey, validation.toChainKey, validation.twoLegs, body);
+        _dispatch(token, ticketId, validation.fromChainKey, validation.validUntil, body);
     }
 
-    /// @dev The leg of an issued validation, rebuilt from its record and the two envelopes the caller supplies
-    ///  again, for a resend. The envelopes must be the ones the ticket was asked with and the ask block hash is the
-    ///  recorded one, so a resend repeats the copy sent byte for byte and can neither widen nor retarget it. Announces
-    ///  the resend and sends it through the token, which as the compliance's DELEGATECALL target sees the compliance as
-    ///  its caller, as {_record} relies on.
+    /// @dev The ticket, rebuilt from its record and the two envelopes the caller supplies again, for a resend. The
+    ///  envelopes must be the ones the ticket was asked with and the ask block hash is the recorded one, so a resend
+    ///  repeats the copy sent byte for byte and can neither widen nor retarget it. Announces the resend and sends it
+    ///  through the token, which as the compliance's DELEGATECALL target sees the compliance as its caller.
     ///
-    ///  While `Open` either leg may go again, before `validUntil`, since past it no satellite may execute. Once the
-    ///  burn landed and the mint is owed, the recipient's leg alone may go again, before `waitingEndsAt`: the receiving
-    ///  Lite mints on the sending Lite's burn message and checks it against this very leg, so without it the pair
-    ///  stays stuck; but a leg sent later could reach the Lite after the second window closed and the pair was
-    ///  resolved, when the burned amount is already back with the sender on the ledger, and mint on the receiving
-    ///  chain an amount the ledger then attributes to the wrong wallet. `waitingEndsAt` leaves one reconciliation
-    ///  window between the last resend and the resolution, as between the last execution and the discard. A burn
-    ///  that lands after a discard is past `waitingEndsAt` by definition, so a discarded pair is never resendable.
-    ///  Issuance paused toward `chainKey` refuses a resend as it refuses an issuance: the pause exists to send
-    ///  nothing more toward that chain. The token's own pause refuses it too, see {requireTokenRunning}.
-    ///
-    ///  The sender's identity may resend either leg, the recipient's the leg toward the recipient's chain: both
-    ///  wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends: the
-    ///  token forwards no value to the gateway, a resend costs its caller the gas and whatever the gateway charges,
-    ///  and the Lite ignores a leg it already holds.
+    ///  Only while `Open` and before `validUntil`, since past it no away token may execute. Issuance paused toward
+    ///  `chainKey` refuses a resend as it refuses an issuance, and so does the token's own pause, see
+    ///  {requireTokenRunning}. The sender's identity may resend, and so may the receiver's when the receiver is on
+    ///  the same away chain: both wait on it, and a resend can change nothing. Nothing is written, so nothing counts or spaces resends.
     /// @param token the token the compliance is bound to
     /// @param authorised whether the AccessManager lets the caller resend any wallet's validation
     function resend(
@@ -431,11 +420,7 @@ library TicketLib {
         requireTokenRunning(token);
         require(!store.issuancePaused[chainKey], ErrorsLib.ValidationIssuancePaused(chainKey));
         requireInboundOpen(token, chainKey);
-        require(
-            msg.sender == validation.fromIdentity
-                || (chainKey == validation.toChainKey && msg.sender == validation.toIdentity) || authorised,
-            ErrorsLib.NotAuthorizedForWallet(msg.sender, validation.fromWallet)
-        );
+        _requireMayResend(validation, chainKey, authorised);
 
         require(WalletKeyLib.canonicalKey(to) == validation.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
         require(keccak256(spender) == keccak256(validation.spender), ErrorsLib.ValidationBodyMismatch(ticketId));
@@ -459,27 +444,31 @@ library TicketLib {
         IToken(token).dispatchComplianceValidation(chainKey, ticketId, abi.encode(rebuilt));
     }
 
-    /// @dev Whether the leg toward `chainKey` may go again: see {resend}.
-    function _requireResendable(ITickets.Ticket storage validation, bytes32 ticketId, bytes32 chainKey) private view {
+    /// @dev Who may resend: the sender's identity, the receiver's when the receiver is on the ticket's away chain,
+    ///  or an address the AccessManager authorised.
+    function _requireMayResend(ITickets.Ticket storage validation, bytes32 chainKey, bool authorised) private view {
+        bool callerIsTheSendersIdentity = msg.sender == validation.fromIdentity;
+        bool receiverIsOnTheTicketsChain = chainKey == validation.toChainKey;
+        bool callerIsTheReceiversIdentity = msg.sender == validation.toIdentity;
+        bool callerIsAReceiverOnTheTicketsChain = receiverIsOnTheTicketsChain && callerIsTheReceiversIdentity;
         require(
-            chainKey == validation.fromChainKey || (validation.twoLegs && chainKey == validation.toChainKey),
-            ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey)
+            callerIsTheSendersIdentity || callerIsAReceiverOnTheTicketsChain || authorised,
+            ErrorsLib.NotAuthorizedForWallet(msg.sender, validation.fromWallet)
         );
-        ITickets.TicketStatus status = validation.status;
-        bool pending = status == ITickets.TicketStatus.Open;
-        bool mintOwed = status == ITickets.TicketStatus.AwaitingMint;
-        require(
-            pending || (mintOwed && chainKey == validation.toChainKey),
-            ErrorsLib.ValidationNotResendable(ticketId, uint8(status))
-        );
-        uint64 deadline = pending ? validation.validUntil : validation.waitingEndsAt;
-        require(block.timestamp < deadline, ErrorsLib.ValidationExpired(ticketId, deadline));
     }
 
-    /// @dev By when: the satellite's deadline from the validity window, and the reservation's from the larger
-    ///  reconciliation window of the chains involved. The token must be running, and every chain involved open
-    ///  and configured: this is where a request is refused with `TokenPaused`.
-    function _expiryAndWindow(address token, bytes32 fromChainKey, bytes32 toChainKey, bool twoLegs)
+    /// @dev Whether the ticket may go to `chainKey` again: see {resend}.
+    function _requireResendable(ITickets.Ticket storage validation, bytes32 ticketId, bytes32 chainKey) private view {
+        require(chainKey == validation.fromChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
+        ITickets.TicketStatus status = validation.status;
+        require(status == ITickets.TicketStatus.Open, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
+        require(block.timestamp < validation.validUntil, ErrorsLib.ValidationExpired(ticketId, validation.validUntil));
+    }
+
+    /// @dev By when: the away token's deadline from the validity window, and the reservation's from the waiting
+    ///  time of the sender's away chain. The token must be running, and that chain open and configured: this is
+    ///  where a request is refused with `TokenPaused`.
+    function _expiryAndWindow(address token, bytes32 fromChainKey)
         private
         view
         returns (uint64 validUntil, uint64 window)
@@ -488,14 +477,10 @@ library TicketLib {
         ValidationStorage storage store = layout();
         require(store.defaultValidityWindow != 0, ErrorsLib.ValidityWindowNotSet());
         window = _openChainWindow(store, token, fromChainKey);
-        if (twoLegs) {
-            uint64 toWindow = _openChainWindow(store, token, toChainKey);
-            if (toWindow > window) window = toWindow;
-        }
         validUntil = uint64(block.timestamp) + store.defaultValidityWindow;
     }
 
-    /// @dev The reconciliation window of a chain a leg may go to: issuance toward it not paused by the compliance,
+    /// @dev The waiting time of a chain a ticket may go to: issuance toward it not paused by the compliance,
     ///  its inbound not paused by the token, and a window configured.
     function _openChainWindow(ValidationStorage storage store, address token, bytes32 chainKey)
         private
@@ -511,34 +496,26 @@ library TicketLib {
     /// @dev Nothing goes out while the token is paused: an incident is under investigation, every settlement
     ///  reverts and waits at its gateway, so a validation sent now could only be executed on a satellite with its
     ///  report held, and its window could run out before the pause is lifted. Request, approval and resend alike.
-    ///  For the same reason no validation with a leg possibly in flight is discarded or resolved under it, see
+    ///  For the same reason no ticket whose receipt may be in flight is cancelled under it, see
     ///  {requireAwaitedInboundOpen}.
     function requireTokenRunning(address token) internal view {
         require(!IToken(token).paused(), ErrorsLib.TokenPaused());
     }
 
     /// @dev Nothing goes toward a chain whose inbound the token has paused: its reports are held at the gateway,
-    ///  so a leg sent now could only add to what cannot land, see {ITREXMessaging-setInboundPaused}.
+    ///  so a ticket sent now could only add to what cannot land, see {ITREXMessaging-setInboundPaused}.
     function requireInboundOpen(address token, bytes32 chainKey) internal view {
         require(!ITREXMessaging(token).isInboundPaused(chainKey), ErrorsLib.AwayChainBlocked(chainKey));
     }
 
-    /// @dev Nothing is decided about a validation while a chain it still awaits has its inbound paused. The
-    ///  reports held at that chain's gateway may already answer it: discarding or resolving on their absence
-    ///  would release or return what they move, and they would then land on a validation that no longer expects
-    ///  them. Which chains count follows the status: both while `Open`, the one owing the missing leg once the
-    ///  other landed. The token's own pause holds every chain's reports the same way, so nothing is decided under
-    ///  it either: a pause that outlasts `waitingEndsAt` would otherwise release a reservation whose leg is waiting,
-    ///  and the room it frees could be issued again before that leg lands.
+    /// @dev Nothing is decided about a ticket while the away chain that owes its receipt is blocked. The receipts
+    ///  held at that chain's bridge may already answer it: cancelling on their absence would release what they
+    ///  move. The token's own pause holds every chain's receipts the same way, so nothing is decided under it
+    ///  either: a pause that outlasts `waitingEndsAt` would otherwise release a reservation whose receipt is
+    ///  waiting, and the room it frees could be reserved again before that receipt lands.
     function requireAwaitedInboundOpen(address token, ITickets.Ticket storage validation) internal view {
         requireTokenRunning(token);
-        ITickets.TicketStatus status = validation.status;
-        bool mintOwed =
-            status == ITickets.TicketStatus.AwaitingMint || status == ITickets.TicketStatus.DiscardedAwaitingMint;
-        bool burnOwed =
-            status == ITickets.TicketStatus.AwaitingBurn || status == ITickets.TicketStatus.DiscardedAwaitingBurn;
-        if (!mintOwed) requireInboundOpen(token, validation.fromChainKey);
-        if (!burnOwed && validation.twoLegs) requireInboundOpen(token, validation.toChainKey);
+        requireInboundOpen(token, validation.fromChainKey);
     }
 
     /// @dev Pauses or resumes issuance toward a chain. Idempotent: the same state again changes nothing and
@@ -587,15 +564,14 @@ library TicketLib {
     }
 
     /// @dev Discards a validation still `WaitingForApproval` once its deadline passed, for anyone, see
-    ///  {ITickets-cancelTickets}: nothing was sent for it, so no leg can be in flight.
+    ///  {ITickets-cancelTickets}: nothing was sent for it, so no receipt can be in flight.
     ///  The reservation comes back and the envelopes kept for the answer are deleted.
     /// @param token the token the compliance is bound to
     function discardUnanswered(bytes32 ticketId, address token) internal {
         ValidationStorage storage store = layout();
         ITickets.Ticket storage validation = store.validations[ticketId];
         require(block.timestamp >= validation.validUntil, ErrorsLib.CancelNotDue(ticketId, validation.validUntil));
-        _release(validation, validation.amountMax, token);
-        validation.status = ITickets.TicketStatus.Cancelled;
+        moveTo(validation, ITickets.TicketStatus.Cancelled, token);
         delete store.awaitedTerms[ticketId];
         emit EventsLib.TicketCancelled(ticketId);
     }
@@ -615,11 +591,12 @@ library TicketLib {
         stored.fromKey = draft.fromKey;
         stored.fromWallet = from;
         stored.toKey = draft.toKey;
-        stored.twoLegs = draft.twoLegs;
         stored.fromIdentity = draft.fromIdentity;
         stored.toIdentity = draft.toIdentity;
         stored.spender = spender;
         stored.requestedMax = draft.requestedMax;
+        // Open unless an approval module is bound, see {_awaitApproval}.
+        stored.status = ITickets.TicketStatus.Open;
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
         stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
         IToken(token).reserveForTicket(from, draft.amountMax);
@@ -648,24 +625,21 @@ library TicketLib {
         body = abi.encode(issued);
     }
 
-    /// @dev Sends one leg of an issued validation to each satellite chain involved, except a chain that already
-    ///  reported a leg for this id while nothing was issued under it: that Lite executed it already, the leg is
-    ///  parked, and {ReceiptLib-applyWaitingReceipt} settles it instead. The token is the wire's only
-    ///  author: it pins the route per leg and refuses a closed chain. As the compliance's DELEGATECALL target,
-    ///  this library reaches the token with the compliance as the caller.
-    function _dispatch(
-        address token,
-        bytes32 ticketId,
-        bytes32 fromChainKey,
-        bytes32 toChainKey,
-        bool twoLegs,
-        bytes memory body
-    ) private {
-        mapping(bytes32 chainKey => ITickets.WaitingReceipt) storage parked = layout().waitingReceipts[ticketId];
-        if (!parked[fromChainKey].exists) IToken(token).dispatchComplianceValidation(fromChainKey, ticketId, body);
-        if (twoLegs && !parked[toChainKey].exists) {
-            IToken(token).dispatchComplianceValidation(toChainKey, ticketId, body);
+    /// @dev Sends a written ticket to the sender's away chain, unless that chain already answered it while it was
+    ///  not sent: that away token executed it already, its receipt waits here, and
+    ///  {ReceiptLib-applyWaitingReceipt} applies it instead. The token is the wire's only author: it pins the
+    ///  half and refuses a closed chain. As the compliance's DELEGATECALL target, this library reaches the token
+    ///  with the compliance as the caller. The latest valid until sent toward the chain is kept for the cap
+    ///  setter, see {ITickets-setTicketLimits}.
+    function _dispatch(address token, bytes32 ticketId, bytes32 fromChainKey, uint64 validUntil, bytes memory body)
+        private
+    {
+        ValidationStorage storage store = layout();
+        if (validUntil > store.latestValidUntilSent[fromChainKey]) {
+            store.latestValidUntilSent[fromChainKey] = validUntil;
         }
+        if (store.waitingReceipts[ticketId][fromChainKey].exists) return;
+        IToken(token).dispatchComplianceValidation(fromChainKey, ticketId, body);
     }
 
     /// @dev Keeps a recorded validation waiting for the approval module, with the two envelopes it is issued
@@ -699,11 +673,28 @@ library TicketLib {
         IApprovalModule(approvalModule).approvalRequested(ticketId, ctx, draft.validUntil);
     }
 
-    /// @dev Gives back `amount` of what a validation `WaitingForApproval` reserved: in the ledger's total, against
-    ///  the identities unless it is a relocation, and against the sending wallet on the token. Mirrors what
-    ///  `ReceiptLib._moveTo` releases when a status stops reserving, see `_stillReservesPending` and
-    ///  `_stillReservesWallet` there: keep the two in step. It lives here because a narrowing gives back part
-    ///  of the amount, which no status move does, and the library cannot call the contract's internals.
+    /// @dev Moves a ticket to `next` and releases what its old row of the table holds and the new row does not.
+    ///  The table, one row per state:
+    ///  - `WaitingForApproval`, `Open`: the ask's `amountMax`, reserved in the ledger's total, against both
+    ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token;
+    ///  - `Cancelled`, `OnHold`, `Done`: none of the ask's reservation.
+    ///  The release is read off the two rows, so it runs exactly once and is never skipped. A ticket is reserved
+    ///  once, when it is written, so no move enters a row that holds more.
+    function moveTo(ITickets.Ticket storage ticket, ITickets.TicketStatus next, address token) internal {
+        bool oldRowHoldsTheAsk = _holdsTheAsk(ticket.status);
+        bool newRowHoldsTheAsk = _holdsTheAsk(next);
+        ticket.status = next;
+        if (oldRowHoldsTheAsk && !newRowHoldsTheAsk) _release(ticket, ticket.amountMax, token);
+    }
+
+    /// @dev Whether a ticket in `status` holds the ask's reservation: the table of {moveTo}.
+    function _holdsTheAsk(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.WaitingForApproval || status == ITickets.TicketStatus.Open;
+    }
+
+    /// @dev Gives back `amount` of what a ticket reserved: in the ledger's total, against the identities unless both
+    ///  wallets are one identity's, and against the sending wallet on the token. {moveTo} gives back a whole row;
+    ///  an approver's narrowing gives back part of it.
     function _release(ITickets.Ticket storage validation, uint256 amount, address token) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
         ledger.pendingTotal -= amount;

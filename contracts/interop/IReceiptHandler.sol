@@ -63,79 +63,47 @@ import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 
 /**
  * @title IReceiptHandler
- * @dev The compliance contract's inbound entry point for satellite settlements.
+ * @dev The compliance contract's entry point for receipts from away chains.
  *
- * A settlement notification arrives at the token, which proves who sent it and forwards the body here
- * untouched.
- * The processing itself belongs to the compliance-slot lifecycle; only the entry point lives here.
+ * A receipt arrives at the token, which proves who sent it and forwards the body here untouched. What the receipt
+ * does to the ticket belongs to the compliance; only the entry point lives here.
  */
 interface IReceiptHandler {
 
-    /// @dev What the token does once a handler has judged an inbound message it could not apply.
+    /// @dev What the token does once the handler took in a receipt.
     enum Verdict {
-        /// Nothing for the token to do: the message was applied, or was a harmless duplicate.
+        /// Nothing for the token to do.
         None,
-        /// The message reports something this chain cannot account for, so that chain's reports can no longer be
-        /// trusted: the token pauses its inbound from that chain only. For a settlement that is a leg already
-        /// accounted for, a leg under an id nothing is issued under, which is parked, and a leg outside the issued
-        /// terms, which is rejected or orphans its validation, see {receiveReceipt}.
-        PauseChain,
-        /// The message names a recall the token never issued. The transport says which chain sent it, but not why
-        /// the id is unknown: a peer inventing ids, or the token's own records no longer matching what it dispatched
-        /// (a token reset with instructions in flight). The second is local and taints what every chain reports,
-        /// and the message cannot tell the two apart, so the token pauses itself. The price, accepted: a trusted
-        /// peer can halt the token with one such proof; the remedy is to distrust its gateway. A settlement never
-        /// returns this: a validation id is a function of the request, so an unknown one is the leg's chain's
-        /// problem, see {receiveReceipt}.
-        HaltToken
+        /// The receipt is bad: the token blocks the away chain that sent it, and that chain alone. The token itself
+        /// is never stopped by a receipt.
+        PauseChain
     }
 
-    /// @dev Acts on a settlement the token has already attributed to its peer on `originChainKey`.
+    /// @dev Takes in a receipt the token has already attributed to its peer on `originChainKey`.
     ///
     /// The token guarantees three things:
-    /// - the delivering gateway is trusted by the network,
-    /// - it is the gateway the validation was dispatched through toward `originChainKey` (or the current
-    /// route when the token never dispatched that id there),
+    /// - the delivering bridge is a receipt bridge of the network,
+    /// - it is the bridge the half was pinned to, or the chain's current receipt route,
     /// - the message's author is the token's peer on that chain.
     ///
-    /// The notification is decoded and passed on as is; classifying it is this handler's job, against the
-    /// validation it issued. The gate is substantive: the wallets must be the issued ones, the leg must come from
-    /// the chain recorded for its side, and the amount must sit inside the issued bounds. A leg that passes it for
-    /// an `Open` validation settles it, whatever the clock says; one for a `Cancelled` validation reconciles it
-    /// late: applied anyway, since the satellite execution is final, the modules caught up with no live
-    /// reservation, `LateReconciliation` emitted and the leg's chain paused for issuance until the manager
-    /// unpauses it. The ask block hash the leg echoes is evidence, never the gate: a leg inside the terms settles
-    /// whatever copy it names (`SettlementBodyDiverged` when it is not the issued one).
-    ///
-    /// Nothing on this path reverts for good. A validation may travel to a satellite before this chain's finality,
-    /// so a leg the token cannot account for has a reorg as a possible cause as well as a Lite breaking a rule,
-    /// and the two are given the same outcome: nothing applied, the delivery consumed, and `PauseChain`, so the
-    /// token stops taking that chain's messages until an agent has investigated. The burden is the Lite's: one
-    /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. One case
-    /// comes before these and returns `None` without applying anything:
-    /// - A delivery already consumed from that chain, whatever it came to, delivered again byte for byte under
-    ///   another receive id (`ReceiptDuplicate`), as a gateway redelivery or a Lite resending its settlement
-    ///   produces. It is consumed and pauses nothing, so a chain reopened after an investigation is not paused
-    ///   again by a copy of the leg that paused it.
-    ///
-    /// Any other leg the token cannot account for is one of four cases:
-    /// - An id with no issued body: the leg is parked under its id and origin chain (`ReceiptWaiting`), so the
-    ///   request, sent again with the same terms and salt, issues the same id, and `applyWaitingReceipt` then judges it
-    ///   as any leg. A second, different leg from the same chain for a parked id is a replay.
-    /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
-    ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
-    /// - A leg outside the issued terms carrying the issued ask block hash: the Lite broke a rule on the copy this
-    ///   chain issued (`ReceiptRefused`); the validation stands, the discard and resolution paths still apply.
-    /// - A leg outside the issued terms carrying another ask block hash, from a chain the validation involves: the
-    ///   satellite executed a copy of the ask mined in a block a reorg dropped (`ValidationOrphaned`). While `Open`
-    ///   the validation ends `Orphaned` and its reservation is released; otherwise it stands. From any other chain
-    ///   the leg is rejected whatever it echoes: that chain could not have executed anything under the id.
-    /// A revert, from a tracker module for instance, leaves the message deliverable again; a silent failure would
-    /// instead leave it marked as received and unretryable.
-    /// @param originChainKey The key of the chain the notification came from.
-    /// @param notification The decoded settlement leg, exactly as the satellite sent it.
-    /// @return verdict `None` when applied or a duplicate, `PauseChain` on every leg the token could not account
-    ///  for.
+    /// Home records what the receipt reports, because the away token's balances already moved. In order:
+    /// - The same receipt again, under the same half, from the same chain: changes nothing (`ReceiptDuplicate`).
+    /// - A still open answer: changes nothing.
+    /// - An id home has no record of: reverts with `UnknownTicket`, and stays deliverable at the bridge.
+    /// - A bad receipt: another body for a half that already has one, a chain that is not the sender's, wallets
+    ///   that are not the ticket's, a half the ticket never sent, or an expired answer that moved something. It is
+    ///   refused (`ReceiptRefused`), nothing is applied, and the chain that sent it is blocked.
+    /// - A receipt for a ticket never sent: kept as a waiting receipt (`ReceiptWaiting`).
+    /// - A zero receipt: the ticket ends `Done` with nothing moved. It is never a bad receipt.
+    /// - Any other receipt is applied as it happened and the ticket ends `Done`. A rule the move breaks now is
+    ///   announced (`MoveBreachedRule`), never refused. The terms check then decides whether the chain is also
+    ///   blocked: on home's own ask block hash the receipt must carry home's own terms; on another ask block hash it
+    ///   is a copy from a dropped home block (`ReceiptOnOlderTerms`), allowed up to `requestedMax` and the away
+    ///   chain's per-ticket cap.
+    /// A revert, from a tracker module for instance, leaves the message deliverable again.
+    /// @param originChainKey The key of the chain the receipt came from.
+    /// @param notification The decoded receipt, exactly as the away token sent it.
+    /// @return verdict `PauseChain` when the sending chain must be blocked, `None` otherwise.
     function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata notification)
         external
         returns (Verdict verdict);

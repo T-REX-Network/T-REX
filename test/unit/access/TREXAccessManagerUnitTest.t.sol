@@ -590,12 +590,10 @@ contract TREXAccessManagerUnitTest is Test {
         );
         _assertRow(target, compliance, ITickets.setWaitingTime.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.setIssuancePaused.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setTicketLimits.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.askToMove.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, compliance, ITickets.sendTicket.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, compliance, ITickets.cancelTickets.selector, domainId, RolesLib.Role.VALIDATION_KEEPER);
-        _assertRow(
-            target, compliance, ITickets.resolveStuckValidation.selector, domainId, RolesLib.Role.VALIDATION_KEEPER
-        );
         // Who hands out which role
         _assertAdmin(target, domainId, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);

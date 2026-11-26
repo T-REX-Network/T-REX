@@ -193,12 +193,12 @@ interface ITREXMessaging {
     /// @dev Stops taking messages from `chainKey`, or resumes. While paused, every settlement and burn proof
     /// attributed to that chain reverts with `AwayChainBlocked` and stays deliverable, so the chain's reports
     /// wait at the gateway; nothing else on the token is affected, native transfers and every other chain
-    /// included. The token sets it on its own when a chain reports a settlement or a burn proof for something
+    /// included. The token sets it on its own when a chain sends a bad receipt or a burn proof for something
     /// already accounted for, see `IReceiptHandler.Verdict`; lifting it is the pauser's, after an investigation.
     ///
     /// What waits with the chain: a delegation toward it is refused with `AwayChainBlocked`, so no more supply
     /// reaches a chain whose reports are suspect, and the compliance neither issues a validation toward it nor
-    /// resends one, nor discards or resolves a validation still awaiting that chain's leg, since the held reports
+    /// resends one, nor cancels a ticket still awaiting that chain's receipt, since the held reports
     /// may answer it. A recall instruction and an instruction resend still go out; the proof that answers a recall
     /// lands once the pause is lifted. To abandon a chain for good, distrust its bridge or close its receipt route,
     /// then lift the pause so its tickets can be closed by hand.
@@ -248,8 +248,8 @@ interface ITREXMessaging {
     /// @dev The receipt route and the peer a half left through, written when it first left, even when the ticket
     /// itself travelled on the ticket route. Its receipt is accepted from this pair or from the chain's current
     /// one, so a route or peer change never strands a half in flight.
-    /// @param halfKey The half to look up: today `keccak256(abi.encode(ticketId, chainKey))`, the ticket and the
-    /// away chain the half went to.
+    /// @param halfKey The half to look up, see {MessageTypesLib-halfKeyOf}: the ticket id itself for the ticket,
+    /// the first half of its move.
     /// @return bridge The pinned receipt bridge, or zero when the half never left.
     /// @return peerKey The `keccak256` of the peer the half was sent to.
     function pinOf(bytes32 halfKey) external view returns (address bridge, bytes32 peerKey);

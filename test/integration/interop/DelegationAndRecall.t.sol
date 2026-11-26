@@ -510,15 +510,18 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertFalse(token.paused());
     }
 
-    function test_handleBurnProof_HaltsTheToken_WhenTheRecallWasNeverIssued() public {
+    /// @notice A burn receipt for a bring home this token never sent stops nothing: the delivery reverts and stays
+    ///         deliverable at the bridge, the token keeps running and the away chain stays open.
+    function test_receiveReceipt_neverStopsTheToken_whenTheBringHomeIdIsUnknown() public {
         uint256 recallId = _instructed();
         uint256 index = _proof(polygonGateway, recallId + 1, aliceSat, 200);
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ReplayedBurnProof(recallId + 1, polygon);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RecallNotPending.selector, recallId + 1));
         polygonGateway.relay(index);
 
-        assertTrue(token.paused());
+        assertFalse(token.paused(), "the token keeps running");
+        assertFalse(token.isInboundPaused(polygon), "the away chain is not blocked");
+        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)), "deliverable");
         assertEq(token.balanceOf(alice), MINTED - 500, "nothing minted");
         assertEq(token.awayBalanceOf(aliceSat), 500, "nothing debited");
     }

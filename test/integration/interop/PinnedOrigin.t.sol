@@ -41,7 +41,6 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
@@ -51,8 +50,9 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /// @dev A half is pinned to the receipt bridge and the peer it was sent to. Its receipt is taken from that pair or
 ///      from the current one, so a peer change does not strand it, and closing the receipt route stops it like every
 ///      other message from that chain.
-///      The validations are dispatched by the token alone, never issued by the compliance, so a leg that
-///      passes the transport reaches `receiveReceipt`, which is what these tests read.
+///      The tickets are sent by the token alone, never written by the compliance, so a receipt that passes the
+///      transport reaches `receiveReceipt`, which refuses an id it has no record of: that refusal is what these
+///      tests read.
 contract PinnedOriginTest is InteropSuiteTest {
 
     ERC7786GatewayMock gateway;
@@ -89,8 +89,9 @@ contract PinnedOriginTest is InteropSuiteTest {
         token.setPeer(satellite, InteroperableAddress.formatEvmV1(POLYGON, newLite));
     }
 
-    function _expectHandled() private {
-        vm.expectCall(compliance, abi.encodeWithSelector(IReceiptHandler.receiveReceipt.selector), 1);
+    /// @dev The receipt got through the transport and reached the compliance, which has no record of the id.
+    function _expectHandled(bytes32 ticketId) private {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, ticketId));
     }
 
     function _expectNotPeer(address author) private {
@@ -107,7 +108,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         uint256 index = _settlementFrom(address(token), inFlight);
         _changePeer();
 
-        _expectHandled();
+        _expectHandled(inFlight);
         gateway.relay(index);
     }
 
@@ -115,7 +116,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         _changePeer();
         uint256 index = _settlementFrom(newLite, inFlight);
 
-        _expectHandled();
+        _expectHandled(inFlight);
         gateway.relay(index);
     }
 
@@ -147,7 +148,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         _expectNotPeer(address(token));
         gateway.relay(fromPrevious);
 
-        _expectHandled();
+        _expectHandled(neverDispatched);
         gateway.relay(fromCurrent);
     }
 
@@ -169,7 +170,7 @@ contract PinnedOriginTest is InteropSuiteTest {
         gateway.relay(index);
 
         _openEvmChain(token, POLYGON, address(gateway));
-        _expectHandled();
+        _expectHandled(inFlight);
         gateway.relay(index);
     }
 

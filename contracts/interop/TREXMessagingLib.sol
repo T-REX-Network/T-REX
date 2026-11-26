@@ -186,12 +186,6 @@ library TREXMessagingLib {
         return gateway != address(0) && s.registry.isReceiptBridge(gateway) && peerFor(chainKey).length > 0;
     }
 
-    /// @dev The key of one half: the part of a ticket one away chain answers. Both halves of a ticket over two away
-    ///  chains leave at once today, so a half is named by its ticket and the away chain it went to.
-    function halfKeyOf(bytes32 ticketId, bytes32 chainKey) internal pure returns (bytes32) {
-        return keccak256(abi.encode(ticketId, chainKey));
-    }
-
     /* ----- Configuration ----- */
 
     /// @dev Called once, from the token's initializer. The registry is the network's and the token
@@ -311,7 +305,8 @@ library TREXMessagingLib {
         MessagingStorage storage s = layout();
         (address receiptRoute, bytes memory peer) = _openRoute(s, chainKey);
 
-        Pin storage pin = s.pins[halfKeyOf(ticketId, chainKey)];
+        // A ticket is the first half of its move.
+        Pin storage pin = s.pins[MessageTypesLib.halfKeyOf(ticketId, 0)];
         bytes32 peerKey = keccak256(peer);
         if (pin.bridge == address(0)) {
             pin.bridge = receiptRoute;
@@ -326,9 +321,9 @@ library TREXMessagingLib {
         }
 
         // A ticket moves nothing on its own: sending it ahead of finality risks a ticket the away token executes
-        // and this chain then loses to a reorg. Its receipt is then never applied: the receipt handler finds no
-        // such ticket and treats it as an emergency, see {IReceiptHandler-receiveReceipt}. A ticket bridge the
-        // registry distrusted falls back to the receipt route rather than stranding the ask.
+        // and this chain then loses to a reorg; the ask mined again takes the same id, and its receipt is applied
+        // on older terms, see {IReceiptHandler-receiveReceipt}. A ticket bridge the registry distrusted falls back
+        // to the receipt route rather than stranding the ask.
         address ticketRoute = s.ticketRoutes[chainKey];
         bool ticketRouteUsable = ticketRoute != address(0) && s.registry.isTrusted(ticketRoute);
         address sendingGateway = ticketRouteUsable ? ticketRoute : receiptRoute;
@@ -380,15 +375,18 @@ library TREXMessagingLib {
         (messageType, body) = MessageTypesLib.decode(payload);
 
         // A zero id is a gateway naming no delivery, which ERC-7786 allows; recording it would refuse every later
-        // message from that gateway. Its deliveries are still deduplicated by what they carry: a settlement by
-        // its validation's status, a burn proof by its recall and the hash of the proof that settled it.
+        // message from that gateway. Its deliveries are still deduplicated by what they carry: a receipt by
+        // the hash home keeps per half, a burn proof by its recall and the hash of the proof that settled it.
         if (receiveId != bytes32(0)) {
             require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
             s.received[gateway][receiveId] = true;
         }
 
         if (messageType == MessageTypesLib.Message.RECEIPT) {
-            _requireExpectedOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeSettlement(body).ticketId);
+            MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.decodeSettlement(body);
+            _requireExpectedOrigin(
+                s, gateway, chainKey, sender, MessageTypesLib.halfKeyOf(receipt.ticketId, receipt.half)
+            );
         } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
             _requireRecallOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeBurnProof(body).recallId);
         } else {
@@ -408,7 +406,7 @@ library TREXMessagingLib {
     /// the handler sees the token as its caller, which is the only caller a compliance accepts.
     /// @param handler The token's bound compliance.
     /// @param body A settlement body, as {acceptMessage} returned it.
-    /// @return verdict `None`, or the pause the handler asks for on a replayed or never-issued settlement.
+    /// @return verdict `None`, or the block of the sending away chain the handler asks for on a bad receipt.
     function forwardSettlement(address handler, bytes32 chainKey, bytes memory body)
         external
         returns (IReceiptHandler.Verdict verdict)
@@ -474,20 +472,20 @@ library TREXMessagingLib {
         require(peer.length > 0, ErrorsLib.ChainNotOpen(chainKey));
     }
 
-    /// @dev The pinned bridge and peer of the half of `ticketId` toward `chainKey`, or the chain's current ones.
-    ///  A closed chain is refused first, pinned or not: closing it stops every receipt from it, and opening the
-    ///  route again lets them be delivered. A half this token never sent there has no pin and is taken from the
-    ///  current pair: whether it was never issued is the receipt handler's question.
+    /// @dev The pinned bridge and peer of the half the receipt answers, or the current ones of the chain it came
+    ///  from. A closed chain is refused first, pinned or not: closing it stops every receipt from it, and opening
+    ///  the route again lets them be delivered. A half this token never sent has no pin and is taken from the
+    ///  current pair: whether it was sent, and to that chain, is the receipt handler's question.
     function _requireExpectedOrigin(
         MessagingStorage storage s,
         address gateway,
         bytes32 chainKey,
         bytes calldata sender,
-        bytes32 ticketId
+        bytes32 halfKey
     ) private view {
         require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
-        Pin storage pin = s.pins[halfKeyOf(ticketId, chainKey)];
+        Pin storage pin = s.pins[halfKey];
         bool fromThePinnedPair = pin.bridge == gateway && pin.peerKey == keccak256(sender);
         if (fromThePinnedPair) return;
 
@@ -500,7 +498,7 @@ library TREXMessagingLib {
     }
 
     /// @dev The peer and gateway the recall was dispatched to while it is open; the current ones once it is not,
-    ///  so a settled or never-issued id still reaches the token's duplicate and replay handling. A closed chain is
+    ///  so a settled id still reaches the token's duplicate and replay handling. A closed chain is
     ///  refused first, as for a settlement: closing it stops every proof from it until a route is set again.
     function _requireRecallOrigin(
         MessagingStorage storage s,

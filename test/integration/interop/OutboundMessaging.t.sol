@@ -143,7 +143,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
 
         _dispatch(ticketId, satellite);
 
-        assertEq(_pinnedBridgeOf(ticketId, satellite), address(gateway));
+        assertEq(_pinnedBridgeOf(ticketId), address(gateway));
     }
 
     /// @dev A lost message may be re-sent: same validation, same chain, same gateway.
@@ -152,7 +152,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _dispatch(ticketId, satellite);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(_pinnedBridgeOf(ticketId, satellite), address(gateway));
+        assertEq(_pinnedBridgeOf(ticketId), address(gateway));
     }
 
     /// @dev Its legs could never be accepted through the new gateway, so the re-dispatch says so now.
@@ -170,18 +170,23 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(other.queueLength(), 0);
     }
 
-    /// @dev One validation, two chains: each leg pins the route it took, independently.
-    function testACrossChainValidationPinsOneRoutePerChain() public {
+    /// @dev A ticket is the first half of its move, sent to one away chain and pinned there once: sending it toward
+    ///      another away chain is refused, and nothing leaves.
+    function testATicketIsPinnedToOneAwayChainOnly() public {
         ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
         _dispatch(ticketId, satellite);
-        _dispatch(ticketId, optimism);
 
-        assertEq(_pinnedBridgeOf(ticketId, satellite), address(gateway));
-        assertEq(_pinnedBridgeOf(ticketId, optimism), address(optimismGateway));
+        vm.prank(compliance);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, ticketId, optimism, address(gateway))
+        );
+        token.dispatchComplianceValidation(optimism, ticketId, abi.encode("validation"));
+
+        assertEq(_pinnedBridgeOf(ticketId), address(gateway));
         assertEq(gateway.queueLength(), 1);
-        assertEq(optimismGateway.queueLength(), 1);
+        assertEq(optimismGateway.queueLength(), 0);
     }
 
     /* ----- Mint instruction: one per delegation ----- */
@@ -210,8 +215,8 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _delegate(10);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(_pinnedBridgeOf(bytes32(uint256(1)), satellite), address(0));
-        assertEq(_pinnedBridgeOf(bytes32(uint256(2)), satellite), address(0));
+        assertEq(_pinnedBridgeOf(bytes32(uint256(1))), address(0));
+        assertEq(_pinnedBridgeOf(bytes32(uint256(2))), address(0));
     }
 
     /* ----- Recall instruction: an order out, a proof back ----- */
@@ -312,7 +317,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         token.dispatchComplianceValidation(satellite, ticketId, validationBody);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(_pinnedBridgeOf(ticketId, satellite), address(0));
+        assertEq(_pinnedBridgeOf(ticketId), address(0));
     }
 
     /// @dev The emergency lever, proven end to end: removal stops traffic with no call on the token.

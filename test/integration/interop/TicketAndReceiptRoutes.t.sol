@@ -161,7 +161,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertEq(ticketBridge.queueLength(), 1, "the ticket took the ticket route");
         assertEq(receiptBridge.queueLength(), 0);
         assertEq(_decodeQueuedValidation(ticketBridge, 0).ticketId, id);
-        assertEq(_pinnedBridgeOf(id, polygon), address(receiptBridge), "its receipt comes back on the receipt route");
+        assertEq(_pinnedBridgeOf(id), address(receiptBridge), "its receipt comes back on the receipt route");
     }
 
     function test_askToMove_sendsTheTicketOnTheReceiptRoute_whenNoTicketRouteIsSet() public {
@@ -171,7 +171,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
 
         assertEq(receiptBridge.queueLength(), 1);
         assertEq(ticketBridge.queueLength(), 0);
-        assertEq(_pinnedBridgeOf(id, polygon), address(receiptBridge));
+        assertEq(_pinnedBridgeOf(id), address(receiptBridge));
     }
 
     /// @dev The registry distrusted the ticket bridge: tickets fall back to the receipt route rather than stopping.

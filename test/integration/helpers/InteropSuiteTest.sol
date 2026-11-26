@@ -45,7 +45,6 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
-import { TREXMessagingLib } from "contracts/interop/TREXMessagingLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
@@ -149,9 +148,10 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         );
     }
 
-    /// @dev The receipt bridge the half of `ticketId` toward `chainKey` is pinned to; zero when it never left.
-    function _pinnedBridgeOf(bytes32 ticketId, bytes32 chainKey) internal view returns (address bridge) {
-        (bridge,) = token.pinOf(TREXMessagingLib.halfKeyOf(ticketId, chainKey));
+    /// @dev The receipt bridge the ticket `ticketId`, the first half of its move, is pinned to; zero when it never
+    ///  left.
+    function _pinnedBridgeOf(bytes32 ticketId) internal view returns (address bridge) {
+        (bridge,) = token.pinOf(MessageTypesLib.halfKeyOf(ticketId, 0));
     }
 
     /// @dev The recall `recallId` as the token stores it, read through the ledger harness.
@@ -298,24 +298,6 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         returns (uint256)
     {
         return _liteSends(gateway, _token, MessageTypesLib.encodeSettlement(notification));
-    }
-
-    /// @dev The burn leg of a cross-chain validation: `to` is empty, by convention.
-    function _burnLeg(bytes32 ticketId, Token _token, bytes memory from, uint256 amount)
-        internal
-        view
-        returns (MessageTypesLib.ReceiptMessage memory)
-    {
-        return _settlement(ticketId, from, "", amount);
-    }
-
-    /// @dev The mint leg of a cross-chain validation: `from` is empty, by convention.
-    function _mintLeg(bytes32 ticketId, Token _token, bytes memory to, uint256 amount)
-        internal
-        view
-        returns (MessageTypesLib.ReceiptMessage memory)
-    {
-        return _settlement(ticketId, "", to, amount);
     }
 
     function _burnProof(uint256 recallId, bytes memory burnedWallet, uint256 amount)

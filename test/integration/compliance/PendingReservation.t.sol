@@ -45,6 +45,7 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -178,8 +179,8 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(_max(_issue(10, CAP)), CAP);
     }
 
-    /// @notice A late settlement is applied anyway, and it breaches when the executed amount is above what the
-    ///         rules allow once its reservation is released. The chain that sent it stops issuing.
+    /// @notice A late receipt is applied anyway, as it happened, and home says it breaks the cap now: asks keep
+    ///         going, and only the rules refuse what no longer fits.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 late = _issue(10, CAP);
@@ -187,19 +188,21 @@ contract PendingReservationTest is InteropSuiteTest {
         bytes32 fresh = _issue(10, CAP);
         assertEq(_pendingIn(), CAP, "the fresh validation now holds the whole cap");
 
-        gateway.relay(_liteSettles(gateway, token, _settlement(late, aliceSat, bobSat, CAP)));
+        uint256 lateReceipt = _liteSettles(gateway, token, _settlement(late, aliceSat, bobSat, CAP));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.MoveBreachedRule(late, polygon, CAP);
+        gateway.relay(lateReceipt);
 
-        assertEq(_position(), CAP, "the late settlement is applied regardless");
+        assertEq(_position(), CAP, "the late receipt is applied regardless");
         assertEq(_pendingIn(), CAP, "the fresh reservation still stands");
         assertEq(
             uint8(boundCompliance.statusOf(fresh)),
             uint8(ITickets.TicketStatus.Open),
             "the fresh validation is still holding its reservation"
         );
-        assertTrue(boundCompliance.isIssuancePaused(polygon), "the origin chain is stopped");
+        assertFalse(boundCompliance.isIssuancePaused(polygon), "nothing stops asks by itself");
+        assertFalse(token.isInboundPaused(polygon), "nor blocks the away chain");
 
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, false);
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
         boundCompliance.askToMove(aliceSat, bobSat, 1, 1, "", _salt());
