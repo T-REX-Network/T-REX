@@ -89,6 +89,7 @@ interface ITransferValidation {
     event ValidationSettled(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount);
     event LateReconciliation(bytes32 indexed validationId, bytes32 indexed chainKey);
     event ReplayedSettlement(bytes32 indexed validationId, bytes32 indexed chainKey);
+    event SettlementDuplicate(bytes32 indexed validationId, bytes32 indexed chainKey);
     event ValidationDiscarded(bytes32 indexed validationId);
     event ValidationResolved(bytes32 indexed validationId, uint256 returnedAmount);
     event SettlementParked(bytes32 indexed validationId, bytes32 indexed chainKey, uint256 amount, bytes32 hash);

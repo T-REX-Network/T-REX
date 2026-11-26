@@ -124,7 +124,10 @@ library TransferSettlementLib {
     /// @dev Classifies an attributed settlement against the stored validation and applies it when it fits. Nothing
     ///  here reverts on the leg itself: a leg the record cannot account for is consumed with a verdict, see
     ///  {ISettlementHandler-handleSettlement} for the cases and {_classify} for the order they are told apart in.
-    ///  The notification is announced first, whatever becomes of it.
+    ///  The notification is announced first, whatever becomes of it. A delivery this chain has already consumed
+    ///  from that chain, whatever its outcome was, is a duplicate and is told apart next, see {_recordDelivery}:
+    ///  it is not classified again, so it applies nothing and pauses nothing. A leg parked earlier is not a
+    ///  delivery and goes straight to {_classify}, through {settleParkedLeg}.
     /// @param token the token the compliance is bound to
     function handleSettlement(
         bytes32 originChainKey,
@@ -134,7 +137,26 @@ library TransferSettlementLib {
         emit EventsLib.SettlementNotified(
             originChainKey, notification.validationId, notification.from, notification.to, notification.amount
         );
+        if (_recordDelivery(originChainKey, notification)) return ISettlementHandler.Verdict.None;
         return _classify(originChainKey, notification, token);
+    }
+
+    /// @dev Records a settlement delivery before it is classified, and tells whether this very delivery, the same
+    ///  leg byte for byte from the same chain, was consumed before: a gateway redelivery, or a Lite's resend, which
+    ///  repeats its settlement unchanged. A duplicate changes nothing and pauses nothing (`SettlementDuplicate`),
+    ///  whatever the first delivery came to: a chain paused over a leg and reopened by the pauser is not paused
+    ///  again by a copy of that leg. The record is one write per consumed delivery, and a revert while the leg is
+    ///  classified undoes it with the rest, so the message stays deliverable.
+    /// @return duplicate whether the delivery was consumed before
+    function _recordDelivery(bytes32 chainKey, MessageTypesLib.SettlementNotification calldata notification)
+        private
+        returns (bool duplicate)
+    {
+        TransferValidationLib.ValidationStorage storage store = TransferValidationLib.layout();
+        bytes32 deliveryKey = keccak256(abi.encode(chainKey, notification));
+        duplicate = store.reportedLegs[deliveryKey];
+        if (duplicate) emit EventsLib.SettlementDuplicate(notification.validationId, chainKey);
+        else store.reportedLegs[deliveryKey] = true;
     }
 
     /// @dev See {ITransferValidation-settleParkedLeg}. The leg is judged as it would have been at delivery, and its
@@ -318,7 +340,8 @@ library TransferSettlementLib {
 
     /// @dev Keeps a leg reported for an id nothing was issued under, one per origin chain, so that once the
     ///  request is sent again with the same salt it can be settled, see {settleParkedLeg}. A second leg from the
-    ///  same chain is a replay. Either way the caller pauses the chain: it executed what this chain never sent.
+    ///  same chain is a replay; the parked leg delivered again never reaches here, see {_recordDelivery}. Either
+    ///  way the caller pauses the chain: it executed what this chain never sent.
     function _park(bytes32 originChainKey, MessageTypesLib.SettlementNotification memory notification) private {
         ITransferValidation.ParkedLeg storage parked =
             TransferValidationLib.layout().parkedLegs[notification.validationId][originChainKey];

@@ -61,7 +61,8 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
  * chain, so the expected envelopes are built with that chain id); a validation executes once, before its expiry,
  * inside its range, for its wallets, by its sender or its named spender; a mint leg is minted only on the sending
  * Lite's burn message; a mint instruction mints once per `delegationId`, and the same id with other contents is
- * refused; a recall burns once per `recallId`, stores its proof, and answers any repetition with the stored proof.
+ * refused; a recall burns once per `recallId`, stores its proof, and answers any repetition with the stored proof;
+ * every settlement it reports is stored and can be resent unchanged.
  */
 contract SatelliteLiteMock is IERC7786Recipient {
 
@@ -81,6 +82,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
     error DelegationConflict(uint256 delegationId);
     error RecallConflict(uint256 recallId);
     error NoStoredProof(uint256 recallId);
+    error NoStoredSettlement(bytes32 validationId);
     error UnexpectedMessage(uint8 messageType);
 
     /// @dev A burn message between two Lites. Travels under `LITE_BURN`, outside the protocol's type range.
@@ -110,6 +112,8 @@ contract SatelliteLiteMock is IERC7786Recipient {
     mapping(uint256 delegationId => bytes32) public delegationSeen;
     mapping(uint256 recallId => bytes32) public recallSeen;
     mapping(uint256 recallId => bytes) internal _proofs;
+    /// @dev The settlement this Lite reported for each validation, kept so it can be sent again unchanged.
+    mapping(bytes32 validationId => bytes) internal _settlements;
     mapping(uint256 recallId => uint256) public burnedFor;
     mapping(bytes32 walletKey => uint256) internal _balances;
 
@@ -218,6 +222,15 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _send(proof);
     }
 
+    /// @notice A retry of a settlement the reference chain may not have received: the stored report, byte for byte,
+    ///  as T-REX-Lite's `resendSettlement` sends it. The reference chain applies the leg once and recognises the
+    ///  repeat (`SettlementDuplicate`).
+    function resendSettlement(bytes32 validationId) external {
+        bytes memory settlement = _settlements[validationId];
+        require(settlement.length != 0, NoStoredSettlement(validationId));
+        _send(settlement);
+    }
+
     /* ----- Private ----- */
 
     /// @dev Rule 3 of `docs/satellite-lite.md`. An unknown id is stored. A known id with the same hash is a
@@ -288,15 +301,15 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _report(message.validationId, "", message.to, message.amount);
     }
 
-    /// @dev Rule 7: every report carries the hash of the body it was executed under.
+    /// @dev Rule 7: every report carries the hash of the body it was executed under, and is kept for a resend.
     function _report(bytes32 validationId, bytes memory from, bytes memory to, uint256 amount) private {
-        _send(
-            MessageTypesLib.encodeSettlement(
-                MessageTypesLib.SettlementNotification({
-                    validationId: validationId, from: from, to: to, amount: amount, hash: hashOf[validationId]
-                })
-            )
+        bytes memory settlement = MessageTypesLib.encodeSettlement(
+            MessageTypesLib.SettlementNotification({
+                validationId: validationId, from: from, to: to, amount: amount, hash: hashOf[validationId]
+            })
         );
+        _settlements[validationId] = settlement;
+        _send(settlement);
     }
 
     function _send(bytes memory payload) private {

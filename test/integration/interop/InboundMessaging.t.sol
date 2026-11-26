@@ -372,8 +372,8 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertEq(routedGateway.queuedMessage(index).deliveries, 1, "delivered once");
     }
 
-    /// @dev A fresh receiveId carrying already-consumed content is the slot lifecycle's problem, not
-    ///      this layer's: both deliveries reach the compliance, which is what lets it raise its emergency.
+    /// @dev A fresh receiveId carrying already-consumed content is the compliance's to judge, not this layer's:
+    ///      both deliveries reach it. The very leg it applied comes back a duplicate: consumed, nothing paused.
     function testSemanticRedeliveryIsPassedThroughUntouched() public {
         uint256 first = _peerSendsSettlement();
         uint256 second = _peerSendsSettlement();
@@ -383,11 +383,12 @@ contract InboundMessagingTest is InteropSuiteTest {
         routedGateway.relay(first);
 
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReplayedSettlement(validationId, originChain);
+        emit EventsLib.SettlementDuplicate(validationId, originChain);
         routedGateway.relay(second);
 
-        assertTrue(token.isInboundPaused(originChain), "the emergency pauses the chain's inbound");
-        assertFalse(token.paused(), "and nothing else");
+        assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(second)), "consumed");
+        assertFalse(token.isInboundPaused(originChain), "a duplicate pauses nothing");
+        assertFalse(token.paused());
         assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
     }
 
@@ -444,24 +445,24 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertFalse(token.paused());
     }
 
-    /// @dev A settlement delivered twice under a zero id is refused by its validation's status: applied once, and
-    ///      the second delivery is the replay emergency, as under two distinct ids.
-    function testZeroReceiveIdSettlementReplayIsRefusedByTheValidationStatus() public {
+    /// @dev A settlement delivered twice under a zero id is judged by the compliance: applied once, and the second
+    ///      delivery is a duplicate, consumed with nothing paused, as under two distinct ids.
+    function testZeroReceiveIdSettlementRedeliveryIsADuplicateAppliedOnce() public {
         _deliverWithZeroReceiveId(_settlementPayload());
 
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReplayedSettlement(validationId, originChain);
+        emit EventsLib.SettlementDuplicate(validationId, originChain);
         _deliverWithZeroReceiveId(_settlementPayload());
 
-        assertTrue(token.isInboundPaused(originChain), "the emergency pauses the chain's inbound");
+        assertFalse(token.isInboundPaused(originChain), "a duplicate pauses nothing");
         assertFalse(token.paused());
         assertEq(token.bridgedBalanceOf(satelliteTo), amount, "applied once");
         assertEq(token.bridgedBalanceOf(satelliteFrom), 1000 - amount, "debited once");
     }
 
-    /// @dev The first leg of a pair delivered twice under a zero id is refused by its validation's status too: the
-    ///      burn is held in transit once, and the second delivery is the replay emergency.
-    function testZeroReceiveIdBurnLegReplayIsRefusedByTheValidationStatus() public {
+    /// @dev The first leg of a pair delivered twice under a zero id is judged by the compliance too: the burn is
+    ///      held in transit once, and the second delivery is a duplicate, consumed with nothing paused.
+    function testZeroReceiveIdBurnLegRedeliveryIsADuplicateHeldOnce() public {
         ERC7786GatewayMock optimismGateway = _newTrustedGateway(OPTIMISM);
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
         bytes memory bobOnOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
@@ -471,10 +472,10 @@ contract InboundMessagingTest is InteropSuiteTest {
         _deliverWithZeroReceiveId(burnLeg);
 
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReplayedSettlement(pairId, originChain);
+        emit EventsLib.SettlementDuplicate(pairId, originChain);
         _deliverWithZeroReceiveId(burnLeg);
 
-        assertTrue(token.isInboundPaused(originChain), "the emergency pauses the chain's inbound");
+        assertFalse(token.isInboundPaused(originChain), "a duplicate pauses nothing");
         assertFalse(token.paused());
         assertEq(token.inTransitOf(pairId), 100, "held once");
         assertEq(token.bridgedBalanceOf(satelliteFrom), 900, "debited once");

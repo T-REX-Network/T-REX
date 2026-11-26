@@ -111,10 +111,17 @@ interface ISettlementHandler {
     /// so a leg the token cannot account for has a reorg as a possible cause as well as a Lite breaking a rule,
     /// and the two are given the same outcome: nothing applied, the delivery consumed, and `PauseChain`, so the
     /// token stops taking that chain's messages until an agent has investigated. The burden is the Lite's: one
-    /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. Four cases:
+    /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. One case
+    /// comes before these and returns `None` without applying anything:
+    /// - A delivery already consumed from that chain, whatever it came to, delivered again byte for byte under
+    ///   another receive id (`SettlementDuplicate`), as a gateway redelivery or a Lite resending its settlement
+    ///   produces. It is consumed and pauses nothing, so a chain reopened after an investigation is not paused
+    ///   again by a copy of the leg that paused it.
+    ///
+    /// Any other leg the token cannot account for is one of four cases:
     /// - An id with no issued body: the leg is parked under its id and origin chain (`SettlementParked`), so the
     ///   request, sent again with the same salt, issues the same id, and `settleParkedLeg` then judges it as any
-    ///   leg. A second leg from the same chain for a parked id is a replay.
+    ///   leg. A second, different leg from the same chain for a parked id is a replay.
     /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
     ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
     /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
@@ -127,7 +134,8 @@ interface ISettlementHandler {
     /// instead leave it marked as received and unretryable.
     /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
-    /// @return verdict `None` when applied, `PauseChain` on every leg the token could not account for.
+    /// @return verdict `None` when applied or a duplicate, `PauseChain` on every leg the token could not account
+    ///  for.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
         returns (Verdict verdict);

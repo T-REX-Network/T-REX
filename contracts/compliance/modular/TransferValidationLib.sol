@@ -109,6 +109,11 @@ library TransferValidationLib {
         /// Legs reported for an id with no issued body, per origin chain, see {ITransferValidation-ParkedLeg}.
         /// Written by the settlement path, consumed by {TransferSettlementLib-settleParkedLeg}.
         mapping(bytes32 validationId => mapping(bytes32 chainKey => ITransferValidation.ParkedLeg leg)) parkedLegs;
+        /// Every settlement delivery consumed, by `keccak256(abi.encode(chainKey, notification))`, whatever its
+        /// outcome was: applied, parked, refused or a replay. Written once and kept, so the same leg delivered
+        /// again from the same chain, under another receive id, is told apart from a new one, as the token keeps
+        /// `settledProofs` for burn proofs.
+        mapping(bytes32 deliveryKey => bool consumed) reportedLegs;
     }
 
     /// @dev The recipient's and the spender's envelopes of a validation awaiting approval.

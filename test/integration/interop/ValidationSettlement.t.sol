@@ -295,13 +295,13 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     // ==== emergency Tests ====
 
-    /// @notice The same content delivered again as a fresh message applies nothing and pauses the inbound of the
-    ///         chain it came from; the token itself keeps running. The replay is consumed, not left deliverable.
+    /// @notice Another body under a settled id, delivered as a fresh message, applies nothing and pauses the
+    ///         inbound of the chain it came from; the token itself keeps running. The replay is consumed, not left
+    ///         deliverable.
     function test_handleSettlement_Success_WhenAReplayedSettlementPausesTheChain() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
-        MessageTypesLib.SettlementNotification memory leg = _settlement(id, aliceSat, bobSat, 95);
-        polygonGateway.relay(_liteSettles(polygonGateway, token, leg));
-        uint256 replay = _liteSettles(polygonGateway, token, leg);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95)));
+        uint256 replay = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 96));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReplayedSettlement(id, polygon);
@@ -340,7 +340,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     /// @notice A notification for an id never issued applies nothing to the ledger: the leg is parked under its
     ///         id for the request that may still issue it, the chain that executed it is paused, and the token
-    ///         itself keeps running. A second leg from the same chain for the parked id is a replay.
+    ///         itself keeps running. A second, different leg from the same chain for the parked id is a replay.
     function test_handleSettlement_Success_WhenANeverIssuedIdParksTheLegAndPausesTheChain() public {
         bytes32 unknown = bytes32(uint256(999));
         bytes32 hash = keccak256("body");
@@ -367,7 +367,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, unknown));
         boundCompliance.statusOf(unknown);
 
-        uint256 replay = _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 95, hash));
+        uint256 replay = _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 94, hash));
         vm.prank(agent);
         token.setInboundPaused(polygon, false);
         vm.expectEmit(true, true, false, true, address(boundCompliance));

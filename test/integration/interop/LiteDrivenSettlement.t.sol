@@ -436,4 +436,63 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(token.pendingRecall(recallId).amount, 0);
     }
 
+    /* ----- Settlement resend ----- */
+
+    /// @notice The settlement is lost; the Lite resends its stored report, byte for byte; it settles once.
+    function test_resendSettlement_Success_WhenTheSettlementWasLost() public {
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
+        _execute(id, 50);
+        polygonGateway.drop(_last(polygonGateway));
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Pending), "still waiting");
+
+        polygonLite.resendSettlement(id);
+        polygonGateway.relay(_last(polygonGateway));
+
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(token.bridgedBalanceOf(bobSat), 50);
+    }
+
+    /// @notice The Lite cannot tell a lost settlement from a slow one, so it may resend one that already landed,
+    ///         as anyone may on T-REX-Lite. The reference chain recognises the leg it applied: nothing moves twice
+    ///         and the chain is not paused.
+    function test_resendSettlement_Success_WhenTheSettlementAlreadyLanded() public {
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
+        _execute(id, 50);
+        _relayAll(polygonGateway);
+
+        polygonLite.resendSettlement(id);
+        uint256 resent = _last(polygonGateway);
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.SettlementDuplicate(id, polygon);
+        polygonGateway.relay(resent);
+
+        assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(resent)), "consumed");
+        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(token.paused());
+        assertEq(token.bridgedBalanceOf(bobSat), 50, "credited once");
+        assertEq(token.bridgedBalanceOf(aliceSat), DELEGATED - 50, "debited once");
+    }
+
+    /// @notice Both Lites of a pair resend their legs after the pair settled: each is a duplicate from the chain that
+    ///         sent it, and neither chain is paused.
+    function test_resendSettlement_Success_WhenBothLitesResendAfterThePairSettled() public {
+        bytes32 id = _issueAndDeliver(bobOptimism, 90, 100);
+        _execute(id, 95);
+        _relayAll(polygonGateway);
+        _relayAll(optimismGateway);
+        _relayAll(optimismGateway);
+        assertEq(uint8(_status(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+
+        polygonLite.resendSettlement(id);
+        optimismLite.resendSettlement(id);
+        _relayAll(polygonGateway);
+        _relayAll(optimismGateway);
+
+        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(token.isInboundPaused(optimism));
+        assertEq(token.bridgedBalanceOf(bobOptimism), 95, "credited once");
+        assertEq(token.inTransitOf(id), 0);
+        assertEq(token.totalBridged(), DELEGATED);
+    }
+
 }

@@ -342,7 +342,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 60));
 
         assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.LateReconciled));
@@ -598,6 +598,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     /* ----- Replays ----- */
 
+    /// @notice A different leg under a settled id is a replay: the chain is paused, nothing applied twice.
     function test_handleSettlement_Success_WhenAConsumedLegIsReplayed() public {
         _track();
         address recorder = _bindAfterTransferModule();
@@ -609,7 +610,7 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 60));
 
         assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
@@ -618,10 +619,124 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.positionOf(bobId), 50);
     }
 
+    /// @notice The very leg that settled, delivered again under another receive id, is a duplicate: verdict
+    ///         `None`, nothing applied twice, no module told twice.
+    function test_handleSettlement_Success_WhenTheSettledLegIsDeliveredAgain() public {
+        _track();
+        address recorder = _bindAfterTransferModule();
+        bytes32 id = _issue();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        vm.expectCall(token, abi.encodeWithSelector(IToken.settleValidation.selector), 0);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.SettlementDuplicate(id, polygon);
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
+        assertEq(mc.validationOf(id).executedAmount, 50);
+        assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
+        assertEq(mc.positionOf(bobId), 50);
+    }
+
+    /// @notice A leg outside the issued terms pauses its chain once. Delivered again after the pauser reopened the
+    ///         chain, it is a duplicate: not judged again, nothing announced twice, nothing paused.
+    function test_handleSettlement_Success_WhenARejectedLegIsDeliveredAgain() public {
+        bytes32 id = _issue();
+        MessageTypesLib.SettlementNotification memory leg = _leg(id, fromSat, toSat, 91);
+        vm.prank(token);
+        _assertRejected(id, polygon, leg);
+
+        vm.recordLogs();
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
+        _assertUntouched(id);
+    }
+
+    /// @notice The leg that orphaned a validation, delivered again, is a duplicate: `ValidationOrphaned` is not
+    ///         emitted a second time and the chain is not paused a second time.
+    function test_handleSettlement_Success_WhenAnOrphanedLegIsDeliveredAgain() public {
+        bytes32 id = _issue();
+        MessageTypesLib.SettlementNotification memory leg =
+            _legUnder(id, fromSat, toSat, 95, keccak256("a body this chain never issued"));
+        vm.prank(token);
+        assertEq(uint8(mc.handleSettlement(polygon, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+
+        vm.recordLogs();
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Orphaned));
+    }
+
+    /// @notice A conflicting body under a settled id pauses its chain once; that same body again is a duplicate,
+    ///         and the applied leg stays the applied one.
+    function test_handleSettlement_Success_WhenAReplayedLegIsDeliveredAgain() public {
+        _track();
+        bytes32 id = _issue();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, toSat, 50));
+        MessageTypesLib.SettlementNotification memory conflicting = _leg(id, fromSat, toSat, 60);
+        vm.prank(token);
+        assertEq(uint8(mc.handleSettlement(polygon, conflicting)), uint8(ISettlementHandler.Verdict.PauseChain));
+
+        vm.recordLogs();
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, conflicting);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
+        assertEq(mc.validationOf(id).executedAmount, 50);
+    }
+
+    /// @notice A duplicate is per chain: the burn leg polygon reported, arriving from optimism, was never consumed
+    ///         from optimism, so it is judged, refused as outside the terms of that chain's side, and pauses it.
+    function test_handleSettlement_Success_WhenTheSettledLegComesFromAnotherChain() public {
+        _track();
+        bytes32 id = _issueCrossChain();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        vm.prank(token);
+        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(optimism, _leg(id, fromSat, "", 50));
+
+        assertEq(
+            uint8(verdict),
+            uint8(ISettlementHandler.Verdict.PauseChain),
+            "never a duplicate from a chain that did not send it"
+        );
+    }
+
     /* ----- Parked legs ----- */
 
+    /// @notice The parked leg delivered again is a duplicate: no second pause, the first leg stays parked as is.
+    function test_handleSettlement_Success_WhenTheParkedLegIsDeliveredAgain() public {
+        bytes32 unknown = keccak256("an id this compliance never issued");
+        MessageTypesLib.SettlementNotification memory leg = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
+        vm.prank(token);
+        mc.handleSettlement(polygon, leg);
+
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.SettlementDuplicate(unknown, polygon);
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, leg);
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
+        assertEq(mc.parkedLegOf(unknown, polygon).amount, 50);
+    }
+
     /// @notice A leg for an id with no issued body is parked under its id and chain, the chain paused, and
-    ///         nothing recorded under the id. A second leg from the same chain is a replay.
+    ///         nothing recorded under the id. A second, different leg from the same chain is a replay.
     function test_handleSettlement_Success_WhenTheIdWasNeverIssued() public {
         bytes32 unknown = keccak256("an id this compliance never issued");
         MessageTypesLib.SettlementNotification memory leg = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
@@ -646,7 +761,10 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(unknown, polygon);
         vm.prank(token);
-        assertEq(uint8(mc.handleSettlement(polygon, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
+        assertEq(
+            uint8(mc.handleSettlement(polygon, _legUnder(unknown, fromSat, toSat, 60, keccak256("body")))),
+            uint8(ISettlementHandler.Verdict.PauseChain)
+        );
         assertEq(mc.parkedLegOf(unknown, polygon).amount, 50, "the first leg stays");
 
         // The other chain of a pair parks its own leg.
@@ -886,11 +1004,30 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReplayedSettlement(id, polygon);
         vm.prank(token);
-        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 60));
 
         assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.PauseChain));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+    }
+
+    /// @notice The burn leg delivered again is a duplicate: no second hold, and the pair still settles.
+    function test_handleSettlement_Success_WhenTheBurnLegIsDeliveredAgain() public {
+        _track();
+        bytes32 id = _issueCrossChain();
+        vm.prank(token);
+        mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        vm.expectCall(token, abi.encodeWithSelector(IToken.holdInTransit.selector), 0);
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.SettlementDuplicate(id, polygon);
+        vm.prank(token);
+        ISettlementHandler.Verdict verdict = mc.handleSettlement(polygon, _leg(id, fromSat, "", 50));
+
+        assertEq(uint8(verdict), uint8(ISettlementHandler.Verdict.None));
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.AwaitingMint));
+        vm.prank(token);
+        mc.handleSettlement(optimism, _leg(id, "", toOptimism, 50));
+        assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Settled));
     }
 
     function test_handleSettlement_RevertWhen_TheSecondLegCarriesAnotherAmount() public {
@@ -979,6 +1116,13 @@ contract TransferValidationSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.SettlementRejected(id, chainKey, leg.amount, leg.hash);
         assertEq(uint8(mc.handleSettlement(chainKey, leg)), uint8(ISettlementHandler.Verdict.PauseChain));
+    }
+
+    /// @dev A duplicate delivery emits its notification and `SettlementDuplicate`, and nothing a judged leg emits.
+    function _assertOnlyADuplicateWasAnnounced(Vm.Log[] memory logs) private pure {
+        assertEq(logs.length, 2, "the notification and the duplicate, nothing judged again");
+        assertEq(logs[0].topics[0], EventsLib.SettlementNotified.selector);
+        assertEq(logs[1].topics[0], EventsLib.SettlementDuplicate.selector);
     }
 
     function _assertUntouched(bytes32 id) private view {
