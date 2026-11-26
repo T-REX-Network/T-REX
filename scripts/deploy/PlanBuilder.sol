@@ -752,7 +752,8 @@ abstract contract PlanBuilder {
         for (uint256 i = 0; i < labels.length; i++) {
             Probe memory probe;
             if (keccak256(bytes(labels[i])) == keccak256(bytes(L_UTILITY_CHECKER))) {
-                // The deployer keeps no code; its proof is the proxy it leaves behind, owned by the Upgrade manager.
+                // The deployer keeps no code; its proof is the proxy it leaves behind, whose authority, which it
+                // reports as its owner, is the Upgrade manager.
                 probe = Probes.strict(a.utilityChecker, abi.encodeCall(Ownable.owner, ()), abi.encode(a.upgradeAM));
             } else {
                 probe = _maskedProbe(_create3Address(a, labels[i]), names[i]);
@@ -885,15 +886,9 @@ abstract contract PlanBuilder {
         t[6] = FunctionRole(a.upgradeAM, a.spenderVerification, _sel1(IUUPS.upgradeToAndCall.selector), version);
         t[7] = FunctionRole(a.upgradeAM, a.spenderWhitelist, _sel1(IUUPS.upgradeToAndCall.selector), version);
         t[8] = FunctionRole(a.upgradeAM, a.maxBalance, _sel1(IUUPS.upgradeToAndCall.selector), version);
-        // UtilityChecker is Ownable with the Upgrade manager as owner: the manager's `execute` is the only way in.
-        t[9] = FunctionRole(
-            a.upgradeAM,
-            a.utilityChecker,
-            _sel3(
-                IUUPS.upgradeToAndCall.selector, Ownable.transferOwnership.selector, Ownable.renounceOwnership.selector
-            ),
-            version
-        );
+        // UtilityChecker is AccessManaged by the Upgrade manager, like the modules: its upgrade is its only
+        // restricted function, and its `transferOwnership` always reverts.
+        t[9] = FunctionRole(a.upgradeAM, a.utilityChecker, _sel1(IUUPS.upgradeToAndCall.selector), version);
         // IdentityUtilities' DEFAULT_ADMIN_ROLE goes to the Upgrade manager. Upgrades and its AccessControl grants
         // all need the code role, so the guardian can cancel each of them: a DEFAULT_ADMIN_ROLE grant left on the
         // manager's ADMIN would let a new admin upgrade with no delay and no veto.
@@ -904,8 +899,7 @@ abstract contract PlanBuilder {
                 IUUPS.upgradeToAndCall.selector,
                 IAccessControl.grantRole.selector,
                 IAccessControl.revokeRole.selector,
-                // The manager renouncing DEFAULT_ADMIN_ROLE would end every upgrade path: same case as
-                // UtilityChecker's renounceOwnership.
+                // The manager renouncing DEFAULT_ADMIN_ROLE would end every upgrade path.
                 IAccessControl.renounceRole.selector
             ),
             version

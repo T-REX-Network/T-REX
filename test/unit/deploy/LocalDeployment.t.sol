@@ -319,10 +319,11 @@ contract LocalDeploymentTest is Test, UpgradePlanner {
                 );
             }
         }
-        // authority 3, three modules 1 each, UtilityChecker 3 (upgrade and the two Ownable functions), IdentityUtilities
-        // 4 (upgrade, grantRole, revokeRole, renounceRole). Its topic functions are TOPIC_MANAGER's, which the manager
-        // does not hold, so the manager cannot reach them.
-        assertGe(guarded, 13, "fewer guarded functions found than expected");
+        // authority 3, three modules 1 each, UtilityChecker 1 (its upgrade: it is AccessManaged, and its
+        // `transferOwnership` reverts for everyone), IdentityUtilities 4 (upgrade, grantRole, revokeRole,
+        // renounceRole). Its topic functions are TOPIC_MANAGER's, which the manager does not hold, so the manager
+        // cannot reach them.
+        assertGe(guarded, 11, "fewer guarded functions found than expected");
         assertEq(
             IAccessManager(a.platformAM)
                 .getTargetFunctionRole(a.identityFactory, IdentityFactory.setTrustedGateway.selector),

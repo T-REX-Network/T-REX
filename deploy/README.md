@@ -153,7 +153,7 @@ forge script scripts/deploy/VerifyDeployment.s.sol --sig "run(string)" local --r
 | Platform | CLAIM_ISSUER_ADMIN, ISSUER, PUBLIC_AUTHORITY | Operations Safe | none (grant delay only) | identity creation |
 | Platform | ASSET_DEPLOYER | TREXFactory | none | token identities |
 | Upgrade | ADMIN | Upgrade Council Safe | 5 days | everything not mapped below |
-| Upgrade | VERSION_MANAGER | Upgrade Council Safe | 5 days | suite versions, module, UtilityChecker and IdentityUtilities upgrades, IdentityUtilities `grantRole`/`revokeRole`, UtilityChecker ownership |
+| Upgrade | VERSION_MANAGER | Upgrade Council Safe | 5 days | suite versions, module, UtilityChecker and IdentityUtilities upgrades, IdentityUtilities `grantRole`/`revokeRole` |
 | Upgrade | GUARDIAN | Protocol Admin Safe | none | cancels VERSION_MANAGER operations |
 
 Grant delays and target admin delays follow the same tiers. The table lives in `scripts/deploy/lib/RoleTable.sol`
@@ -254,8 +254,8 @@ Replace every placeholder in `config/mainnet.json` and regenerate `addresses/mai
 explicitly, next to `contracts/`:
 
 - `scripts/deploy/RoleRevoker.sol`: permanent, holds ROLE_MANAGER on the Platform manager (revoke-only);
-- `scripts/deploy/UtilityCheckerDeployer.sol`: runs once in its constructor (creates the UtilityChecker proxy and
-  hands it to the Upgrade manager), keeps no state and no function.
+- `scripts/deploy/UtilityCheckerDeployer.sol`: runs once in its constructor (creates the UtilityChecker proxy,
+  initialized with the Upgrade manager as its authority), keeps no state and no function.
 
 Known limits that need contract changes (out of scope here; most come from OpenZeppelin's report):
 
@@ -276,9 +276,9 @@ Known limits that need contract changes (out of scope here; most come from OpenZ
   targets' 5-day admin delay. Nothing can cancel that, since ADMIN operations have no guardian. Closing this needs a
   contract change. `setIdentityTypePolicy` and `removeIdentityTypePolicy` stay on ADMIN (48 h, configuration of
   who may create identities, not code).
-- **UtilityChecker** sets its owner to `msg.sender` in `initialize`. `UtilityCheckerDeployer` (tooling, unaudited)
-  creates the proxy and hands ownership to the Upgrade manager in one constructor. The real fix is letting
-  `initialize` take the owner.
+- **UtilityChecker** takes its AccessManager in `initialize`, so nothing hands ownership over any more.
+  `UtilityCheckerDeployer` (tooling, unaudited) is kept only for the proxy's address: CREATE from a CREATE3
+  contract, so it does not depend on the proxy's init code.
 - **RoleRevoker must be audited before mainnet.** It lives in `scripts/deploy/` like `UtilityCheckerDeployer`, but
   it is a permanent on-chain contract holding a revoke-only power on the Platform manager. The verifier checks it
   points at that manager (`manager()`), which neither the masked code probe nor CREATE3 commits to.
