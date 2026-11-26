@@ -123,6 +123,7 @@ interface ITickets {
     event HoldTaken(bytes32 indexed ticketId);
     event HoldCancelled(bytes32 indexed ticketId);
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
+    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error NotACrossChainMove();
@@ -168,6 +169,8 @@ interface ITickets {
     error NotASatelliteWallet(bytes wallet);
     error LaterHoldStillCarries(bytes32 ticketId, bytes32 laterTicketId);
     error HeldReceiptBreaksItsTerms(bytes32 ticketId);
+    error AwayClockBeforeValidUntil(bytes32 ticketId, uint64 awayClockTime, uint64 validUntil);
+    error ReceiptRouteNotClosed(bytes32 chainKey);
 
     /// @dev What a ticket is for. Part of the ticket id, so a holder's move and an agent's bring home asked with the
     /// same wallet and salt never share an id.
@@ -376,6 +379,21 @@ interface ITickets {
         uint256 perTicketCap;
         /// The most the ticket route toward the away chain may carry in one window of one waiting time.
         uint256 perWindowCap;
+    }
+
+    /// @dev What a human read from an away chain whose receipt route is closed, all from one final block of that
+    /// chain, at or after the valid until of the half or the ticket being closed. The role that may close by hand
+    /// attests it; nothing on chain proves it.
+    struct AwayChainReading {
+        /// The number of the final block read.
+        uint64 blockNumber;
+        /// That block's timestamp: the away chain's own clock.
+        uint64 awayClockTime;
+        /// The receipt the away token stored for the half, as it would have sent it; an amount of zero when it
+        /// stored none, or stored that nothing moved.
+        MessageTypesLib.ReceiptMessage storedReceipt;
+        /// The valid until of the ticket copy the away token holds for an open ticket; zero when it holds none.
+        uint64 storedTicketValidUntil;
     }
 
     /// @dev Asks to move tokens between chains. From an away wallet, toward any wallet: issues a `TicketMessage` and
@@ -639,7 +657,7 @@ interface ITickets {
     ///   too.
     /// - The sender's away chain open on the token: a receipt route set, through a bridge still recorded as a
     ///   receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
-    ///   taken as missing.
+    ///   taken as missing: {closeByHand} decides it from a read of that chain.
     /// - No receipt for the ticket waiting that can be applied now; otherwise reverts with
     ///   `ApplyWaitingReceiptFirst`: the receipt is already here, and {applyWaitingReceipt} applies it first. A
     ///   waiting receipt that cannot be applied, because its route check fails or the sender's away balance is
@@ -774,6 +792,48 @@ interface ITickets {
     /// @param receiver ERC-7930 interoperable address of the receiver the receipt named, read off
     /// `ReceiptWithoutTicket`.
     function cancelHold(bytes32 ticketId, bytes calldata receiver) external;
+
+    /// @dev Closes by hand what waits on an away chain whose receipt route is closed or whose bridge is distrusted for
+    /// good: no receipt can land from it, and its silence cannot tell a dead chain from a lost message. So home
+    /// decides from `reading`, the away chain's own state in one final block, never from home's clock.
+    ///
+    /// When the away token stored a receipt above zero for the half, it is applied as if it had arrived, see
+    /// {IReceiptHandler-receiveReceipt}, and nothing is returned; a stored receipt for an id home has no record of is
+    /// booked on hold. Otherwise, for:
+    /// - an open move: it is cancelled once that chain's clock is past the latest valid until its copies can carry:
+    ///   home's own plus the chain's reorg slot shift, the one a still open answer reported, and the stored copy's;
+    /// - an open bring home: it ends `Done` with nothing moved once that chain's clock is past its half's valid until;
+    /// - money on hold whose second half goes to the receiver: once that chain's clock is past the half's valid until,
+    ///   the money goes back to the sender by a new `MOVE_OUT`, minted at once to a home sender;
+    /// - money on hold with no ticket, moved inside that chain: what the receiver still holds as uncounted credit is
+    ///   applied as the move inside that chain it was, never minted to the sender, after the carried part of an
+    ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit.
+    /// Money going back to a sender whose own chain is the closed one is not closed by hand: it waits for that chain.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `ticketId` recorded, or a stored receipt above zero read for it; otherwise reverts with `UnknownTicket`.
+    /// - The away chain of the latest half, or of the stored receipt's sender for an id with no record, has no
+    ///   receipt route open; otherwise reverts with `ReceiptRouteNotClosed`.
+    /// - The token not paused, that chain not blocked and no hostile change running on it; otherwise reverts with
+    ///   `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
+    /// - A stored receipt for `ticketId`; otherwise reverts with `ValidationBodyMismatch`.
+    /// With no stored receipt:
+    /// - No receipt waiting under the latest half; otherwise reverts with `ApplyWaitingReceiptFirst`: the read and
+    ///   home disagree, and the receipt read again applies it.
+    /// - `receiver` with the key of the ticket's receiver; otherwise reverts with `ValidationBodyMismatch`.
+    /// - One of the cases above; otherwise reverts with `TicketNotCancellable`.
+    /// - `reading.awayClockTime` at or after the valid until the case needs; otherwise reverts with
+    ///   `AwayClockBeforeValidUntil`.
+    /// - For money on hold with no ticket: no later hold carrying it, otherwise `LaterHoldStillCarries`; and, before
+    ///   its cancel started, `stopWaitingAt` passed, otherwise `CancelNotDue`.
+    ///
+    /// Emits what the applied receipt, the cancel or the return emits, then `ClosedByHand`.
+    /// @param ticketId The ticket, money on hold or id to close.
+    /// @param receiver ERC-7930 interoperable address of the ticket's receiver, read off `TicketWritten` or
+    /// `ReceiptWithoutTicket`; not read when a stored receipt is applied.
+    /// @param reading What was read from the closed away chain.
+    function closeByHand(bytes32 ticketId, bytes calldata receiver, AwayChainReading calldata reading) external;
 
     /// @dev The uncounted credit of `wallet`: tokens it holds on its away chain that home does not count for it yet,
     /// from receipts with no ticket that named it as the receiver. Never part of its away balance, so never asked to

@@ -114,7 +114,7 @@ library ComplianceLedgerLib {
     }
 
     /// @dev Undoes the total of {reservePending}, once the movement is over: the validation settled, or the
-    ///  keeper discarded it. Every validation gets here, a relocation included.
+    ///  ticket was cancelled. Every validation gets here, a relocation included.
     function releasePendingTotal(uint256 amountMax) internal {
         layout().pendingTotal -= amountMax;
     }

@@ -105,6 +105,17 @@ library ReceiptLib {
         MessageTypesLib.ReceiptMessage calldata receipt,
         address token
     ) external {
+        _receive(originChainKey, bridge, senderPeerKey, receipt, token);
+    }
+
+    /// @dev See {receiveReceipt}; also the way {closeByHand} applies a receipt read from a closed away chain.
+    function _receive(
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) private {
         emit EventsLib.ReceiptReceived(originChainKey, receipt.ticketId, receipt.from, receipt.to, receipt.amount);
 
         // 1. The same receipt again, from the same chain, changes nothing, unless it waits and can now be applied.
@@ -622,7 +633,7 @@ library ReceiptLib {
     ///  No ticket is cancelled while the away chain that owes its receipt is blocked, its peer was replaced as hostile
     ///  less than four waiting times ago, or the token is stopped, a ticket waiting for approval included: its receipt
     ///  may be waiting or on its way, see {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot
-    ///  deliver its receipt, see {_requireReceiptRouteOpen}. Nor while a receipt for it waits and can be applied now,
+    ///  deliver its receipt, see {_requireReceiptRouteOpen}: that is {closeByHand}'s. Nor while a receipt for it waits and can be applied now,
     ///  see {_requireNoWaitingReceiptToApply}.
     /// @param token the token the compliance is bound to
     function cancelTickets(bytes32[] calldata validationIds, address token) external {
@@ -653,9 +664,9 @@ library ReceiptLib {
         }
     }
 
-    /// @dev A ticket is not cancelled while the away chain it was sent to cannot deliver a receipt: its receipt
-    ///  route is closed, or its bridge distrusted. The away token may have executed it already, and its receipt
-    ///  waits until a receipt route is set again; cancelling meanwhile would free what the receipt still moves.
+    /// @dev A ticket is not cancelled on home's clock while the away chain it was sent to cannot deliver a receipt:
+    ///  its receipt route is closed, or its bridge distrusted. The away token may have executed it already, and its
+    ///  silence proves nothing; {closeByHand} decides it from a read of that chain instead.
     function _requireReceiptRouteOpen(address token, bytes32 chainKey) private view {
         require(ITREXMessaging(token).isChainOpen(chainKey), ErrorsLib.ChainNotOpen(chainKey));
     }
@@ -714,6 +725,117 @@ library ReceiptLib {
         uint64 askedAt = waitingEndsAt;
         if (askedAfterTheReceiptWasDue) askedAt = ticket.lastSentAt;
         dueAt = askedAt + ticket.waitingTime;
+    }
+
+    /* ----- Close by hand ----- */
+
+    /// @dev See {ITickets-closeByHand}. The read stands in for the receipt the closed chain cannot deliver: a stored
+    ///  receipt goes through the same handler a delivery runs, with no bridge and no peer, since the caller's role
+    ///  attests it. Without one, only the away chain's own clock in the read lets home decide.
+    /// @param token the token the compliance is bound to
+    function closeByHand(
+        bytes32 ticketId,
+        bytes calldata receiver,
+        ITickets.AwayChainReading calldata reading,
+        address token
+    ) external {
+        bytes32 chainKey = _requireTheChainIsClosed(ticketId, reading, token);
+
+        // 1. What the away token stored is applied as if it had arrived; nothing is returned.
+        if (reading.storedReceipt.amount != 0) {
+            require(reading.storedReceipt.ticketId == ticketId, ErrorsLib.ValidationBodyMismatch(ticketId));
+            _receive(chainKey, address(0), bytes32(0), reading.storedReceipt, token);
+            emit EventsLib.ClosedByHand(ticketId, 0);
+            return;
+        }
+
+        // 2. Nothing stored: decided on the away chain's own clock.
+        uint256 returnedAmount = _closeOnTheAwayClock(ticketId, receiver, reading, chainKey, token);
+        emit EventsLib.ClosedByHand(ticketId, returnedAmount);
+    }
+
+    /// @dev The away chain a close by hand reads, once it is known: the chain of the ticket's latest half, or the
+    ///  stored receipt's sender's for an id with no record. It must deliver no receipt, and nothing is decided under
+    ///  a stop, a block or a hostile change.
+    /// @return chainKey the away chain read
+    function _requireTheChainIsClosed(bytes32 ticketId, ITickets.AwayChainReading calldata reading, address token)
+        private
+        view
+        returns (bytes32 chainKey)
+    {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        bool recorded = TicketLib.isRecorded(store, ticketId);
+        bool storedAReceipt = reading.storedReceipt.amount != 0;
+        require(recorded || storedAReceipt, ErrorsLib.UnknownTicket(ticketId));
+
+        if (recorded) chainKey = _chainOfTheLatestHalf(store.validations[ticketId]);
+        if (!recorded) chainKey = _chainKeyOf(reading.storedReceipt.from);
+        require(!ITREXMessaging(token).isChainOpen(chainKey), ErrorsLib.ReceiptRouteNotClosed(chainKey));
+        TicketLib.requireTokenRunning(token);
+        TicketLib.requireAwayChainNotBlocked(chainKey);
+        TicketLib.requireNoHostileChange(token, chainKey);
+    }
+
+    /// @dev No receipt in the read. A receipt waiting at home for the latest half says otherwise, so it is read again
+    ///  instead. Then an open move is cancelled here, money on hold with no ticket is {HoldLib}'s, and any other
+    ///  half {SecondHalfLib}'s.
+    /// @return returnedAmount what goes back to the sender
+    function _closeOnTheAwayClock(
+        bytes32 ticketId,
+        bytes calldata receiver,
+        ITickets.AwayChainReading calldata reading,
+        bytes32 chainKey,
+        address token
+    ) private returns (uint256 returnedAmount) {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.Ticket storage ticket = store.validations[ticketId];
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, ticket.half);
+        bool aReceiptWaits = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
+        require(!aReceiptWaits, ErrorsLib.ApplyWaitingReceiptFirst(ticketId, chainKey));
+        require(WalletKeyLib.canonicalKey(receiver) == ticket.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
+
+        bool anOpenMove = ticket.status == ITickets.TicketStatus.Open && ticket.kind == ITickets.TicketKind.MOVE;
+        if (anOpenMove) {
+            _cancelOnTheClosedRoute(store, ticket, ticketId, reading, token);
+            return 0;
+        }
+        if (!ticket.written) {
+            HoldLib.closeHoldByHand(ticketId, receiver, reading.awayClockTime, token);
+            return 0;
+        }
+        return SecondHalfLib.closeHalfByHand(ticketId, reading.awayClockTime, token);
+    }
+
+    /// @dev An open move on a closed route is cancelled once the away chain's clock in the read is past every valid
+    ///  until a copy of the ticket can carry there: home's own, moved by up to the chain's reorg slot shift for a copy
+    ///  from a home block a reorg dropped that may still be on its way, the one a still open answer reported, and the
+    ///  stored copy's.
+    function _cancelOnTheClosedRoute(
+        TicketLib.ValidationStorage storage store,
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        ITickets.AwayChainReading calldata reading,
+        address token
+    ) private {
+        uint64 reorgSlotShift = store.measuredTimes[ticket.fromChainKey].reorgSlotShift;
+        uint64 latestValidUntil = ticket.validUntil + reorgSlotShift;
+        if (ticket.seenValidUntil > latestValidUntil) latestValidUntil = ticket.seenValidUntil;
+        if (reading.storedTicketValidUntil > latestValidUntil) latestValidUntil = reading.storedTicketValidUntil;
+        require(
+            reading.awayClockTime >= latestValidUntil,
+            ErrorsLib.AwayClockBeforeValidUntil(ticketId, reading.awayClockTime, latestValidUntil)
+        );
+
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.Cancelled, token);
+        emit EventsLib.TicketCancelled(ticketId);
+    }
+
+    /// @dev The away chain the latest half of a ticket went to: the receiver's while its money on hold goes to the
+    ///  receiver, the sender's otherwise, the ticket itself included.
+    function _chainOfTheLatestHalf(ITickets.Ticket storage ticket) private view returns (bytes32) {
+        bool goesToTheReceiver = ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.toKey;
+        if (goesToTheReceiver) return ticket.toChainKey;
+        return ticket.fromChainKey;
     }
 
     function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {

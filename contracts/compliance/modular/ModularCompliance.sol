@@ -337,6 +337,16 @@ contract ModularCompliance is
         HoldLib.cancelHold(ticketId, receiver, _getTokenBound());
     }
 
+    /// @inheritdoc ITickets
+    /// @dev `restricted`: the role that holds it attests the read of the closed away chain, see
+    ///  {ReceiptLib-closeByHand}.
+    function closeByHand(bytes32 ticketId, bytes calldata receiver, AwayChainReading calldata reading)
+        external
+        restricted
+    {
+        ReceiptLib.closeByHand(ticketId, receiver, reading, _getTokenBound());
+    }
+
     /**
      *  @dev See {IERC165-supportsInterface}.
      */

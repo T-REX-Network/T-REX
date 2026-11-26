@@ -303,6 +303,48 @@ library SecondHalfLib {
         _finish(ticket, ticketId, receipt.to, token);
     }
 
+    /* ----- Close by hand ----- */
+
+    /// @dev See {ITickets-closeByHand}: {ReceiptLib-closeByHand} found no stored receipt in the read of the half's
+    ///  closed chain. Once that chain's clock is past the half's valid until, the half can no longer be executed
+    ///  there: an open bring home ends with nothing moved, and money going to the receiver goes back to the sender,
+    ///  only the latest half's amount, which for a move is all its money on hold. A return is new money on hold, so
+    ///  its halves are counted from zero.
+    /// @param awayClockTime the timestamp of the block read on the half's chain
+    /// @param token the token the compliance is bound to
+    /// @return returnedAmount what goes back to the sender
+    function closeHalfByHand(bytes32 ticketId, uint64 awayClockTime, address token)
+        external
+        returns (uint256 returnedAmount)
+    {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.Ticket storage ticket = store.validations[ticketId];
+        bool anOpenBringHome =
+            ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
+        bool goesToTheReceiver = ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.toKey;
+        require(anOpenBringHome || goesToTheReceiver, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        uint64 validUntil = ticket.secondHalfValidUntil;
+        require(awayClockTime >= validUntil, ErrorsLib.AwayClockBeforeValidUntil(ticketId, awayClockTime, validUntil));
+
+        if (anOpenBringHome) {
+            delete store.openBringHome[ticket.fromKey];
+            TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+            return 0;
+        }
+
+        returnedAmount = ticket.moved;
+        (bool senderAtHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+        if (senderAtHome) {
+            TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+            IToken(token).finishMove(ticket.fromWallet, ticket.fromWallet, returnedAmount, ticketId);
+            return returnedAmount;
+        }
+        TicketLib.turnTheHoldBack(ticket);
+        ticket.newHalves = 0;
+        takeANewHalf(ticket, ticketId);
+        sendTheLatestHalf(ticket, ticketId, ticket.fromWallet, token);
+    }
+
     /* ----- Private: a bring home ----- */
 
     /// @dev Everything a bring home is checked for, see {ITickets-bringHome}, before anything is written. The amount

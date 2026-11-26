@@ -285,6 +285,12 @@ library ErrorsLib {
     /// @dev The receipt held under `ticketId` moved an amount the ask mined again does not allow, or echoed a maximum
     ///  above what was asked or above the away chain's per-ticket cap: the ask does not take it.
     error HeldReceiptBreaksItsTerms(bytes32 ticketId);
+    /// @dev The block read from the closed away chain is at `awayClockTime` on that chain's clock, before `validUntil`:
+    ///  the half or the ticket of `ticketId` could still be executed there, so close by hand does not decide yet.
+    error AwayClockBeforeValidUntil(bytes32 ticketId, uint64 awayClockTime, uint64 validUntil);
+    /// @dev Close by hand is only for an away chain whose receipt route is closed or whose bridge is distrusted:
+    ///  `chainKey` still delivers receipts.
+    error ReceiptRouteNotClosed(bytes32 chainKey);
     /// @dev Less gas is left than a second half's send needs: the whole delivery reverts and stays deliverable.
     error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
     /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or a floor

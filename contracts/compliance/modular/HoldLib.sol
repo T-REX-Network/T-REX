@@ -269,6 +269,46 @@ library HoldLib {
         _cancel(ticket, ticketId, receiver, token);
     }
 
+    /* ----- Close by hand ----- */
+
+    /// @dev See {ITickets-closeByHand}: {ReceiptLib-closeByHand} found no stored receipt in the read of the closed
+    ///  chain the money moved inside. The tokens never left that chain, so nothing is minted to the sender: what the
+    ///  receiver still holds as uncounted credit is applied as the move it was, and a bring home of the cancel that is
+    ///  out burned nothing once that chain's clock is past its valid until. Last in, first out: never while a later
+    ///  hold carries this one's credit, and the earlier move this one carries from is applied first for that part.
+    /// @param receiver the receiver's wallet, checked by the caller
+    /// @param awayClockTime the timestamp of the block read on the closed chain
+    /// @param token the token the compliance is bound to
+    function closeHoldByHand(bytes32 ticketId, bytes calldata receiver, uint64 awayClockTime, address token) external {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.Ticket storage ticket = store.validations[ticketId];
+
+        // Checks
+        bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
+        bool noReturnToTheSender = ticket.secondHalfToKey != ticket.fromKey;
+        bool closable = onHold && _insideOneAwayChain(ticket) && noReturnToTheSender;
+        require(closable, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        bytes32 laterHoldId = ticket.carriedBy;
+        require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
+        bool cancelStarted = ticket.secondHalfToKey != bytes32(0);
+        if (!cancelStarted) {
+            require(block.timestamp >= ticket.stopWaitingAt, ErrorsLib.CancelNotDue(ticketId, ticket.stopWaitingAt));
+        }
+        bool aBringHomeIsOut = TicketLib.aBringHomeIsOut(ticket);
+        if (aBringHomeIsOut) {
+            uint64 validUntil = ticket.secondHalfValidUntil;
+            require(
+                awayClockTime >= validUntil, ErrorsLib.AwayClockBeforeValidUntil(ticketId, awayClockTime, validUntil)
+            );
+        }
+
+        // Effects and interactions: what the bring home took from the receiver's credit is back, since it burned
+        // nothing; then the moves the away token made, the earlier one first.
+        if (aBringHomeIsOut) store.uncountedCredit[ticket.toKey] += ticket.amountMax;
+        if (ticket.carriedFrom != bytes32(0)) _applyTheCarriedPartFirst(ticket, ticketId, token);
+        _applyWhatTheReceiverHolds(ticket, ticketId, receiver, token);
+    }
+
     /* ----- The halves of a cancel landed ----- */
 
     /// @dev See {IReceiptHandler-receiveReceipt}: a good receipt for a half of the cancel of money on hold with no
@@ -623,6 +663,87 @@ library HoldLib {
             earlierHold.shortCancel = false;
             earlierHold.secondHalfOwed = true;
         }
+    }
+
+    /* ----- Private: close by hand ----- */
+
+    /// @dev This hold's sender spent tokens that were the earlier hold's uncounted credit: that earlier move happened
+    ///  for the carried part, so it is applied first, from the earlier hold to this sender, and the part joins this
+    ///  hold as its sender's own money. The earlier hold keeps the rest, and ends once nothing is left of it.
+    function _applyTheCarriedPartFirst(ITickets.Ticket storage ticket, bytes32 ticketId, address token) private {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        bytes32 earlierHoldId = ticket.carriedFrom;
+        ITickets.Ticket storage earlierHold = store.validations[earlierHoldId];
+        uint256 carried = ticket.carriedAmount;
+        IModule.TransferContext memory move = TransferContextLib.settlement(
+            address(this),
+            MovementKindLib.CROSS_CHAIN,
+            earlierHold.fromIdentity,
+            earlierHold.toIdentity,
+            WalletKeyLib.walletId(earlierHold.fromWallet),
+            WalletKeyLib.walletId(ticket.fromWallet),
+            carried,
+            ""
+        );
+
+        // Effects
+        ticket.carriedFrom = bytes32(0);
+        ticket.carriedAmount = 0;
+        earlierHold.carriedBy = bytes32(0);
+        earlierHold.moved -= carried;
+        ComplianceLedgerLib.releasePendingTotal(carried);
+        if (earlierHold.moved == 0) TicketLib.moveTo(earlierHold, ITickets.TicketStatus.Done, token);
+        ComplianceLedgerLib.movePosition(move.fromIdentity, move.toIdentity, move.fromWallet, move.toWallet, carried);
+
+        // Interactions
+        IToken(token).finishMove(earlierHold.fromWallet, ticket.fromWallet, carried, earlierHoldId);
+        IToken(token).putOnHold(ticket.fromWallet, carried, ticketId);
+        ModuleSetLib.callAfterTransfer(move);
+    }
+
+    /// @dev The move inside the closed chain, as far as the receiver still holds its tokens there as uncounted credit:
+    ///  that credit becomes the receiver's away balance out of this hold, the positions move and the trackers are
+    ///  told. What the receiver no longer holds stays on hold, short, as a cancel that burned less would leave it.
+    function _applyWhatTheReceiverHolds(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes calldata receiver,
+        address token
+    ) private {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        bytes32 receiverKey = ticket.toKey;
+        uint256 credit = store.uncountedCredit[receiverKey];
+        uint256 applied = ticket.moved;
+        if (credit < applied) applied = credit;
+        IModule.TransferContext memory move = TransferContextLib.settlement(
+            address(this),
+            MovementKindLib.CROSS_CHAIN,
+            ticket.fromIdentity,
+            ticket.toIdentity,
+            WalletKeyLib.walletId(ticket.fromWallet),
+            WalletKeyLib.walletId(receiver),
+            applied,
+            ""
+        );
+
+        // Effects
+        store.uncountedCredit[receiverKey] = credit - applied;
+        ticket.moved -= applied;
+        ComplianceLedgerLib.releasePendingTotal(applied);
+        bool nothingLeftOnHold = ticket.moved == 0;
+        if (nothingLeftOnHold) TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+        if (!nothingLeftOnHold) {
+            ticket.secondHalfToKey = receiverKey;
+            ticket.secondHalfOwed = false;
+            ticket.shortCancel = true;
+            emit EventsLib.CancelHoldShort(ticketId, ticket.moved);
+        }
+        ComplianceLedgerLib.movePosition(move.fromIdentity, move.toIdentity, move.fromWallet, move.toWallet, applied);
+
+        // Interactions
+        if (applied == 0) return;
+        IToken(token).finishMove(ticket.fromWallet, receiver, applied, ticketId);
+        ModuleSetLib.callAfterTransfer(move);
     }
 
     /* ----- Private ----- */

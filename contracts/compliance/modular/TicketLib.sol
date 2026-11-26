@@ -982,6 +982,14 @@ library TicketLib {
         if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] += ticket.moved;
     }
 
+    /// @dev Turns money on hold back toward its sender: the `OnHold` row is written again for the new destination,
+    ///  so nothing stays kept against the receiver.
+    function turnTheHoldBack(ITickets.Ticket storage ticket) internal {
+        _releaseTheHold(ticket);
+        ticket.secondHalfToKey = ticket.fromKey;
+        reserveTheHold(ticket);
+    }
+
     /// @dev Gives back the `OnHold` row of {moveTo}'s table.
     function _releaseTheHold(ITickets.Ticket storage ticket) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();

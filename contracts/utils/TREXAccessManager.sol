@@ -399,6 +399,11 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(compliance, ITickets.blockAwayChain.selector, pauserRole);
         _setTargetFunctionRole(compliance, ITickets.unblockAwayChain.selector, pauserRole);
         _setTargetFunctionRole(compliance, ITickets.refuseWaitingReceipt.selector, pauserRole);
+
+        // Closing by hand what waits on an away chain whose receipt route is closed, from a read of that chain the
+        // caller attests: the role that closes a dead chain's route on the token.
+        uint64 identityManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.IDENTITY_MANAGER);
+        _setTargetFunctionRole(compliance, ITickets.closeByHand.selector, identityManagerRole);
     }
 
     /// @dev Who hands out which role. The key that appoints never acts: `AGENT_ADMIN` and `SUITE_ADMIN` open
@@ -416,7 +421,6 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_FORCED_TRANSFER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.IRS_BINDER), agentAdminRole);
-        _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER), agentAdminRole);
 
         // The configuration managers are appointed by SUITE_ADMIN.
         uint64 suiteAdminRole = RolesLib.forDomain(domainId, RolesLib.Role.SUITE_ADMIN);

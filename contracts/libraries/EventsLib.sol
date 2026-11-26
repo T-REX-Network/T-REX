@@ -224,6 +224,9 @@ library EventsLib {
     /// @notice The cancel of the money on hold under `ticketId` burned `missing` less than it holds: that rest stays
     ///         on hold under the sender until carried credit comes back to the receiver, or a human acts.
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
+    /// @notice A human closed `ticketId` by hand from a read of its closed away chain. `returnedAmount` went back
+    ///         toward the sender; zero when the read receipt was applied, a ticket cancelled or a bring home ended.
+    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
     /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, or on a bad receipt or
     ///         receipt terms it broke. No ticket goes to it, none of its tickets is cancelled, and its receipts wait.
     event AwayChainBlockStarted(bytes32 indexed chainKey);

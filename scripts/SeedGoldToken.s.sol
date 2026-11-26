@@ -310,7 +310,7 @@ contract SeedGoldToken is Script {
     ///      SUITE_ADMIN first, since they appoint the rest. Idempotent.
     function _grantSuiteRoles(address token) internal {
         TREXAccessManager suiteAM = TREXAccessManager(Token(token).authority());
-        RolesLib.Role[15] memory roles = [
+        RolesLib.Role[14] memory roles = [
             RolesLib.Role.AGENT_ADMIN,
             RolesLib.Role.SUITE_ADMIN,
             RolesLib.Role.OWNER,
@@ -324,8 +324,7 @@ contract SeedGoldToken is Script {
             RolesLib.Role.AGENT_PAUSER,
             RolesLib.Role.TOKEN_MANAGER,
             RolesLib.Role.IDENTITY_MANAGER,
-            RolesLib.Role.COMPLIANCE_MANAGER,
-            RolesLib.Role.VALIDATION_KEEPER
+            RolesLib.Role.COMPLIANCE_MANAGER
         ];
         for (uint256 i = 0; i < roles.length; i++) {
             _grantIfMissing(suiteAM, _role(roles[i]), deployer);

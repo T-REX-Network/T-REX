@@ -81,8 +81,7 @@ library RolesLib {
         SUITE_ADMIN,
         IRS_BINDER,
         IRS_WRITER,
-        COMPLIANCE_MANAGER,
-        VALIDATION_KEEPER
+        COMPLIANCE_MANAGER
     }
 
     // ---- Platform roles: factory, implementation authority and identity factory governance ----
