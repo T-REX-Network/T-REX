@@ -180,8 +180,11 @@ library EventsLib {
     /// @notice Emitted the first time a token learns the ERC-7930 prefix behind a `chainKey`.
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
     event RouteSet(bytes32 indexed chainKey, address indexed gateway);
+    /// @notice Emitted when the fast route of `chainKey`, which carries validations only, is set; zero unsets it.
+    event FastRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
-    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to the gateway that carried it.
+    /// @notice Emitted when a validation's leg toward `chainKey` is pinned to `gateway`, the chain's final route at
+    ///         dispatch, which its settlement must come back through, whichever route carried the leg out.
     event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
     event ProtocolMessageReceived(

@@ -31,6 +31,12 @@ that recall was dispatched to.
    the instruction ids of rules 9 and 10. A zero receive id names no delivery (ERC-7786 allows it) and is never
    recorded, or the first one would refuse every later message.
 2. **Accept only the reference token as author**, through its own gateway.
+2a. **Send every report on the final route.** A chain may have two routes on the reference side: a fast one, set
+   with `setFastRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
+   `setRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
+   token refuses a delivery from the fast route with `GatewayIsFastRoute`, and pins each validation leg to the final
+   route of the moment (`pinnedRouteFor`), so a validation that arrived on the fast gateway is settled through the
+   final one, not back through the gateway that delivered it.
 
 ### Validations
 
@@ -67,7 +73,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes through the gateway and to the peer the issuance pinned; refused while issuance toward that chain is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
+| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes out as the issuance did, on the fast route when one is set and on the final route otherwise, and only while the final route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
