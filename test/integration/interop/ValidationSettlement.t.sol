@@ -178,7 +178,6 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
-        assertFalse(boundCompliance.isIssuancePaused(polygon));
     }
 
     // ==== mismatch Tests: the leg is consumed, nothing moves, and the chain that executed it is paused ====
@@ -191,11 +190,11 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(id, polygon, 80);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonGateway.relay(below);
 
-        assertTrue(token.isInboundPaused(polygon), "the chain that broke the terms is blocked");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that broke the terms is blocked");
         assertFalse(token.paused(), "the token keeps running");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(aliceSat), BALANCE - 80);
@@ -214,10 +213,10 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         _relayRejected(polygonGateway, polygon, wrongTo, id, 95);
         vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        boundCompliance.unblockAwayChain(polygon);
         _relayRejected(polygonGateway, polygon, wrongFrom, id, 95);
         vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        boundCompliance.unblockAwayChain(polygon);
         _relayRejected(polygonGateway, polygon, emptyTo, id, 95);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
@@ -234,7 +233,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         _relayRejected(optimismGateway, optimism, index, id, 95);
 
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(token.awayBalanceOf(bobSat), 0);
     }
@@ -252,12 +251,12 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptOnOlderTerms(id, polygon, 100);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonGateway.relay(index);
 
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused());
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "the recipient's reservation is released");
@@ -286,7 +285,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).moved, 95);
         assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95);
         assertEq(token.awayBalanceOf(bobSat), 95);
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused());
     }
 
@@ -301,37 +300,46 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonGateway.relay(replay);
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused());
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(replay)));
         assertEq(token.awayBalanceOf(bobSat), 95);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
-    /// @notice Once a chain's inbound is paused its next leg is refused and stays deliverable; the pauser lifts
-    ///         the pause and the same delivery settles.
-    function test_handleSettlement_RevertWhen_TheChainsInboundIsPaused_ThenSettlesOnceLifted() public {
+    /// @notice A good receipt from a blocked away chain is consumed and waits, tagged with the bridge that brought
+    ///         it; the ticket stays open. Once the pauser lifts the block, anyone applies it.
+    function test_receiveReceipt_waits_whenTheAwayChainIsBlocked() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95));
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement(id, aliceSat, bobSat, 95);
+        uint256 index = _liteSettles(polygonGateway, token, receipt);
         vm.prank(agent);
-        token.setInboundPaused(polygon, true);
+        boundCompliance.blockAwayChain(polygon);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWaiting(id, polygon, address(polygonGateway), receipt);
         polygonGateway.relay(index);
-        _assertNothingApplied(polygonGateway, index);
+        assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)), "consumed");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
+        ITickets.WaitingReceipt memory waiting = boundCompliance.waitingReceiptOf(id);
+        assertEq(waiting.bodyHash, keccak256(abi.encode(polygon, receipt)));
+        assertEq(waiting.deliveredBy, address(polygonGateway));
 
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundUnpaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainUnblocked(polygon);
         vm.prank(agent);
-        token.setInboundPaused(polygon, false);
-        polygonGateway.relay(index);
+        boundCompliance.unblockAwayChain(polygon);
+        vm.prank(makeAddr("anyone"));
+        boundCompliance.applyWaitingReceipt(id, receipt);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
+        assertEq(boundCompliance.waitingReceiptOf(id).bodyHash, bytes32(0), "taken off the shelf");
     }
 
     /// @notice A receipt for an id home has no record of applies nothing and blocks nobody: it reverts and stays
@@ -346,28 +354,36 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
         _assertNothingApplied(polygonGateway, index);
         assertFalse(token.paused());
-        assertFalse(token.isInboundPaused(polygon), "no chain is blocked over an unknown id");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "no chain is blocked over an unknown id");
         assertEq(token.awayBalanceOf(aliceSat), BALANCE);
         assertEq(token.awayBalanceOf(bobSat), 0);
-        assertFalse(boundCompliance.waitingReceiptOf(unknown, polygon).exists, "nothing waits");
+        assertEq(boundCompliance.waitingReceiptOf(unknown).bodyHash, bytes32(0), "nothing waits");
     }
 
-    /// @notice While the token is paused a valid leg is refused and stays deliverable; once unpaused it settles.
-    function test_handleSettlement_RevertWhen_TheTokenIsPaused() public {
+    /// @notice While the token is stopped a good receipt is consumed and waits; once the token runs again, anyone
+    ///         applies it.
+    function test_receiveReceipt_waits_whenTheTokenIsStopped() public {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 95));
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement(id, aliceSat, bobSat, 95);
+        uint256 index = _liteSettles(polygonGateway, token, receipt);
         vm.prank(agent);
         token.pause();
 
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWaiting(id, polygon, address(polygonGateway), receipt);
         polygonGateway.relay(index);
-        _assertNothingApplied(polygonGateway, index);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
+
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
+        boundCompliance.applyWaitingReceipt(id, receipt);
 
         vm.prank(agent);
         token.unpause();
-        polygonGateway.relay(index);
+        boundCompliance.applyWaitingReceipt(id, receipt);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 95);
     }
 
     /// @notice Only the pauser lifts a halt.
@@ -455,12 +471,12 @@ contract ValidationSettlementTest is InteropSuiteTest {
     {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(chainKey);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(chainKey);
         gateway.relay(index);
 
         assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "the leg is consumed");
-        assertTrue(token.isInboundPaused(chainKey), "the chain that executed it is paused");
+        assertTrue(boundCompliance.isAwayChainBlocked(chainKey), "the chain that executed it is paused");
         assertFalse(token.paused(), "the token keeps running");
     }
 

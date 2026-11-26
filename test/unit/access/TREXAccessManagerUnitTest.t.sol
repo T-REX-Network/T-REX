@@ -509,7 +509,6 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, IERC3643.batchForcedTransfer.selector, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
         _assertRow(target, token, IERC3643.pause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, token, IERC3643.unpause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
-        _assertRow(target, token, ITREXMessaging.setInboundPaused.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         // Registry
         _assertRow(target, registry, ITREXRegistry.disableEligibilityChecks.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, registry, ITREXRegistry.enableEligibilityChecks.selector, domainId, RolesLib.Role.OWNER);
@@ -589,10 +588,12 @@ contract TREXAccessManagerUnitTest is Test {
             target, compliance, ITickets.setDefaultValidityWindow.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER
         );
         _assertRow(target, compliance, ITickets.setWaitingTime.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
-        _assertRow(target, compliance, ITickets.setIssuancePaused.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.setTicketLimits.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.askToMove.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, compliance, ITickets.sendTicket.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITickets.blockAwayChain.selector, domainId, RolesLib.Role.AGENT_PAUSER);
+        _assertRow(target, compliance, ITickets.unblockAwayChain.selector, domainId, RolesLib.Role.AGENT_PAUSER);
+        _assertRow(target, compliance, ITickets.refuseWaitingReceipt.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, compliance, ITickets.cancelTickets.selector, domainId, RolesLib.Role.VALIDATION_KEEPER);
         // Who hands out which role
         _assertAdmin(target, domainId, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);

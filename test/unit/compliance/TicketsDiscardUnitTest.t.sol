@@ -90,7 +90,6 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
-        vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
         // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
@@ -345,7 +344,7 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         // The token's side of the move is not what these tests are about.
         vm.mockCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toSat, 50, id)), "");
         vm.prank(token);
-        mc.receiveReceipt(polygon, receipt);
+        mc.receiveReceipt(polygon, makeAddr("bridge"), keccak256("peer"), receipt);
     }
 
     function _ids(bytes32 id) private pure returns (bytes32[] memory ids) {

@@ -47,8 +47,8 @@ import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
-/// @dev The COMPLIANCE_MANAGER surface of the validation layer: the five setters, their events and their
-///      guards, plus the late-reconciliation hook that pauses a chain on its own.
+/// @dev The settings of the validation layer: the COMPLIANCE_MANAGER's windows and the pauser's block of an away
+///      chain, with their events and their guards.
 contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     bytes32 internal constant POLYGON = keccak256(abi.encodePacked(bytes2(0x0000), hex"89"));
@@ -99,58 +99,78 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         mc.setWaitingTime(POLYGON, 30 minutes);
     }
 
-    // ==== .setIssuancePaused Tests ====
+    // ==== .blockAwayChain and .unblockAwayChain Tests ====
 
-    function test_setIssuancePaused_Success_WhenPausingAnOpenChain() public {
-        assertFalse(mc.isIssuancePaused(POLYGON));
-
-        vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ValidationIssuancePaused(POLYGON);
-        mc.setIssuancePaused(POLYGON, true);
-
-        assertTrue(mc.isIssuancePaused(POLYGON));
-        assertFalse(mc.isIssuancePaused(OPTIMISM));
-    }
-
-    function test_setIssuancePaused_Success_WhenResumingAPausedChain() public {
-        mc.setIssuancePaused(POLYGON, true);
+    function test_blockAwayChain_blocksOnlyThatChain() public {
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ValidationIssuanceUnpaused(POLYGON);
-        mc.setIssuancePaused(POLYGON, false);
+        emit EventsLib.AwayChainBlockStarted(POLYGON);
+        mc.blockAwayChain(POLYGON);
 
-        assertFalse(mc.isIssuancePaused(POLYGON));
+        assertTrue(mc.isAwayChainBlocked(POLYGON));
+        assertFalse(mc.isAwayChainBlocked(OPTIMISM));
     }
 
-    /// @notice Setting the state a chain already has changes nothing and emits nothing, so a keeper can
-    ///         pause without first checking whether someone else already did.
-    function test_setIssuancePaused_Success_WhenTheStateIsAlreadyTheOneAsked() public {
-        mc.setIssuancePaused(POLYGON, true);
+    function test_unblockAwayChain_liftsTheBlock() public {
+        mc.blockAwayChain(POLYGON);
+
+        vm.expectEmit(true, false, false, true, address(mc));
+        emit EventsLib.AwayChainUnblocked(POLYGON);
+        mc.unblockAwayChain(POLYGON);
+
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
+    }
+
+    /// @notice Blocking a blocked chain, or unblocking an open one, changes nothing and emits nothing, so a pauser can
+    ///         block without first checking whether a bad receipt already did.
+    function test_blockAwayChain_changesNothing_whenTheStateIsAlreadyTheOneAsked() public {
+        mc.blockAwayChain(POLYGON);
 
         vm.recordLogs();
-        mc.setIssuancePaused(POLYGON, true);
+        mc.blockAwayChain(POLYGON);
         assertEq(vm.getRecordedLogs().length, 0, "no event on a no-op");
-        assertTrue(mc.isIssuancePaused(POLYGON));
+        assertTrue(mc.isAwayChainBlocked(POLYGON));
 
-        mc.setIssuancePaused(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
         vm.recordLogs();
-        mc.setIssuancePaused(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
         assertEq(vm.getRecordedLogs().length, 0, "no event on a no-op");
-        assertFalse(mc.isIssuancePaused(POLYGON));
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
     }
 
-    function test_setIssuancePaused_RevertWhen_PauserIsNotManager() public {
+    function test_blockAwayChain_reverts_when_theCallerHasNoRole() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setIssuancePaused(POLYGON, true);
+        mc.blockAwayChain(POLYGON);
     }
 
-    function test_setIssuancePaused_RevertWhen_ResumerIsNotManager() public {
-        mc.setIssuancePaused(POLYGON, true);
+    /// @notice The bound token blocks the chain of a burn proof for a recall already settled, with no role.
+    function test_blockAwayChain_succeeds_whenTheBoundTokenCalls() public {
+        vm.prank(token);
+        mc.blockAwayChain(POLYGON);
+
+        assertTrue(mc.isAwayChainBlocked(POLYGON));
+    }
+
+    /// @notice Only the pauser lifts a block, whoever set it: a bad receipt blocks from inside `receiveReceipt`, and
+    ///         the lift is never automatic.
+    function test_unblockAwayChain_reverts_when_theCallerHasNoRole() public {
+        mc.blockAwayChain(POLYGON);
 
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setIssuancePaused(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
+        assertTrue(mc.isAwayChainBlocked(POLYGON), "the chain stays blocked until the pauser acts");
+    }
+
+    /// @notice The bound token blocks, it never unblocks.
+    function test_unblockAwayChain_reverts_when_theBoundTokenCalls() public {
+        mc.blockAwayChain(POLYGON);
+
+        vm.prank(token);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, token));
+        mc.unblockAwayChain(POLYGON);
     }
 
     /// @notice OWNER alone does not reach the manager surface: the roles are distinct.
@@ -161,24 +181,6 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, owner));
         mc.setDefaultValidityWindow(1 hours);
-    }
-
-    // ==== automatic pause Tests ====
-
-    /// @notice Only the manager lifts a pause, whoever set it. A late settlement that breached a rule closes
-    ///         the chain from inside `receiveReceipt`; `LateReconciliation.t.sol` covers that path end to
-    ///         end, and this pins that the lift is a manager action and not automatic.
-    function test_setIssuancePaused_Success_WhenTheManagerLiftsAnAutomaticPause() public {
-        mc.setIssuancePaused(POLYGON, true);
-        assertTrue(mc.isIssuancePaused(POLYGON));
-
-        vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setIssuancePaused(POLYGON, false);
-        assertTrue(mc.isIssuancePaused(POLYGON), "issuance stays closed until the manager acts");
-
-        mc.setIssuancePaused(POLYGON, false);
-        assertFalse(mc.isIssuancePaused(POLYGON));
     }
 
     // ==== .supportsInterface and storage Tests ====

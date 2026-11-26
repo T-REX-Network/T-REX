@@ -319,11 +319,10 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         uint64 recoveryRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
         _setTargetFunctionRole(token, IERC3643.recoveryAddress.selector, recoveryRole);
 
-        // Stopping every transfer, or one chain's messages, and resuming.
+        // Stopping every transfer, and resuming.
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
         _setTargetFunctionRole(token, IERC3643.pause.selector, pauserRole);
         _setTargetFunctionRole(token, IERC3643.unpause.selector, pauserRole);
-        _setTargetFunctionRole(token, ITREXMessaging.setInboundPaused.selector, pauserRole);
     }
 
     function _setRegistryFunctionRoles(address registry, uint32 domainId) private {
@@ -389,13 +388,18 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         uint64 complianceManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _setTargetFunctionRole(compliance, ITickets.setDefaultValidityWindow.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setWaitingTime.selector, complianceManagerRole);
-        _setTargetFunctionRole(compliance, ITickets.setIssuancePaused.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setTicketLimits.selector, complianceManagerRole);
 
         // Issuing a ticket, and sending a lost one again.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(compliance, ITickets.askToMove.selector, agentRole);
         _setTargetFunctionRole(compliance, ITickets.sendTicket.selector, agentRole);
+
+        // Blocking an away chain, lifting the block, and refusing a receipt waiting from a blocked chain.
+        uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
+        _setTargetFunctionRole(compliance, ITickets.blockAwayChain.selector, pauserRole);
+        _setTargetFunctionRole(compliance, ITickets.unblockAwayChain.selector, pauserRole);
+        _setTargetFunctionRole(compliance, ITickets.refuseWaitingReceipt.selector, pauserRole);
 
         // Cancelling overdue tickets.
         uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);

@@ -50,6 +50,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
@@ -235,7 +236,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
     /// @notice No more supply goes to a chain whose reports are suspect; the burn is undone with the refusal.
     function test_delegateOut_RevertWhen_TheChainsInboundIsPaused() public {
         vm.prank(agent);
-        token.setInboundPaused(polygon, true);
+        boundCompliance.blockAwayChain(polygon);
         uint256 nativeBefore = token.balanceOf(alice);
         uint256 bridgedBefore = token.awayBalanceOf(aliceSat);
 
@@ -392,9 +393,10 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(aliceSat), 0);
         assertEq(token.reservedOf(aliceSat), 300, "the reservation outlives the position");
         assertEq(token.availableOf(aliceSat), 0);
-        uint256 settlement = _liteSettles(polygonGateway, token, _settlement(ticketId, aliceSat, bobSat, 100));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, aliceSat, 0, 100));
-        polygonGateway.relay(settlement);
+        // A receipt the away balance no longer covers waits at home rather than reverting at the bridge.
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(ticketId, aliceSat, bobSat, 100)));
+        assertEq(boundCompliance.waitingReceiptOf(ticketId).amount, 100, "the receipt waits");
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
         _assertPartition();
     }
 
@@ -520,7 +522,7 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         polygonGateway.relay(index);
 
         assertFalse(token.paused(), "the token keeps running");
-        assertFalse(token.isInboundPaused(polygon), "the away chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the away chain is not blocked");
         assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)), "deliverable");
         assertEq(token.balanceOf(alice), MINTED - 500, "nothing minted");
         assertEq(token.awayBalanceOf(aliceSat), 500, "nothing debited");
@@ -552,11 +554,11 @@ contract DelegationAndRecallTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ReplayedBurnProof(recallId, polygon);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonGateway.relay(conflicting);
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused());
         assertEq(token.balanceOf(alice), MINTED - 500 + 200, "credited once");
     }
@@ -676,7 +678,9 @@ contract DelegationAndRecallTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ReplayedBurnProof(recallId, polygon);
         polygonGateway.relay(tooMuch);
-        assertTrue(token.isInboundPaused(polygon), "the stale 200 proof conflicts with the 100 that settled");
+        assertTrue(
+            boundCompliance.isAwayChainBlocked(polygon), "the stale 200 proof conflicts with the 100 that settled"
+        );
         assertFalse(token.paused());
     }
 

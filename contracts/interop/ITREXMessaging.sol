@@ -73,8 +73,6 @@ interface ITREXMessaging {
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     event HalfPinned(bytes32 indexed ticketId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event InboundPaused(bytes32 indexed chainKey);
-    event InboundUnpaused(bytes32 indexed chainKey);
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
@@ -190,32 +188,6 @@ interface ITREXMessaging {
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
 
-    /// @dev Stops taking messages from `chainKey`, or resumes. While paused, every settlement and burn proof
-    /// attributed to that chain reverts with `AwayChainBlocked` and stays deliverable, so the chain's reports
-    /// wait at the gateway; nothing else on the token is affected, native transfers and every other chain
-    /// included. The token sets it on its own when a chain sends a bad receipt or a burn proof for something
-    /// already accounted for, see `IReceiptHandler.Verdict`; lifting it is the pauser's, after an investigation.
-    ///
-    /// What waits with the chain: a delegation toward it is refused with `AwayChainBlocked`, so no more supply
-    /// reaches a chain whose reports are suspect, and the compliance neither issues a validation toward it nor
-    /// resends one, nor cancels a ticket still awaiting that chain's receipt, since the held reports
-    /// may answer it. A recall instruction and an instruction resend still go out; the proof that answers a recall
-    /// lands once the pause is lifted. To abandon a chain for good, distrust its bridge or close its receipt route,
-    /// then lift the pause so its tickets can be closed by hand.
-    ///
-    /// Whether a refused delivery can be delivered again is the gateway's: this contract assumes an ERC-7786
-    /// gateway that keeps a reverted execution retryable. One that marks it failed for good loses the message,
-    /// and its author has to send it again.
-    ///
-    /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - The chain must have been registered by a route or a peer; otherwise reverts with `ChainNotRegistered`.
-    ///
-    /// Emits `InboundPaused` or `InboundUnpaused` when the state changes; nothing when it does not.
-    /// @param chainKey The chain whose messages are refused or taken again.
-    /// @param pause True to refuse, false to take again.
-    function setInboundPaused(bytes32 chainKey, bool pause) external;
-
     /// @dev The bridge registry this token resolves trust against. It is the network's, wired at
     /// deployment, and no role on the token can move it: distrusting a bridge in the registry severs
     /// every route through it, for every token.
@@ -255,16 +227,24 @@ interface ITREXMessaging {
     function pinOf(bytes32 halfKey) external view returns (address bridge, bytes32 peerKey);
 
     /// @dev Whether `chainKey` is routed right now: a receipt route, a peer, and a bridge still recorded as a
-    /// receipt bridge. Re-reads the registry, so distrusting a bridge closes every chain routed through it. The inbound pause is a
-    /// separate state, see `isInboundPaused`: a paused chain stays open for the instructions that still go out
-    /// while its deliveries are refused.
+    /// receipt bridge. Re-reads the registry, so distrusting a bridge closes every chain routed through it. A blocked
+    /// away chain is the compliance's, see `ITickets.isAwayChainBlocked`, and stays open here.
     /// @param chainKey The chain to check.
     /// @return True when the chain has a receipt route, a peer and a receipt bridge.
     function isChainOpen(bytes32 chainKey) external view returns (bool);
 
-    /// @dev Whether messages from `chainKey` are currently refused, see `setInboundPaused`.
-    /// @param chainKey The chain to check.
-    /// @return True while that chain's inbound is paused.
-    function isInboundPaused(bytes32 chainKey) external view returns (bool);
+    /// @dev Runs the route check a receipt passes at delivery again, for a receipt the compliance kept waiting:
+    /// `bridge` must still be a receipt bridge of the network, the away chain's receipt route must be open, the
+    /// pair must be the one the half was pinned to or the chain's current route and peer, and the bridge's
+    /// receiving policy must still admit that away chain at full finality only. A bridge distrusted, a route
+    /// closed or changed, or a peer replaced since the receipt arrived therefore refuses it.
+    ///
+    /// Reverts with `NotAReceiptBridge`, `ChainNotOpen`, `PeerChanged`, `BridgeNotOnRoute` or
+    /// `ReceiptBridgeNotFullFinality`; returns nothing when the receipt may be applied.
+    /// @param chainKey The away chain the receipt came from.
+    /// @param bridge The bridge that delivered it.
+    /// @param senderPeerKey The `keccak256` of the peer that sent it.
+    /// @param halfKey The half it answers, see {MessageTypesLib-halfKeyOf}.
+    function checkReceiptOrigin(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes32 halfKey) external view;
 
 }

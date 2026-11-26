@@ -422,7 +422,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonGateway.relay(resent);
 
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(resent)), "consumed");
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused());
         assertEq(token.awayBalanceOf(bobSat), 50, "credited once");
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 50, "debited once");

@@ -112,7 +112,6 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 100);
-        assertFalse(boundCompliance.isIssuancePaused(polygon), "settled, not reconciled late");
     }
 
     /// @dev Once the token runs again, a validation nobody executed is discarded as before.

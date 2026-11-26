@@ -64,6 +64,9 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.TicketCancelled.selector, EventsLib.TicketCancelled.selector);
         assertEq(ITickets.ReceiptWaiting.selector, EventsLib.ReceiptWaiting.selector);
         assertEq(ITickets.WaitingReceiptApplied.selector, EventsLib.WaitingReceiptApplied.selector);
+        assertEq(ITickets.WaitingReceiptRefused.selector, EventsLib.WaitingReceiptRefused.selector);
+        assertEq(ITickets.AwayChainBlockStarted.selector, EventsLib.AwayChainBlockStarted.selector);
+        assertEq(ITickets.AwayChainUnblocked.selector, EventsLib.AwayChainUnblocked.selector);
         assertEq(ITickets.ReceiptRefused.selector, EventsLib.ReceiptRefused.selector);
         assertEq(ITickets.ReceiptOnOlderTerms.selector, EventsLib.ReceiptOnOlderTerms.selector);
         assertEq(ITickets.MoveBreachedRule.selector, EventsLib.MoveBreachedRule.selector);
@@ -89,6 +92,9 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.ValidationSpenderRefused.selector, ErrorsLib.ValidationSpenderRefused.selector);
         assertEq(ITickets.TicketAlreadyWritten.selector, ErrorsLib.TicketAlreadyWritten.selector);
         assertEq(ITickets.NoWaitingReceipt.selector, ErrorsLib.NoWaitingReceipt.selector);
+        assertEq(ITickets.AwayChainNotBlocked.selector, ErrorsLib.AwayChainNotBlocked.selector);
+        assertEq(ITickets.AwayChainBlocked.selector, ErrorsLib.AwayChainBlocked.selector);
+        assertEq(ITickets.InsufficientBridgedBalance.selector, ErrorsLib.InsufficientBridgedBalance.selector);
         assertEq(ITickets.ApplyWaitingReceiptFirst.selector, ErrorsLib.ApplyWaitingReceiptFirst.selector);
         assertEq(ITickets.TokenPaused.selector, ErrorsLib.TokenPaused.selector);
         assertEq(ITickets.TicketNotCancellable.selector, ErrorsLib.TicketNotCancellable.selector);

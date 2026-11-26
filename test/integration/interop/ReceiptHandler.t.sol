@@ -103,7 +103,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         assertTrue(token.messageReceived(address(polygonBridge), polygonBridge.receiveIdFor(again)), "consumed");
         assertEq(token.awayBalanceOf(bobOnPolygon), 40, "applied once");
         assertEq(token.awayBalanceOf(aliceOnPolygon), ALICE_AWAY_BALANCE - 40);
-        assertFalse(token.isInboundPaused(polygon), "nothing blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing blocked");
     }
 
     /// @notice Another receipt for a half that already has one is a bad receipt: refused, and its chain blocked.
@@ -114,12 +114,12 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(ticketId, polygon, 45, boundCompliance.ticketOf(ticketId).askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonBridge.relay(another);
 
         assertEq(token.awayBalanceOf(bobOnPolygon), 40, "the first receipt stands");
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice A receipt for a half home never sent is a bad receipt: home sends a ticket as the first half alone.
@@ -133,7 +133,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         emit EventsLib.ReceiptRefused(ticketId, polygon, 40, receipt.askBlockHash);
         polygonBridge.relay(index);
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(token.awayBalanceOf(bobOnPolygon), 0, "nothing applied");
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
     }
@@ -150,11 +150,11 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         uint256 fromItsOwnChain = _liteSettles(polygonBridge, token, receipt);
 
         optimismBridge.relay(fromAnotherChain);
-        assertTrue(token.isInboundPaused(optimism), "a chain the ticket never went to is blocked");
+        assertTrue(boundCompliance.isAwayChainBlocked(optimism), "a chain the ticket never went to is blocked");
 
         polygonBridge.relay(fromItsOwnChain);
 
-        assertFalse(token.isInboundPaused(polygon), "the honest chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest chain is not blocked");
         assertEq(token.awayBalanceOf(bobOnPolygon), 40);
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
     }
@@ -172,13 +172,13 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(ticketId, polygon, movedAboveTheTicket);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonBridge.relay(index);
 
         assertEq(token.awayBalanceOf(bobOnPolygon), movedAboveTheTicket, "applied as it happened");
         assertEq(token.awayBalanceOf(aliceOnPolygon), ALICE_AWAY_BALANCE - movedAboveTheTicket);
-        assertTrue(token.isInboundPaused(polygon), "the away chain is blocked");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the away chain is blocked");
         assertFalse(token.paused(), "the token keeps running");
     }
 
@@ -191,8 +191,8 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
 
-        assertTrue(token.isInboundPaused(polygon), "the sending chain is blocked");
-        assertFalse(token.isInboundPaused(optimism), "the other away chain is not");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the sending chain is blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(optimism), "the other away chain is not");
         assertFalse(token.paused(), "nor is the token");
         assertEq(token.awayBalanceOf(bobOnPolygon), 40, "applied as it happened");
     }
@@ -205,7 +205,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(token.awayBalanceOf(bobOnPolygon), 0, "nothing applied");
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
     }
@@ -230,7 +230,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         assertEq(token.reservedOf(aliceOnPolygon), 0, "the reservation is released");
         assertEq(boundCompliance.pendingInOf(address(bobIdentity)), 0);
         assertEq(token.awayBalanceOf(aliceOnPolygon), ALICE_AWAY_BALANCE, "nothing moved");
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice A zero receipt is never a bad receipt: below the minimum, on terms home never sent, it still ends
@@ -244,7 +244,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
 
-        assertFalse(token.isInboundPaused(polygon), "never a bad receipt");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "never a bad receipt");
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobOnPolygon), 0);
     }
@@ -262,7 +262,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobOnPolygon), 40);
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /* ----- Older terms ----- */
@@ -293,7 +293,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         emit EventsLib.ReceiptOnOlderTerms(ticketId, polygon, 50);
         polygonBridge.relay(index);
 
-        assertFalse(token.isInboundPaused(polygon), "the honest away chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest away chain is not blocked");
         assertEq(token.awayBalanceOf(bobOnPolygon), 40);
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
     }
@@ -322,7 +322,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         emit EventsLib.ReceiptOnOlderTerms(ticketId, polygon, 50);
         polygonBridge.relay(index);
 
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(token.awayBalanceOf(bobOnPolygon), 45);
     }
 
@@ -359,7 +359,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobOnPolygon), requestedMax, "Bob holds 160 under a cap of 100");
         assertEq(token.awayBalanceOf(aliceOnPolygon), ALICE_AWAY_BALANCE - requestedMax);
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
-        assertFalse(token.isInboundPaused(polygon), "the honest away chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest away chain is not blocked");
     }
 
     /// @notice Bob's cap and the away chain's per-ticket cap are both 1. Alice asks to move up to 2, home narrows to
@@ -378,11 +378,11 @@ contract ReceiptHandlerTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptOnOlderTerms(ticketId, polygon, 2);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonBridge.relay(index);
 
-        assertTrue(token.isInboundPaused(polygon), "older terms above the per-ticket cap block the chain");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "older terms above the per-ticket cap block the chain");
         assertEq(token.awayBalanceOf(bobOnPolygon), 2, "applied as it happened");
     }
 
@@ -413,7 +413,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         assertEq(bobHolds, 2 * requestedMax);
         assertEq(bobHolds - bobCap, narrowedAway, "the cap is passed by what home narrowed away, no more");
         assertLe(bobHolds, 2 * perTicketCap, "at most the per-ticket cap per ticket");
-        assertFalse(token.isInboundPaused(polygon), "within the bound, nothing is blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "within the bound, nothing is blocked");
     }
 
     /* ----- A receipt for an id home does not know ----- */
@@ -429,7 +429,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknownId));
         polygonBridge.relay(unknownIndex);
 
-        assertFalse(token.isInboundPaused(polygon), "the away chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the away chain is not blocked");
         assertFalse(token.messageReceived(address(polygonBridge), polygonBridge.receiveIdFor(unknownIndex)));
 
         bytes32 ticketId = _ask(aliceOnPolygon, bobOnPolygon, 10, 50);

@@ -202,25 +202,14 @@ contract ValidationResendTest is InteropSuiteTest {
         boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
-    /// @notice A chain whose inbound is paused holds its reports at the gateway; a leg sent now could only add to
-    ///         what cannot land.
+    /// @notice A blocked away chain's receipts wait unapplied; a ticket sent now could only add to what cannot be
+    ///         applied.
     function test_resendValidation_RevertWhen_TheChainsInboundIsPaused() public {
         vm.prank(agent);
-        token.setInboundPaused(polygon, true);
+        boundCompliance.blockAwayChain(polygon);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
-        assertEq(polygonGateway.queueLength(), 1);
-    }
-
-    /// @notice The issuance pause means nothing more goes toward that chain; a resend is no exception.
-    function test_resendValidation_RevertWhen_IssuanceTowardTheChainIsPaused() public {
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, true);
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
         boundCompliance.sendTicket(id, polygon, bobSat, "");
         assertEq(polygonGateway.queueLength(), 1);
     }

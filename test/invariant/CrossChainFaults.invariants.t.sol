@@ -451,7 +451,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
                 token.totalAwayBalance(),
                 token.totalOnHold(),
                 token.paused(),
-                token.isInboundPaused(polygon),
+                boundCompliance.isAwayChainBlocked(polygon),
                 lite.mints(),
                 lite.burns()
             )

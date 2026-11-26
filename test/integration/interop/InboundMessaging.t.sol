@@ -105,6 +105,11 @@ contract InboundMessagingTest is InteropSuiteTest {
         emit EventsLib.ReceiptReceived(originChain, n.ticketId, n.from, n.to, n.amount);
     }
 
+    /// @dev The `keccak256` of the token's Lite on Polygon, the peer every delivery here comes from.
+    function _peerKey() private view returns (bytes32) {
+        return keccak256(InteroperableAddress.formatEvmV1(POLYGON, address(token)));
+    }
+
     /// @dev A refusal rolls the whole delivery back, so the token never records having seen it.
     function _assertNothingApplied(ERC7786GatewayMock gateway, uint256 index) private view {
         assertFalse(token.messageReceived(address(gateway), gateway.receiveIdFor(index)));
@@ -117,7 +122,10 @@ contract InboundMessagingTest is InteropSuiteTest {
         MessageTypesLib.ReceiptMessage memory n = _issuedSettlement();
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(n));
 
-        vm.expectCall(compliance, abi.encodeCall(IReceiptHandler.receiveReceipt, (originChain, n)));
+        vm.expectCall(
+            compliance,
+            abi.encodeCall(IReceiptHandler.receiveReceipt, (originChain, address(routedGateway), _peerKey(), n))
+        );
         _expectSettlementNotified(n);
 
         routedGateway.relay(index);
@@ -138,7 +146,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         routedGateway.relay(index);
 
         _assertNothingApplied(routedGateway, index);
-        assertFalse(token.isInboundPaused(originChain), "no chain is blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(originChain), "no chain is blocked");
         assertFalse(token.paused());
     }
 
@@ -153,17 +161,21 @@ contract InboundMessagingTest is InteropSuiteTest {
         );
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(leg));
 
-        vm.expectCall(compliance, abi.encodeCall(IReceiptHandler.receiveReceipt, (originChain, leg)), 1);
+        vm.expectCall(
+            compliance,
+            abi.encodeCall(IReceiptHandler.receiveReceipt, (originChain, address(routedGateway), _peerKey(), leg)),
+            1
+        );
         // Not the issued wallets, under the issued ask block hash: the compliance rejects the leg and pauses the chain
         // that reported it. The delivery is consumed, nothing applied, the validation untouched.
         vm.expectEmit(true, true, false, true, compliance);
         emit EventsLib.ReceiptRefused(ticketId, originChain, amount, leg.askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(originChain);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(originChain);
         routedGateway.relay(index);
 
         assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(index)));
-        assertTrue(token.isInboundPaused(originChain));
+        assertTrue(boundCompliance.isAwayChainBlocked(originChain));
         assertFalse(token.paused());
         assertEq(token.awayBalanceOf(satelliteTo), 0);
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
@@ -186,7 +198,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         vm.expectRevert(ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
         vm.prank(impostor);
-        IReceiptHandler(compliance).receiveReceipt(originChain, n);
+        IReceiptHandler(compliance).receiveReceipt(originChain, address(routedGateway), _peerKey(), n);
     }
 
     /* ----- Burn proof: the recall path ----- */
@@ -223,7 +235,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         _assertNothingApplied(routedGateway, index);
         assertFalse(token.paused());
-        assertFalse(token.isInboundPaused(originChain));
+        assertFalse(boundCompliance.isAwayChainBlocked(originChain));
         assertEq(token.balanceOf(alice), nativeBefore);
         assertEq(token.awayBalanceOf(satelliteFrom), 1000);
     }
@@ -345,35 +357,37 @@ contract InboundMessagingTest is InteropSuiteTest {
         routedGateway.relay(second);
 
         assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(second)), "consumed");
-        assertFalse(token.isInboundPaused(originChain), "a duplicate pauses nothing");
+        assertFalse(boundCompliance.isAwayChainBlocked(originChain), "a duplicate pauses nothing");
         assertFalse(token.paused());
         assertEq(token.awayBalanceOf(satelliteTo), amount, "applied once");
     }
 
-    /// @dev A paused chain's messages, settlements and burn proofs alike, are refused after attribution and before
-    ///      any handler, so nothing is recorded and the same deliveries land once the pauser lifts the pause.
-    function testInboundPausedChainRefusesEveryMessageAndKeepsItDeliverable() public {
+    /// @dev A blocked away chain's receipt is consumed and waits at the compliance, tagged with its bridge and peer;
+    ///      its burn proof is refused after attribution and stays deliverable. Once the block is lifted, anyone
+    ///      applies the waiting receipt and the proof lands.
+    function testABlockedChainsReceiptWaitsAndItsBurnProofStaysDeliverable() public {
         vm.prank(agent);
         uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
-        uint256 settlement = _peerSendsSettlement();
+        MessageTypesLib.ReceiptMessage memory receipt = _issuedSettlement();
+        uint256 settlement = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(receipt));
         uint256 proof =
             _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
         uint256 nativeBefore = token.balanceOf(alice);
         vm.prank(agent);
-        token.setInboundPaused(originChain, true);
+        boundCompliance.blockAwayChain(originChain);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, originChain));
         routedGateway.relay(settlement);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, originChain));
         routedGateway.relay(proof);
-        _assertNothingApplied(routedGateway, settlement);
+        assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(settlement)), "consumed");
         _assertNothingApplied(routedGateway, proof);
+        assertEq(token.awayBalanceOf(satelliteTo), 0, "the receipt waits");
         assertTrue(token.isChainOpen(originChain), "outbound is not gated");
         assertFalse(token.paused());
 
         vm.prank(agent);
-        token.setInboundPaused(originChain, false);
-        routedGateway.relay(settlement);
+        boundCompliance.unblockAwayChain(originChain);
+        boundCompliance.applyWaitingReceipt(MessageTypesLib.halfKeyOf(receipt.ticketId, 0), receipt);
         routedGateway.relay(proof);
 
         assertEq(token.awayBalanceOf(satelliteTo), amount);
@@ -412,7 +426,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         emit EventsLib.ReceiptDuplicate(ticketId, originChain);
         _deliverWithZeroReceiveId(_settlementPayload());
 
-        assertFalse(token.isInboundPaused(originChain), "a duplicate pauses nothing");
+        assertFalse(boundCompliance.isAwayChainBlocked(originChain), "a duplicate pauses nothing");
         assertFalse(token.paused());
         assertEq(token.awayBalanceOf(satelliteTo), amount, "applied once");
         assertEq(token.awayBalanceOf(satelliteFrom), 1000 - amount, "debited once");
@@ -447,7 +461,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         emit EventsLib.ReplayedBurnProof(recallId, originChain);
         _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 60)));
 
-        assertTrue(token.isInboundPaused(originChain));
+        assertTrue(boundCompliance.isAwayChainBlocked(originChain));
         assertFalse(token.paused());
         assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
     }

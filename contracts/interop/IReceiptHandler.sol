@@ -70,15 +70,6 @@ import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
  */
 interface IReceiptHandler {
 
-    /// @dev What the token does once the handler took in a receipt.
-    enum Verdict {
-        /// Nothing for the token to do.
-        None,
-        /// The receipt is bad: the token blocks the away chain that sent it, and that chain alone. The token itself
-        /// is never stopped by a receipt.
-        PauseChain
-    }
-
     /// @dev Takes in a receipt the token has already attributed to its peer on `originChainKey`.
     ///
     /// The token guarantees three things:
@@ -88,12 +79,15 @@ interface IReceiptHandler {
     ///
     /// Home records what the receipt reports, because the away token's balances already moved. In order:
     /// - The same receipt again, under the same half, from the same chain: changes nothing (`ReceiptDuplicate`).
+    ///   When that receipt is waiting and can now be applied, the repeat applies it (`WaitingReceiptApplied`).
     /// - A still open answer: changes nothing.
     /// - An id home has no record of: reverts with `UnknownTicket`, and stays deliverable at the bridge.
-    /// - A bad receipt: another body for a half that already has one, a chain that is not the sender's, wallets
-    ///   that are not the ticket's, a half the ticket never sent, or an expired answer that moved something. It is
-    ///   refused (`ReceiptRefused`), nothing is applied, and the chain that sent it is blocked.
-    /// - A receipt for a ticket never sent: kept as a waiting receipt (`ReceiptWaiting`).
+    /// - A bad receipt: another body for a half that already has one, applied or waiting, a chain that is not the
+    ///   sender's, wallets that are not the ticket's, a half the ticket never sent, or an expired answer that moved
+    ///   something. It is refused (`ReceiptRefused`), nothing is applied, and the chain that sent it is blocked.
+    /// - A receipt that cannot be applied yet: its ticket was never sent, the token is stopped, its away chain is
+    ///   blocked, or the sender's away balance is below its amount. It waits (`ReceiptWaiting`), tagged with
+    ///   `bridge` and `senderPeerKey`, for anyone to apply with `applyWaitingReceipt`.
     /// - A zero receipt: the ticket ends `Done` with nothing moved. It is never a bad receipt.
     /// - Any other receipt is applied as it happened and the ticket ends `Done`. A rule the move breaks now is
     ///   announced (`MoveBreachedRule`), never refused. The terms check then decides whether the chain is also
@@ -102,10 +96,14 @@ interface IReceiptHandler {
     ///   chain's per-ticket cap.
     /// A revert, from a tracker module for instance, leaves the message deliverable again.
     /// @param originChainKey The key of the chain the receipt came from.
+    /// @param bridge The bridge that delivered it.
+    /// @param senderPeerKey The `keccak256` of the peer that sent it.
     /// @param notification The decoded receipt, exactly as the away token sent it.
-    /// @return verdict `PauseChain` when the sending chain must be blocked, `None` otherwise.
-    function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata notification)
-        external
-        returns (Verdict verdict);
+    function receiveReceipt(
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata notification
+    ) external;
 
 }

@@ -45,6 +45,7 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
@@ -118,8 +119,7 @@ contract LateReconciliationTest is InteropSuiteTest {
             CAP,
             "caught up with no reservation"
         );
-        assertFalse(boundCompliance.isIssuancePaused(polygon), "nothing stops asks by itself");
-        assertFalse(token.isInboundPaused(polygon), "nor blocks the away chain");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nor blocks the away chain");
         assertFalse(token.paused(), "nor stops the token");
 
         // Toward another identity, which has a cap of its own and nothing pending against it.
@@ -137,27 +137,30 @@ contract LateReconciliationTest is InteropSuiteTest {
         emit EventsLib.ReceiptRefused(late, polygon, CAP - 1, boundCompliance.ticketOf(late).askBlockHash);
         polygonGateway.relay(replay);
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused());
         assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), CAP, "applied once");
     }
 
-    /// @notice A late receipt never reverts on a pause of asks: a chain the manager paused stays paused, the
-    ///         receipt is applied.
-    function test_handleSettlement_Success_WhenTheChainWasAlreadyPaused() public {
+    /// @notice A late receipt from a blocked away chain never reverts: it waits, and once the block is lifted
+    ///         anyone applies it as the move it is.
+    function test_receiveReceipt_waits_whenALateReceiptComesFromABlockedChain() public {
         bytes32 late = _issue(aliceSat, bobSat, 10, CAP);
         _discard(late);
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, true);
-        uint256 index = _liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP));
+        vm.prank(agent);
+        boundCompliance.blockAwayChain(polygon);
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement(late, aliceSat, bobSat, CAP);
+        polygonGateway.relay(_liteSettles(polygonGateway, token, receipt));
+        assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.Cancelled), "it waits");
 
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(polygon);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(late, polygon, CAP);
-        polygonGateway.relay(index);
+        boundCompliance.applyWaitingReceipt(MessageTypesLib.halfKeyOf(late, 0), receipt);
 
         assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.Done));
-        assertTrue(boundCompliance.isIssuancePaused(polygon));
         assertEq(token.awayBalanceOf(bobSat), CAP);
     }
 

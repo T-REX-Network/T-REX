@@ -367,8 +367,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         gateway.relay(lateReceipt);
 
         assertEq(_position(address(bobIdentity)), CAP, "applied regardless: the satellite already executed it");
-        assertFalse(boundCompliance.isIssuancePaused(polygon), "asks toward the chain go on");
-        assertFalse(token.isInboundPaused(polygon), "the away chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the away chain is not blocked");
         assertEq(uint8(boundCompliance.statusOf(late)), uint8(ITickets.TicketStatus.Done));
     }
 

@@ -223,7 +223,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(_pendingRecall(recallId).amount, 0, "the recall settled on what was left to burn");
         assertEq(token.availableOf(aliceSat), 0);
         assertFalse(token.paused());
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice An approver can lower the maximum; the difference goes back at once.
@@ -311,20 +311,20 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.finalize(address(boundCompliance), id);
     }
 
-    /// @notice A chain paused while the request waited makes `finalize` revert, never an approver. The request
-    ///         stays fully approved, and `finalize` goes through once the chain is open again.
+    /// @notice A chain blocked while the request waited makes `finalize` revert, never an approver. The request
+    ///         stays fully approved, and `finalize` goes through once the block is lifted.
     function test_finalize_Success_WhenRetriedAfterAPausedChainReopens() public {
         bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, true);
+        vm.prank(agent);
+        boundCompliance.blockAwayChain(polygon);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         module.finalize(address(boundCompliance), id);
         assertTrue(module.requestOf(address(boundCompliance), id).fullyApproved, "still there to retry");
 
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, false);
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(polygon);
         module.finalize(address(boundCompliance), id);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
@@ -545,19 +545,20 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     }
 
     /// @notice Nothing was sent for a request still waiting, so a leg for it is one the satellite executed
-    ///         under a body this chain never issued: parked under the id, the chain paused, the request
+    ///         under a body this chain never issued: it waits under the id, no chain blocked, the request
     ///         untouched. Issued, `applyWaitingReceipt` settles it; see `ReorgRecovery.t.sol`.
     function test_handleSettlement_ParksTheLeg_WhenTheValidationIsStillWaiting() public {
         bytes32 id = _request(10, 150);
 
-        uint256 index = _liteSettles(gateway, token, _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body")));
+        MessageTypesLib.ReceiptMessage memory receipt = _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body"));
+        uint256 index = _liteSettles(gateway, token, receipt);
         vm.expectEmit(address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(id, polygon, 100, keccak256("body"));
+        emit EventsLib.ReceiptWaiting(id, polygon, address(gateway), receipt);
         gateway.relay(index);
 
         assertFalse(token.paused(), "the token keeps running");
-        assertFalse(token.isInboundPaused(polygon), "nothing blocks the chain by itself");
-        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists);
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing blocks the chain by itself");
+        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
     }
@@ -572,8 +573,8 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         gateway.relay(_liteSettles(gateway, token, _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body"))));
 
         assertFalse(token.paused());
-        assertFalse(token.isInboundPaused(polygon));
-        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "left for the operator");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
+        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0), "left for the operator");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
     }

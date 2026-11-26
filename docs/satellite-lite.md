@@ -112,9 +112,9 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
   and stays deliverable at the bridge, and no chain is blocked. The request sent again with the same terms and
   `salt` takes the same id; the body carries the `salt`, so an agent can send it on the requester's behalf from the
   Lite's copy. The receipt delivered again is then applied on the older terms it echoes, as below. When the request
-  sent again waits for an `APPROVAL` module, the receipt waits under the id (`ReceiptWaiting`, `waitingReceiptOf`)
-  and anyone applies it with `applyWaitingReceipt(ticketId, chainKey)` once the approval sent the ticket; while a
-  receipt waits under an id its ticket is not cancelled (`ApplyWaitingReceiptFirst`). When the request is refused
+  sent again waits for an `APPROVAL` module, the receipt waits under its half (`ReceiptWaiting`, `waitingReceiptOf`)
+  and anyone applies it with `applyWaitingReceipt(halfKey, receipt)` once the approval sent the ticket; while a
+  receipt for the ticket waits and can be applied, the ticket is not cancelled (`ApplyWaitingReceiptFirst`). When the request is refused
   this time, the receipt stays waiting and readable: nothing is applied and the ledger does not follow what the
   Lite executed. No function takes such a receipt in or sends it back today: that exit needs a contract change.
 - **Mined again in another block.** The id is the same and the ask block hash is not: the copy home now holds may
@@ -135,7 +135,7 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| ticket | sender's identity, recipient's identity when the recipient is on the same away chain, or agent | `sendTicket(ticketId, chainKey, to, spender)`: while `Open` and before `validUntil`; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the issuance did, on the ticket route when one is set and on the receipt route otherwise, and only while the receipt route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a ticket it holds |
+| ticket | sender's identity, recipient's identity when the recipient is on the same away chain, or agent | `sendTicket(ticketId, chainKey, to, spender)`: while `Open` and before `validUntil`; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out as the issuance did, on the ticket route when one is set and on the receipt route otherwise, and only while the receipt route and the peer are still the ones the issuance pinned; refused while that away chain is blocked or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a ticket it holds |
 | mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
 | recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
 | burn proof | Lite operator | resend the stored proof; the token settles it once |
@@ -152,15 +152,15 @@ was sent to.
 
 | Broken rule | Reference-chain reaction |
 |---|---|
-| 3, 7: another receipt for a half that already has one | `ReceiptRefused`, consumed, nothing applied, the token stops taking that chain's messages (`setInboundPaused`) |
+| 3, 7: another receipt for a half that already has one, applied or waiting | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain (`blockAwayChain`) |
 | the receipt home holds for a half, delivered again byte for byte (a bridge redelivery, or the Lite resending its receipt) | `ReceiptDuplicate`, consumed, nothing applied, nothing blocked; a chain blocked over the first delivery and reopened stays open |
 | a receipt for an id home has no record of | reverts with `UnknownTicket` and stays deliverable; nothing is blocked; once the request is sent again with the same terms and salt, the receipt lands |
-| a receipt for a ticket written and never sent | `ReceiptWaiting`, kept under its id, nothing blocked; once the ticket is sent, `applyWaitingReceipt` applies it |
-| 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused`, consumed, nothing applied, the token stops taking that chain's messages; the ticket stands |
-| 5: an amount outside the range, or other terms echoed, under home's own ask block hash; or, under another ask block hash, a copy above `requestedMax` or the per-ticket cap | applied as it happened, then the token stops taking that chain's messages |
+| a good receipt that cannot be applied yet: its ticket never sent, the token stopped, its away chain blocked, or the sender's away balance too low | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
+| 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
+| 5: an amount outside the range, or other terms echoed, under home's own ask block hash; or, under another ask block hash, a copy above `requestedMax` or the per-ticket cap | applied as it happened, then the compliance blocks that away chain |
 | 10: proof above the instruction | `RecallAmountExceeded`, stays deliverable |
 | 10: proof for another wallet | `RecallMismatch`, stays deliverable |
-| 10: a different proof for a settled recall | `ReplayedBurnProof`, the token stops taking that chain's messages |
+| 10: a different proof for a settled recall | `ReplayedBurnProof`, the compliance blocks that away chain |
 | a proof for a recall never issued | reverts with `RecallNotPending` and stays deliverable; nothing stops |
 
 A receipt for a ticket home knows never reverts for what it carries: it is applied as it happened or refused, and
@@ -168,14 +168,15 @@ consumed either way, see "Lanes". A receipt or a proof for an id home does not k
 blocking nobody. A reverted
 delivery, from a tracker module for instance, can be redelivered once the cause is understood, on the assumption
 that the ERC-7786 gateway keeps a reverted execution retryable; a gateway that marks it failed for good loses the
-message, and its author has to send it again. Either pause is lifted by the pauser after an investigation:
-`setInboundPaused(chainKey, false)` for one chain, `unpause` for the token. While a chain's inbound is paused its deliveries revert with
+message, and its author has to send it again. The block of an away chain and the stop of the token are lifted by the
+pauser after an investigation: `unblockAwayChain(chainKey)` on the compliance for one chain, `unpause` for the token.
+While a chain is blocked its good receipts are consumed and wait at home, and its burn proofs revert with
 `AwayChainBlocked` and wait at the gateway; a delegation toward it is refused, and the compliance neither issues a
-ticket toward it nor resends one, nor cancels a ticket still awaiting that chain's receipt, since the held receipts
-may answer it and acting on their absence would release what they move. Native transfers,
-every other chain, and recall instructions and instruction resends toward the paused chain are unaffected; the proof
-answering a recall lands once the pause is lifted. To abandon a chain for good: distrust its gateway or close its
-route, then lift the pause so its tickets can be cancelled.
+ticket toward it nor resends one, nor cancels any of its tickets, a ticket waiting for approval included, since the
+waiting receipts may answer them and acting on their absence would release what they move. Native transfers, every
+other chain, and recall instructions and instruction resends toward the blocked chain are unaffected; the proof
+answering a recall lands once the block is lifted. To abandon a chain for good: distrust its gateway or close its
+route, refuse the receipts it left waiting, then lift the block so its tickets can be cancelled.
 
 Threat model, stated plainly. A trusted gateway, or the registered peer behind it, can stop its own chain's inbound
 with one bad receipt, and a receipt can do little more: it is applied as it happened on its own chain, bounded by
@@ -187,15 +188,16 @@ stays deliverable too. The remedy against a peer abusing its chain is to distrus
 
 | Brake | Stops | Set by | Lifted by |
 |---|---|---|---|
-| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound receipt and proof; new tickets, approvals into issuance and ticket resends; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
-| chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new tickets and ticket resends toward it; cancels of tickets still awaiting its receipt | the pauser; the token itself on a bad receipt from that chain, a receipt that breaks its terms, and a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
-| chain issuance pause, `setIssuancePaused` on the compliance | new tickets and ticket resends toward one chain | the compliance manager | the compliance manager |
+| token pause, `pause` | every balance movement between wallets, native or satellite; every inbound receipt waits at home and every proof reverts; new tickets, approvals into issuance and ticket resends; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
+| block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home) and its proofs; delegations, new tickets and ticket resends toward it; cancels of its tickets | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms; the token on a conflicting proof from that chain | the pauser, `unblockAwayChain` |
 | receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled meanwhile | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
 | bridge distrust, `distrustBridge` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled meanwhile | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 
-Before lifting the token pause or a chain pause, the operator has the gateway discard the deliveries refused while
-it was paused that should never land: lifting a pause lets every pending delivery through, and while the replay that
-triggered it is consumed, a misbehaving peer may have queued more.
+Before lifting the token pause or the block of a chain, the operator refuses the receipts that waited and should
+never be applied, with `refuseWaitingReceipt(halfKey)` while the chain is still blocked, and has the gateway discard
+the proofs refused meanwhile that should never land: once lifted, anyone applies what waits and every pending
+delivery goes through. A waiting receipt is applied only after the route check runs again on the bridge and peer
+that brought it, so one from a bridge distrusted meanwhile is never applied.
 
 A peer replaced with `setPeer` while recalls are open keeps the authority to settle those recalls, through their
 pinned gateway, for up to the instructed amounts: that is what lets a recall survive a planned peer change. When the

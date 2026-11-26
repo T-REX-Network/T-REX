@@ -39,8 +39,8 @@ contract DuplicateSettlementTest is InteropSuiteTest {
     }
 
     function _assertNothingPaused() private view {
-        assertFalse(token.isInboundPaused(polygon), "polygon inbound");
-        assertFalse(token.isInboundPaused(optimism), "optimism inbound");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "polygon inbound");
+        assertFalse(boundCompliance.isAwayChainBlocked(optimism), "optimism inbound");
         assertFalse(token.paused(), "token");
     }
 
@@ -84,11 +84,11 @@ contract DuplicateSettlementTest is InteropSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(polygon);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockStarted(polygon);
         polygonGateway.relay(conflicting);
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
         assertFalse(token.paused(), "the token keeps running");
         assertEq(token.awayBalanceOf(bobSat), 95, "applied once, at the first amount");
     }
@@ -102,7 +102,7 @@ contract DuplicateSettlementTest is InteropSuiteTest {
 
         polygonGateway.relay(_liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 90)));
 
-        assertTrue(token.isInboundPaused(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @dev A receipt outside the terms of home's own copy is applied as it happened and blocks its chain. Once the
@@ -113,9 +113,9 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         uint256 first = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 101));
         uint256 again = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 101));
         polygonGateway.relay(first);
-        assertTrue(token.isInboundPaused(polygon), "the receipt outside the terms blocks its chain");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the receipt outside the terms blocks its chain");
         vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        boundCompliance.unblockAwayChain(polygon);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(id, polygon);

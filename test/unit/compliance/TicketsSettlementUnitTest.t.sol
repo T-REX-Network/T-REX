@@ -46,7 +46,6 @@ import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUn
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -71,6 +70,10 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     uint64 internal constant OPTIMISM_WINDOW = 45 minutes;
     uint256 internal constant ISSUED_AT = 1_700_000_000;
     uint256 internal constant BRIDGED_BALANCE = 100;
+
+    /// @dev The receipt bridge and the peer the token reports a receipt was delivered by.
+    address internal constant BRIDGE = address(0xB41D6E);
+    bytes32 internal constant PEER_KEY = keccak256("the token's peer on the away chain");
 
     bytes32 internal polygon = _evmChainKey(POLYGON);
     bytes32 internal optimism = _evmChainKey(OPTIMISM);
@@ -104,13 +107,11 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
-        vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
         // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
         vm.mockCall(token, abi.encodeWithSelector(IToken.finishMove.selector), "");
         vm.mockCall(token, abi.encodeWithSelector(IToken.putOnHold.selector), "");
-        vm.mockCall(token, abi.encodeWithSelector(IToken.applyVerdict.selector), "");
         vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(false));
         _bind(fromSat, aliceIdentity);
         _bind(nativeBob, bobIdentity);
@@ -128,7 +129,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(stranger);
         vm.expectRevert(ErrorsLib.AddressNotATokenBoundToComplianceContract.selector);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
     }
 
     /* ----- Leg matching: a leg outside the issued terms is consumed with a verdict, never left deliverable ----- */
@@ -165,9 +166,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, toSat, 9, id)), 1);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 9));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 9));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertTrue(mc.isAwayChainBlocked(polygon), "the away chain is blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.ticketOf(id).moved, 9);
         assertEq(mc.positionOf(bobId), 9);
@@ -185,9 +186,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReceiptOnOlderTerms(id, polygon, 90);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, receipt);
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.PauseChain));
+        assertTrue(mc.isAwayChainBlocked(polygon), "the away chain is blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.ticketOf(id).moved, 95, "applied as it happened");
         assertEq(mc.pendingInOf(bobId), 0, "the reservation is released");
@@ -220,9 +221,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReceiptOnOlderTerms(id, polygon, 90);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _legUnder(id, fromSat, toSat, 50, olderCopy));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _legUnder(id, fromSat, toSat, 50, olderCopy));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.positionOf(bobId), 50);
     }
@@ -244,12 +245,11 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReceiptApplied(id, polygon, 50);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.ticketOf(id).moved, 50);
-        assertFalse(mc.isIssuancePaused(polygon), "nothing stops asks by itself");
         assertEq(mc.positionOf(bobId), 50, "the receipt is applied anyway");
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE - 50);
         assertEq(mc.pendingInOf(bobId), 0, "nothing released twice");
@@ -263,12 +263,11 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.recordLogs();
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(_countTopic(EventsLib.MoveBreachedRule.selector), 0, "inside the rules");
-        assertFalse(mc.isIssuancePaused(polygon));
         assertEq(mc.positionOf(bobId), 50);
         assertEq(mc.pendingInOf(bobId), 0);
         assertEq(mc.pendingOutOf(aliceId), 0);
@@ -282,10 +281,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         _discard(id);
 
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
-        assertFalse(mc.isIssuancePaused(polygon), "a relocation asks no rule");
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE, "a relocation moves no position");
     }
 
@@ -294,7 +292,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
         _discard(id);
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.prank(token);
@@ -320,9 +318,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReceiptApplied(id, polygon, 50);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         ITickets.Ticket memory state = mc.ticketOf(id);
         assertEq(state.moved, 50);
@@ -333,7 +331,6 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.positionOf(aliceId), BRIDGED_BALANCE - 50);
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
         assertEq(RecordingModule(recorder).lastAmount(), 50);
-        assertFalse(mc.isIssuancePaused(polygon));
     }
 
     function test_handleSettlement_Success_WhenTheContextNamesTheRecordedParties() public {
@@ -342,7 +339,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         (
             address compliance,
@@ -375,7 +372,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = mc.askToMove(fromSat, toSat, 10, 90, spender, _salt());
 
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         (,,,,,,,,, bytes memory recorded,) = TrackerOnlyModule(recorder).lastContext();
         assertEq(recorded, spender);
@@ -390,7 +387,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.positionOf(bobId), 50, "the recipient now holds what was executed");
@@ -408,8 +405,8 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         uint256 secondMax = mc.ticketOf(second).amountMax;
 
         vm.startPrank(token);
-        mc.receiveReceipt(polygon, _leg(first, fromSat, toSat, mc.ticketOf(first).amountMin));
-        mc.receiveReceipt(polygon, _leg(second, fromSat, toSat, secondMax));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(first, fromSat, toSat, mc.ticketOf(first).amountMin));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(second, fromSat, toSat, secondMax));
         vm.stopPrank();
 
         assertEq(mc.ticketOf(first).moved, 10, "settled at its minimum");
@@ -424,9 +421,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeCall(IToken.finishMove, (fromSat, nativeBob, 40, id)), 1);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, nativeBob, 40));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, nativeBob, 40));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.positionOf(bobId), 40);
         (,,,, bytes32 toWallet,,,,,,) = TrackerOnlyModule(recorder).lastContext();
@@ -450,11 +447,10 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
-        assertFalse(mc.isIssuancePaused(polygon));
         assertEq(mc.pendingInOf(bobId), 0, "the reservation was still live and is released");
         assertEq(mc.positionOf(bobId), 50);
     }
@@ -465,7 +461,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
 
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         assertEq(RecordingModule(recorder).transferActionCalls(), 1);
         (, address fromIdentity, address toIdentity,,,,,,,,) = TrackerOnlyModule(recorder).lastContext();
@@ -482,7 +478,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.prank(token);
@@ -501,15 +497,15 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         address recorder = _bindAfterTransferModule();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReceiptDuplicate(id, polygon);
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(mc.ticketOf(id).moved, 50);
         assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
@@ -523,13 +519,13 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
         MessageTypesLib.ReceiptMessage memory receipt = _leg(id, fromSat, toSat, 91);
         vm.prank(token);
-        assertEq(uint8(mc.receiveReceipt(polygon, receipt)), uint8(IReceiptHandler.Verdict.PauseChain));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
+        assertTrue(mc.isAwayChainBlocked(polygon), "the receipt outside its terms blocks its chain");
 
         vm.recordLogs();
         vm.prank(token);
-        IReceiptHandler.Verdict verdict = mc.receiveReceipt(polygon, receipt);
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
 
-        assertEq(uint8(verdict), uint8(IReceiptHandler.Verdict.None));
         _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
         assertEq(mc.ticketOf(id).moved, 91, "applied once");
     }
@@ -540,7 +536,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
         MessageTypesLib.ReceiptMessage memory conflicting = _leg(id, fromSat, toSat, 60);
         vm.prank(token);
         _assertRejected(id, polygon, conflicting);
@@ -556,7 +552,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         _track();
         bytes32 id = _issue();
         vm.prank(token);
-        mc.receiveReceipt(polygon, _leg(id, fromSat, toSat, 50));
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
 
         vm.prank(token);
         _assertRejected(id, optimism, _leg(id, fromSat, toSat, 50));
@@ -572,9 +568,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.prank(token);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
-        mc.receiveReceipt(polygon, receipt);
+        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
 
-        assertFalse(mc.waitingReceiptOf(unknown, polygon).exists, "nothing waits");
+        assertEq(mc.waitingReceiptOf(unknown).bodyHash, bytes32(0), "nothing waits");
         assertEq(mc.ticketOf(unknown).fromIdentity, address(0), "the unknown id recorded nothing");
     }
 
@@ -635,7 +631,8 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     function _assertRejected(bytes32 id, bytes32 chainKey, MessageTypesLib.ReceiptMessage memory leg) private {
         vm.expectEmit(true, true, false, true, address(mc));
         emit EventsLib.ReceiptRefused(id, chainKey, leg.amount, leg.askBlockHash);
-        assertEq(uint8(mc.receiveReceipt(chainKey, leg)), uint8(IReceiptHandler.Verdict.PauseChain));
+        mc.receiveReceipt(chainKey, BRIDGE, PEER_KEY, leg);
+        assertTrue(mc.isAwayChainBlocked(chainKey), "the chain that sent it is blocked");
     }
 
     /// @dev A duplicate delivery emits its notification and `ReceiptDuplicate`, and nothing a judged leg emits.

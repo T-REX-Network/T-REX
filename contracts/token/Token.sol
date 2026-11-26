@@ -74,7 +74,6 @@ import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Token } from "../ERC-3643/base/ERC3643Token.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
-import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { TREXMessaging } from "../interop/TREXMessaging.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
@@ -183,13 +182,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         _setPeer(chainKey, peer);
     }
 
-    /// @inheritdoc ITREXMessaging
-    /// @dev Bound to the pauser, like `pause` and `unpause`: it is the per-chain brake, the one the token pulls on
-    ///  its own when a chain sends a bad receipt, and only an agent releases it.
-    function setInboundPaused(bytes32 chainKey, bool pause) external restricted {
-        _setInboundPaused(chainKey, pause);
-    }
-
     /* ----- Interop Dispatch ----- */
 
     /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to the
@@ -260,13 +252,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     {
         _requireBoundCompliance();
         _settle(from, to, amount, ticketId);
-    }
-
-    /// @inheritdoc IToken
-    /// @dev No pause guard: a brake is applied under any state, as it is at delivery.
-    function applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) external {
-        _requireBoundCompliance();
-        _applyVerdict(chainKey, verdict);
     }
 
     /// @inheritdoc IToken
@@ -594,12 +579,15 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      library and with the token as the caller; classifying it against the stored validation is the
     ///      compliance's business, not the token's.
     ///
-    ///      While the token is paused nothing is applied: the delivery reverts and stays deliverable, so an
-    ///      incident under investigation settles nothing. When the compliance finds a bad receipt, the chain that
-    ///      sent it is misbehaving: the token stops taking that chain's messages until an agent has investigated
-    ///      and called `setInboundPaused(chainKey, false)`, see {IReceiptHandler-receiveReceipt}.
-    function _handleSettlement(bytes32 chainKey, bytes memory body) internal override whenNotPaused nonReentrant {
-        _applyVerdict(chainKey, TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, body));
+    ///      No pause guard: while the token is stopped the compliance keeps the receipt waiting, with the bridge
+    ///      and peer that delivered it, and applies nothing, see {IReceiptHandler-receiveReceipt}. Blocking the
+    ///      away chain of a bad receipt is the compliance's too.
+    function _handleSettlement(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes memory body)
+        internal
+        override
+        nonReentrant
+    {
+        TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, bridge, senderPeerKey, body);
     }
 
     /// @inheritdoc TREXMessaging
@@ -610,8 +598,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///      `RECALL` instead, native wallet to the same native wallet, the exact inverse of the `DELEGATION`.
     ///      `consumeBurnProof` runs `syncOwner` before the mint, so the owner follow inside `agentTransferred`
     ///      finds nothing left to settle. Same pause policy as {_handleSettlement}: a paused token leaves the
-    ///      proof deliverable, a proof for a recall already settled pauses the chain's inbound, a proof for a
-    ///      recall never issued reverts and stays deliverable. A duplicate of a settled proof changes nothing.
+    ///      proof deliverable, a proof for a recall already settled blocks its away chain on the compliance, a proof
+    ///      for a recall never issued reverts and stays deliverable. A duplicate of a settled proof changes nothing.
     function _handleBurnProof(bytes32 chainKey, bytes memory body)
         internal
         virtual
@@ -619,12 +607,7 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         whenNotPaused
         nonReentrant
     {
-        (IReceiptHandler.Verdict verdict, address nativeWallet, uint256 amount) =
-            TokenDelegationLib.consumeBurnProof(chainKey, body);
-        if (verdict != IReceiptHandler.Verdict.None) {
-            _applyVerdict(chainKey, verdict);
-            return;
-        }
+        (address nativeWallet, uint256 amount) = TokenDelegationLib.consumeBurnProof(chainKey, body);
         if (amount == 0) return;
         ERC20Upgradeable._update(address(0), nativeWallet, amount);
         _reportAgentMovement(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
@@ -641,12 +624,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     ///  reason {_checkOnchainID} gives.
     function _reportAgentMovement(address from, address to, uint256 amount, uint8 kind) private {
         IModularCompliance(address(_getCompliance())).agentTransferred(from, to, amount, kind);
-    }
-
-    /// @dev The one brake a handler can ask for: block the away chain that sent a bad receipt. Nothing a message
-    ///  says stops the token itself, see {IReceiptHandler-Verdict}.
-    function _applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) private {
-        if (verdict == IReceiptHandler.Verdict.PauseChain) _setInboundPaused(chainKey, true);
     }
 
     /// @inheritdoc ERC3643Token

@@ -67,7 +67,7 @@ import { TicketLib } from "./TicketLib.sol";
 
 /**
  * @title Tickets
- * @dev The compliance's issuance layer for satellite movements: the two windows, the per-chain pause, the record
+ * @dev The compliance's issuance layer for satellite movements: the two windows, the block of an away chain, the record
  * of every issued validation, the issuance itself, the pending reservation it writes, settlement, discard and the
  * late-reconciliation surface. Own ERC-7201 namespace, so the module registry's layout is untouched.
  *
@@ -103,8 +103,8 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    /// @dev The answer, the narrowing and the send live in {TicketLib-answerApproval}; a receipt waiting under
-    ///  the id is applied by {applyWaitingReceipt} once the ticket is sent, and stays waiting when it is refused.
+    /// @dev The answer, the narrowing and the send live in {TicketLib-answerApproval}; a receipt waiting for the
+    ///  ticket is applied by {applyWaitingReceipt} once the ticket is sent, and stays waiting when it is refused.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external {
         TicketLib.answerApproval(ticketId, approvedMax, address(_boundToken()));
     }
@@ -138,8 +138,8 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    function isIssuancePaused(bytes32 chainKey) public view returns (bool) {
-        return _validationStorage().issuancePaused[chainKey];
+    function isAwayChainBlocked(bytes32 chainKey) public view returns (bool) {
+        return _validationStorage().blockedAwayChains[chainKey];
     }
 
     /// @inheritdoc ITickets
@@ -148,8 +148,8 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    function waitingReceiptOf(bytes32 ticketId, bytes32 chainKey) public view returns (WaitingReceipt memory) {
-        return _validationStorage().waitingReceipts[ticketId][chainKey];
+    function waitingReceiptOf(bytes32 halfKey) public view returns (WaitingReceipt memory) {
+        return _validationStorage().waitingReceipts[halfKey];
     }
 
     /// @inheritdoc ITickets

@@ -268,7 +268,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     function invariant_DR6_anHonestLiteNeverPausesItsChainOrHaltsTheToken() public view {
         assertFalse(token.paused(), "DR-6");
-        assertFalse(token.isInboundPaused(polygon), "DR-6");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "DR-6");
     }
 
     function invariant_callSummary() public view {

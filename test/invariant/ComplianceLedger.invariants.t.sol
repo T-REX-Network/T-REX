@@ -221,9 +221,9 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         max = bound(max, 1, balance - pending);
         min = bound(min, 1, max);
 
-        if (boundCompliance.isIssuancePaused(polygon)) {
-            vm.prank(deployer);
-            boundCompliance.setIssuancePaused(polygon, false);
+        if (boundCompliance.isAwayChainBlocked(polygon)) {
+            vm.prank(agent);
+            boundCompliance.unblockAwayChain(polygon);
         }
 
         vm.prank(address(identities[fromActor]));

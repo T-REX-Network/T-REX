@@ -95,7 +95,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(a).moved, 55);
         assertEq(boundCompliance.ticketOf(b).moved, 95);
         assertEq(token.awayBalanceOf(bobSat), 150);
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /* ----- Case 2: the ask is dropped from the canonical chain ----- */
@@ -117,7 +117,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         polygonGateway.relay(receipt);
 
         assertFalse(token.paused(), "the token keeps running");
-        assertFalse(token.isInboundPaused(polygon), "the honest away chain is not blocked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest away chain is not blocked");
         assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(receipt)));
         assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
 
@@ -137,7 +137,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
             boundCompliance.ticketOf(id).askBlockHash != orphaned.askBlockHash,
             "same request, same id; another block, another copy"
         );
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice The ticket mined again is cancelled before the receipt of the dropped copy lands: the receipt is still
@@ -161,8 +161,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
-        assertFalse(token.isInboundPaused(polygon));
-        assertFalse(boundCompliance.isIssuancePaused(polygon), "a late receipt stops nothing");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice The away token executed the dropped copy above what home narrows the same request to when it is mined
@@ -190,7 +189,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         polygonGateway.relay(receipt);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(token.awayBalanceOf(bobSat), 98, "applied as it happened");
         assertEq(token.reservedOf(aliceSat), reservedByTheOtherAsk, "the ticket's reservation is released");
         assertEq(boundCompliance.pendingInOf(address(bobIdentity)), reservedByTheOtherAsk);
@@ -210,15 +209,16 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
 
+        MessageTypesLib.ReceiptMessage memory waiting = _receiptOf(receipt);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(id, polygon, 95, orphaned.askBlockHash);
+        emit EventsLib.ReceiptWaiting(id, polygon, address(polygonGateway), waiting);
         polygonGateway.relay(receipt);
-        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "waits for the answer");
-        assertFalse(token.isInboundPaused(polygon), "nothing is blocked");
+        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0), "waits for the answer");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing is blocked");
         assertEq(token.awayBalanceOf(bobSat), 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id));
+        boundCompliance.applyWaitingReceipt(id, waiting);
 
         vm.prank(backend);
         module.approveValidation(address(boundCompliance), id, 100);
@@ -227,25 +227,25 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
         // A waiting receipt waits under a block of its chain, and under a stop of the token, as a delivery does.
         vm.prank(agent);
-        token.setInboundPaused(polygon, true);
+        boundCompliance.blockAwayChain(polygon);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, waiting);
         vm.startPrank(agent);
-        token.setInboundPaused(polygon, false);
+        boundCompliance.unblockAwayChain(polygon);
         token.pause();
         vm.stopPrank();
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, waiting);
         vm.prank(agent);
         token.unpause();
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.WaitingReceiptApplied(id, polygon);
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        boundCompliance.applyWaitingReceipt(id, waiting);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.awayBalanceOf(bobSat), 95);
-        assertFalse(boundCompliance.waitingReceiptOf(id, polygon).exists);
+        assertEq(boundCompliance.waitingReceiptOf(id).bodyHash, bytes32(0));
     }
 
     /// @notice Refused, the request sends nothing and the receipt stays waiting for the operator to read.
@@ -263,11 +263,12 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         module.refuseValidation(address(boundCompliance), id);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Cancelled));
-        assertTrue(boundCompliance.waitingReceiptOf(id, polygon).exists, "left for the operator");
-        assertEq(boundCompliance.waitingReceiptOf(id, polygon).amount, 95);
+        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0), "left for the operator");
+        assertEq(boundCompliance.waitingReceiptOf(id).amount, 95);
         assertEq(token.awayBalanceOf(bobSat), 0);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id, polygon));
-        boundCompliance.applyWaitingReceipt(id, polygon);
+        MessageTypesLib.ReceiptMessage memory waiting = _receiptOf(receipt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id));
+        boundCompliance.applyWaitingReceipt(id, waiting);
     }
 
     /// @notice The requester need not come back: the copy the away token holds carries the whole request, the asked
@@ -314,7 +315,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         _relayAll(polygonGateway);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice The away token executed the copy of the dropped block at an amount the copy mined again also covers:
@@ -366,6 +367,12 @@ contract ReorgRecoveryTest is InteropSuiteTest {
             ERC7786GatewayMock.QueuedMessage memory message = gateway.queuedMessage(i);
             if (message.deliveries == 0 && !message.dropped) gateway.relay(i);
         }
+    }
+
+    /// @dev The receipt a queued delivery on the Polygon bridge carries, as `ReceiptWaiting` gives it back.
+    function _receiptOf(uint256 index) private view returns (MessageTypesLib.ReceiptMessage memory) {
+        (, bytes memory body) = MessageTypesLib.decode(polygonGateway.queuedMessage(index).payload);
+        return MessageTypesLib.decodeSettlement(body);
     }
 
     function _last(ERC7786GatewayMock gateway) private view returns (uint256) {

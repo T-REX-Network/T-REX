@@ -91,8 +91,7 @@ library EventsLib {
     /// @notice Emitted when the proof that already settled a recall is delivered again: nothing is applied.
     event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when a burn proof differs from the proof that settled its recall. Nothing is applied and the
-    ///  token blocks `originChainKey`, see {IReceiptHandler-Verdict}. A proof for a recall never issued reverts
-    ///  instead, and stops nothing.
+    ///  compliance blocks `originChainKey`. A proof for a recall never issued reverts instead, and stops nothing.
     event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
     /// @notice Emitted when an agent resends an instruction unchanged: `kind` 0 a delegation, 1 a recall.
     event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
@@ -195,11 +194,6 @@ library EventsLib {
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
-    /// @notice Emitted when the token stops taking messages from `chainKey`: by the pauser, or on a message that
-    ///  chain sent for something already accounted for. Deliveries from that chain revert and stay deliverable.
-    event InboundPaused(bytes32 indexed chainKey);
-    /// @notice Emitted when the pauser takes messages from `chainKey` again.
-    event InboundUnpaused(bytes32 indexed chainKey);
 
     // ModularCompliance Interop Events
 
@@ -211,8 +205,12 @@ library EventsLib {
     // Tickets Events
     event DefaultValidityWindowSet(uint64 duration);
     event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
-    event ValidationIssuancePaused(bytes32 indexed chainKey);
-    event ValidationIssuanceUnpaused(bytes32 indexed chainKey);
+    /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, on a bad receipt or
+    ///         receipt terms it broke, or on a burn proof for a recall already settled. No ticket goes to it, none of
+    ///         its tickets is cancelled, and its receipts wait.
+    event AwayChainBlockStarted(bytes32 indexed chainKey);
+    /// @notice The pauser lifted the block of the away chain `chainKey`, after an investigation.
+    event AwayChainUnblocked(bytes32 indexed chainKey);
     /// @notice Emitted on issuance with the full envelopes, the asked and the final bounds, and the ask block hash
     ///         of the copy sent, so indexers need no reverse table.
     event TicketWritten(
@@ -260,15 +258,19 @@ library EventsLib {
     ///         another receive id: a bridge delivering twice, or an away token sending its stored receipt again.
     ///         Nothing changes; the delivery is consumed.
     event ReceiptDuplicate(bytes32 indexed ticketId, bytes32 indexed chainKey);
-    /// @notice A receipt arrived from `chainKey` for a ticket written here and never sent: the away token executed a
-    ///         copy home never sent. It is kept under its id; once the ticket is sent, `applyWaitingReceipt`
-    ///         applies it.
-    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    /// @notice A waiting receipt from `chainKey` was applied, once its ticket was sent.
-    event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
+    /// @notice A good receipt from `chainKey` that cannot be applied yet waits under its half, tagged with the
+    ///         `bridge` that delivered it. Home keeps only its hash: `receipt` is the copy a later caller gives back
+    ///         to `applyWaitingReceipt`.
+    event ReceiptWaiting(
+        bytes32 indexed halfKey, bytes32 indexed chainKey, address bridge, MessageTypesLib.ReceiptMessage receipt
+    );
+    /// @notice The receipt waiting under `halfKey` from `chainKey` was applied.
+    event WaitingReceiptApplied(bytes32 indexed halfKey, bytes32 indexed chainKey);
+    /// @notice The pauser deleted the receipt waiting under `halfKey` while its away chain was blocked.
+    event WaitingReceiptRefused(bytes32 indexed halfKey);
     /// @notice A bad receipt from `chainKey`: another body for a half that has one, from a chain that is not the
     ///         sender's, for wallets that are not the ticket's, for a half never sent, or an expired answer that
-    ///         moved something. Nothing is applied, and the token blocks `chainKey`.
+    ///         moved something. Nothing is applied, and the compliance blocks `chainKey`.
     event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
     /// @notice A receipt from `chainKey` answers a copy of the ticket from another home block, one a home reorg
     ///         dropped: it is applied as it happened, and blocks `chainKey` only above `requestedMax` or the away

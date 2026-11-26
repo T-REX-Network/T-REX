@@ -181,12 +181,13 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc IReceiptHandler
-    function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata notification)
-        external
-        onlyBoundToken
-        returns (IReceiptHandler.Verdict verdict)
-    {
-        return ReceiptLib.receiveReceipt(originChainKey, notification, _getTokenBound());
+    function receiveReceipt(
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata notification
+    ) external onlyBoundToken {
+        ReceiptLib.receiveReceipt(originChainKey, bridge, senderPeerKey, notification, _getTokenBound());
     }
 
     /**
@@ -263,20 +264,36 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITickets
-    function setIssuancePaused(bytes32 chainKey, bool paused) external restricted {
-        TicketLib.setIssuancePaused(chainKey, paused);
-    }
-
-    /// @inheritdoc ITickets
     function setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) external restricted {
         _setTicketLimits(chainKey, perTicketCap, perWindowCap);
     }
 
+    /* ----- Block an away chain ----- */
+
+    /// @inheritdoc ITickets
+    /// @dev The bound token may block too, without a role: it blocks the chain of a burn proof for a recall already
+    ///  settled, as the compliance does for a bad receipt.
+    function blockAwayChain(bytes32 chainKey) external {
+        if (msg.sender != _getTokenBound()) _checkCanCall(msg.sender, _msgData());
+        TicketLib.blockAwayChain(chainKey);
+    }
+
+    /// @inheritdoc ITickets
+    function unblockAwayChain(bytes32 chainKey) external restricted {
+        TicketLib.unblockAwayChain(chainKey);
+    }
+
+    /// @inheritdoc ITickets
+    function refuseWaitingReceipt(bytes32 halfKey) external restricted {
+        ReceiptLib.refuseWaitingReceipt(halfKey);
+    }
+
     /// @inheritdoc ITickets
     /// @dev Not `restricted`: the receipt was sent by the chain's away token and admitted by the token already, and
-    ///  it is applied as a delivery would be. The caller chooses when, as whoever relays a delivery does.
-    function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey) external {
-        ReceiptLib.applyWaitingReceipt(ticketId, chainKey, _getTokenBound());
+    ///  it is applied as a delivery would be, once its route check passes again. The caller chooses when, as
+    ///  whoever relays a delivery does.
+    function applyWaitingReceipt(bytes32 halfKey, MessageTypesLib.ReceiptMessage calldata receipt) external {
+        ReceiptLib.applyWaitingReceipt(halfKey, receipt, _getTokenBound());
     }
 
     /// @inheritdoc ITickets

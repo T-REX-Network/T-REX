@@ -130,8 +130,11 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function isInboundPaused(bytes32 chainKey) public view returns (bool) {
-        return TREXMessagingLib.layout().inboundPaused[chainKey];
+    function checkReceiptOrigin(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes32 halfKey)
+        external
+        view
+    {
+        TREXMessagingLib.checkReceiptOrigin(chainKey, bridge, senderPeerKey, halfKey);
     }
 
     /// @dev Whether `gateway` has already delivered `receiveId` to this token. Always false for a zero id, which
@@ -149,9 +152,9 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @inheritdoc ERC7786Recipient
     /// @dev Admission is the library's: attribution to the peer, the replay guard, the expected gateway.
-    /// What an admitted message does is the token's, so the hooks are called from here. A message from a chain
-    /// whose inbound is paused reverts once attributed, which undoes the replay guard's record of it in the same
-    /// transaction: it stays deliverable, and lands once the pauser lifts the pause.
+    /// What an admitted message does is the token's, so the hooks are called from here. A receipt is handed on with
+    /// the bridge and the peer that delivered it, so the compliance can keep it waiting and check that route again
+    /// when it is applied later.
     function _processMessage(address gateway, bytes32 receiveId, bytes calldata sender, bytes calldata payload)
         internal
         override
@@ -160,7 +163,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
             TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
 
         if (messageType == MessageTypesLib.Message.RECEIPT) {
-            _handleSettlement(chainKey, body);
+            _handleSettlement(chainKey, gateway, keccak256(sender), body);
         } else {
             _handleBurnProof(chainKey, body);
         }
@@ -168,12 +171,15 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         emit EventsLib.ProtocolMessageReceived(messageType, chainKey, receiveId);
     }
 
-    /// @dev Acts on a settlement attributed to this token's peer on `chainKey`.
+    /// @dev Acts on a settlement attributed to this token's peer on `chainKey`, delivered by `bridge` from the peer
+    /// whose `keccak256` is `senderPeerKey`.
     ///
     /// Left to the inheriting token, because the destination is something only it knows: its bound
     /// compliance, which owns the slot lifecycle. The body arrives encoded, already known to decode as
     /// a `MessageTypesLib.ReceiptMessage`; {TREXMessagingLib-forwardSettlement} delivers it.
-    function _handleSettlement(bytes32 chainKey, bytes memory body) internal virtual;
+    function _handleSettlement(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes memory body)
+        internal
+        virtual;
 
     /// @dev Acts on a burn proof attributed to this token's peer on `chainKey`. The token's recall path.
     /// The body arrives encoded, a `MessageTypesLib.BurnProof`.
@@ -205,12 +211,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
         TREXMessagingLib.setPeer(chainKey, peer);
-    }
-
-    /// @dev Stops, or resumes, taking messages from `chainKey`. The token calls it with `true` on its own when a
-    /// handler returns `PauseChain`; the pauser calls it either way.
-    function _setInboundPaused(bytes32 chainKey, bool pause) internal {
-        TREXMessagingLib.setInboundPaused(chainKey, pause);
     }
 
     /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to

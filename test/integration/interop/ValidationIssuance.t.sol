@@ -283,27 +283,11 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(replacement.queueLength(), 1);
     }
 
-    function test_requestTransferValidation_Success_WhenPauseAndUnpauseRoundTrip() public {
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, true);
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
-        boundCompliance.askToMove(aliceSat, bobSat, 10, 90, "", _salt());
-
-        vm.prank(deployer);
-        boundCompliance.setIssuancePaused(polygon, false);
-
-        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
-        assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
-        assertEq(polygonGateway.queueLength(), 1);
-    }
-
-    /// @notice A chain whose inbound is paused cannot report back, so nothing new is issued toward it; the other
-    ///         chains are issued to as before.
+    /// @notice A blocked away chain's receipts wait unapplied, so nothing new is issued toward it; once the block
+    ///         is lifted, asks go out as before.
     function test_requestTransferValidation_RevertWhen_AnInvolvedChainsInboundIsPaused() public {
         vm.prank(agent);
-        token.setInboundPaused(polygon, true);
+        boundCompliance.blockAwayChain(polygon);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
@@ -311,7 +295,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 0);
 
         vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        boundCompliance.unblockAwayChain(polygon);
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
         assertEq(id, _ticketId(aliceSat, bobSat, "", 10, 90, lastSalt));
         assertEq(polygonGateway.queueLength(), 1);

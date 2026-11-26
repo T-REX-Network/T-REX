@@ -61,8 +61,8 @@ pragma solidity 0.8.30;
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
+import { ITickets } from "../compliance/modular/ITickets.sol";
 import { MovementKindLib } from "../compliance/modular/MovementKindLib.sol";
-import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { TREXMessagingLib } from "../interop/TREXMessagingLib.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
@@ -98,10 +98,10 @@ library TokenDelegationLib {
 
     /// @dev The rest of a delegation-out, once the token has burned `amount` of `holder`'s native balance: the burn
     ///  stayed inside the free balance, the bridged position of `toWallet` is credited under a fresh delegation id
-    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the chain's inbound is
-    ///  not paused (no more supply goes to a chain whose reports are suspect), the compliance is told, the instruction
-    ///  is committed and sent. Any refusal reverts the burn with it, so nothing is delegated that the satellite is not
-    ///  told to mint.
+    ///  (`DelegatedOut`), both wallets sit on one identity, the registry admits the recipient, the away chain is not
+    ///  blocked on the compliance (no more supply goes to a chain whose reports are suspect), the compliance is
+    ///  told, the instruction is committed and sent. Any refusal reverts the burn with it, so nothing is delegated
+    ///  that the satellite is not told to mint.
     /// @return sendId The gateway's id for the instruction.
     function delegateOut(address holder, bytes calldata toWallet, uint256 amount) external returns (bytes32 sendId) {
         uint256 delegationId = _creditDelegation(holder, toWallet, amount);
@@ -112,7 +112,7 @@ library TokenDelegationLib {
         _compliance().agentTransferred(holder, holder, amount, MovementKindLib.DELEGATION);
 
         bytes32 chainKey = _chainKeyOf(toWallet);
-        require(!TREXMessagingLib.layout().inboundPaused[chainKey], ErrorsLib.AwayChainBlocked(chainKey));
+        _requireAwayChainNotBlocked(chainKey);
         TokenLedgerLib.layout().delegations[delegationId] =
             _commitment(chainKey, keccak256(TREXMessagingLib.peerFor(chainKey)), toWallet, amount, holder);
 
@@ -185,16 +185,17 @@ library TokenDelegationLib {
     ///  move and nothing to report.
     ///
     ///  With no open recall: the very proof that settled it, from the same chain, is a duplicate and changes
-    ///  nothing. A different proof for a recall the token issued and settled is `PauseChain`: the chain that sent
-    ///  it is at fault. A proof for a recall never issued reverts with `RecallNotPending`: nothing stops the token
-    ///  or blocks a chain over an id it does not know.
-    /// @return verdict `None` when the proof settled its recall or duplicated the one that did; else the block.
+    ///  nothing. A different proof for a recall the token issued and settled blocks the chain that sent it on the
+    ///  compliance: that chain is at fault. A proof for a recall never issued reverts with `RecallNotPending`:
+    ///  nothing stops the token or blocks a chain over an id it does not know. A proof from a blocked away chain
+    ///  reverts with `AwayChainBlocked` and stays deliverable.
     /// @return nativeWallet The wallet the token mints to, as the instruction recorded it.
     /// @return amount What the token mints: what the satellite proved it burned, zero when nothing is credited.
     function consumeBurnProof(bytes32 originChainKey, bytes memory body)
         external
-        returns (IReceiptHandler.Verdict verdict, address nativeWallet, uint256 amount)
+        returns (address nativeWallet, uint256 amount)
     {
+        _requireAwayChainNotBlocked(originChainKey);
         MessageTypesLib.BurnProof memory proof = MessageTypesLib.decodeBurnProof(body);
         bytes32 proofHash = keccak256(abi.encode(originChainKey, body));
 
@@ -205,13 +206,14 @@ library TokenDelegationLib {
         if (recall.amount == 0) {
             if (s.settledProofs[proof.recallId] == proofHash) {
                 emit EventsLib.BurnProofDuplicate(proof.recallId, originChainKey);
-                return (IReceiptHandler.Verdict.None, address(0), 0);
+                return (address(0), 0);
             }
             // A proof for a recall never sent stops nothing: it reverts and stays deliverable at the bridge.
             bool issued = proof.recallId != 0 && proof.recallId <= s.lastRecallId;
             require(issued, ErrorsLib.RecallNotPending(proof.recallId));
             emit EventsLib.ReplayedBurnProof(proof.recallId, originChainKey);
-            return (IReceiptHandler.Verdict.PauseChain, address(0), 0);
+            ITickets(address(_compliance())).blockAwayChain(originChainKey);
+            return (address(0), 0);
         }
 
         require(
@@ -296,6 +298,12 @@ library TokenDelegationLib {
     }
 
     /// @dev The token's compliance, through its own getter.
+    /// @dev A blocked away chain is the compliance's: nothing is delegated toward it and none of its proofs lands.
+    function _requireAwayChainNotBlocked(bytes32 chainKey) private view {
+        bool blocked = ITickets(address(_compliance())).isAwayChainBlocked(chainKey);
+        require(!blocked, ErrorsLib.AwayChainBlocked(chainKey));
+    }
+
     function _compliance() private view returns (IModularCompliance) {
         return IModularCompliance(address(IERC3643(address(this)).compliance()));
     }

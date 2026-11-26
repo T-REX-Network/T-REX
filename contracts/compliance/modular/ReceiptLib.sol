@@ -59,7 +59,6 @@
 
 pragma solidity 0.8.30;
 
-import { IReceiptHandler } from "../../interop/IReceiptHandler.sol";
 import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
@@ -77,8 +76,8 @@ import { IModule } from "./modules/IModule.sol";
 /**
  * @title ReceiptLib
  * @dev How a ticket ends, deployed once and linked: {receiveReceipt} records what an away token reports it did,
- * {applyWaitingReceipt} applies a receipt that came before its ticket was sent, and {cancelTickets} releases what
- * an away token never did.
+ * {applyWaitingReceipt} applies a good receipt that could not be applied when it arrived, and {cancelTickets}
+ * releases what an away token never did.
  *
  * Home records what a receipt reports, not what home allowed: the away token's balances already moved, and a
  * refused receipt would leave home's records wrong for good. The terms check only decides whether the away chain
@@ -93,69 +92,128 @@ library ReceiptLib {
     /* ----- Receipts ----- */
 
     /// @dev See {IReceiptHandler-receiveReceipt}, which lists the cases in the order they are told apart here. A
-    ///  receipt is announced first, whatever becomes of it. Only a receipt that is taken in writes the hash of its
-    ///  half: a refused one never does, so the honest receipt for that half still lands after it.
+    ///  receipt is announced first, whatever becomes of it. A refused receipt writes nothing, so the honest receipt
+    ///  for that half still lands after it.
     /// @param token the token the compliance is bound to
-    function receiveReceipt(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata receipt, address token)
-        external
-        returns (IReceiptHandler.Verdict)
-    {
+    function receiveReceipt(
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) external {
         emit EventsLib.ReceiptReceived(originChainKey, receipt.ticketId, receipt.from, receipt.to, receipt.amount);
 
-        // 1. The same receipt again, from the same chain, changes nothing.
+        // 1. The same receipt again, from the same chain, changes nothing, unless it waits and can now be applied.
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         bytes32 halfKey = MessageTypesLib.halfKeyOf(receipt.ticketId, receipt.half);
         bytes32 receiptHash = keccak256(abi.encode(originChainKey, receipt));
-        bytes32 storedHash = store.receiptHashes[halfKey];
-        if (storedHash == receiptHash) {
+        if (store.receiptHashes[halfKey] == receiptHash) {
             emit EventsLib.ReceiptDuplicate(receipt.ticketId, originChainKey);
-            return IReceiptHandler.Verdict.None;
+            return;
+        }
+        if (store.waitingReceipts[halfKey].bodyHash == receiptHash) {
+            _receiveTheWaitingReceiptAgain(halfKey, receiptHash, originChainKey, receipt, token);
+            return;
         }
 
         // 2. A still open answer moves nothing and never takes the half.
-        if (receipt.answer == MessageTypesLib.ReceiptAnswer.StillOpen) return IReceiptHandler.Verdict.None;
+        if (receipt.answer == MessageTypesLib.ReceiptAnswer.StillOpen) return;
 
         // 3. An id home has no record of reverts and stays deliverable at the bridge.
         require(TicketLib.isRecorded(store, receipt.ticketId), ErrorsLib.UnknownTicket(receipt.ticketId));
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
 
         // 4. A bad receipt is refused and blocks the chain that sent it.
-        if (_isBadReceipt(ticket, originChainKey, receipt, storedHash)) {
+        if (_isBadReceipt(store, ticket, halfKey, originChainKey, receipt)) {
             emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
-            return IReceiptHandler.Verdict.PauseChain;
+            TicketLib.blockAwayChain(originChainKey);
+            return;
         }
+
+        // 5. A good receipt that cannot be applied yet waits, tagged with the bridge and peer that delivered it.
+        if (!_canBeAppliedNow(ticket, originChainKey, receipt.from, receipt.amount, token)) {
+            _keepWaiting(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt);
+            return;
+        }
+
+        // 6. Applied as it happened.
         store.receiptHashes[halfKey] = receiptHash;
-
-        // 5. A receipt for a ticket never sent waits for the ticket to be sent.
-        if (ticket.askBlockHash == bytes32(0)) {
-            _keepWaiting(originChainKey, receipt);
-            return IReceiptHandler.Verdict.None;
-        }
-        return _apply(ticket, originChainKey, receipt, token);
+        _apply(ticket, originChainKey, receipt, token);
     }
 
-    /// @dev See {ITickets-applyWaitingReceipt}. The receipt was checked when it arrived, and is applied as it
-    ///  would have been then: applied, it is announced; with broken terms, the block reaches the token through
-    ///  {IToken-applyVerdict}. A revert anywhere below leaves the receipt waiting; the next call tries again.
+    /// @dev See {ITickets-applyWaitingReceipt}. The receipt was checked when it arrived and is applied as it would
+    ///  have been then, once its route still admits it. A revert anywhere below leaves the receipt waiting; the next
+    ///  call tries again.
     /// @param token the token the compliance is bound to
-    function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey, address token) external {
-        MessageTypesLib.ReceiptMessage memory waiting = _takeWaitingReceipt(ticketId, chainKey, token);
-        ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
-        IReceiptHandler.Verdict verdict = _apply(ticket, chainKey, waiting, token);
-        if (verdict == IReceiptHandler.Verdict.None) emit EventsLib.WaitingReceiptApplied(ticketId, chainKey);
-        else IToken(token).applyVerdict(chainKey, verdict);
+    function applyWaitingReceipt(bytes32 halfKey, MessageTypesLib.ReceiptMessage calldata receipt, address token)
+        external
+    {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.WaitingReceipt memory waiting = store.waitingReceipts[halfKey];
+        bytes32 receiptHash = keccak256(abi.encode(waiting.chainKey, receipt));
+        require(receiptHash == waiting.bodyHash, ErrorsLib.NoWaitingReceipt(halfKey));
+
+        ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
+        _requireCanBeAppliedNow(ticket, halfKey, waiting.chainKey, receipt, token);
+        ITREXMessaging(token).checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey);
+
+        delete store.waitingReceipts[halfKey];
+        store.receiptHashes[halfKey] = receiptHash;
+        emit EventsLib.WaitingReceiptApplied(halfKey, waiting.chainKey);
+        _apply(ticket, waiting.chainKey, receipt, token);
     }
 
-    /// @dev A receipt home cannot take in: another body for a half that already has one, from a chain that is not
-    ///  the one the ticket went to, for wallets that are not the ticket's, for a half home never sent, or an
-    ///  expired answer that still moved something.
-    function _isBadReceipt(
-        ITickets.Ticket storage ticket,
+    /// @dev See {ITickets-refuseWaitingReceipt}. Only the waiting slot is deleted: no hash was written for the half,
+    ///  so the honest receipt for it can still land.
+    function refuseWaitingReceipt(bytes32 halfKey) external {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.WaitingReceipt storage waiting = store.waitingReceipts[halfKey];
+        require(waiting.bodyHash != bytes32(0), ErrorsLib.NoWaitingReceipt(halfKey));
+        bytes32 chainKey = waiting.chainKey;
+        require(store.blockedAwayChains[chainKey], ErrorsLib.AwayChainNotBlocked(chainKey));
+
+        delete store.waitingReceipts[halfKey];
+
+        emit EventsLib.WaitingReceiptRefused(halfKey);
+    }
+
+    /// @dev The receipt that waits under the half came again. When it can now be applied, the repeat applies it: the
+    ///  repeat itself passed the route check at delivery. Otherwise it is a duplicate and the receipt keeps waiting.
+    function _receiveTheWaitingReceiptAgain(
+        bytes32 halfKey,
+        bytes32 receiptHash,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt,
-        bytes32 storedHash
+        address token
+    ) private {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
+        if (!_canBeAppliedNow(ticket, originChainKey, receipt.from, receipt.amount, token)) {
+            emit EventsLib.ReceiptDuplicate(receipt.ticketId, originChainKey);
+            return;
+        }
+
+        delete store.waitingReceipts[halfKey];
+        store.receiptHashes[halfKey] = receiptHash;
+        emit EventsLib.WaitingReceiptApplied(halfKey, originChainKey);
+        _apply(ticket, originChainKey, receipt, token);
+    }
+
+    /// @dev A receipt home cannot take in: another body for a half that already has one, applied or waiting, from a
+    ///  chain that is not the one the ticket went to, for wallets that are not the ticket's, for a half home never
+    ///  sent, or an expired answer that still moved something. The same body again never reaches here.
+    function _isBadReceipt(
+        TicketLib.ValidationStorage storage store,
+        ITickets.Ticket storage ticket,
+        bytes32 halfKey,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
     ) private view returns (bool) {
-        bool anotherBodyForThisHalf = storedHash != bytes32(0);
+        bool anotherBodyApplied =
+            store.receiptHashes[halfKey] != bytes32(0);
+        bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
+        bool anotherBodyForThisHalf = anotherBodyApplied || anotherBodyWaiting;
         bool fromTheChainTheTicketWentTo = originChainKey == ticket.fromChainKey;
         bool fromTheTicketsSender = keccak256(receipt.from) == ticket.fromKey;
         bool toTheTicketsReceiver = keccak256(receipt.to) == ticket.toKey;
@@ -167,8 +225,8 @@ library ReceiptLib {
         return anotherBodyForThisHalf || !answersTheTicketItWasSent || expiredYetMoved;
     }
 
-    /// @dev Applies a receipt for a ticket that was sent, open or cancelled, as it happened, and says whether its
-    ///  away chain must also be blocked. A zero receipt ends the ticket with nothing moved and is never a bad
+    /// @dev Applies a receipt for a ticket that was sent, open or cancelled, as it happened, and blocks its away
+    ///  chain when it breaks its terms. A zero receipt ends the ticket with nothing moved and is never a bad
     ///  receipt, whatever terms it echoes. Any other receipt is checked against the copy it echoes: home's own,
     ///  or an older one from a home block a reorg dropped.
     function _apply(
@@ -176,11 +234,11 @@ library ReceiptLib {
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage memory receipt,
         address token
-    ) private returns (IReceiptHandler.Verdict) {
+    ) private {
         if (receipt.amount == 0) {
             TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
             emit EventsLib.ReceiptApplied(receipt.ticketId, originChainKey, 0);
-            return IReceiptHandler.Verdict.None;
+            return;
         }
 
         bool breaksItsTerms;
@@ -194,8 +252,7 @@ library ReceiptLib {
 
         _applyTheMove(ticket, originChainKey, receipt, token);
 
-        if (breaksItsTerms) return IReceiptHandler.Verdict.PauseChain;
-        return IReceiptHandler.Verdict.None;
+        if (breaksItsTerms) TicketLib.blockAwayChain(originChainKey);
     }
 
     /// @dev On home's own ask block hash the away token executed the copy home sent, so the receipt must echo that
@@ -302,57 +359,72 @@ library ReceiptLib {
 
     /* ----- Waiting receipts ----- */
 
-    /// @dev Keeps a receipt for a ticket written and never sent, so that once the ticket is sent
-    ///  {applyWaitingReceipt} applies it. Its half already holds its hash, so the same receipt again is a duplicate
-    ///  and another one a bad receipt: one receipt waits per ticket at most.
-    function _keepWaiting(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata receipt) private {
-        ITickets.WaitingReceipt storage waiting = TicketLib.layout().waitingReceipts[receipt.ticketId][originChainKey];
-        waiting.from = receipt.from;
-        waiting.to = receipt.to;
-        waiting.amount = receipt.amount;
-        waiting.askBlockHash = receipt.askBlockHash;
-        waiting.exists = true;
-        waiting.seenMax = receipt.seenMax;
-        waiting.seenValidUntil = receipt.seenValidUntil;
-        emit EventsLib.ReceiptWaiting(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
+    /// @dev Whether a good receipt can be applied now: its ticket was sent, the token runs, its away chain is not
+    ///  blocked, and the sender's away balance covers what it moved. Otherwise it waits.
+    function _canBeAppliedNow(
+        ITickets.Ticket storage ticket,
+        bytes32 chainKey,
+        bytes memory from,
+        uint256 amount,
+        address token
+    ) private view returns (bool) {
+        bool ticketSent = ticket.askBlockHash != bytes32(0);
+        bool tokenRunning = !IToken(token).paused();
+        bool awayChainBlocked = TicketLib.layout().blockedAwayChains[chainKey];
+        bool awayBalanceCoversIt = amount <= IToken(token).awayBalanceOf(from);
+        return ticketSent && tokenRunning && !awayChainBlocked && awayBalanceCoversIt;
     }
 
-    /// @dev Takes the receipt waiting under `(ticketId, chainKey)` out of storage and hands it back as the receipt
-    ///  it was, see {ITickets-applyWaitingReceipt} for the requirements. A revert further on undoes the take.
-    function _takeWaitingReceipt(bytes32 ticketId, bytes32 chainKey, address token)
-        private
-        returns (MessageTypesLib.ReceiptMessage memory receipt)
-    {
-        TicketLib.ValidationStorage storage store = TicketLib.layout();
-        ITickets.WaitingReceipt memory waiting = store.waitingReceipts[ticketId][chainKey];
-        // A receipt waits under the id for this chain.
-        require(waiting.exists, ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
-        // The ticket was sent: a record without an ask block hash was sent nowhere, and there is nothing to apply
-        // it against.
-        require(store.validations[ticketId].askBlockHash != bytes32(0), ErrorsLib.NoWaitingReceipt(ticketId, chainKey));
+    /// @dev {_canBeAppliedNow} as requirements, each with its own error, for {applyWaitingReceipt}.
+    function _requireCanBeAppliedNow(
+        ITickets.Ticket storage ticket,
+        bytes32 halfKey,
+        bytes32 chainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) private view {
+        require(ticket.askBlockHash != bytes32(0), ErrorsLib.NoWaitingReceipt(halfKey));
         TicketLib.requireTokenRunning(token);
-        // A receipt delivered from a blocked chain waits at the bridge; a waiting one from it waits here, for the
-        // same investigation.
-        TicketLib.requireInboundOpen(token, chainKey);
-        delete store.waitingReceipts[ticketId][chainKey];
-        receipt.ticketId = ticketId;
-        receipt.from = waiting.from;
-        receipt.to = waiting.to;
-        receipt.amount = waiting.amount;
-        receipt.askBlockHash = waiting.askBlockHash;
-        receipt.seenMax = waiting.seenMax;
-        receipt.seenValidUntil = waiting.seenValidUntil;
+        TicketLib.requireAwayChainNotBlocked(chainKey);
+        uint256 awayBalance = IToken(token).awayBalanceOf(receipt.from);
+        require(
+            receipt.amount <= awayBalance,
+            ErrorsLib.InsufficientBridgedBalance(receipt.from, awayBalance, receipt.amount)
+        );
+    }
+
+    /// @dev Keeps a good receipt that cannot be applied yet under its half: its hash, and the bridge and peer that
+    ///  delivered it for the route check {applyWaitingReceipt} runs again. Its bytes go out in the event only.
+    ///  The half writes no receipt hash yet, so {refuseWaitingReceipt} can delete it and the honest receipt still
+    ///  lands; another body for the half meanwhile is a bad receipt.
+    function _keepWaiting(
+        bytes32 halfKey,
+        bytes32 receiptHash,
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private {
+        ITickets.WaitingReceipt storage waiting = TicketLib.layout().waitingReceipts[halfKey];
+        waiting.bodyHash = receiptHash;
+        waiting.chainKey = originChainKey;
+        waiting.deliveredBy = bridge;
+        waiting.peerKey = senderPeerKey;
+        waiting.amount = receipt.amount;
+        emit EventsLib.ReceiptWaiting(halfKey, originChainKey, bridge, receipt);
     }
 
     /* ----- Cancel ----- */
 
-    /// @dev Each id must be stored `Open` and past `waitingEndsAt`. One refused id reverts the whole batch.
+    /// @dev Each id must be stored `Open` and past `waitingEndsAt`, or `WaitingForApproval` and past `validUntil`.
+    ///  One refused id reverts the whole batch.
     /// @dev Who may: the keeper from `waitingEndsAt`, anyone from the end of the second window. A cancel turns a
     ///  receipt that lands afterwards into a late one, so during the first window the keeper alone judges that a
-    ///  receipt is late rather than slow. Nor is a ticket cancelled while the away chain that owes its receipt is
-    ///  blocked on the token, or the token itself is stopped: its receipt may be waiting at that bridge, see
-    ///  {TicketLib-requireAwaitedInboundOpen}. Nor while that away chain cannot deliver its receipt, see
-    ///  {_requireReceiptRouteOpen}. Nor while a receipt waits under its id, see {_requireNoWaitingReceipt}.
+    ///  receipt is late rather than slow. No ticket is cancelled while the away chain that owes its receipt is
+    ///  blocked or the token is stopped, a ticket waiting for approval included: its receipt may be waiting, see
+    ///  {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot deliver its receipt, see
+    ///  {_requireReceiptRouteOpen}. Nor while a receipt for it waits and can be applied now, see
+    ///  {_requireNoWaitingReceiptToApply}.
     /// @param token the token the compliance is bound to
     /// @param keeper whether the AccessManager binds the caller to this selector's role
     function cancelTickets(bytes32[] calldata validationIds, address token, bool keeper) external {
@@ -361,8 +433,9 @@ library ReceiptLib {
             bytes32 ticketId = validationIds[i];
             require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
             ITickets.Ticket storage ticket = store.validations[ticketId];
-            // Nothing was sent for a ticket waiting for approval, so no receipt can be in flight: anyone may
-            // cancel it once its deadline passed, and the reservation comes back.
+            TicketLib.requireTicketCanBeDecided(token, ticket);
+            // Nothing was sent for a ticket waiting for approval: anyone may cancel it once its deadline passed,
+            // and the reservation comes back.
             if (ticket.status == ITickets.TicketStatus.WaitingForApproval) {
                 TicketLib.discardUnanswered(ticketId, token);
                 continue;
@@ -376,9 +449,8 @@ library ReceiptLib {
                 uint64 publicAt = _secondWindowEnd(ticket);
                 require(block.timestamp > publicAt, ErrorsLib.ValidationNotPubliclyDiscardable(ticketId, publicAt));
             }
-            TicketLib.requireAwaitedInboundOpen(token, ticket);
             _requireReceiptRouteOpen(token, ticket.fromChainKey);
-            _requireNoWaitingReceipt(store, ticketId, ticket.fromChainKey);
+            _requireNoWaitingReceiptToApply(store, ticketId, ticket, token);
 
             TicketLib.moveTo(ticket, ITickets.TicketStatus.Cancelled, token);
 
@@ -393,16 +465,41 @@ library ReceiptLib {
         require(ITREXMessaging(token).isChainOpen(chainKey), ErrorsLib.ChainNotOpen(chainKey));
     }
 
-    /// @dev A ticket is not cancelled over a receipt waiting under its id. The receipt came while the ticket was
-    ///  not sent and waits for {applyWaitingReceipt}; cancelling first would release the reservation of a move
-    ///  home already holds the receipt of.
-    function _requireNoWaitingReceipt(TicketLib.ValidationStorage storage store, bytes32 ticketId, bytes32 chainKey)
+    /// @dev A ticket is not cancelled over a receipt for it that waits and can be applied now: cancelling first
+    ///  would release the reservation of a move home already holds the receipt of, and anyone can apply it instead.
+    ///  The caller already checked the token runs and the away chain is not blocked. A waiting receipt the sender's
+    ///  away balance no longer covers, or whose route check fails, cannot be applied, so it does not hold the
+    ///  cancel: it would lock the ticket open.
+    function _requireNoWaitingReceiptToApply(
+        TicketLib.ValidationStorage storage store,
+        bytes32 ticketId,
+        ITickets.Ticket storage ticket,
+        address token
+    ) private view {
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, 0);
+        ITickets.WaitingReceipt storage waiting = store.waitingReceipts[halfKey];
+        if (waiting.bodyHash == bytes32(0)) return;
+
+        bool awayBalanceCoversIt = waiting.amount <= IToken(token).awayBalanceOf(ticket.fromWallet);
+        bool routeStillAdmitsIt = _routeStillAdmits(token, waiting, halfKey);
+        bool canBeAppliedNow = awayBalanceCoversIt && routeStillAdmitsIt;
+        require(!canBeAppliedNow, ErrorsLib.ApplyWaitingReceiptFirst(ticketId, waiting.chainKey));
+    }
+
+    /// @dev Whether the route check of {ITREXMessaging-checkReceiptOrigin} admits the waiting receipt now. A failed
+    ///  check names its error. An empty reason is a check that ran out of gas, which a caller could force to skip
+    ///  it: that counts as admitted, so the cancel waits rather than passes.
+    function _routeStillAdmits(address token, ITickets.WaitingReceipt storage waiting, bytes32 halfKey)
         private
         view
+        returns (bool)
     {
-        require(
-            !store.waitingReceipts[ticketId][chainKey].exists, ErrorsLib.ApplyWaitingReceiptFirst(ticketId, chainKey)
-        );
+        try ITREXMessaging(token).checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey) {
+            return true;
+        } catch (bytes memory reason) {
+            bool ranOutOfGas = reason.length == 0;
+            return ranOutOfGas;
+        }
     }
 
     /// @dev The end of the second window: one more waiting time past `waitingEndsAt`. The public cancel opens here.

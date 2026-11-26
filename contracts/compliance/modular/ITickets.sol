@@ -58,11 +58,14 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 pragma solidity 0.8.30;
 
+import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
+
 /**
  * @title ITickets
  * @dev The compliance's issuance surface for satellite movements: the two windows a COMPLIANCE_MANAGER tunes, the
- * per-chain issuance pause, the lifecycle of every issued validation and the keeper's discard. A satellite
- * executes a transfer only against a `TicketMessage` the reference chain issued for that exact transfer;
+ * block of an away chain, the receipts waiting to be applied, the lifecycle of every issued validation and the
+ * keeper's discard. A satellite executes a transfer only against a `TicketMessage` the reference chain issued for
+ * that exact transfer;
  * this is where it comes from. A ceiling on what may be issued is a rule, not a setting: a module answers it
  * from `checkTransfer`.
  */
@@ -89,8 +92,13 @@ interface ITickets {
     event ReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
     event ReceiptDuplicate(bytes32 indexed ticketId, bytes32 indexed chainKey);
     event TicketCancelled(bytes32 indexed ticketId);
-    event ReceiptWaiting(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
-    event WaitingReceiptApplied(bytes32 indexed ticketId, bytes32 indexed chainKey);
+    event ReceiptWaiting(
+        bytes32 indexed halfKey, bytes32 indexed chainKey, address bridge, MessageTypesLib.ReceiptMessage receipt
+    );
+    event WaitingReceiptApplied(bytes32 indexed halfKey, bytes32 indexed chainKey);
+    event WaitingReceiptRefused(bytes32 indexed halfKey);
+    event AwayChainBlockStarted(bytes32 indexed chainKey);
+    event AwayChainUnblocked(bytes32 indexed chainKey);
     event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
     event ReceiptOnOlderTerms(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 seenMax);
     event MoveBreachedRule(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
@@ -104,7 +112,10 @@ interface ITickets {
     error ZeroValue();
     error ValidationSpenderRefused(bytes spender);
     error TicketAlreadyWritten(bytes32 ticketId);
-    error NoWaitingReceipt(bytes32 ticketId, bytes32 chainKey);
+    error NoWaitingReceipt(bytes32 halfKey);
+    error AwayChainNotBlocked(bytes32 chainKey);
+    error AwayChainBlocked(bytes32 chainKey);
+    error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
     error TokenPaused();
     error TicketNotCancellable(bytes32 ticketId, uint8 status);
@@ -201,22 +212,22 @@ interface ITickets {
         uint256 requestedMax;
     }
 
-    /// @dev A receipt that arrived for a ticket written and not sent, kept so that once the ticket is sent
-    /// `applyWaitingReceipt` can apply it. The delivery that carried it is consumed; this is all that is left of it.
+    /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
+    /// with `applyWaitingReceipt`. The delivery that carried it is consumed. Home keeps its hash, not its bytes: the
+    /// caller gives the receipt back from `ReceiptWaiting`, and the hash proves it. The bridge and the peer that
+    /// delivered it are kept so the route check runs again on them when it is applied.
     struct WaitingReceipt {
-        /// ERC-7930 wallet the tokens left.
-        bytes from;
-        /// ERC-7930 wallet the tokens reached.
-        bytes to;
+        /// `keccak256(abi.encode(chainKey, receipt))`, the hash a receipt is known by under its half. Zero when
+        /// nothing waits.
+        bytes32 bodyHash;
+        /// The away chain the receipt came from.
+        bytes32 chainKey;
+        /// The bridge that delivered it.
+        address deliveredBy;
+        /// The `keccak256` of the peer that sent it.
+        bytes32 peerKey;
+        /// What it moved, so a cancel can tell whether the sender's away balance covers it now.
         uint256 amount;
-        /// The ask block hash of the ticket copy the Lite executed, as it reported it.
-        bytes32 askBlockHash;
-        /// Whether a receipt waits here, since every other field may legitimately be zero or empty.
-        bool exists;
-        /// The `amountMax` of the ticket copy the away token executed, as it reported it.
-        uint256 seenMax;
-        /// The `validUntil` of that copy, as it reported it.
-        uint64 seenValidUntil;
     }
 
     /// @dev The caps on tickets toward one away chain.
@@ -254,9 +265,9 @@ interface ITickets {
     /// - The caller is the identity `from` is linked to, or authorised by the AccessManager for this selector;
     ///   otherwise reverts with `NotAuthorizedForWallet`.
     /// - The token not paused; otherwise reverts with `TokenPaused`.
-    /// - A validity window set, `from`'s chain not paused, and with a waiting time; otherwise
-    ///   `ValidityWindowNotSet`, `ValidationIssuancePaused` or `WaitingTimeNotSet`.
-    /// - `from`'s chain not blocked on the token; otherwise `AwayChainBlocked`.
+    /// - A validity window set, and `from`'s chain with a waiting time; otherwise `ValidityWindowNotSet` or
+    ///   `WaitingTimeNotSet`.
+    /// - `from`'s chain not blocked; otherwise `AwayChainBlocked`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - `from`'s chain open on the token; otherwise the token reverts with `ChainNotOpen`.
@@ -299,7 +310,7 @@ interface ITickets {
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
     /// - On an approval, the token not paused, otherwise `TokenPaused`, and the sender's chain still open,
-    ///   configured and not paused, as at a request.
+    ///   configured and not blocked, as at a request.
     ///
     /// Emits `TicketWritten` and sends the ticket, unless a receipt for it already waits here, as `askToMove`
     /// does, or emits `ValidationApprovalRefused`.
@@ -329,16 +340,42 @@ interface ITickets {
     /// @param duration The window in seconds.
     function setWaitingTime(bytes32 chainKey, uint64 duration) external;
 
-    /// @dev Stops or resumes issuing tickets involving `chainKey`. Setting the state it already has changes
-    /// nothing and emits nothing.
+    /// @dev Blocks the away chain `chainKey` on suspicion of fraud, before or after a bad receipt. While it is
+    /// blocked no ticket goes to it, none of its tickets is cancelled, and every good receipt from it waits here,
+    /// where `refuseWaitingReceipt` can delete one. The compliance also blocks a chain on its own when that chain
+    /// sends a bad receipt or a receipt that breaks its terms. Blocking a blocked chain changes nothing.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager, or be the bound token, which
+    ///   blocks the chain of a burn proof for a recall already settled.
+    ///
+    /// Emits `AwayChainBlockStarted` when the chain was not blocked.
+    /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
+    function blockAwayChain(bytes32 chainKey) external;
+
+    /// @dev Lifts the block of the away chain `chainKey`, once an investigation is over. Its waiting receipts are
+    /// then applied by anyone, so a receipt a compromised bridge delivered is refused before. Unblocking a chain
+    /// that is not blocked changes nothing.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     ///
-    /// Emits `ValidationIssuancePaused` or `ValidationIssuanceUnpaused` when the state changes.
-    /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
-    /// @param paused Whether issuance toward or from the chain is paused.
-    function setIssuancePaused(bytes32 chainKey, bool paused) external;
+    /// Emits `AwayChainUnblocked` when the chain was blocked.
+    /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
+    function unblockAwayChain(bytes32 chainKey) external;
+
+    /// @dev Deletes the receipt waiting under `halfKey`, the named step for a receipt a compromised bridge
+    /// delivered. Only while its away chain is blocked: unblocked, anyone may apply it, and the honest receipt for
+    /// the half can still land afterwards.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - A receipt must wait under `halfKey`; otherwise reverts with `NoWaitingReceipt`.
+    /// - Its away chain must be blocked; otherwise reverts with `AwayChainNotBlocked`.
+    ///
+    /// Emits `WaitingReceiptRefused`.
+    /// @param halfKey The half the receipt waits under, see {MessageTypesLib-halfKeyOf}.
+    function refuseWaitingReceipt(bytes32 halfKey) external;
 
     /// @dev Sets the caps on tickets toward the away chain `chainKey`. A receipt on older terms whose `seenMax` is
     /// above the per-ticket cap blocks that away chain. Raising a cap takes effect at once. Lowering the per-ticket
@@ -370,20 +407,23 @@ interface ITickets {
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
     /// - A ticket `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was
-    ///   sent for it; otherwise reverts with `CancelNotDue`. The rules below do not apply to it.
+    ///   sent for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop and the
+    ///   block of its away chain apply to it.
     /// - Each other id must be stored `Open`; otherwise reverts with `TicketNotCancellable`.
     /// - `block.timestamp` must be past each id's `waitingEndsAt`; otherwise reverts with `CancelNotDue`.
     /// - A caller without the role bound to this selector needs `block.timestamp` past each id's second window;
     ///   otherwise reverts with `ValidationNotPubliclyDiscardable`.
-    /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits at its bridge under the
-    ///   pause, so the one that answers the ticket may be among them.
-    /// - The sender's away chain not blocked on the token; otherwise reverts with `AwayChainBlocked`: the receipts
-    ///   held at that bridge may answer the ticket.
+    /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits under the pause, so the
+    ///   one that answers the ticket may be among them. This holds for a ticket `WaitingForApproval` too.
+    /// - The sender's away chain not blocked; otherwise reverts with `AwayChainBlocked`: its receipts wait, and may
+    ///   answer the ticket. This holds for a ticket `WaitingForApproval` too.
     /// - The sender's away chain open on the token: a receipt route set, through a bridge still recorded as a
     ///   receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
     ///   taken as missing.
-    /// - No receipt waiting under an id; otherwise reverts with `ApplyWaitingReceiptFirst`: the receipt is already
-    ///   here, and {applyWaitingReceipt} applies it first.
+    /// - No receipt for the ticket waiting that can be applied now; otherwise reverts with
+    ///   `ApplyWaitingReceiptFirst`: the receipt is already here, and {applyWaitingReceipt} applies it first. A
+    ///   waiting receipt that cannot be applied, because its route check fails or the sender's away balance is
+    ///   below it, does not hold the cancel: it would lock the ticket open with no one able to apply it.
     ///
     /// Emits `TicketCancelled` per id.
     /// @param validationIds The tickets to cancel.
@@ -402,8 +442,7 @@ interface ITickets {
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`: past it no away
     ///   token may execute.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
-    /// - Issuance toward `chainKey` must not be paused; otherwise reverts with `ValidationIssuancePaused`.
-    /// - `chainKey` must not be blocked on the token; otherwise reverts with `AwayChainBlocked`.
+    /// - `chainKey` must not be blocked; otherwise reverts with `AwayChainBlocked`.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
     /// - The caller is the identity `from` is linked to, the identity `to` is linked to when `to` is on the same
@@ -429,38 +468,37 @@ interface ITickets {
     /// @param chainKey The chain to look up.
     function waitingTimeOf(bytes32 chainKey) external view returns (uint64);
 
-    /// @dev Whether issuance is paused for movements involving `chainKey`.
-    /// @param chainKey The chain to look up.
-    function isIssuancePaused(bytes32 chainKey) external view returns (bool);
+    /// @dev Whether the away chain `chainKey` is blocked, see `blockAwayChain`.
+    /// @param chainKey The away chain to look up.
+    function isAwayChainBlocked(bytes32 chainKey) external view returns (bool);
 
     /// @dev The caps on tickets toward `chainKey`, zero until set.
     /// @param chainKey The away chain to look up.
     function ticketLimitsOf(bytes32 chainKey) external view returns (TicketLimits memory);
 
-    /// @dev Applies the receipt `chainKey` sent for `ticketId` while the ticket was written and not sent, once it is
-    /// sent. The receipt is applied exactly as it would have been at delivery, see {IReceiptHandler-receiveReceipt}:
-    /// `WaitingReceiptApplied` is emitted, or, when it breaks its terms, the away chain is blocked through
-    /// `IToken.applyVerdict`. Its own call, for anyone, rather than a step of the send: a receipt that reverts here,
-    /// a tracker module that refuses it for instance, stays waiting and can be tried again.
+    /// @dev Applies the receipt waiting under `halfKey`, as it would have been applied at delivery, see
+    /// {IReceiptHandler-receiveReceipt}: `WaitingReceiptApplied` is emitted, and the away chain is blocked when the
+    /// receipt breaks its terms. Anyone may call it once the receipt can be applied. The route check runs again on
+    /// the bridge and peer that delivered it, so a bridge distrusted, a route closed or a peer replaced meanwhile
+    /// refuses it. A receipt that reverts here, a tracker module that refuses it for instance, stays waiting.
     ///
     /// Requirements:
-    /// - A receipt must wait under `(ticketId, chainKey)` and the ticket be sent (its ask block hash written);
-    ///   otherwise reverts with `NoWaitingReceipt`.
-    /// - The token must not be paused; otherwise reverts with `TokenPaused`. A delivered receipt waits under the
-    ///   pause the same way.
-    /// - `chainKey` must not be blocked on the token; otherwise reverts with `AwayChainBlocked`.
+    /// - `receipt` must be the one waiting under `halfKey`; otherwise reverts with `NoWaitingReceipt`.
+    /// - Its ticket must be sent; otherwise reverts with `NoWaitingReceipt`.
+    /// - The token must not be paused; otherwise reverts with `TokenPaused`.
+    /// - Its away chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
+    /// - The sender's away balance must cover the amount; otherwise reverts with `InsufficientBridgedBalance`.
+    /// - The route check of {ITREXMessaging-checkReceiptOrigin} must pass; otherwise the token reverts with its
+    ///   error.
     ///
-    /// Emits `WaitingReceiptApplied`, or the block of the away chain.
-    /// @param ticketId The ticket the waiting receipt belongs to.
-    /// @param chainKey The chain the receipt came from, keyed as `MessageTypesLib.chainKey` computes it.
-    function applyWaitingReceipt(bytes32 ticketId, bytes32 chainKey) external;
+    /// Emits `WaitingReceiptApplied`, and `AwayChainBlockStarted` on broken terms.
+    /// @param halfKey The half the receipt waits under, see {MessageTypesLib-halfKeyOf}.
+    /// @param receipt The receipt, as `ReceiptWaiting` carried it.
+    function applyWaitingReceipt(bytes32 halfKey, MessageTypesLib.ReceiptMessage calldata receipt) external;
 
-    /// @dev The receipt `chainKey` sent for `ticketId` while the ticket was written and not sent, `exists` false when
-    /// none waits. Applied by `applyWaitingReceipt` once the ticket is sent; left waiting for good when it is
-    /// refused or never answered.
-    /// @param ticketId The ticket to look up.
-    /// @param chainKey The chain the receipt came from, keyed as `MessageTypesLib.chainKey` computes it.
-    function waitingReceiptOf(bytes32 ticketId, bytes32 chainKey) external view returns (WaitingReceipt memory);
+    /// @dev The receipt waiting under `halfKey`, `bodyHash` zero when none waits.
+    /// @param halfKey The half to look up, see {MessageTypesLib-halfKeyOf}.
+    function waitingReceiptOf(bytes32 halfKey) external view returns (WaitingReceipt memory);
 
     /// @dev Everything kept for `ticketId`, all zeros when the id was never issued.
     /// @param ticketId The validation to look up.

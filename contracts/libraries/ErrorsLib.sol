@@ -236,11 +236,8 @@ library ErrorsLib {
     error ValidationSpenderRefused(bytes spender);
     /// @dev A validity or reconciliation window must be positive.
     error ZeroDuration();
-    /// @dev Issuance involving this chain is paused by the manager.
-    error ValidationIssuancePaused(bytes32 chainKey);
     /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused,
-    ///  none whose receipt may be in flight is cancelled, and a waiting receipt, like a delivered one, is applied
-    ///  only once it is unpaused.
+    ///  none whose receipt may be in flight is cancelled, and a waiting receipt is applied only once it is unpaused.
     error TokenPaused();
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
@@ -273,8 +270,10 @@ library ErrorsLib {
     error UnknownTicket(bytes32 ticketId);
     /// @dev The id of the whole request is already recorded: the same request, salt included, was asked twice.
     error TicketAlreadyWritten(bytes32 ticketId);
-    /// @dev No receipt waits under this id for this chain, or the ticket is not sent yet.
-    error NoWaitingReceipt(bytes32 ticketId, bytes32 chainKey);
+    /// @dev No receipt waits under this half with the body given, or its ticket is not sent yet.
+    error NoWaitingReceipt(bytes32 halfKey);
+    /// @dev A waiting receipt is refused by hand only while its away chain is blocked.
+    error AwayChainNotBlocked(bytes32 chainKey);
     /// @dev A receipt `chainKey` sent for this ticket waits here: it is applied first, so that the ticket is not
     ///  cancelled over a receipt this chain already holds.
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);

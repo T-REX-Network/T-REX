@@ -47,7 +47,6 @@ import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.so
 import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -114,7 +113,6 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
-        vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
 
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
@@ -219,10 +217,10 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_requestTransferValidation_RevertWhen_FromChainIsPaused() public configured {
-        mc.setIssuancePaused(polygon, true);
+        mc.blockAwayChain(polygon);
 
         vm.prank(aliceIdentity);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationIssuancePaused.selector, polygon));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         mc.askToMove(fromSat, toSat, 10, 90, "", _salt());
     }
 
@@ -237,8 +235,8 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_requestTransferValidation_Success_AfterTheChainIsUnpaused() public configured {
-        mc.setIssuancePaused(polygon, true);
-        mc.setIssuancePaused(polygon, false);
+        mc.blockAwayChain(polygon);
+        mc.unblockAwayChain(polygon);
 
         bytes32 salt = _salt();
         vm.prank(aliceIdentity);

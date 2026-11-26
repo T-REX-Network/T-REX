@@ -221,7 +221,6 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.chains[KEY].chainReference = hex"02";
         messagingStorage.pins[KEY].bridge = address(0x3);
         messagingStorage.pins[KEY].peerKey = bytes32(uint256(0x4));
-        messagingStorage.inboundPaused[KEY] = true;
         messagingStorage.ticketRoutes[KEY] = address(0x5);
         messagingStorage.awayReceiptBridges[KEY].chainSelector = 0x6;
         messagingStorage.awayReceiptBridges[KEY].bridge = hex"07";
@@ -236,9 +235,8 @@ contract NamespaceFieldsTest is Test {
         bytes32 pin = _entry(_field(base, 5), KEY);
         assertEq(_word(_field(pin, 0)), 0x3, "pins.bridge");
         assertEq(_word(_field(pin, 1)), 0x4, "pins.peerKey");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 1, "inboundPaused");
-        assertEq(_word(_entry(_field(base, 7), KEY)), 0x5, "ticketRoutes");
-        bytes32 awaySide = _entry(_field(base, 8), KEY);
+        assertEq(_word(_entry(_field(base, 6), KEY)), 0x5, "ticketRoutes");
+        bytes32 awaySide = _entry(_field(base, 7), KEY);
         assertEq(_word(_field(awaySide, 0)), 0x6, "awayReceiptBridges.chainSelector");
         assertEq(_slot(_field(awaySide, 1)), _shortBytes(0x07), "awayReceiptBridges.bridge");
     }
@@ -319,7 +317,6 @@ contract NamespaceFieldsTest is Test {
 
         validationStorage.defaultValidityWindow = 11;
         validationStorage.waitingTimes[KEY] = 12;
-        validationStorage.issuancePaused[KEY] = true;
         ITickets.Ticket storage validation = validationStorage.validations[bytes32(NUMBER)];
         validation.askBlockHash = bytes32(uint256(21));
         validation.amountMin = 22;
@@ -340,41 +337,38 @@ contract NamespaceFieldsTest is Test {
         validation.salt = bytes32(uint256(33));
         validation.requestedMax = 34;
         validationStorage.awaitedTerms[bytes32(NUMBER)] = TicketLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
-        ITickets.WaitingReceipt storage parked = validationStorage.waitingReceipts[bytes32(NUMBER)][KEY];
-        parked.from = hex"05";
-        parked.to = hex"06";
-        parked.amount = 31;
-        parked.askBlockHash = bytes32(uint256(32));
-        parked.exists = true;
-        parked.seenMax = 39;
-        parked.seenValidUntil = 40;
+        ITickets.WaitingReceipt storage waiting = validationStorage.waitingReceipts[KEY];
+        waiting.bodyHash = bytes32(uint256(31));
+        waiting.chainKey = bytes32(uint256(32));
+        waiting.deliveredBy = ALICE;
+        waiting.peerKey = bytes32(uint256(39));
+        waiting.amount = 40;
         validationStorage.receiptHashes[KEY] = bytes32(uint256(35));
         validationStorage.ticketLimits[KEY] = ITickets.TicketLimits({ perTicketCap: 36, perWindowCap: 37 });
         validationStorage.latestValidUntilSent[KEY] = 38;
+        validationStorage.blockedAwayChains[KEY] = true;
 
         assertEq(_word(_field(base, 0)), 11, "defaultValidityWindow");
         assertEq(_word(_entry(_field(base, 1), KEY)), 12, "waitingTimes");
-        assertEq(_word(_entry(_field(base, 2), KEY)), 1, "issuancePaused");
 
-        bytes32 terms = _entry(_field(base, 4), bytes32(NUMBER));
+        bytes32 terms = _entry(_field(base, 3), bytes32(NUMBER));
         assertEq(_slot(_field(terms, 0)), _shortBytes(0x03), "awaitedTerms.to");
         assertEq(_slot(_field(terms, 1)), _shortBytes(0x04), "awaitedTerms.spender");
 
-        bytes32 leg = _entry(_entry(_field(base, 5), bytes32(NUMBER)), KEY);
-        assertEq(_slot(_field(leg, 0)), _shortBytes(0x05), "waitingReceipts.from");
-        assertEq(_slot(_field(leg, 1)), _shortBytes(0x06), "waitingReceipts.to");
-        assertEq(_word(_field(leg, 2)), 31, "waitingReceipts.amount");
-        assertEq(_word(_field(leg, 3)), 32, "waitingReceipts.askBlockHash");
-        assertEq(_word(_field(leg, 4)), 1, "waitingReceipts.exists");
-        assertEq(_word(_field(leg, 5)), 39, "waitingReceipts.seenMax");
-        assertEq(_word(_field(leg, 6)), 40, "waitingReceipts.seenValidUntil");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 35, "receiptHashes");
-        bytes32 limits = _entry(_field(base, 7), KEY);
+        bytes32 waitingSlot = _entry(_field(base, 4), KEY);
+        assertEq(_word(_field(waitingSlot, 0)), 31, "waitingReceipts.bodyHash");
+        assertEq(_word(_field(waitingSlot, 1)), 32, "waitingReceipts.chainKey");
+        assertEq(_word(_field(waitingSlot, 2)), uint256(uint160(ALICE)), "waitingReceipts.deliveredBy");
+        assertEq(_word(_field(waitingSlot, 3)), 39, "waitingReceipts.peerKey");
+        assertEq(_word(_field(waitingSlot, 4)), 40, "waitingReceipts.amount");
+        assertEq(_word(_entry(_field(base, 5), KEY)), 35, "receiptHashes");
+        bytes32 limits = _entry(_field(base, 6), KEY);
         assertEq(_word(_field(limits, 0)), 36, "ticketLimits.perTicketCap");
         assertEq(_word(_field(limits, 1)), 37, "ticketLimits.perWindowCap");
-        assertEq(_word(_entry(_field(base, 8), KEY)), 38, "latestValidUntilSent");
+        assertEq(_word(_entry(_field(base, 7), KEY)), 38, "latestValidUntilSent");
+        assertEq(_word(_entry(_field(base, 8), KEY)), 1, "blockedAwayChains");
 
-        bytes32 entry = _entry(_field(base, 3), bytes32(NUMBER));
+        bytes32 entry = _entry(_field(base, 2), bytes32(NUMBER));
         assertEq(_word(_field(entry, 0)), 21, "validations.askBlockHash");
         assertEq(_word(_field(entry, 1)), 22, "validations.amountMin");
         assertEq(_word(_field(entry, 2)), 23, "validations.amountMax");

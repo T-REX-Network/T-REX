@@ -60,7 +60,6 @@
 pragma solidity 0.8.30;
 
 import { IERC3643 } from "../ERC-3643/IERC3643.sol";
-import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 
 /// @title IToken
 /// @notice The T-REX token surface beyond ERC-3643: the ledger views the standard does not define.
@@ -201,13 +200,6 @@ interface IToken is IERC3643 {
         address onchainIdAddress,
         address accessManagerAddress
     ) external;
-
-    /// @notice Applies a verdict the compliance reached outside a delivery: a receipt that waited for its ticket to
-    ///  be sent, applied by `applyWaitingReceipt`, gets the same block it would have got at delivery, see
-    ///  {IReceiptHandler-Verdict}. Callable by the bound compliance alone.
-    /// @param chainKey the chain the receipt came from
-    /// @param verdict what to apply; `None` applies nothing
-    function applyVerdict(bytes32 chainKey, IReceiptHandler.Verdict verdict) external;
 
     /// @dev Sends a compliance validation to this token's peer on `chainKey`. Callable by the bound compliance alone.
     function dispatchComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes calldata body)

@@ -107,7 +107,7 @@ contract RouteSwitchTest is InteropSuiteTest {
     /// @dev A receipt the compliance refused for an unknown id: left deliverable, nothing blocked, the token open.
     function _assertLeftDeliverable(ERC7786GatewayMock gateway, uint256 index) private view {
         assertFalse(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "still deliverable");
-        assertFalse(token.isInboundPaused(satellite), "an unknown id blocks nobody");
+        assertFalse(boundCompliance.isAwayChainBlocked(satellite), "an unknown id blocks nobody");
         assertFalse(token.paused(), "the token itself stays open");
     }
 

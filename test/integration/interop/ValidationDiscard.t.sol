@@ -46,6 +46,7 @@ import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
+import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { TicketsHarness } from "test/integration/helpers/TicketsHarness.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
@@ -63,13 +64,15 @@ contract ValidationDiscardTest is InteropSuiteTest {
     CappedRecipientModule internal cappedRule;
     uint256 internal issuedAt;
     bytes32 internal id;
+    ERC7786GatewayMock internal polygonBridge;
 
     function setUp() public override {
         super.setUp();
         // Running: a paused token refuses every request (TokenPaused).
         vm.prank(agent);
         token.unpause();
-        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
+        polygonBridge = _newReceiptBridge(POLYGON);
+        _openEvmChain(token, POLYGON, address(polygonBridge));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
@@ -195,12 +198,15 @@ contract ValidationDiscardTest is InteropSuiteTest {
         boundCompliance.cancelTickets(_ids(id));
     }
 
-    /// @notice A chain whose inbound is paused may hold the report that settles the validation at its gateway;
-    ///         the discard waits for the pauser.
+    /// @notice A blocked away chain's receipt waits at home and may answer the ticket, so the cancel waits for the
+    ///         pauser. Once the block is lifted, the cancel is refused while that receipt can be applied: whoever
+    ///         wants the ticket to move on applies it first, and the cancel never wins the race.
     function test_discardExpiredValidations_RevertWhen_TheChainsInboundIsPaused_ThenDiscardsOnceLifted() public {
-        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         vm.prank(agent);
-        token.setInboundPaused(polygon, true);
+        boundCompliance.blockAwayChain(polygon);
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement(id, aliceSat, bobSat, 40);
+        polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
+        vm.warp(issuedAt + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
         vm.prank(keeper);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
@@ -208,10 +214,14 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
 
         vm.prank(agent);
-        token.setInboundPaused(polygon, false);
+        boundCompliance.unblockAwayChain(polygon);
         vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, id, polygon));
         boundCompliance.cancelTickets(_ids(id));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
+
+        boundCompliance.applyWaitingReceipt(id, receipt);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+        assertEq(token.awayBalanceOf(bobSat), 40);
     }
 
     /// @notice One refused id reverts the whole batch and releases nothing.

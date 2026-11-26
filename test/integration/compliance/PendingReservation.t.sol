@@ -200,8 +200,7 @@ contract PendingReservationTest is InteropSuiteTest {
             uint8(ITickets.TicketStatus.Open),
             "the fresh validation is still holding its reservation"
         );
-        assertFalse(boundCompliance.isIssuancePaused(polygon), "nothing stops asks by itself");
-        assertFalse(token.isInboundPaused(polygon), "nor blocks the away chain");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nor blocks the away chain");
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));

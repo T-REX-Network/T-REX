@@ -130,9 +130,6 @@ library TREXMessagingLib {
         /// The receipt route and peer each half left through, written when it first leaves and never rewritten.
         mapping(bytes32 halfKey => Pin pin) pins;
 
-        /// Chains whose messages are refused, and left deliverable, until the pauser lifts it.
-        mapping(bytes32 chainKey => bool paused) inboundPaused;
-
         /// The ticket bridge carrying tickets only, per chain, ahead of the chain's finality. Zero sends them on
         /// `receiptRoutes`. Never carries a money message, and never delivers anything to this token.
         mapping(bytes32 chainKey => address bridge) ticketRoutes;
@@ -275,19 +272,6 @@ library TREXMessagingLib {
         emit EventsLib.PeerSet(chainKey, peer);
     }
 
-    /// @dev See {ITREXMessaging-setInboundPaused}. Authorization is the caller's. Idempotent: the same state again
-    /// changes nothing and emits nothing. A chain registered by a route or a peer is never deregistered, and a
-    /// message is attributed only to a registered chain, so the token's own call on a verdict never meets the
-    /// registration refusal; it is there for a pauser's typo.
-    function setInboundPaused(bytes32 chainKey, bool pause) external {
-        MessagingStorage storage s = layout();
-        require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
-        if (s.inboundPaused[chainKey] == pause) return;
-        s.inboundPaused[chainKey] = pause;
-        if (pause) emit EventsLib.InboundPaused(chainKey);
-        else emit EventsLib.InboundUnpaused(chainKey);
-    }
-
     /* ----- Outbound ----- */
 
     /// @dev Sends a ticket to this token's peer on `chainKey`, through the chain's ticket route when one is set and
@@ -355,11 +339,10 @@ library TREXMessagingLib {
     /// must still admit that away chain at full finality only. A receipt comes from the bridge and peer its half
     /// was pinned to, or from the chain's current ones; a burn proof for a recall still open comes from the peer
     /// and bridge that recall was sent to, so a later route or peer change cannot strand it, and any other burn
-    /// proof from the current peer and route. A chain whose inbound is paused is refused last, once the message is
-    /// attributed to it, so the revert undoes the replay guard's record and the delivery stays deliverable. Acting
-    /// on the message is left to the token, since only it knows its compliance and its pause. That the bridge is a
-    /// receipt bridge is the caller's check, made before this is reached, so a distrusted bridge is refused even
-    /// when pinned.
+    /// proof from the current peer and route. A blocked away chain is not refused here: its receipts are the
+    /// compliance's to keep waiting. Acting on the message is left to the token, since only it knows its compliance
+    /// and its pause. That the bridge is a receipt bridge is the caller's check, made before this is reached, so a
+    /// distrusted bridge is refused even when pinned.
     /// @return messageType `RECEIPT` or `BURN_PROOF`; anything else reverts.
     /// @return chainKey The chain the message is attributed to.
     /// @return body The still-encoded body, of the type `messageType` names.
@@ -396,22 +379,41 @@ library TREXMessagingLib {
         // Everything a token receives reports value that moved, so the bridge must still wait for full finality.
         AwayReceiptBridge storage awaySide = s.awayReceiptBridges[chainKey];
         _requireFullFinality(gateway, chainKey, awaySide.chainSelector, awaySide.bridge);
-
-        require(!s.inboundPaused[chainKey], ErrorsLib.AwayChainBlocked(chainKey));
     }
 
-    /// @dev Hands an admitted settlement to `handler`, decoded, and reports the handler's verdict.
+    /// @dev See {ITREXMessaging-checkReceiptOrigin}: the checks {acceptMessage} ran on the delivery, on the bridge
+    ///  and peer the compliance kept, and with the registry and the routes as they are now.
+    function checkReceiptOrigin(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes32 halfKey)
+        external
+        view
+    {
+        MessagingStorage storage s = layout();
+        require(s.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
+
+        bool fromThePinnedPair = _isFromThePinnedPair(s, bridge, chainKey, senderPeerKey, halfKey);
+        if (!fromThePinnedPair) {
+            require(senderPeerKey == keccak256(peerFor(chainKey)), ErrorsLib.PeerChanged(chainKey));
+            _requireCurrentRoute(s, bridge, chainKey);
+        }
+
+        AwayReceiptBridge storage awaySide = s.awayReceiptBridges[chainKey];
+        _requireFullFinality(bridge, chainKey, awaySide.chainSelector, awaySide.bridge);
+    }
+
+    /// @dev Hands an admitted settlement to `handler`, decoded, with the bridge and the peer that delivered it.
     ///
-    /// The token calls this from inside its own pause and reentrancy checks. Run by DELEGATECALL, so
-    /// the handler sees the token as its caller, which is the only caller a compliance accepts.
+    /// The token calls this from inside its own reentrancy check. Run by DELEGATECALL, so the handler sees the
+    /// token as its caller, which is the only caller a compliance accepts.
     /// @param handler The token's bound compliance.
     /// @param body A settlement body, as {acceptMessage} returned it.
-    /// @return verdict `None`, or the block of the sending away chain the handler asks for on a bad receipt.
-    function forwardSettlement(address handler, bytes32 chainKey, bytes memory body)
-        external
-        returns (IReceiptHandler.Verdict verdict)
-    {
-        return IReceiptHandler(handler).receiveReceipt(chainKey, MessageTypesLib.decodeSettlement(body));
+    function forwardSettlement(
+        address handler,
+        bytes32 chainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        bytes memory body
+    ) external {
+        IReceiptHandler(handler).receiveReceipt(chainKey, bridge, senderPeerKey, MessageTypesLib.decodeSettlement(body));
     }
 
     /* ----- Storage ----- */
@@ -483,14 +485,26 @@ library TREXMessagingLib {
         bytes calldata sender,
         bytes32 halfKey
     ) private view {
-        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
-
-        Pin storage pin = s.pins[halfKey];
-        bool fromThePinnedPair = pin.bridge == gateway && pin.peerKey == keccak256(sender);
+        bool fromThePinnedPair = _isFromThePinnedPair(s, gateway, chainKey, keccak256(sender), halfKey);
         if (fromThePinnedPair) return;
 
         _requireCurrentPeer(chainKey, sender);
         _requireCurrentRoute(s, gateway, chainKey);
+    }
+
+    /// @dev Whether `gateway` and the peer `senderPeerKey` are the pair the half was pinned to. A closed chain is
+    ///  refused first, pinned or not.
+    function _isFromThePinnedPair(
+        MessagingStorage storage s,
+        address gateway,
+        bytes32 chainKey,
+        bytes32 senderPeerKey,
+        bytes32 halfKey
+    ) private view returns (bool) {
+        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+
+        Pin storage pin = s.pins[halfKey];
+        return pin.bridge == gateway && pin.peerKey == senderPeerKey;
     }
 
     function _requireCurrentPeer(bytes32 chainKey, bytes calldata sender) private view {
