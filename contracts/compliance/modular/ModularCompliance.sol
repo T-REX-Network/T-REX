@@ -81,6 +81,7 @@ import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
 import { ReceiptLib } from "./ReceiptLib.sol";
+import { SecondHalfLib } from "./SecondHalfLib.sol";
 import { TicketLib } from "./TicketLib.sol";
 import { Tickets } from "./Tickets.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
@@ -290,10 +291,7 @@ contract ModularCompliance is
     /* ----- Block an away chain ----- */
 
     /// @inheritdoc ITickets
-    /// @dev The bound token may block too, without a role: it blocks the chain of a burn proof for a recall already
-    ///  settled, as the compliance does for a bad receipt.
-    function blockAwayChain(bytes32 chainKey) external {
-        if (msg.sender != _getTokenBound()) _checkCanCall(msg.sender, _msgData());
+    function blockAwayChain(bytes32 chainKey) external restricted {
         TicketLib.blockAwayChain(chainKey);
     }
 
@@ -319,6 +317,16 @@ contract ModularCompliance is
     /// @dev Not `restricted`: anyone may cancel, once the ticket's clock allows it.
     function cancelTickets(bytes32[] calldata validationIds) external {
         ReceiptLib.cancelTickets(validationIds, _getTokenBound());
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev The checks, the record and the send live in {SecondHalfLib-bringHome}.
+    function bringHome(bytes calldata awayWallet, uint256 amount, address homeWallet, bytes32 salt)
+        external
+        restricted
+        returns (bytes32)
+    {
+        return SecondHalfLib.bringHome(awayWallet, amount, homeWallet, salt, _getTokenBound());
     }
 
     /**
@@ -403,15 +411,8 @@ contract ModularCompliance is
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
     }
 
-    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
-    ///  and no module is told. The recall it precedes is reported by {agentTransferred} once the token minted.
-    function syncOwner(address wallet) external onlyBoundToken {
-        address token = _getTokenBound();
-        ComplianceLedgerLib.currentOwner(token, wallet, address(_registryOf(token).identity(wallet)), 0);
-    }
-
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced, recovery and recall paths so that the trackers learn what moved the tokens.
+    ///  the token's forced and recovery paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         _applyMovement(from, to, amount, kind);
@@ -427,9 +428,7 @@ contract ModularCompliance is
     ///  to the new owner here, before the movement itself is counted.
     ///
     ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
-    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A recall names the
-    ///  native wallet on both sides too, after its mint: `syncOwner` settled that wallet's owner before the mint, so
-    ///  no owner is left to follow here.
+    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same.
     ///
     ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
     ///  is not taken for it.
@@ -438,7 +437,7 @@ contract ModularCompliance is
         ITREXRegistry registry = _registryOf(token);
         address fromIdentity;
         address toIdentity;
-        // A self-transfer leaves the balance where it was, and so does a recall, reported after its mint.
+        // A self-transfer leaves the balance where it was.
         bool balanceUnchanged = from == to;
         int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
         if (from != address(0)) {

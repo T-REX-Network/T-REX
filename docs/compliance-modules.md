@@ -109,16 +109,16 @@ asked about those two, so a `TRANSFER_CHECK` module only ever sees `TRANSFER`, `
 position does not move. A tracker of the investor's own activity leaves it out like `FORCED_TRANSFER` and
 `RECOVERY`; a holder count sees no change of ownership.
 
-`RECALL` is the way back, a recall answered by a satellite's burn proof: the exact inverse of a `DELEGATION`, so a
-module that debited the out-leg has the in-leg to credit. `fromWallet` and `toWallet` are both the native wallet
-the credit landed on, as on the way out; the position does not move, and no rule is asked. Before the credit lands
-the token calls `syncOwner(nativeWallet)`, which settles who owns that wallet: an empty wallet the registry
-relinked takes its new owner, a funded one is refused until the registry names the owner the ledger credited. The
-credit is already counted in that identity's position as a bridged one, so nothing else moves. The `RECALL` is
-reported after the mint, through `agentTransferred` like the `DELEGATION`, with both identities the owner that
-sync settled on. The mint itself goes through no hook, so a module never sees a plain `MINT` of tokens it saw
-leave as a `DELEGATION`. A tracker of the investor's own activity leaves it out; a module keeping its own record
-of native balances credits it, and needs no reseed after a round trip.
+`RECALL` is the way back, an agent's bring home answered by the away token's receipt: the inverse of a
+`DELEGATION`, so a module that debited the out-leg has the in-leg to credit. `fromWallet` and `toWallet` are both
+the home wallet the credit landed on; the position does not move, and no rule is asked. Before the credit lands the
+compliance settles who owns that wallet: an empty wallet the registry relinked takes its new owner, a funded one
+refuses the receipt until the registry names the owner the ledger credited. The credit is already counted in that
+identity's position as an away one, so nothing else moves. The compliance tells the `RECALL` once the mint is done,
+with both identities the bring home's. The mint itself goes through no hook, so a module never sees a plain `MINT`
+of tokens it saw leave as a `DELEGATION`. A tracker of the investor's own activity leaves it out; a module keeping
+its own record of native balances credits it, and needs no reseed after a round trip. A bring home whose home
+wallet is no longer the identity's is sent back to the away wallet and tells nobody.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that

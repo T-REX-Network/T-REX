@@ -92,10 +92,9 @@ library MovementKindLib {
     /// A home wallet's move out to an away wallet, burned at home and minted on the away chain by its second half.
     /// The receiver may be another identity: the rules were asked at the ask. Told once, when the move is done.
     uint8 internal constant DELEGATION = 7;
-    /// A bridged position brought back from a remote wallet onto a native wallet of the same identity, answered by
-    /// a burn proof. `fromWallet` and `toWallet` are both the native wallet the
-    /// credit landed on: the position keeps its owner. Reported after the mint, once `syncOwner` settled the
-    /// owner of that wallet, so both sides resolve to the identity the registry names now.
+    /// A bring home: an away position brought back onto a home wallet of the same identity, answered by the away
+    /// token's receipt. `fromWallet` and `toWallet` are both the home wallet the credit landed on: the position keeps
+    /// its owner. Told once the mint is done, after the owner of that wallet was settled.
     uint8 internal constant RECALL = 8;
 
 }

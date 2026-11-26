@@ -76,7 +76,6 @@ import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { RolesLib } from "../libraries/RolesLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
-import { IToken } from "../token/IToken.sol";
 
 /// @title TREXAccessManager
 /// @notice The AccessManager of a T-REX suite. It knows the suite's own role layout: which role opens
@@ -233,8 +232,8 @@ contract TREXAccessManager is AccessManagerUpgradeable {
             _setComplianceFunctionRoles(compliance, domainId);
         }
 
-        // The token registers wallets on recovery and dispatches cross-chain instructions, so it acts as
-        // an agent of its registry. Only the registry writes into the storage, never a person.
+        // The token registers wallets on recovery, so it acts as an agent of its registry. Only the registry
+        // writes into the storage, never a person.
         _grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0, NO_EXECUTION_DELAY);
         _grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry, 0, NO_EXECUTION_DELAY);
     }
@@ -278,11 +277,6 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(token, ITREXMessaging.setTicketRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.replaceHostilePeer.selector, identityManagerRole);
-
-        // Cross-chain instructions.
-        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-        _setTargetFunctionRole(token, IToken.instructRecall.selector, agentRole);
-        _setTargetFunctionRole(token, IToken.resend.selector, agentRole);
 
         // From here on, one agent verb per role. Each batch has a row of its own, on the role of its single-item
         // function: without one it falls back to ADMIN_ROLE, and an agent granted with an execution delay could
@@ -394,9 +388,11 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(compliance, ITickets.setAskLimits.selector, complianceManagerRole);
         _setTargetFunctionRole(compliance, ITickets.setAskLimitOf.selector, complianceManagerRole);
 
-        // Asking to move any wallet's tokens. Asking for a receipt and cancelling are open to anyone.
+        // Asking to move any wallet's tokens, and bringing an away wallet's tokens home. Asking for a receipt,
+        // sending a second half again and cancelling are open to anyone.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
         _setTargetFunctionRole(compliance, ITickets.askToMove.selector, agentRole);
+        _setTargetFunctionRole(compliance, ITickets.bringHome.selector, agentRole);
 
         // Blocking an away chain, lifting the block, and refusing a receipt waiting from a blocked chain.
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);

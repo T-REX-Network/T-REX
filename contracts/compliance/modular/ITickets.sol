@@ -155,6 +155,10 @@ interface ITickets {
     error NonCanonicalInteroperableAddress(bytes envelope);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
+    error WalletsNotLinked(address nativeWallet, bytes wallet);
+    error BringHomeAlreadyOpen(bytes32 walletKey, bytes32 ticketId);
+    error WaitingTimeNotSet(bytes32 chainKey);
+    error NotASatelliteWallet(bytes wallet);
 
     /// @dev What a ticket is for. Part of the ticket id, so a holder's move and an agent's bring home asked with the
     /// same wallet and salt never share an id.
@@ -237,7 +241,8 @@ interface ITickets {
 
         /* ----- Written once, at issuance; last for the layout's sake ----- */
 
-        /// The requester's nonce the id was derived from, carried in the issued body and kept for a resend.
+        /// The requester's nonce the id was derived from, carried in the issued body and kept for an ask for the
+        /// receipt.
         bytes32 salt;
         /// The upper bound as asked, before it was narrowed to `amountMax`: part of the id, and carried in the ticket.
         uint256 requestedMax;
@@ -269,6 +274,14 @@ interface ITickets {
         bool secondHalfOwed;
         /// How many second halves this money on hold has had, at most `MAX_NEW_HALVES`.
         uint8 newHalves;
+
+        /* ----- What the ticket is for; last for the layout's sake ----- */
+
+        /// A holder's move, or an agent's bring home.
+        TicketKind kind;
+        /// The home wallet a bring home mints to; zero for a move. Kept because the bring home's receipt names only
+        /// the wallet it burned.
+        address homeWallet;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
@@ -514,8 +527,7 @@ interface ITickets {
     /// sends a bad receipt or a receipt that breaks its terms. Blocking a blocked chain changes nothing.
     ///
     /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager, or be the bound token, which
-    ///   blocks the chain of a burn proof for a recall already settled.
+    /// - The caller must hold the role bound to this selector by the AccessManager.
     ///
     /// Emits `AwayChainBlockStarted` when the chain was not blocked.
     /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
@@ -575,7 +587,8 @@ interface ITickets {
     /// - A ticket `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was
     ///   sent for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop and the
     ///   block of its away chain apply to it.
-    /// - Each other id must be stored `Open`; otherwise reverts with `TicketNotCancellable`.
+    /// - Each other id must be a move stored `Open`; otherwise reverts with `TicketNotCancellable`. A bring home is
+    ///   never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
     /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` more than one waiting time past
     ///   that ask; otherwise reverts with `CancelNotDue`.
     /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits under the pause, so the
@@ -607,7 +620,8 @@ interface ITickets {
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
     /// - `chainKey` must be the sender's chain; otherwise reverts with `ChainNotPartOfValidation`.
-    /// - It must be stored `Open`; otherwise reverts with `ValidationNotResendable`.
+    /// - It must be a move stored `Open`; otherwise reverts with `ValidationNotResendable`. A bring home is sent
+    ///   again with `sendSecondHalf`.
     /// - Fewer than `MAX_RECEIPT_ASKS` asks standing; otherwise reverts with `NoAsksLeft`.
     /// - `block.timestamp` at or after the next ask's time; otherwise reverts with `SendNotDue`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
@@ -628,7 +642,8 @@ interface ITickets {
 
     /// @dev Sends the owed second half of a move, or sends its latest half again, for anyone. The money of the move is
     /// on hold at home, and the half mints it to `wallet` on its away chain: the receiver's wallet, or the sender's on
-    /// a return. `wallet` is the one envelope the record does not keep; it is read off `SecondHalfSent`.
+    /// a return. The half of an open bring home burns from `wallet` instead, and is sent again the same way.
+    /// `wallet` is the one envelope the record does not keep; it is read off `SecondHalfSent`.
     ///
     /// An owed half, one that died answered zero after its valid until, is sent as a new half, with a fresh valid
     /// until: the send time plus the waiting time of its chain. At most `MAX_NEW_HALVES` halves per money on hold.
@@ -642,8 +657,8 @@ interface ITickets {
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - It must hold money on hold with a second half, and that half must be owed or have sends left; otherwise
-    ///   reverts with `SecondHalfNotOwed`.
+    /// - It must hold money on hold with a second half, or be an open bring home, and that half must be owed or have
+    ///   sends left; otherwise reverts with `SecondHalfNotOwed`.
     /// - `wallet` must have the key of the half's wallet; otherwise reverts with `ValidationBodyMismatch`.
     /// - The token must not be paused, `wallet`'s chain not blocked and no hostile change running on it; otherwise
     ///   reverts with `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
@@ -655,6 +670,43 @@ interface ITickets {
     /// @param ticketId The ticket whose money is on hold.
     /// @param wallet ERC-7930 interoperable address of the wallet the half mints to.
     function sendSecondHalf(bytes32 ticketId, bytes calldata wallet) external;
+
+    /// @dev Brings an away wallet's tokens home to a home wallet of the same identity: a move of place, never of owner.
+    /// Writes an `Open` ticket of kind `BRING_HOME`, reserves `amount` on the away wallet in the same table as every
+    /// ticket, and sends its half, a `BRING_HOME`, on the receipt route with its own valid until: now plus the waiting
+    /// time of the wallet's chain. The away token burns what the wallet still holds, up to `amount`, and its receipt
+    /// is applied as any receipt: what it burned is minted to `homeWallet` when that wallet is still linked to the
+    /// identity and verified, and sent back to `awayWallet` by a `MOVE_OUT` otherwise; a zero answer ends the bring
+    /// home `Done` with nothing moved. A lost half or receipt is asked for again with `sendSecondHalf`.
+    ///
+    /// The id is built from the request, as a move's is, under the kind `BRING_HOME`: the same request lands under
+    /// the same id in any block, and a move and a bring home with the same wallets and salt never share one.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `amount` not zero; otherwise reverts with `ZeroValue`.
+    /// - `awayWallet` canonical and on another chain; otherwise `NonCanonicalInteroperableAddress` or
+    ///   `NotASatelliteWallet`.
+    /// - The token not paused, otherwise `TokenPaused`; the wallet's chain not blocked, otherwise `AwayChainBlocked`;
+    ///   no hostile change running on it, otherwise `HostileChangeNotOver`; and a waiting time set for it, otherwise
+    ///   `WaitingTimeNotSet`.
+    /// - `homeWallet` and `awayWallet` linked to one existing identity; otherwise reverts with `WalletsNotLinked`.
+    /// - No other bring home open on `awayWallet`; otherwise reverts with `BringHomeAlreadyOpen`.
+    /// - `amount` at most the wallet's free balance, its away balance less what is reserved; otherwise reverts with
+    ///   `RequestAboveBalance`.
+    /// - The id not yet recorded; otherwise reverts with `TicketAlreadyWritten`.
+    /// - The wallet's chain open on the token; otherwise the token reverts with `ChainNotOpen`.
+    ///
+    /// Emits `TicketWritten`, the token's `ReservedForValidation`, `SecondHalfSent`, then the token's `HalfPinned`
+    /// and `ProtocolMessageSent`.
+    /// @param awayWallet ERC-7930 interoperable address of the away wallet to burn from.
+    /// @param amount The most the away token burns.
+    /// @param homeWallet The home wallet to mint to.
+    /// @param salt The agent's nonce for this bring home; with the rest of the request, it is the id.
+    /// @return ticketId The id of the bring home's ticket.
+    function bringHome(bytes calldata awayWallet, uint256 amount, address homeWallet, bytes32 salt)
+        external
+        returns (bytes32 ticketId);
 
     /// @dev The two validity windows, zero until set, which blocks issuance.
     function validityWindows() external view returns (ValidityWindows memory);

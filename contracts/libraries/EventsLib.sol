@@ -75,22 +75,6 @@ library EventsLib {
 
     // Token Events
 
-    /// @notice Emitted on a recall from a satellite wallet onto a native wallet.
-    event Recalled(bytes32 indexed fromKey, address indexed holder, bytes fromWallet, uint256 amount);
-    /// @notice Emitted when an agent orders a satellite to burn up to `amount` of `wallet`; the proof that answers
-    ///  credits `nativeWallet`.
-    event RecallInstructed(
-        uint256 indexed recallId, bytes32 indexed walletKey, address indexed nativeWallet, bytes wallet, uint256 amount
-    );
-    /// @notice Emitted when a burn proof settles its recall. `amount` is what the satellite proved.
-    event RecallSettled(uint256 indexed recallId, bytes32 indexed originChainKey, uint256 amount);
-    /// @notice Emitted when the proof that already settled a recall is delivered again: nothing is applied.
-    event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
-    /// @notice Emitted when a burn proof differs from the proof that settled its recall. Nothing is applied and the
-    ///  compliance blocks `originChainKey`. A proof for a recall never issued reverts instead, and stops nothing.
-    event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
-    /// @notice Emitted when an agent resends a recall instruction unchanged: `kind` 1.
-    event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
     /// A validation being issued reserved part of a satellite wallet's bridged balance.
     event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);
 
@@ -105,8 +89,8 @@ library EventsLib {
     event BridgedTransfer(
         bytes32 indexed fromKey, bytes32 indexed toKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
-    /// @notice Emitted on a settled movement leaving a satellite wallet for a native one, under the validation it
-    ///  consumed. Ownership moves between identities, unlike {Recalled}.
+    /// @notice Emitted on a settled movement leaving a satellite wallet for a native one, under the ticket it
+    ///  consumed: a move, or a bring home, which keeps its owner.
     event SettledToNative(
         bytes32 indexed fromKey, address indexed to, bytes32 indexed ticketId, bytes fromWallet, uint256 amount
     );
@@ -190,10 +174,6 @@ library EventsLib {
     event ProtocolMessageReceived(
         MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 receiveId
     );
-    /// @notice Emitted by the token when an attributed burn proof reaches its recall path, before it is judged.
-    event BurnProofReceived(
-        bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
-    );
 
     // ModularCompliance Interop Events
 
@@ -229,9 +209,8 @@ library EventsLib {
     event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
     /// @notice The money on hold for `ticketId` took its last new half: if that half dies too, a human ends it.
     event NewHalfLimitReached(bytes32 indexed ticketId);
-    /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, on a bad receipt or
-    ///         receipt terms it broke, or on a burn proof for a recall already settled. No ticket goes to it, none of
-    ///         its tickets is cancelled, and its receipts wait.
+    /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, or on a bad receipt or
+    ///         receipt terms it broke. No ticket goes to it, none of its tickets is cancelled, and its receipts wait.
     event AwayChainBlockStarted(bytes32 indexed chainKey);
     /// @notice The pauser lifted the block of the away chain `chainKey`, after an investigation.
     event AwayChainUnblocked(bytes32 indexed chainKey);

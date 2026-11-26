@@ -59,6 +59,8 @@
 
 pragma solidity 0.8.30;
 
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
+
 import { ITREXMessaging } from "../../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
@@ -89,6 +91,10 @@ import { IModule } from "./modules/IModule.sol";
  * then are the positions moved and the trackers told, once. A half answered zero after its valid until is dead and a
  * new half is owed; the number of new halves per money on hold is bounded, so a wrong waiting time costs a bounded
  * number of sends.
+ *
+ * A bring home is a ticket whose first half is home's: a `BRING_HOME` that burns an away wallet's tokens, with its own
+ * valid until, sent again the same way. Its receipt mints what was burned at the home wallet of the same identity, or
+ * sends it back to the away wallet by a move out when that home wallet is no longer the identity's.
  *
  * The compliance reaches this by DELEGATECALL, from {ReceiptLib} and {TicketLib} or from its own entry point, so the
  * storage is its own namespaces, the token and the modules see the compliance as their caller, and every event is
@@ -169,6 +175,32 @@ library SecondHalfLib {
         _sendTheLatestHalf(ticket, ticketId, to, token);
     }
 
+    /* ----- A bring home ----- */
+
+    /// @dev See {ITickets-bringHome}. Everything is checked first, then the ticket is written and its amount reserved,
+    ///  then its half leaves: a send that fails reverts the whole bring home.
+    /// @param token the token the compliance is bound to
+    /// @return ticketId the id of the request, see {TicketLib-ticketIdOf}
+    function bringHome(bytes calldata awayWallet, uint256 amount, address homeWallet, bytes32 salt, address token)
+        external
+        returns (bytes32 ticketId)
+    {
+        // Checks
+        address identity;
+        (ticketId, identity) = _checkTheBringHome(awayWallet, amount, homeWallet, salt, token);
+
+        // Effects
+        ITickets.Ticket storage ticket = _writeTheBringHome(ticketId, awayWallet, amount, homeWallet, identity);
+        ticket.salt = salt;
+        _announceTheBringHome(ticket, ticketId);
+        _takeANewHalf(ticket, ticketId);
+        _writeTheFirstSend(ticket, ticket.fromChainKey);
+
+        // Interactions
+        IToken(token).reserveForTicket(awayWallet, amount);
+        _send(ticket, ticketId, ticket.fromChainKey, awayWallet, token);
+    }
+
     /* ----- Anyone ----- */
 
     /// @dev See {ITickets-sendSecondHalf}.
@@ -178,7 +210,8 @@ library SecondHalfLib {
         require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
         ITickets.Ticket storage ticket = store.validations[ticketId];
         bool onHoldWithAHalf = ticket.status == ITickets.TicketStatus.OnHold && ticket.half != 0;
-        require(onHoldWithAHalf, ErrorsLib.SecondHalfNotOwed(ticketId));
+        bool anOpenBringHome = _isAnOpenBringHome(ticket);
+        require(onHoldWithAHalf || anOpenBringHome, ErrorsLib.SecondHalfNotOwed(ticketId));
         require(WalletKeyLib.canonicalKey(wallet) == ticket.secondHalfToKey, ErrorsLib.ValidationBodyMismatch(ticketId));
         bytes32 chainKey = _chainKeyOf(wallet);
         TicketLib.requireTokenRunning(token);
@@ -214,7 +247,8 @@ library SecondHalfLib {
     /// @dev See {IReceiptHandler-receiveReceipt}: a good receipt for a second half, see {ReceiptLib}. A zero answer to
     ///  the latest half says it arrived after its valid until and was never executed: the half is dead, the money
     ///  stays on hold, and a new half is owed. A receipt equal to the latest half ends the move. A zero answer to an
-    ///  older half changes nothing: that half is dead already.
+    ///  older half changes nothing: that half is dead already. A receipt naming the wallet it burned answers a bring
+    ///  home, see {_applyBringHomeReceipt}: only a bring home burns.
     /// @param token the token the compliance is bound to
     function applySecondHalfReceipt(
         bytes32 ticketId,
@@ -225,6 +259,12 @@ library SecondHalfLib {
         ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
         emit EventsLib.ReceiptApplied(ticketId, originChainKey, receipt.amount);
 
+        bool answersABringHome = receipt.from.length != 0;
+        if (answersABringHome) {
+            _applyBringHomeReceipt(ticket, ticketId, receipt, token);
+            return;
+        }
+
         bool answersTheLatestHalf = receipt.half == ticket.half;
         if (!answersTheLatestHalf) return;
         if (receipt.amount == 0) {
@@ -232,6 +272,213 @@ library SecondHalfLib {
             return;
         }
         _finish(ticket, ticketId, receipt.to, token);
+    }
+
+    /* ----- Private: a bring home ----- */
+
+    /// @dev Everything a bring home is checked for, see {ITickets-bringHome}, before anything is written. The amount
+    ///  must fit in what the away wallet has free, so no ticket and no bring home ever count on the same tokens.
+    /// @return ticketId the id of the request
+    /// @return identity the identity both wallets are linked to
+    function _checkTheBringHome(
+        bytes calldata awayWallet,
+        uint256 amount,
+        address homeWallet,
+        bytes32 salt,
+        address token
+    ) private view returns (bytes32 ticketId, address identity) {
+        require(amount != 0, ErrorsLib.ZeroValue());
+        bytes32 walletKey = WalletKeyLib.satelliteKey(awayWallet);
+        _requireChainTakesTheHalf(_chainKeyOf(awayWallet), token);
+        identity = _identityOfBoth(awayWallet, homeWallet, token);
+        bytes32 openTicketId = TicketLib.layout().openBringHome[walletKey];
+        require(openTicketId == bytes32(0), ErrorsLib.BringHomeAlreadyOpen(walletKey, openTicketId));
+        uint256 free = IToken(token).availableOf(awayWallet);
+        require(amount <= free, ErrorsLib.RequestAboveBalance(awayWallet, free, amount));
+        ticketId = _bringHomeIdOf(walletKey, amount, homeWallet, salt);
+        require(!TicketLib.isRecorded(TicketLib.layout(), ticketId), ErrorsLib.TicketAlreadyWritten(ticketId));
+    }
+
+    /// @dev The away chain a bring home's half goes to: the token runs, the chain is not blocked and has no hostile
+    ///  change running, and it has a waiting time to give the half its valid until.
+    function _requireChainTakesTheHalf(bytes32 chainKey, address token) private view {
+        TicketLib.requireTokenRunning(token);
+        TicketLib.requireAwayChainNotBlocked(chainKey);
+        TicketLib.requireNoHostileChange(token, chainKey);
+        uint64 waitingTime = TicketLib.layout().waitingTimes[chainKey];
+        require(waitingTime != 0, ErrorsLib.WaitingTimeNotSet(chainKey));
+    }
+
+    /// @dev The one identity both wallets are linked to: a bring home moves place, never owner. A revoked away wallet
+    ///  still resolves, since a bring home is how a revoked position comes home.
+    function _identityOfBoth(bytes calldata awayWallet, address homeWallet, address token)
+        private
+        view
+        returns (address identity)
+    {
+        ITREXRegistry registry = _registryOf(token);
+        identity = address(registry.identity(homeWallet));
+        bool linkedToAnIdentity = identity != address(0);
+        bool linkedToTheSameIdentity = identity == address(registry.resolveIdentity(awayWallet));
+        require(linkedToAnIdentity && linkedToTheSameIdentity, ErrorsLib.WalletsNotLinked(homeWallet, awayWallet));
+    }
+
+    /// @dev The id of a bring home: the id of a ticket built from the request under the kind `BRING_HOME`, with no
+    ///  spender and no minimum, since the away token burns what the wallet still holds.
+    function _bringHomeIdOf(bytes32 walletKey, uint256 amount, address homeWallet, bytes32 salt)
+        private
+        view
+        returns (bytes32)
+    {
+        bytes32 homeWalletKey = WalletKeyLib.canonicalKey(_homeEnvelopeOf(homeWallet));
+        bytes32 noSpender = keccak256("");
+        return
+            TicketLib.ticketIdOf(ITickets.TicketKind.BRING_HOME, walletKey, homeWalletKey, noSpender, 0, amount, salt);
+    }
+
+    /// @dev Writes an open bring home: the away wallet is its sender, the home wallet its receiver, and its half goes
+    ///  to the away wallet. One identity's two wallets, so nothing is reserved against identities, only the ledger's
+    ///  total.
+    ///  It counts as one of the identity's open tickets, which every ticket leaving its open row gives back, and is
+    ///  never refused by the limits on asks: they bound what a holder asks. Home waits for it four waiting times after
+    ///  its valid until, as for any ticket.
+    function _writeTheBringHome(
+        bytes32 ticketId,
+        bytes calldata awayWallet,
+        uint256 amount,
+        address homeWallet,
+        address identity
+    ) private returns (ITickets.Ticket storage ticket) {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        ticket = store.validations[ticketId];
+        bytes32 chainKey = _chainKeyOf(awayWallet);
+        uint64 waitingTime = store.waitingTimes[chainKey];
+        uint64 validUntil = uint64(block.timestamp) + waitingTime;
+
+        ticket.kind = ITickets.TicketKind.BRING_HOME;
+        ticket.homeWallet = homeWallet;
+        ticket.amountMax = amount;
+        ticket.requestedMax = amount;
+        ticket.validUntil = validUntil;
+        ticket.waitingTime = waitingTime;
+        ticket.stopWaitingAt = validUntil + 4 * waitingTime;
+        ticket.fromChainKey = chainKey;
+        ticket.toChainKey = _chainKeyOf(_homeEnvelopeOf(homeWallet));
+        ticket.fromKey = WalletKeyLib.canonicalKey(awayWallet);
+        ticket.fromWallet = awayWallet;
+        ticket.toKey = WalletKeyLib.canonicalKey(_homeEnvelopeOf(homeWallet));
+        ticket.fromIdentity = identity;
+        ticket.toIdentity = identity;
+        ticket.status = ITickets.TicketStatus.Open;
+        ticket.secondHalfToKey = ticket.fromKey;
+        ticket.relocation = !ComplianceLedgerLib.reservePending(identity, identity, amount);
+
+        if (ticket.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = ticket.stopWaitingAt;
+        store.identityAsks[identity].openTickets += 1;
+        store.openBringHome[ticket.fromKey] = ticketId;
+    }
+
+    /// @dev Announces a written bring home as a ticket from the away wallet to the home wallet. It names no ask block
+    ///  hash: no ticket copy leaves for it.
+    function _announceTheBringHome(ITickets.Ticket storage ticket, bytes32 ticketId) private {
+        emit EventsLib.TicketWritten(
+            ticketId,
+            ticket.fromWallet,
+            _homeEnvelopeOf(ticket.homeWallet),
+            "",
+            0,
+            ticket.amountMax,
+            ticket.requestedMax,
+            ticket.validUntil,
+            bytes32(0),
+            ticket.salt
+        );
+    }
+
+    /// @dev A receipt for one of a bring home's halves, checked by {ReceiptLib}. Only the open bring home's latest half
+    ///  moves anything; a zero answer to an older half changes nothing. The bring home is no longer open once its
+    ///  latest half is answered. Nothing burned ends it `Done` with nothing moved, whether the half expired or burned
+    ///  zero, and it is not sent again. What was burned is minted at the home wallet when that wallet is still the
+    ///  identity's and verified, and sent back to the away wallet otherwise.
+    function _applyBringHomeReceipt(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) private {
+        bool answersTheOpenHalf =
+            ticket.status == ITickets.TicketStatus.Open && receipt.half == ticket.half;
+        if (!answersTheOpenHalf) return;
+        delete TicketLib.layout().openBringHome[ticket.fromKey];
+
+        bool nothingBurned = receipt.amount == 0;
+        if (nothingBurned) {
+            TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+            return;
+        }
+
+        ticket.moved = receipt.amount;
+        if (_homeWalletStillTheirs(ticket, token)) {
+            _mintAtHome(ticket, ticketId, token);
+            return;
+        }
+        _sendBackToTheAwayWallet(ticket, ticketId, receipt.from, token);
+    }
+
+    /// @dev Whether the bring home's home wallet is still linked to the identity it was asked for, and verified.
+    function _homeWalletStillTheirs(ITickets.Ticket storage ticket, address token) private view returns (bool) {
+        ITREXRegistry registry = _registryOf(token);
+        address homeWallet = ticket.homeWallet;
+        bool linkedToTheSameIdentity = address(registry.identity(homeWallet)) == ticket.fromIdentity;
+        bool verified = registry.isVerified(homeWallet);
+        return linkedToTheSameIdentity && verified;
+    }
+
+    /// @dev Ends a bring home at its home wallet: what was burned leaves the away wallet and is minted there. The
+    ///  position keeps its owner, so only the trackers are told, as a `RECALL`. A funded home wallet the ledger counts
+    ///  under another identity reverts the delivery, which stays deliverable, as a transfer into it would be refused.
+    function _mintAtHome(ITickets.Ticket storage ticket, bytes32 ticketId, address token) private {
+        address homeWallet = ticket.homeWallet;
+        address identity = ticket.fromIdentity;
+        uint256 amount = ticket.moved;
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+        ComplianceLedgerLib.currentOwner(token, homeWallet, identity, 0);
+        IToken(token).finishMove(ticket.fromWallet, _homeEnvelopeOf(homeWallet), amount, ticketId);
+
+        bytes32 homeWalletId = WalletKeyLib.walletId(homeWallet);
+        IModule.TransferContext memory context = TransferContextLib.settlement(
+            address(this), MovementKindLib.RECALL, identity, identity, homeWalletId, homeWalletId, amount, ""
+        );
+        ModuleSetLib.callAfterTransfer(context);
+    }
+
+    /// @dev The home wallet is no longer the identity's, or not verified: what was burned goes on hold and back to the
+    ///  away wallet by a move out, with no rule asked, since a return is an undo. It is new money on hold, so its
+    ///  halves are counted from zero.
+    function _sendBackToTheAwayWallet(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes calldata awayWallet,
+        address token
+    ) private {
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.OnHold, token);
+        IToken(token).putOnHold(awayWallet, ticket.moved, ticketId);
+        TicketLib.reserveTheHold(ticket);
+        ticket.newHalves = 0;
+        _takeANewHalf(ticket, ticketId);
+        _trySendInsideTheDelivery(ticket, ticketId, awayWallet, token);
+    }
+
+    /// @dev Whether the ticket is a bring home whose half is still out: its half burns, every other half mints.
+    function _isAnOpenBringHome(ITickets.Ticket storage ticket) private view returns (bool) {
+        bool aBringHome = ticket.kind == ITickets.TicketKind.BRING_HOME;
+        bool open = ticket.status == ITickets.TicketStatus.Open;
+        return aBringHome && open;
+    }
+
+    /// @dev The ERC-7930 envelope of a wallet on this chain.
+    function _homeEnvelopeOf(address homeWallet) private view returns (bytes memory) {
+        return InteroperableAddress.formatEvmV1(block.chainid, homeWallet);
     }
 
     /* ----- Private ----- */
@@ -392,7 +639,8 @@ library SecondHalfLib {
         }
     }
 
-    /// @dev Sends the latest half as recorded: its number, its wallet, the money on hold and its valid until.
+    /// @dev Sends the latest half as recorded: its number, its wallet, its amount and its valid until. The half of an
+    ///  open bring home burns what it may take; any other half mints the money on hold.
     function _send(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
@@ -400,14 +648,39 @@ library SecondHalfLib {
         bytes calldata wallet,
         address token
     ) private {
-        bytes memory body = _moveOutBody(ticket, ticketId, wallet);
         bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, ticket.half);
+
+        if (_isAnOpenBringHome(ticket)) {
+            emit EventsLib.SecondHalfSent(
+                ticketId, ticket.half, chainKey, wallet, ticket.amountMax, ticket.secondHalfValidUntil
+            );
+            bytes memory bringHomeBody = _bringHomeBody(ticket, ticketId, wallet);
+            IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.BRING_HOME, bringHomeBody);
+            return;
+        }
 
         emit EventsLib.SecondHalfSent(
             ticketId, ticket.half, chainKey, wallet, ticket.moved, ticket.secondHalfValidUntil
         );
+        bytes memory moveOutBody = _moveOutBody(ticket, ticketId, wallet);
+        IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.MOVE_OUT, moveOutBody);
+    }
 
-        IToken(token).sendOnReceiptRoute(chainKey, halfKey, MessageTypesLib.Message.MOVE_OUT, body);
+    /// @dev The `BRING_HOME` of an open bring home's latest half, encoded.
+    function _bringHomeBody(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata wallet)
+        private
+        view
+        returns (bytes memory)
+    {
+        return abi.encode(
+            MessageTypesLib.BringHomeMessage({
+                ticketId: ticketId,
+                half: ticket.half,
+                wallet: wallet,
+                amount: ticket.amountMax,
+                validUntil: ticket.secondHalfValidUntil
+            })
+        );
     }
 
     /// @dev The `MOVE_OUT` of the latest half, encoded.
@@ -453,7 +726,7 @@ library SecondHalfLib {
         return ITREXRegistry(address(IToken(token).identityRegistry()));
     }
 
-    function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
+    function _chainKeyOf(bytes memory wallet) private pure returns (bytes32) {
         (bytes2 chainType, bytes memory chainReference,) = WalletKeyLib.parse(wallet);
         return MessageTypesLib.chainKey(chainType, chainReference);
     }

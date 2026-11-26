@@ -65,12 +65,12 @@ import { ErrorsLib } from "./ErrorsLib.sol";
 
 /**
  * @title MessageTypesLib
- * @dev The protocol's ERC-7786 message surface: the five types that cross the interop boundary, the
+ * @dev The protocol's ERC-7786 message surface: the four types that cross the interop boundary, the
  * bodies they carry, and the envelope that wraps them.
  */
 library MessageTypesLib {
 
-    /// @dev The five types that cross the interop boundary, numbered from zero as their wire codes.
+    /// @dev The four types that cross the interop boundary, numbered from zero as their wire codes.
     /// Appending a member is the only backward-compatible way to grow the surface.
     enum Message {
         /// Outbound. A `TicketMessage` issued on the reference chain for a satellite to execute.
@@ -78,17 +78,17 @@ library MessageTypesLib {
         /// Outbound. Home's order to an away chain to mint, the second half of a move into it. The away token mints
         /// once per half, strictly before the half's valid until, and answers with a `RECEIPT` for that half.
         MOVE_OUT,
-        /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF` under its id.
+        /// Outbound. Home's order to an away chain to burn a wallet's tokens, the half of a bring home. The away token
+        /// burns once per half, strictly before the half's valid until, and answers with a `RECEIPT` for that half.
         BRING_HOME,
-        /// Inbound. An away chain reporting what it did with one half of a move.
-        RECEIPT,
-        /// Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.
-        BURN_PROOF
+        /// Inbound. An away chain reporting what it did with one half of a move or a bring home.
+        RECEIPT
     }
 
     /// @dev The envelope version this library serves. A payload carrying any other version is refused, so a peer on
     ///  another shape refuses a message instead of decoding it wrong. Version 2: the ticket id is built from the whole
-    ///  request, the TICKET and the RECEIPT carry the ask block hash, and the RECEIPT echoes the copy it answers.
+    ///  request, the TICKET and the RECEIPT carry the ask block hash, the RECEIPT echoes the copy it answers, the
+    ///  second halves carry their own valid until, and a bring home is answered by a RECEIPT.
     uint8 internal constant VERSION = 2;
 
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
@@ -155,7 +155,8 @@ library MessageTypesLib {
         /// The `validUntil` of that copy.
         uint64 seenValidUntil;
         /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket, the half's number
-        /// for a move out. A move out's receipt leaves `from` empty and names the minted wallet in `to`.
+        /// for a move out or a bring home. A move out's receipt leaves `from` empty and names the minted wallet in `to`;
+        /// a bring home's names the burned wallet in `from` and leaves `to` empty.
         uint8 half;
         /// Why the receipt says what it says, so a zero receipt says why it is zero.
         ReceiptAnswer answer;
@@ -177,28 +178,21 @@ library MessageTypesLib {
         uint64 validUntil;
     }
 
-    /// @dev Body of a `BRING_HOME`: an order to burn up to `amount` of `wallet` on the satellite and answer
-    /// with a `BurnProof` under the same `recallId`. A resend carries the same body byte for byte.
+    /// @dev Body of a `BRING_HOME`: the half of a bring home. The away token burns the smaller of `amount` and what
+    /// `wallet` holds, once per half, strictly before `validUntil` on its own clock, and answers with a `RECEIPT` for
+    /// that half, of the amount it burned. A half that arrives at or after its valid until, never executed, is answered
+    /// with a stored zero receipt (`Expired`) and is dead. A half sent again carries the same body byte for byte.
     struct BringHomeMessage {
-        /// Unique per token, sequential from 1: keys the pending recall the proof must answer.
-        uint256 recallId;
-        /// ERC-7930 satellite wallet to burn.
+        /// The bring home's ticket.
+        bytes32 ticketId;
+        /// Which half this is, from 1. With the ticket id it keys the half, see {halfKeyOf}.
+        uint8 half;
+        /// ERC-7930 wallet on the away chain to burn from.
         bytes wallet;
-        /// Upper bound: the satellite may burn less when a validation moved part of the position first.
+        /// The most the away token burns.
         uint256 amount;
-        /// Reference-chain wallet the token will credit. Informational for the satellite.
-        address nativeWallet;
-    }
-
-    /// @dev Body of a `BURN_PROOF`: a satellite's proof that it burned a position under a recall instruction. The
-    /// token credits the native wallet the instruction recorded, never one the proof could name.
-    struct BurnProof {
-        /// The recall this proof answers.
-        uint256 recallId;
-        /// ERC-7930 wallet the satellite burned. Must be the instructed one.
-        bytes burnedWallet;
-        /// What was burned: at most the instructed amount, possibly zero.
-        uint256 amount;
+        /// The half's own valid until: its first send time plus the waiting time of the wallet's chain.
+        uint64 validUntil;
     }
 
     /// @dev Wraps `body` in the envelope.
@@ -243,18 +237,8 @@ library MessageTypesLib {
     }
 
     /// @dev Unwraps a `BRING_HOME` body, as a satellite's Lite does. Reverts on a body that is not one.
-    function decodeRecallInstruction(bytes memory body) internal pure returns (BringHomeMessage memory) {
+    function decodeBringHome(bytes memory body) internal pure returns (BringHomeMessage memory) {
         return abi.decode(body, (BringHomeMessage));
-    }
-
-    /// @dev Wraps a burn proof in the envelope, as a satellite's Lite does before sending.
-    function encodeBurnProof(BurnProof memory proof) internal pure returns (bytes memory) {
-        return abi.encode(Message.BURN_PROOF, VERSION, abi.encode(proof));
-    }
-
-    /// @dev Unwraps a `BURN_PROOF` body. Reverts on a body that is not one.
-    function decodeBurnProof(bytes memory body) internal pure returns (BurnProof memory) {
-        return abi.decode(body, (BurnProof));
     }
 
     /// @dev The key of one half of a move: what one away chain answers with one receipt. Half 0, the away token's

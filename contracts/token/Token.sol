@@ -85,7 +85,6 @@ import {
     AccessManagedOwnableUpgradeable
 } from "../utils/AccessManagedOwnableUpgradeable.sol";
 import { IToken } from "./IToken.sol";
-import { TokenDelegationLib } from "./TokenDelegationLib.sol";
 import { TokenGuardsLib } from "./TokenGuardsLib.sol";
 import { TokenLedgerLib } from "./TokenLedgerLib.sol";
 import { TokenRecoveryLib } from "./TokenRecoveryLib.sol";
@@ -217,23 +216,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
-    /// @dev No pause guard: an instruction moves nothing here. The proof that answers it is applied only once the
-    ///  token is unpaused, and stays deliverable until then.
-    function instructRecall(bytes calldata wallet, uint256 amount, address nativeWallet)
-        external
-        restricted
-        returns (uint256)
-    {
-        return TokenDelegationLib.instructRecall(wallet, amount, nativeWallet);
-    }
-
-    /// @inheritdoc IToken
-    /// @dev No pause guard, like {instructRecall}: a resend moves nothing.
-    function resend(uint8 kind, uint256 id, bytes calldata data) external restricted returns (bytes32) {
-        return TokenDelegationLib.resend(kind, id, data);
-    }
-
-    /// @inheritdoc IToken
     function finishMove(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId)
         external
         whenNotPaused
@@ -260,13 +242,13 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
 
     /// @inheritdoc IERC20
     /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite, money on hold included.
-    ///  A home wallet's move out, a recall or a move ending at home moves between the two terms and never changes the
-    ///  sum; only a mint or a burn does.
+    ///  A home wallet's move out, a bring home or a move ending at home moves between the two terms and never changes
+    ///  the sum; only a mint or a burn does.
     ///
     ///  The register reports the issuance, not the native float, and the events say so at the cost of one
     ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
     ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
-    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance`; `HeldInTransit`, `Recalled` and
+    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance`; `HeldInTransit` and
     ///  `SettledToNative` are the reconciliation for anyone deriving it that way, and
     ///  `totalSupply() - totalAwayBalance()` is the native float. An escrow address holding the delegated float
     ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
@@ -383,9 +365,9 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Ledger Transitions ----- */
 
     // Pause policy for everything below: the transitions move balances without {_update} and check no pause
-    // themselves; the entry points that reach them do. Those are `finishMove`, `putOnHold`, `burnOntoHold` and
-    // `_handleBurnProof`, each of which requires the token not to be paused, so that the pause halts every movement
-    // between wallets, native or satellite, while mints and burns stay allowed.
+    // themselves; the entry points that reach them do. Those are `finishMove`, `putOnHold` and `burnOntoHold`, each
+    // of which requires the token not to be paused, so that the pause halts every movement between wallets, native or
+    // satellite, while mints and burns stay allowed.
 
     /// @dev Ends a move: the amount leaves the ticket's hold, or `from`'s away balance for a move inside one away
     ///  chain, and either lands on `to`'s free balance when `to` is on this chain (a native mint, `Transfer(0x0,
@@ -577,29 +559,6 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
         TREXMessagingLib.forwardSettlement(address(_getCompliance()), chainKey, bridge, senderPeerKey, body);
     }
 
-    /// @inheritdoc TREXMessaging
-    /// @dev The recall path: the proof is judged against the instruction it answers and the bridged position
-    ///      debited, see {TokenDelegationLib-consumeBurnProof}, then the native wallet that instruction named is
-    ///      minted to, so a recall never moves ownership or `totalSupply`. The mint stays on the raw `_update`,
-    ///      so the modules do not see a plain mint for tokens they never saw burned; the compliance is told a
-    ///      `RECALL` instead, native wallet to the same native wallet.
-    ///      `consumeBurnProof` runs `syncOwner` before the mint, so the owner follow inside `agentTransferred`
-    ///      finds nothing left to settle. Same pause policy as {_handleSettlement}: a paused token leaves the
-    ///      proof deliverable, a proof for a recall already settled blocks its away chain on the compliance, a proof
-    ///      for a recall never issued reverts and stays deliverable. A duplicate of a settled proof changes nothing.
-    function _handleBurnProof(bytes32 chainKey, bytes memory body)
-        internal
-        virtual
-        override
-        whenNotPaused
-        nonReentrant
-    {
-        (address nativeWallet, uint256 amount) = TokenDelegationLib.consumeBurnProof(chainKey, body);
-        if (amount == 0) return;
-        ERC20Upgradeable._update(address(0), nativeWallet, amount);
-        _reportAgentMovement(nativeWallet, nativeWallet, amount, MovementKindLib.RECALL);
-    }
-
     /// @dev {TokenGuardsLib-checkOnchainID}, from `init` and from the setter. One function for both because every
     ///  separate call into a linked library is compiled in full, and the token sits at the contract size limit.
     function _checkOnchainID(address identityRegistryAddress, address onchainIdAddress) private view {
@@ -607,8 +566,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @dev Tells the compliance about a movement an agent made, so the modules can leave it out of what they
-    ///  count against the investor. One function for the forced transfer, the recovery and the recall, for the
-    ///  reason {_checkOnchainID} gives.
+    ///  count against the investor. One function for the forced transfer and the recovery, for the reason
+    ///  {_checkOnchainID} gives.
     function _reportAgentMovement(address from, address to, uint256 amount, uint8 kind) private {
         IModularCompliance(address(_getCompliance())).agentTransferred(from, to, amount, kind);
     }

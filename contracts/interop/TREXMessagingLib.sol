@@ -67,7 +67,6 @@ import { ITickets } from "../compliance/modular/ITickets.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
-import { TokenLedgerLib } from "../token/TokenLedgerLib.sol";
 import { IReceiptHandler } from "./IReceiptHandler.sol";
 import { IReceivingPolicy } from "./IReceivingPolicy.sol";
 import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
@@ -340,20 +339,6 @@ library TREXMessagingLib {
         sendId = _send(sendingGateway, peer, chainKey, MessageTypesLib.Message.TICKET, body);
     }
 
-    /// @dev Sends one protocol message to this token's peer on `chainKey`, through its current receipt route. The
-    /// ticket route is never used here: a money message moves value, so it waits for the chain's finality.
-    ///
-    /// Fail-closed before anything leaves: a registry must be set, the chain must be routed, the routed
-    /// bridge must still be a receipt bridge at this instant, and the peer must be addressable.
-    function sendMessage(bytes32 chainKey, MessageTypesLib.Message messageType, bytes memory body)
-        external
-        returns (bytes32 sendId)
-    {
-        (address gateway, bytes memory peer) = _openRoute(layout(), chainKey);
-
-        sendId = _send(gateway, peer, chainKey, messageType, body);
-    }
-
     /// @dev Sends a message for one half of a move on the chain's receipt route, at full finality, and pins the half
     /// to that route and peer at its first send. A half sent again goes to the pair it was pinned to only, while that
     /// pair is still the chain's current one: the away token that holds the half is the one that answers it, so a
@@ -387,51 +372,52 @@ library TREXMessagingLib {
     /// @dev Attributes and admits one inbound delivery, and hands back what the token must act on.
     ///
     /// Everything that decides whether a message is accepted happens here: the envelope must decode, a
-    /// delivery under a nonzero receive id must be new (and is recorded), the type must be one a token receives,
-    /// the author and the bridge must be the ones this message is expected from, and the bridge's receiving policy
-    /// must still admit that away chain at full finality only. A receipt comes from the bridge and peer its half
-    /// was pinned to, from the chain's current ones, or, inside the window of a planned change, from its former ones;
-    /// a burn proof for a recall still open comes from the peer and bridge that recall was sent to, so a later route
-    /// or peer change cannot strand it, and any other burn proof from the current peer and route. A blocked away
-    /// chain is not refused here: its receipts are the compliance's to keep waiting. Acting on the message is left to
-    /// the token, since only it knows its compliance and its pause. That the bridge is a receipt bridge is the
-    /// caller's check, made before this is reached, so a distrusted bridge is refused even when pinned.
-    /// @return messageType `RECEIPT` or `BURN_PROOF`; anything else reverts.
-    /// @return chainKey The chain the message is attributed to.
-    /// @return body The still-encoded body, of the type `messageType` names.
+    /// delivery under a nonzero receive id must be new (and is recorded), the type must be a `RECEIPT`, the only one
+    /// a token receives, the author and the bridge must be the ones this message is expected from, and the bridge's
+    /// receiving policy must still admit that away chain at full finality only. A receipt comes from the bridge and
+    /// peer its half was pinned to, from the chain's current ones, or, inside the window of a planned change, from
+    /// its former ones. A blocked away chain is not refused here: its receipts are the compliance's to keep waiting.
+    /// Acting on the message is left to the token, since only it knows its compliance. That the bridge is a receipt
+    /// bridge is the caller's check, made before this is reached, so a distrusted bridge is refused even when pinned.
+    /// @return chainKey The chain the receipt is attributed to.
+    /// @return body The still-encoded `ReceiptMessage`.
     function acceptMessage(address gateway, bytes32 receiveId, bytes calldata sender, bytes calldata payload)
         external
-        returns (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body)
+        returns (bytes32 chainKey, bytes memory body)
     {
         (bytes2 chainType, bytes calldata chainReference,) = InteroperableAddress.parseV1Calldata(sender);
         chainKey = MessageTypesLib.chainKey(chainType, chainReference);
 
         MessagingStorage storage s = layout();
 
-        (messageType, body) = MessageTypesLib.decode(payload);
+        body = _receiptBodyOf(payload);
 
         // A zero id is a gateway naming no delivery, which ERC-7786 allows; recording it would refuse every later
-        // message from that gateway. Its deliveries are still deduplicated by what they carry: a receipt by
-        // the hash home keeps per half, a burn proof by its recall and the hash of the proof that settled it.
+        // message from that gateway. Its deliveries are still deduplicated by what they carry: a receipt by the hash
+        // home keeps per half.
         if (receiveId != bytes32(0)) {
             require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
             s.received[gateway][receiveId] = true;
         }
 
-        if (messageType == MessageTypesLib.Message.RECEIPT) {
-            MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.decodeSettlement(body);
-            _requireExpectedOrigin(
-                s, gateway, chainKey, sender, MessageTypesLib.halfKeyOf(receipt.ticketId, receipt.half)
-            );
-        } else if (messageType == MessageTypesLib.Message.BURN_PROOF) {
-            _requireRecallOrigin(s, gateway, chainKey, sender, MessageTypesLib.decodeBurnProof(body).recallId);
-        } else {
-            revert ErrorsLib.MessageTypeNotInbound(messageType);
-        }
+        _requireExpectedOrigin(s, gateway, chainKey, sender, _halfKeyOf(body));
 
         // Everything a token receives reports value that moved, so the bridge must still wait for full finality.
         AwayReceiptBridge storage awaySide = _awaySideOf(s, gateway, chainKey);
         _requireFullFinality(gateway, chainKey, awaySide.chainSelector, awaySide.bridge);
+    }
+
+    /// @dev The body of a payload that must be a `RECEIPT`, the only message a token receives.
+    function _receiptBodyOf(bytes calldata payload) private pure returns (bytes memory body) {
+        MessageTypesLib.Message messageType;
+        (messageType, body) = MessageTypesLib.decode(payload);
+        require(messageType == MessageTypesLib.Message.RECEIPT, ErrorsLib.MessageTypeNotInbound(messageType));
+    }
+
+    /// @dev The half a receipt body answers, see {MessageTypesLib-halfKeyOf}.
+    function _halfKeyOf(bytes memory body) private pure returns (bytes32) {
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.decodeSettlement(body);
+        return MessageTypesLib.halfKeyOf(receipt.ticketId, receipt.half);
     }
 
     /// @dev See {ITREXMessaging-checkReceiptOrigin}: the checks {acceptMessage} ran on the delivery, on the bridge
@@ -571,28 +557,6 @@ library TREXMessagingLib {
 
     function _requireCurrentPeer(bytes32 chainKey, bytes calldata sender) private view {
         require(keccak256(sender) == keccak256(peerFor(chainKey)), ErrorsLib.SenderNotPeer(chainKey, sender));
-    }
-
-    /// @dev The peer and gateway the recall was dispatched to while it is open; the current ones once it is not,
-    ///  so a settled id still reaches the token's duplicate and replay handling. A closed chain is
-    ///  refused first, as for a settlement: closing it stops every proof from it until a route is set again.
-    function _requireRecallOrigin(
-        MessagingStorage storage s,
-        address gateway,
-        bytes32 chainKey,
-        bytes calldata sender,
-        uint256 recallId
-    ) private view {
-        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
-
-        TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[recallId];
-        if (recall.amount == 0) {
-            _requireCurrentPeer(chainKey, sender);
-            _requireCurrentRoute(s, gateway, chainKey);
-            return;
-        }
-        require(keccak256(sender) == recall.peerKey, ErrorsLib.SenderNotPeer(chainKey, sender));
-        require(recall.gateway == gateway, ErrorsLib.BridgeNotPinned(gateway, bytes32(recallId), chainKey));
     }
 
     /// @dev The receiving policy of `bridge` must admit messages from the away chain's receipt bridge at full

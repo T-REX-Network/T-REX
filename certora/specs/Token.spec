@@ -288,9 +288,7 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:setInboundPaused(bytes32,bool).selector
     || f.selector == sig:setReceiptRoute(bytes2,bytes,address,uint64,bytes).selector
     || f.selector == sig:closeReceiptRoute(bytes32).selector
-    || f.selector == sig:setPeer(bytes32,bytes).selector
-    || f.selector == sig:instructRecall(bytes,uint256,address).selector
-    || f.selector == sig:resend(uint8,uint256,bytes).selector;
+    || f.selector == sig:setPeer(bytes32,bytes).selector;
 
 /* -------------------------------------------------------------------------- */
 /*  Per-chain inbound pause                                                    */

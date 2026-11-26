@@ -160,23 +160,18 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @inheritdoc ERC7786Recipient
     /// @dev Admission is the library's: attribution to the peer, the replay guard, the expected gateway.
-    /// What an admitted message does is the token's, so the hooks are called from here. A receipt is handed on with
-    /// the bridge and the peer that delivered it, so the compliance can keep it waiting and check that route again
-    /// when it is applied later.
+    /// What an admitted message does is the token's, so the hook is called from here. A receipt, the only message a
+    /// token receives, is handed on with the bridge and the peer that delivered it, so the compliance can keep it
+    /// waiting and check that route again when it is applied later.
     function _processMessage(address gateway, bytes32 receiveId, bytes calldata sender, bytes calldata payload)
         internal
         override
     {
-        (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
-            TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
+        (bytes32 chainKey, bytes memory body) = TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
 
-        if (messageType == MessageTypesLib.Message.RECEIPT) {
-            _handleSettlement(chainKey, gateway, keccak256(sender), body);
-        } else {
-            _handleBurnProof(chainKey, body);
-        }
+        _handleSettlement(chainKey, gateway, keccak256(sender), body);
 
-        emit EventsLib.ProtocolMessageReceived(messageType, chainKey, receiveId);
+        emit EventsLib.ProtocolMessageReceived(MessageTypesLib.Message.RECEIPT, chainKey, receiveId);
     }
 
     /// @dev Acts on a settlement attributed to this token's peer on `chainKey`, delivered by `bridge` from the peer
@@ -188,10 +183,6 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     function _handleSettlement(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes memory body)
         internal
         virtual;
-
-    /// @dev Acts on a burn proof attributed to this token's peer on `chainKey`. The token's recall path.
-    /// The body arrives encoded, a `MessageTypesLib.BurnProof`.
-    function _handleBurnProof(bytes32 chainKey, bytes memory body) internal virtual;
 
     /// @dev Called once, from the token's initializer. The registry is the network's and the token
     /// exposes no setter for it, so a token can never resolve trust against a registry of its own.

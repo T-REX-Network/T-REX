@@ -75,15 +75,11 @@ interface ITREXMessaging {
     event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
     event HalfPinned(bytes32 indexed halfKey, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event BurnProofReceived(
-        bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
-    );
 
     error AwayChainBlocked(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
-    error BridgeNotPinned(address gateway, bytes32 ticketId, bytes32 chainKey);
     error NotAReceiptBridge(address bridge);
     error NotATicketBridge(address bridge);
     error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
@@ -158,8 +154,8 @@ interface ITREXMessaging {
     ///
     /// The two routes of a chain split its traffic by what a reorg can cost:
     /// - the ticket route carries tickets out, and only tickets. A ticket moves nothing on its own.
-    /// - the receipt route carries money messages out and is the only route receipts and burn proofs are taken
-    ///   from. A ticket bridge never delivers to this token: the token takes deliveries from receipt bridges only.
+    /// - the receipt route carries money messages out and is the only route receipts are taken from. A ticket
+    ///   bridge never delivers to this token: the token takes deliveries from receipt bridges only.
     ///
     /// A ticket goes out on the ticket route when it is set and still trusted, otherwise on the receipt route.
     /// The chain must be open on its receipt route either way, and the half is pinned to that receipt route,

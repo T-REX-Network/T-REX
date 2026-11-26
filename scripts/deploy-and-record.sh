@@ -71,9 +71,9 @@ IMPLEMENTATION_AUTHORITY=$(addr_for TREXImplementationAuthority)
 TRUSTED_GATEWAY_REGISTRY=$(addr_for TrustedGatewayRegistry)
 TREX_FACTORY=$(addr_for TREXFactory)
 
-# Token is linked against TREXMessagingLib, TokenDelegationLib, TokenLedgerLib, TokenRecoveryLib and
-# TokenGuardsLib; ModularCompliance against ModuleSetLib, TicketLib, ReceiptLib and SecondHalfLib
-# (ComplianceLedgerLib is internal and never deployed). forge deploys each library ahead of the script's own
+# Token is linked against TREXMessagingLib, TokenLedgerLib, TokenRecoveryLib and TokenGuardsLib;
+# ModularCompliance against ModuleSetLib, TicketLib, ReceiptLib and SecondHalfLib (ComplianceLedgerLib is internal
+# and never deployed). forge deploys each library ahead of the script's own
 # transactions and records it under "libraries" as "<source>:<name>:<address>".
 lib_addr() {
     python3 -c '
@@ -87,7 +87,6 @@ sys.exit(1)
 ' "$1" "$RUN" || { echo "ERROR: $1 not found in $RUN libraries." >&2; exit 1; }
 }
 MESSAGING_LIB=$(lib_addr TREXMessagingLib)
-DELEGATION_LIB=$(lib_addr TokenDelegationLib)
 LEDGER_LIB=$(lib_addr TokenLedgerLib)
 RECOVERY_LIB=$(lib_addr TokenRecoveryLib)
 GUARDS_LIB=$(lib_addr TokenGuardsLib)
@@ -108,7 +107,6 @@ cat > "deployments/$NETWORK_NAME.json" <<JSON
   "accessManager": "$ACCESS_MANAGER",
   "tokenImpl": "$TOKEN_IMPL",
   "messagingLib": "$MESSAGING_LIB",
-  "delegationLib": "$DELEGATION_LIB",
   "ledgerLib": "$LEDGER_LIB",
   "recoveryLib": "$RECOVERY_LIB",
   "guardsLib": "$GUARDS_LIB",

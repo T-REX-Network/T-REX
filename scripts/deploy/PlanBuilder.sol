@@ -281,7 +281,7 @@ abstract contract PlanBuilder {
         a.roleRevoker = _create3Address(a, L_ROLE_REVOKER);
     }
 
-    /// @dev Libraries in dependency order: TokenDelegationLib links the two before it.
+    /// @dev Libraries in dependency order: TicketLib and ReceiptLib link SecondHalfLib, which comes before them.
     function _fillLibraries(Addrs memory a, bytes32 salt) internal view {
         (string[8] memory names,) = BytecodeStore.libraries();
         for (uint256 i = 0; i < 8; i++) {

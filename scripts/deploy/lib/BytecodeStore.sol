@@ -148,15 +148,15 @@ library BytecodeStore {
         uint8[] links;
     }
 
-    /// @notice The eight linked libraries, by fully qualified name, in deployment order: TokenDelegationLib
-    ///         links TREXMessagingLib and TokenLedgerLib, so both come before it.
+    /// @notice The eight linked libraries, by fully qualified name, in deployment order: TicketLib and ReceiptLib
+    ///         link SecondHalfLib, so it comes before them.
     function libraries() internal pure returns (string[8] memory names, string[8] memory fullyQualified) {
         names = [
             "TREXMessagingLib",
             "TokenLedgerLib",
             "TokenRecoveryLib",
             "TokenGuardsLib",
-            "TokenDelegationLib",
+            "SecondHalfLib",
             "ModuleSetLib",
             "TicketLib",
             "ReceiptLib"
@@ -166,7 +166,7 @@ library BytecodeStore {
             "contracts/token/TokenLedgerLib.sol:TokenLedgerLib",
             "contracts/token/TokenRecoveryLib.sol:TokenRecoveryLib",
             "contracts/token/TokenGuardsLib.sol:TokenGuardsLib",
-            "contracts/token/TokenDelegationLib.sol:TokenDelegationLib",
+            "contracts/compliance/modular/SecondHalfLib.sol:SecondHalfLib",
             "contracts/compliance/modular/ModuleSetLib.sol:ModuleSetLib",
             "contracts/compliance/modular/TicketLib.sol:TicketLib",
             "contracts/compliance/modular/ReceiptLib.sol:ReceiptLib"
@@ -181,18 +181,19 @@ library BytecodeStore {
         for (uint256 i = 0; i < 8; i++) {
             list[i] = ReleaseContract(libs[i], "default", string.concat(libs[i], ".sol"), none);
         }
-        uint8[] memory delegationLinks = new uint8[](2);
-        delegationLinks[0] = 0; // TREXMessagingLib
-        delegationLinks[1] = 1; // TokenLedgerLib
-        list[4].links = delegationLinks;
-        uint8[] memory tokenLinks = new uint8[](5);
-        for (uint8 i = 0; i < 5; i++) {
+        uint8[] memory secondHalfLinks = new uint8[](1);
+        secondHalfLinks[0] = 4; // SecondHalfLib
+        list[6].links = secondHalfLinks; // TicketLib
+        list[7].links = secondHalfLinks; // ReceiptLib
+        uint8[] memory tokenLinks = new uint8[](4);
+        for (uint8 i = 0; i < 4; i++) {
             tokenLinks[i] = i;
         }
-        uint8[] memory mcLinks = new uint8[](3);
+        uint8[] memory mcLinks = new uint8[](4);
         mcLinks[0] = 5; // ModuleSetLib
         mcLinks[1] = 6; // TicketLib
         mcLinks[2] = 7; // ReceiptLib
+        mcLinks[3] = 4; // SecondHalfLib
         list[8] = ReleaseContract("Token", "default", "Token.sol", tokenLinks);
         list[9] = ReleaseContract("ModularCompliance", "default", "ModularCompliance.sol", mcLinks);
         list[10] = ReleaseContract("TREXRegistry", "default", "TREXRegistry.sol", none);
@@ -286,7 +287,7 @@ library BytecodeStore {
 
     /// @dev A contract that links no library comes straight from `getCode`, which reads the artifact natively (no
     ///      JSON in EVM memory) and refuses bytecode that still has library placeholders, so a library added to it
-    ///      fails here. The three linked contracts are read as JSON and linked by {LinkerLib}.
+    ///      fails here. The linked contracts are read as JSON and linked by {LinkerLib}.
     function initCode(string memory name, address[8] memory libraryAddresses) internal view returns (bytes memory) {
         (string memory path, ReleaseContract memory c) = _builtPath(name);
         if (c.links.length == 0) return VM.getCode(path);

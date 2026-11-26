@@ -100,27 +100,6 @@ library TokenLedgerLib {
         ///  compliance reserves at issuance and gives back when the ticket leaves its open row, a receipt or a
         ///  cancel.
         mapping(bytes32 walletKey => uint256) reservedForTickets;
-        /// @dev Recall instructions waiting for their proof, keyed by id. A settling proof deletes its record.
-        mapping(uint256 recallId => PendingRecall) recalls;
-        /// @dev The last recall id issued. Ids start at 1.
-        uint256 lastRecallId;
-        /// @dev The one recall open on each satellite wallet, zero when none.
-        mapping(bytes32 walletKey => uint256 recallId) openRecall;
-        /// @dev `keccak256(abi.encode(originChainKey, body))` of the proof that settled each recall, kept after the
-        ///  record is gone so the same proof delivered again is recognised as a duplicate, not a replay.
-        mapping(uint256 recallId => bytes32) settledProofs;
-    }
-
-    /// @dev What a burn proof is matched against, and where it may come from: the wallet and chain the recall
-    ///  named, the native wallet it credits, the ceiling on what the satellite may prove, and the gateway and
-    ///  peer it was dispatched to. `gateway` and `peerKey` come last so the layout before them is unchanged.
-    struct PendingRecall {
-        bytes32 walletKey;
-        bytes32 chainKey;
-        address nativeWallet;
-        uint256 amount;
-        address gateway;
-        bytes32 peerKey;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXToken")) - 1)) & ~bytes32(uint256(0xff));
@@ -139,17 +118,13 @@ library TokenLedgerLib {
         return layout().reservedForTickets[WalletKeyLib.canonicalKey(wallet)];
     }
 
-    /// @dev See {IToken-availableOf}. The open recall's amount is read off its record rather than kept as a
-    ///  second reservation, so it counts from the instruction and stops counting the moment the proof that
-    ///  settles the recall deletes the record; `recalls[0]` is never written, so a wallet without one adds zero.
+    /// @dev See {IToken-availableOf}. An open bring home reserves in the same table as every ticket.
     function availableOf(bytes calldata wallet) external view returns (uint256) {
         TokenStorage storage s = layout();
         bytes32 key = WalletKeyLib.canonicalKey(wallet);
         uint256 balance = s.awayBalance[key];
         uint256 reservedForTickets = s.reservedForTickets[key];
-        uint256 recalledAmount = s.recalls[s.openRecall[key]].amount;
-        uint256 heldBack = reservedForTickets + recalledAmount;
-        return heldBack < balance ? balance - heldBack : 0;
+        return reservedForTickets < balance ? balance - reservedForTickets : 0;
     }
 
     /* ----- Reservations ----- */
@@ -229,20 +204,6 @@ library TokenLedgerLib {
         s.awayBalance[toKey] += amount;
 
         emit EventsLib.BridgedTransfer(fromKey, toKey, ticketId, from, to, amount);
-    }
-
-    /// @dev The bridged half of every bridged-to-native transition: a bridged debit, `totalAwayBalance` down. The
-    ///  token mints `amount` to `holder` afterwards and names the movement. Emits nothing.
-    function debitToNative(bytes calldata fromWallet, address holder, uint256 amount)
-        external
-        returns (bytes32 fromKey)
-    {
-        require(holder != address(0), ErrorsLib.ZeroAddress());
-        fromKey = WalletKeyLib.satelliteKey(fromWallet);
-
-        TokenStorage storage s = layout();
-        _debit(s, fromWallet, fromKey, amount);
-        s.totalAwayBalance -= amount;
     }
 
     /* ----- Storage ----- */

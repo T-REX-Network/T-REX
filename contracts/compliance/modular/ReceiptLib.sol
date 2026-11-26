@@ -247,8 +247,8 @@ library ReceiptLib {
     }
 
     /// @dev A receipt home cannot take in: another body for a half that already has one, applied or waiting, or one
-    ///  that does not answer the half it names, see {_answersTheTicket} and {_answersASecondHalf}. The same body
-    ///  again never reaches here.
+    ///  that does not answer the half it names, see {_answersTheTicket}, {_answersASecondHalf} and
+    ///  {_answersTheBringHome}. The same body again never reaches here.
     function _isBadReceipt(
         TicketLib.ValidationStorage storage store,
         ITickets.Ticket storage ticket,
@@ -260,8 +260,42 @@ library ReceiptLib {
             store.receiptHashes[halfKey] != bytes32(0);
         bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
         if (anotherBodyApplied || anotherBodyWaiting) return true;
+        bool aBringHome = ticket.kind == ITickets.TicketKind.BRING_HOME;
+        if (aBringHome) return !_answersTheBringHome(ticket, originChainKey, receipt);
         if (receipt.half == 0) return !_answersTheTicket(ticket, originChainKey, receipt);
         return !_answersASecondHalf(ticket, originChainKey, receipt);
+    }
+
+    /// @dev Whether a receipt answers a bring home. It has no half 0: its first half is home's `BRING_HOME`. A receipt
+    ///  naming no sender answers the move out that returns what it burned, and exists only once something was burned.
+    ///  Any other must come from the away wallet's chain, name the burned wallet and no receiver, and either burn at
+    ///  most the bring home's amount for its latest half while it is open, or be a zero answer that a half expired
+    ///  unexecuted. A burn for an older half would be a second burn of one bring home.
+    function _answersTheBringHome(
+        ITickets.Ticket storage ticket,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private view returns (bool) {
+        if (receipt.half == 0) return false;
+        bool namesTheBurnedWallet = receipt.from.length != 0;
+        if (!namesTheBurnedWallet) {
+            bool somethingWasBurned = ticket.moved != 0;
+            return somethingWasBurned && _answersASecondHalf(ticket, originChainKey, receipt);
+        }
+        bool fromTheWalletsChain = originChainKey == ticket.fromChainKey;
+        bool burnedTheBringHomesWallet = keccak256(receipt.from) == ticket.fromKey;
+        bool namesNoReceiver = receipt.to.length == 0;
+
+        bool stillOpen = ticket.status == ITickets.TicketStatus.Open;
+        bool answersTheLatestHalf = stillOpen && receipt.half == ticket.half;
+        bool answersAnOlderHalf = receipt.half < ticket.half;
+        bool executed = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
+        bool burnedAtMostItsAmount = executed && receipt.amount <= ticket.amountMax;
+        bool expiredUnexecuted = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount == 0;
+        bool answersTheLatestHalfRightly = answersTheLatestHalf && (burnedAtMostItsAmount || expiredUnexecuted);
+        bool answersAnOlderHalfRightly = answersAnOlderHalf && expiredUnexecuted;
+        bool answersAHalfRightly = answersTheLatestHalfRightly || answersAnOlderHalfRightly;
+        return fromTheWalletsChain && burnedTheBringHomesWallet && namesNoReceiver && answersAHalfRightly;
     }
 
     /// @dev Whether a first-half receipt answers the ticket: from the chain the ticket went to, for the ticket's
@@ -305,11 +339,12 @@ library ReceiptLib {
         return fromTheChainTheHalfWentTo && namesNoSender && answersAHalfRightly;
     }
 
-    /// @dev Applies a good receipt as it happened. A second half's receipt is {SecondHalfLib}'s. A first-half receipt
-    ///  for a ticket that was sent, open or cancelled, blocks its away chain when it breaks its terms. A zero receipt
-    ///  ends the ticket with nothing moved and is never a bad receipt, whatever terms it echoes. Any other receipt is
-    ///  checked against the copy it echoes: home's own, or an older one from a home block a reorg dropped. A move
-    ///  inside one away chain is then done; a move to another chain goes on hold for its second half.
+    /// @dev Applies a good receipt as it happened. A second half's receipt, a bring home's included, is
+    ///  {SecondHalfLib}'s. A first-half receipt for a ticket that was sent, open or cancelled, blocks its away chain
+    ///  when it breaks its terms. A zero receipt ends the ticket with nothing moved and is never a bad receipt,
+    ///  whatever terms it echoes. Any other receipt is checked against the copy it echoes: home's own, or an older one
+    ///  from a home block a reorg dropped. A move inside one away chain is then done; a move to another chain goes on
+    ///  hold for its second half.
     function _apply(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
@@ -508,10 +543,9 @@ library ReceiptLib {
                 TicketLib.discardUnanswered(ticketId, token);
                 continue;
             }
-            require(
-                ticket.status == ITickets.TicketStatus.Open,
-                ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status))
-            );
+            // A bring home is never cancelled: its half may still burn, and it is asked for again instead.
+            bool anOpenMove = ticket.status == ITickets.TicketStatus.Open && ticket.kind == ITickets.TicketKind.MOVE;
+            require(anOpenMove, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
             (bool askedAfterTheReceiptWasDue, uint64 dueAt) = _cancelDueAt(ticket);
             require(askedAfterTheReceiptWasDue, ErrorsLib.CancelNotDue(ticketId, dueAt));
             require(block.timestamp > dueAt, ErrorsLib.CancelNotDue(ticketId, dueAt));

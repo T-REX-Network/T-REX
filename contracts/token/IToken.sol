@@ -77,22 +77,8 @@ interface IToken is IERC3643 {
         bytes32 indexed fromKey, bytes32 indexed toKey, bytes32 indexed ticketId, bytes from, bytes to, uint256 amount
     );
 
-    event RecallInstructed(
-        uint256 indexed recallId, bytes32 indexed walletKey, address indexed nativeWallet, bytes wallet, uint256 amount
-    );
-    event RecallSettled(uint256 indexed recallId, bytes32 indexed originChainKey, uint256 amount);
-    event BurnProofDuplicate(uint256 indexed recallId, bytes32 indexed originChainKey);
-    event ReplayedBurnProof(uint256 indexed recallId, bytes32 indexed originChainKey);
-    event InstructionResent(uint8 indexed kind, uint256 indexed id, bytes32 indexed chainKey, bytes32 sendId);
-
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
-    error WalletsNotLinked(address nativeWallet, bytes wallet);
-    error RecallMismatch(uint256 recallId);
-    error RecallAmountExceeded(uint256 recallId, uint256 instructed, uint256 proven);
-    error RecallPending(bytes32 walletKey, uint256 recallId);
-    error RecallNotPending(uint256 recallId);
     error PeerChanged(bytes32 chainKey);
-    error UnknownResendKind(uint8 kind);
     error UnverifiedWallet(bytes wallet);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error NotASatelliteWallet(bytes wallet);
@@ -163,18 +149,14 @@ interface IToken is IERC3643 {
     /// @param ticketId the ticket of the move
     function burnOntoHold(bytes calldata from, uint256 amount, bytes32 ticketId) external;
 
-    /// @dev What open validations may still draw from `wallet`. The compliance reserves this at issuance and
-    ///  gives it back when the validation settles or is discarded. The amount of an open recall is not part of
-    ///  it: {availableOf} subtracts both, so `awayBalanceOf - reservedOf` overstates what the wallet can send
-    ///  while a recall is open.
+    /// @dev What open tickets may still draw from `wallet`, an open bring home included. The compliance reserves
+    ///  this when a ticket is written and gives it back when the ticket leaves its open row.
     /// @param wallet the satellite wallet, ERC-7930
     function reservedOf(bytes calldata wallet) external view returns (uint256);
 
-    /// @dev What `wallet` can still send: its bridged balance less what open validations may draw from it and
-    ///  less the amount of its open recall, from {instructRecall} until the proof settles it. Floors at zero.
-    ///  The compliance narrows every new request to this, so none made after a recall draws on tokens being
-    ///  recalled. A request that reserved before the recall keeps its reservation, issued or still awaiting
-    ///  approval.
+    /// @dev What `wallet` can still send: its bridged balance less what open tickets may draw from it, an open bring
+    ///  home included. Floors at zero. The compliance bounds every new ask and every bring home by this, so none
+    ///  draws on tokens another ticket reserved.
     /// @param wallet the satellite wallet, ERC-7930
     function availableOf(bytes calldata wallet) external view returns (uint256);
 
@@ -201,8 +183,8 @@ interface IToken is IERC3643 {
     ///  one is usable and on the receipt route otherwise. Callable by the bound compliance alone.
     function sendOnTicketRoute(bytes32 chainKey, bytes32 ticketId, bytes calldata body) external returns (bytes32);
 
-    /// @dev Sends a message for one half of a move, a `MOVE_OUT` today, to this token's peer on `chainKey` on the
-    ///  receipt route, at full finality, and pins `halfKey` to that route and peer at its first send. A half sent
+    /// @dev Sends a message for one half of a move, a `MOVE_OUT` or a `BRING_HOME`, to this token's peer on `chainKey`
+    ///  on the receipt route, at full finality, and pins `halfKey` to that route and peer at its first send. A half sent
     ///  again goes only to the pair it was pinned to, while it is the chain's current pair; otherwise reverts with
     ///  `PeerChanged`. Reverts with `ChainNotOpen` when the chain has no open receipt route. Callable by the bound
     ///  compliance alone; reverts with `OnlyBoundCompliance` otherwise. Emits `HalfPinned` at the first send and
@@ -218,37 +200,5 @@ interface IToken is IERC3643 {
         MessageTypesLib.Message messageType,
         bytes calldata body
     ) external returns (bytes32);
-
-    /// @notice Orders the Lite on `wallet`'s chain to burn up to `amount` of `wallet` and prove it under the returned id.
-    ///  The proof debits the bridged position and credits `nativeWallet` by what the satellite actually burned, and the
-    ///  compliance is told, as a `RECALL`. A forced movement
-    ///  of location, never of ownership. One recall at a time per wallet; a lost instruction is sent
-    ///  again with {resend}. Only the gateway and the peer the instruction went to may answer it, even after a
-    ///  `setPeer`: before replacing a hostile peer, distrust its gateway or drain its open recalls.
-    /// @dev Callable by the AccessManager role bound to this selector. Not pause-gated: the instruction moves nothing.
-    ///  Reverts with `ZeroValue`, `ZeroAddress`, `WalletsNotLinked` (revoked wallets still resolve),
-    ///  `NotASatelliteWallet`, `RecallPending`, `InsufficientBridgedBalance` above the wallet's bridged position, and
-    ///  `ChainNotOpen`. The recall is not bounded by the wallet's reservations, so a holder cannot keep a position
-    ///  from being recalled by reserving it: a validation that reserved earlier may still execute first, and the
-    ///  satellite burns what it still holds and proves that. From here until the proof lands, `amount` is subtracted
-    ///  from {availableOf}, so no validation requested from now on draws on it.
-    ///  Emits `RecallInstructed` and `ProtocolMessageSent`.
-    /// @param wallet the ERC-7930 envelope of the satellite wallet to burn
-    /// @param amount the most the satellite may burn
-    /// @param nativeWallet the wallet on this chain to credit
-    /// @return recallId the id the burn proof must answer with
-    function instructRecall(bytes calldata wallet, uint256 amount, address nativeWallet)
-        external
-        returns (uint256 recallId);
-
-    /// @notice Sends a recall instruction again, byte for byte, under its original id, to the peer it first went to,
-    ///  through the chain's current route. Moves nothing on this chain; the Lite acts on each id once.
-    ///  `kind` 1, the only kind: a recall still waiting for its proof, `data` = `abi.encode(wallet)`; the gateway
-    ///  admitted to answer it becomes the current route.
-    /// @dev Callable by the AccessManager role bound to this selector, while paused too. Reverts with
-    ///  `RecallNotPending`, `RecallMismatch`, `PeerChanged` when the chain's peer is no longer
-    ///  the one addressed, `UnknownResendKind`, and `ChainNotOpen`. Emits `ProtocolMessageSent` and `InstructionResent`.
-    /// @return sendId the gateway's id for the resent instruction
-    function resend(uint8 kind, uint256 id, bytes calldata data) external returns (bytes32 sendId);
 
 }

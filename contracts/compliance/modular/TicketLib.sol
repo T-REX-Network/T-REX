@@ -133,6 +133,8 @@ library TicketLib {
         mapping(address identity => uint32 asksPerWindow) askLimitOverrides;
         /// What each identity asked: its open tickets and its asks in the current window.
         mapping(address identity => IdentityAsks asks) identityAsks;
+        /// The bring home open on each away wallet, zero when none: one at a time per wallet.
+        mapping(bytes32 walletKey => bytes32 ticketId) openBringHome;
     }
 
     /// @dev What one identity asked, counted against {ITickets-AskLimits}.
@@ -331,9 +333,9 @@ library TicketLib {
     }
 
     /// @dev The asked maximum must fit in what the sending wallet can still send: an away wallet's balance less what
-    ///  earlier tickets may still draw from it and less what an open recall is taking back, or a home wallet's
-    ///  unfrozen balance. Refused, not narrowed: the id is built from the asked maximum, so a ticket narrowed here
-    ///  would carry a maximum its id does not name.
+    ///  earlier tickets may still draw from it, an open bring home included, or a home wallet's unfrozen balance.
+    ///  Refused, not narrowed: the id is built from the asked maximum, so a ticket narrowed here would carry a maximum
+    ///  its id does not name.
     function _requireRequestWithinTheFreeBalance(Draft memory draft, bytes calldata from, address token) private view {
         uint256 free;
         if (draft.homeWallet != address(0)) {
@@ -544,7 +546,8 @@ library TicketLib {
         IToken(token).sendOnTicketRoute(chainKey, ticketId, abi.encode(rebuilt));
     }
 
-    /// @dev Whether the ticket's receipt may be asked for now: see {sendTicket}.
+    /// @dev Whether the ticket's receipt may be asked for now: see {sendTicket}. A bring home has no ticket to send:
+    ///  its half is asked for with {SecondHalfLib-sendSecondHalf}.
     function _requireReceiptCanBeAsked(ITickets.Ticket storage ticket, bytes32 ticketId, bytes32 chainKey)
         private
         view
@@ -552,6 +555,8 @@ library TicketLib {
         require(chainKey == ticket.fromChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
         ITickets.TicketStatus status = ticket.status;
         require(status == ITickets.TicketStatus.Open, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
+        bool aMove = ticket.kind == ITickets.TicketKind.MOVE;
+        require(aMove, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
         require(ticket.asksForReceipt < MAX_RECEIPT_ASKS, ErrorsLib.NoAsksLeft(ticketId));
         uint64 dueAt = nextAskDueAt(ticket);
         require(block.timestamp >= dueAt, ErrorsLib.SendNotDue(ticketId, dueAt));
@@ -907,7 +912,8 @@ library TicketLib {
     /// @dev Moves a ticket to `next` and releases what its old row of the table holds and the new row does not.
     ///  The table, one row per state:
     ///  - `WaitingForApproval`, `Open`: the ask's `amountMax`, reserved in the ledger's total, against both
-    ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token;
+    ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token. An
+    ///    open bring home is one identity's two wallets, so it holds its amount in the total and on its away wallet;
     ///  - `OnHold`: `moved`, reserved in the ledger's total, and against the receiver's identity when the money goes
     ///    to the receiver and the two wallets are not one identity's. Written by {reserveTheHold} once the
     ///    destination is known, since the rules judge the receiver between the ask's release and this write;

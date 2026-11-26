@@ -102,21 +102,13 @@ library ErrorsLib {
     error OnlyBoundCompliance();
     /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
-    /// @dev A recall moves location, never ownership: the native wallet and the satellite wallet must resolve to one
+    /// @dev A bring home moves location, never ownership: the home wallet and the away wallet must resolve to one
     ///  identity, and that identity must exist.
     error WalletsNotLinked(address nativeWallet, bytes wallet);
-    /// @dev The burn proof or the resend names another wallet, or the proof another chain, than the recall.
-    error RecallMismatch(uint256 recallId);
-    /// @dev The satellite proves it burned more than the recall instructed.
-    error RecallAmountExceeded(uint256 recallId, uint256 instructed, uint256 proven);
-    /// @dev The wallet already has a recall waiting for its proof; one at a time.
-    error RecallPending(bytes32 walletKey, uint256 recallId);
-    /// @dev The recall is not waiting for a proof: never issued, or already settled.
-    error RecallNotPending(uint256 recallId);
-    /// @dev The chain's peer changed since the instruction went out; a resend never retargets.
+    /// @dev The away wallet already has a bring home open; one at a time.
+    error BringHomeAlreadyOpen(bytes32 walletKey, bytes32 ticketId);
+    /// @dev The chain's peer or receipt route changed since the half was first sent; a send never retargets.
     error PeerChanged(bytes32 chainKey);
-    /// @dev `resend` knows one kind: 1, a recall.
-    error UnknownResendKind(uint8 kind);
     /// @dev The ticket already holds money on hold; a move puts its money on hold once.
     error TransitAlreadyHeld(bytes32 ticketId);
 
@@ -318,7 +310,6 @@ library ErrorsLib {
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
-    error BridgeNotPinned(address gateway, bytes32 ticketId, bytes32 chainKey);
     error BridgeNotTrusted(address gateway);
     /// @dev `bridge` is not recorded as a receipt bridge, the only kind a receipt route may use.
     error NotAReceiptBridge(address bridge);

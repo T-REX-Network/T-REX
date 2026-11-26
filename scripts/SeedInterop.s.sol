@@ -57,12 +57,12 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /**
  * @title SeedInterop
  * @notice Seeds every cross-chain flow of the Gold Token on one chain, so a subgraph and an SDK
- *         see real routes, validations, a home wallet's move out and a recall without a second chain.
+ *         see real routes, validations, a home wallet's move out and a bring home without a second chain.
  *
  * The "satellite" is chain SATELLITE_CHAIN_ID (default 31338, a local id no public network uses), reached
  * through a loopback ERC-7786 gateway (test/integration/mocks/ERC7786GatewayMock.sol) that
  * attributes everything it delivers to that chain. The deployer plays the satellite's Lite: it
- * is registered as the token's peer there, so the settlements and burn proofs it authors through
+ * is registered as the token's peer there, so the receipts it authors through
  * the gateway are admitted. Gold investors 0 and 1 own one satellite wallet each: their own
  * address on the satellite chain, linked to their identity through the factory's cross-chain
  * link (the wallet sends the proposal itself through the gateway, the identity settles it).
@@ -71,8 +71,8 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  *   gateway trusted, route + peer set, measured times, validity windows, waiting time, ask limits
  *   and ticket caps set, two satellite wallets linked, investor0 moves 100 GOLD out of its home wallet to
  *   its satellite wallet (burned at home onto hold, landed by the move out's receipt), validation 1 issued and settled for 30 (satellite 0 -> satellite 1), validation 2 issued
- *   and left pending, validation 3 issued toward investor1's native wallet, a recall of 20
- *   instructed on satellite wallet 1 and settled by a burn proof.
+ *   and left pending, validation 3 issued toward investor1's native wallet, a bring home of 20
+ *   from satellite wallet 1 to investor1's home wallet, ended by its receipt.
  *
  * ===== Environment =====
  *   DEPLOYER_PRIVATE_KEY        the suite agent (every suite role was granted by the seeders)
@@ -84,7 +84,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  *
  * ===== Idempotency =====
  * Infrastructure steps check on-chain state first. The gateway address, once deployed, is kept in
- * the record and reused. The movement steps (move out, validations, recall) run once: the record
+ * the record and reused. The movement steps (move out, validations, bring home) run once: the record
  * carries `movementsSeeded` and a re-run skips them unless INTEROP_FORCE_MOVEMENTS=true.
  *
  * Usage:
@@ -123,7 +123,7 @@ contract SeedInterop is Script {
     bytes32 internal settledValidation;
     bytes32 internal pendingValidation;
     bytes32 internal resentValidation;
-    uint256 internal recallId;
+    bytes32 internal bringHomeTicket;
 
     function run() external {
         _load();
@@ -144,7 +144,7 @@ contract SeedInterop is Script {
             _moveOutFromHome();
             vm.startBroadcast(deployerKey);
             _seedValidations();
-            _seedRecall();
+            _seedBringHome();
             vm.stopBroadcast();
             movementsSeeded = true;
         }
@@ -195,7 +195,7 @@ contract SeedInterop is Script {
             settledValidation = vm.parseJsonBytes32(json, ".settledValidation");
             pendingValidation = vm.parseJsonBytes32(json, ".pendingValidation");
             resentValidation = vm.parseJsonBytes32(json, ".resentValidation");
-            recallId = vm.parseJsonUint(json, ".recallId");
+            bringHomeTicket = vm.parseJsonBytes32(json, ".bringHomeTicket");
         }
 
         console.log("Deployer (plays the Lite):", deployer);
@@ -393,14 +393,26 @@ contract SeedInterop is Script {
         return keccak256(abi.encode(label, block.timestamp, block.chainid));
     }
 
-    function _seedRecall() internal {
-        recallId = token.instructRecall(satellites[1], 20 * UNIT, wallets[1]);
+    /// @dev The agent brings 20 GOLD of satellite wallet 1 home to investor1's home wallet: the away token burns them
+    ///  and its receipt for the bring home's half mints them at home.
+    function _seedBringHome() internal {
+        bringHomeTicket = compliance.bringHome(satellites[1], 20 * UNIT, wallets[1], _salt("bring home"));
         _liteSends(
-            MessageTypesLib.encodeBurnProof(
-                MessageTypesLib.BurnProof({ recallId: recallId, burnedWallet: satellites[1], amount: 20 * UNIT })
+            MessageTypesLib.encodeSettlement(
+                MessageTypesLib.ReceiptMessage({
+                    ticketId: bringHomeTicket,
+                    from: satellites[1],
+                    to: "",
+                    amount: 20 * UNIT,
+                    askBlockHash: bytes32(0),
+                    seenMax: 0,
+                    seenValidUntil: 0,
+                    half: 1,
+                    answer: MessageTypesLib.ReceiptAnswer.Executed
+                })
             )
         );
-        console.log("Recall of 20 GOLD instructed and settled, id", recallId);
+        console.log("Bring home of 20 GOLD done, id", vm.toString(bringHomeTicket));
     }
 
     function _liteSends(bytes memory payload) internal {
@@ -423,7 +435,7 @@ contract SeedInterop is Script {
         vm.serializeBytes32(JSON, "settledValidation", settledValidation);
         vm.serializeBytes32(JSON, "pendingValidation", pendingValidation);
         vm.serializeBytes32(JSON, "resentValidation", resentValidation);
-        vm.serializeUint(JSON, "recallId", recallId);
+        vm.serializeBytes32(JSON, "bringHomeTicket", bringHomeTicket);
         string memory json = vm.serializeBool(JSON, "movementsSeeded", movementsSeeded);
         vm.writeJson(json, recordPath);
         console.log("Recorded", recordPath);
