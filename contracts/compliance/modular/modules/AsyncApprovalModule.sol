@@ -89,7 +89,7 @@ interface IAsyncApprover {
 ///  The compliance owner lists the approvers with {setApprovers}. They answer in that order, each on the request
 ///  id, never on terms of their own: approve, possibly with a lower maximum, or refuse. Nobody can change the
 ///  recipient or the spender, or widen the range. Once the last approver approved, anyone calls {finalize}, which
-///  answers the compliance: it issues the validation at the lowest maximum approved. The first refusal refuses
+///  answers the compliance: it opens the validation at the lowest maximum approved, and anyone sends it there. The first refusal refuses
 ///  it at once. A request nobody finished answering is discarded by anyone past its deadline, on the compliance.
 ///
 ///  A relocation between one identity's own wallets changes no position, so it is approved at once, in the
@@ -219,7 +219,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         onlyComplianceCall
     {
         if (ComplianceLedgerLib.isRelocation(ctx.fromIdentity, ctx.toIdentity)) {
-            // The compliance already records it `WaitingForApproval`, so this answer issues it inside the request.
+            // The compliance already records it `WaitingForApproval`, so this answer opens it inside the request.
             ITickets(msg.sender).answerApproval(ticketId, ctx.amountMax);
             return;
         }
@@ -241,7 +241,7 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     /// @dev Approves a request awaiting approval, at most at `amountMax`. Only the approver whose turn it is
     ///  may answer. A maximum below the requested minimum refuses. The last approval only records the request
     ///  as fully approved, so an approver answering from a callback never pays for, nor reverts on, the
-    ///  issuance; {finalize} issues it. Emits `ValidationApproved`, and `ValidationFullyApproved` on the last.
+    ///  answer; {finalize} gives it. Emits `ValidationApproved`, and `ValidationFullyApproved` on the last.
     function approveValidation(address compliance, bytes32 ticketId, uint256 amountMax)
         external
         onlyBoundCompliance(compliance)
@@ -263,9 +263,10 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
         emit ValidationFullyApproved(compliance, ticketId, request.amountMax);
     }
 
-    /// @dev Issues a request every approver approved, at the lowest maximum approved, by answering the
-    ///  compliance. Anyone may call it. A failure, a chain paused since the request for instance, reverts and
-    ///  leaves the request fully approved, so it can be tried again before the deadline.
+    /// @dev Opens a request every approver approved, at the lowest maximum approved, by answering the
+    ///  compliance; anyone then sends the ticket with `sendTicket` there. Anyone may call it. A failure, a receipt
+    ///  waiting for the ticket for instance, reverts and leaves the request fully approved, so it can be tried
+    ///  again before the deadline.
     function finalize(address compliance, bytes32 ticketId) external {
         Request storage request = _getAsyncApprovalStorage().requests[compliance][ticketId];
         require(request.fullyApproved, ErrorsLib.NotFullyApproved(ticketId));

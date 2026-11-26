@@ -299,39 +299,20 @@ library TREXMessagingLib {
 
     /* ----- Outbound ----- */
 
-    /// @dev Sends a ticket to this token's peer on `chainKey`, through the chain's ticket route when one is set and
-    /// still trusted, else through its receipt route; pins the half to the receipt route and the peer.
-    ///
-    /// The chain must be open on its receipt route either way, since that is the route the receipt comes back
-    /// through: the first send of a half records the receipt route and the peer, and its receipt is then taken
-    /// from that pair, the chain's current one, or its former one inside the window of a planned change, so a later
-    /// route or peer change does not strand it. An ask for the receipt goes out through the pinned pair while that
-    /// pair is the current one or the former one inside its window, and through the current pair otherwise.
+    /// @dev Sends a ticket the compliance put on the ticket route to this token's peer on `chainKey`, through the
+    /// chain's ticket route, and pins the half to the receipt route and the peer, see {_ticketPairOf}. A ticket bridge
+    /// the registry distrusted since falls back to the receipt route rather than stranding an ask: that only ever
+    /// adds finality. A ticket the compliance put on the receipt route goes through {sendOnReceiptRoute}.
     function sendComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes memory body)
         external
         returns (bytes32 sendId)
     {
         MessagingStorage storage s = layout();
-        (address receiptRoute, bytes memory peer) = _openRoute(s, chainKey);
-
-        // A ticket is the first half of its move.
-        Pin storage pin = s.pins[MessageTypesLib.halfKeyOf(ticketId, 0)];
-        if (pin.bridge == address(0)) {
-            pin.bridge = receiptRoute;
-            pin.peerKey = keccak256(peer);
-
-            emit EventsLib.HalfPinned(ticketId, chainKey, receiptRoute);
-        } else if (_isTheFormerPairToAsk(s, chainKey, pin)) {
-            // The away token that holds the ticket is the one that answers the ask: until the away side switches,
-            // that is the former peer, and its answer comes back on the former pair.
-            receiptRoute = pin.bridge;
-            peer = s.formerReceiptRoutes[chainKey].peer;
-        }
+        (address receiptRoute, bytes memory peer) = _ticketPairOf(s, chainKey, MessageTypesLib.halfKeyOf(ticketId, 0));
 
         // A ticket moves nothing on its own: sending it ahead of finality risks a ticket the away token executes
         // and this chain then loses to a reorg; the ask mined again takes the same id, and its receipt is applied
-        // on older terms, see {IReceiptHandler-receiveReceipt}. A ticket bridge the registry distrusted falls back
-        // to the receipt route rather than stranding the ask.
+        // on older terms, see {IReceiptHandler-receiveReceipt}.
         address ticketRoute = s.ticketRoutes[chainKey];
         bool ticketRouteUsable = ticketRoute != address(0) && s.registry.isTrusted(ticketRoute);
         address sendingGateway = ticketRouteUsable ? ticketRoute : receiptRoute;
@@ -340,9 +321,10 @@ library TREXMessagingLib {
     }
 
     /// @dev Sends a message for one half of a move on the chain's receipt route, at full finality, and pins the half
-    /// to that route and peer at its first send. A half sent again goes to the pair it was pinned to only, while that
-    /// pair is still the chain's current one: the away token that holds the half is the one that answers it, so a
-    /// send never retargets. A half whose pair was replaced is the compliance's to send again as a new half.
+    /// to that route and peer at its first send. A second half sent again goes to the pair it was pinned to only,
+    /// while that pair is still the chain's current one: the away token that holds the half is the one that answers
+    /// it, so a send never retargets. A second half whose pair was replaced is the compliance's to send again as a
+    /// new half. A ticket has no new half: it goes where {_ticketPairOf} says.
     function sendOnReceiptRoute(
         bytes32 chainKey,
         bytes32 halfKey,
@@ -350,6 +332,11 @@ library TREXMessagingLib {
         bytes memory body
     ) external returns (bytes32 sendId) {
         MessagingStorage storage s = layout();
+        if (messageType == MessageTypesLib.Message.TICKET) {
+            (address ticketReceiptRoute, bytes memory ticketPeer) = _ticketPairOf(s, chainKey, halfKey);
+            return _send(ticketReceiptRoute, ticketPeer, chainKey, messageType, body);
+        }
+
         (address receiptRoute, bytes memory peer) = _openRoute(s, chainKey);
         bytes32 peerKey = keccak256(peer);
 
@@ -503,6 +490,32 @@ library TREXMessagingLib {
             .sendMessage(peer, MessageTypesLib.encode(messageType, body), new bytes[](0));
 
         emit EventsLib.ProtocolMessageSent(messageType, chainKey, sendId);
+    }
+
+    /// @dev The receipt route and the peer a ticket's half goes to. The chain must be open on its receipt route
+    /// either way, since that is the route the receipt comes back through: the first send of the half records the
+    /// receipt route and the peer, and its receipt is then taken from that pair, the chain's current one, or its
+    /// former one inside the window of a planned change, so a later route or peer change does not strand it. An ask
+    /// for the receipt goes out through the pinned pair while that pair is the current one or the former one inside
+    /// its window, and through the current pair otherwise.
+    function _ticketPairOf(MessagingStorage storage s, bytes32 chainKey, bytes32 halfKey)
+        private
+        returns (address receiptRoute, bytes memory peer)
+    {
+        (receiptRoute, peer) = _openRoute(s, chainKey);
+
+        Pin storage pin = s.pins[halfKey];
+        if (pin.bridge == address(0)) {
+            pin.bridge = receiptRoute;
+            pin.peerKey = keccak256(peer);
+
+            emit EventsLib.HalfPinned(halfKey, chainKey, receiptRoute);
+        } else if (_isTheFormerPairToAsk(s, chainKey, pin)) {
+            // The away token that holds the ticket is the one that answers the ask: until the away side switches,
+            // that is the former peer, and its answer comes back on the former pair.
+            receiptRoute = pin.bridge;
+            peer = s.formerReceiptRoutes[chainKey].peer;
+        }
     }
 
     /// @dev Resolves the gateway and peer for `chainKey`

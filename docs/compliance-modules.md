@@ -167,24 +167,35 @@ the compliance has a waiting state for cross-chain requests, and a module of typ
 While an `APPROVAL` module is bound (one at most), `askToMove` does everything it does today,
 resolving the route, narrowing the range by every rule and reserving it, but records the validation as
 `WaitingForApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
-`approvalRequested`. The request's `validUntil`, the validity window from now, is both the deadline for the answer
-and, once issued, the satellite's deadline: the time spent waiting comes out of the time to execute, so the
-rules are never older than one validity window when the satellite executes.
+`approvalRequested`. A ticket that waits for an approver always travels the receipt route, at full finality: a home
+reorg short of finality could otherwise drop the approver's answer after the away token executed the ticket. The
+request's `validUntil`, the receipt route's validity window from now, is the deadline for the answer, for the first
+send and, once sent, the satellite's deadline: the time spent waiting comes out of the time to execute, so the rules
+are never older than one validity window when the satellite executes. The approvers' answer time is not measured on
+chain: the receipt route's validity window is sized off chain to cover it.
 
 Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
-lowers the maximum when the answer is lower, releases the difference and sends the ticket; no rule runs again,
-since every rule ran and the room was reserved at the request, but the chain is checked again, as it may
-have been paused while the request waited. An answer below the requested minimum is a refusal, which releases
-the reservation and ends the validation `Cancelled`. A request nobody answered is discarded past its deadline
-with `cancelTickets`, by anyone, since nothing was sent for it. A receipt for a ticket that was never sent
-(still waiting, refused or unanswered) waits under its id and is applied once the approval sends the ticket; a
-receipt for an id never taken reverts and stays deliverable. Neither stops the token or blocks a chain.
+lowers the maximum when the answer is lower, releases the difference and opens the ticket; no rule runs again,
+since every rule ran and the room was reserved at the request. Nothing is sent by the answer: anyone makes the
+first send with `sendTicket(ticketId, chainKey, to, spender)` before the deadline, and that send checks the token
+and the chain again, as either may have been stopped while the request waited. An answer below the requested
+minimum is a refusal, which releases the reservation and ends the validation `Cancelled`. A request nobody answered,
+or an approved ticket nobody sent, is discarded past its deadline with `cancelTickets`, by anyone, since nothing was
+sent for it. A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
+unanswered) answers no copy home sent: it is put on hold with no destination and reversed, never applied as the
+ticket's move. Home's own copy is the only honest one of an approved ticket: a first-half receipt on any other ask
+block hash breaks its terms and blocks its away chain. Neither stops the token.
 
 Because the request reserves while it waits, two waiting requests cannot jointly break a rule that reads the
 ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
 
-Unbinding the module turns new requests back into immediate issuances; the OWNER of the compliance can do it if
-the approvers stop answering. Requests already waiting keep waiting until their deadline, then are discarded.
+An `APPROVAL` module is bound, removed or filed again only while asks are paused for the whole token
+(`setAsksPaused`, otherwise `AsksNotPaused`): whether a ticket waits for an approver is written at its ask, and a
+change inside a home block a reorg drops would leave one fork's ticket waiting and the other's not. Like every
+module change, it also waits until no ticket holds a reservation (`TicketsStillReserved`); only
+`forceRemoveModule` skips that wait. Unbinding the module turns new requests back into immediate issuances; the
+OWNER of the compliance can do it if the approvers stop answering, once the waiting requests were discarded past
+their deadline.
 
 `AsyncApprovalModule` is the `APPROVAL` module that ships:
 
@@ -194,9 +205,8 @@ the approvers stop answering. Requests already waiting keep waiting until their 
   `refuseValidation(compliance, id)`. They cannot change the recipient or the spender, or widen the range: the
   lowest maximum approved is the one issued, and the first refusal refuses at once.
 - The last approval only records the request as fully approved. Anyone then calls `finalize(compliance, id)`,
-  which answers the compliance and pays for sending the ticket. An approver answering from a callback therefore
-  never reverts on a paused chain, nor carries the cost of the issuance, and a failed `finalize` can be tried
-  again before the deadline.
+  which answers the compliance; anyone then sends the ticket with `sendTicket`. An approver answering from a
+  callback therefore never reverts on a paused chain, nor carries the cost of a send.
 - An approver contract is told in the same transaction, through `IAsyncApprover.approvalAsked`, when its turn
   comes. An FHE rule starts its computation there and answers from its decryption callback, with no trusted
   party in between. Telling is best effort: an approver that does not implement it reads `ApprovalRequested`.

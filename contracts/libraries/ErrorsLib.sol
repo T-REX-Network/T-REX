@@ -300,6 +300,9 @@ library ErrorsLib {
     error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
     /// @dev New asks are paused for the whole token; receipts still land.
     error AsksPaused();
+    /// @dev An approval module is bound or removed only while asks are paused for the whole token: a module bound in a
+    ///  home block a reorg drops would leave one fork's tickets waiting for approval and the other's not.
+    error AsksNotPaused();
     /// @dev The identity asked as many times as it may in the current window.
     error AskLimitReached(address identity);
     /// @dev The identity already has as many tickets waiting for approval or open as it may.

@@ -64,6 +64,8 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
+import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
+import { TicketLib } from "./TicketLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /**
@@ -77,7 +79,10 @@ import { IModule } from "./modules/IModule.sol";
  * the compliance's. Asking the modules, which every transfer does, is internal here: it is compiled into the
  * compliance itself, and into the validation libraries that ask the same modules about a cross-chain movement.
  *
- * Nothing here checks a caller: the compliance's entry points do, before they reach this.
+ * Nothing here checks a caller: the compliance's entry points do, before they reach this. Modules do not change
+ * under open tickets: binding, removing, filing again and configuring a module wait until nothing is reserved for
+ * a ticket, and an approval module is bound or removed only while asks are paused. Only a forced removal skips the
+ * first wait, so a module that reverts everywhere cannot hold the token.
  */
 library ModuleSetLib {
 
@@ -102,6 +107,7 @@ library ModuleSetLib {
     ///  requirement, then it is sorted into the list of every type it names. Everything is validated before
     ///  any state is written, so `canComplianceBind` sees the module as not yet bound.
     function addModule(address _module) external {
+        _requireNoTicketReserved();
         require(_module != address(0), ErrorsLib.ZeroAddress());
         ModuleSet storage moduleSet = layout();
         require(moduleSet.modules.length() < 25, ErrorsLib.MaxModulesReached(25));
@@ -122,6 +128,12 @@ library ModuleSetLib {
 
     /// @dev Takes a module out of every list it sits in, without calling into it.
     function removeModule(address _module) external {
+        _requireNoTicketReserved();
+        forceRemoveModule(_module);
+    }
+
+    /// @dev {removeModule} while tickets are open too: the repair for a module that reverts everywhere.
+    function forceRemoveModule(address _module) public {
         require(_module != address(0), ErrorsLib.ZeroAddress());
         ModuleSet storage moduleSet = layout();
         require(moduleSet.modules.remove(_module), ErrorsLib.ModuleNotBound());
@@ -131,6 +143,7 @@ library ModuleSetLib {
     /// @dev Re-reads what the module says it is and files it again, as a rebind would, without touching the
     ///  module's own state.
     function resyncModuleTypes(address _module) external {
+        _requireNoTicketReserved();
         ModuleSet storage moduleSet = layout();
         require(moduleSet.modules.contains(_module), ErrorsLib.ModuleNotBound());
         _removeFromItsTypeLists(moduleSet, _module);
@@ -140,6 +153,7 @@ library ModuleSetLib {
     /// @dev Forwards `callData` to a bound `_module` via low-level call and emits the interaction event.
     ///  Reverts when `_module` is not bound or when the underlying call fails.
     function callModuleFunction(bytes calldata callData, address _module) external {
+        _requireNoTicketReserved();
         require(layout().modules.contains(_module), ErrorsLib.ModuleNotBound());
 
         if (!LowLevelCall.callNoReturn(_module, callData)) {
@@ -203,6 +217,7 @@ library ModuleSetLib {
             // A request waits for one answer, so a second module deciding it would race the first.
             if (moduleType == IModule.ModuleType.APPROVAL) {
                 require(moduleSet.byType[moduleType].length() == 1, ErrorsLib.OneApprovalModuleOnly());
+                _requireAsksPaused();
             }
         }
 
@@ -213,9 +228,24 @@ library ModuleSetLib {
     ///  rather than asking the module what it names now, so a module whose declaration changed since it was
     ///  bound still leaves the lists it really sits in.
     function _removeFromItsTypeLists(ModuleSet storage moduleSet, address _module) private {
+        bool anApprovalModule = moduleSet.byType[IModule.ModuleType.APPROVAL].contains(_module);
+        if (anApprovalModule) _requireAsksPaused();
         for (uint256 i = 0; i <= uint256(type(IModule.ModuleType).max); i++) {
             moduleSet.byType[IModule.ModuleType(i)].remove(_module);
         }
+    }
+
+    /// @dev A module changes nothing under an open ticket: the rules that judged its ask, and the trackers that
+    ///  will be told of its move, stay the ones it was asked under.
+    function _requireNoTicketReserved() private view {
+        require(ComplianceLedgerLib.layout().pendingTotal == 0, ErrorsLib.TicketsStillReserved());
+    }
+
+    /// @dev Whether a ticket waits for an approver is written at its ask, so an approval module is bound or removed
+    ///  only while asks are paused: a change in a home block a reorg drops would otherwise leave one fork's ticket
+    ///  waiting for approval and the other's not, and an honest receipt for it could then block its chain.
+    function _requireAsksPaused() private view {
+        require(TicketLib.layout().asksPaused, ErrorsLib.AsksNotPaused());
     }
 
 }

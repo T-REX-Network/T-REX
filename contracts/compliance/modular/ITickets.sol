@@ -152,6 +152,7 @@ interface ITickets {
     error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);
     error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
     error AsksPaused();
+    error AsksNotPaused();
     error AskLimitReached(address identity);
     error TooManyOpenTickets(address identity);
     error BelowSmallestAmount(uint256 requestedMax, uint256 smallestAmount);
@@ -185,9 +186,10 @@ interface ITickets {
     /// {TicketLib-moveTo}, so a release can neither run twice nor be skipped.
     enum TicketStatus {
         /// Written and reserved, sent nowhere: an `APPROVAL` module is bound and has not answered. `answerApproval`
-        /// opens and sends it, or cancels it; past `validUntil`, `cancelTickets` cancels it.
+        /// opens it, or cancels it; past `validUntil`, `cancelTickets` cancels it.
         WaitingForApproval,
-        /// Written, reserved and sent: waiting for its receipt.
+        /// Written, reserved and sent: waiting for its receipt. Or opened by the approver and not sent yet: anyone
+        /// sends it with `sendTicket`; past `validUntil` unsent, `cancelTickets` cancels it.
         Open,
         /// Its reservation released: refused by the approver, or cancelled once its receipt was overdue. A late
         /// receipt for a ticket that was sent is still applied as the move it is.
@@ -312,6 +314,15 @@ interface ITickets {
         /// The cancel of this money on hold burned less than it asked: the rest stays on hold and is not sent again
         /// until carried credit comes back to the receiver.
         bool shortCancel;
+
+        /* ----- The route, chosen at the ask; last for the layout's sake ----- */
+
+        /// The ticket and every ask for its receipt travel the receipt route, at full finality: it waited for an
+        /// approver, it is above a cap, or its chain has no trusted ticket bridge. Never chosen again.
+        bool onReceiptRoute;
+        /// An approval module was bound at the ask, so the ticket waited for its answer. Its only honest copy is
+        /// home's own: a first-half receipt on any other ask block hash breaks its terms.
+        bool waitedForApproval;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
@@ -455,10 +466,16 @@ interface ITickets {
     /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent`. For a home `from`: the token's
     /// `HeldInTransit` and `Transfer`, `SecondHalfSent`, then the token's `HalfPinned` and `ProtocolMessageSent`.
     ///
+    /// The route is chosen here and written on the ticket, see {Ticket-onReceiptRoute}: the receipt route, at full
+    /// finality, while an `APPROVAL` module is bound, for a home `from`, when the chain has no trusted ticket bridge,
+    /// above the chain's per-ticket cap, or when the ticket would take the ticket route above its per-window cap in
+    /// the current window of one waiting time; the ticket route otherwise. `validUntil` is the ask's time plus the
+    /// validity window of that route.
+    ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
     /// reserved as `WaitingForApproval`, `TicketWaitingForApproval` is emitted, the module is told, and
-    /// `answerApproval` decides. The deadline for the answer is `validUntil`, the validity window from now, and it
-    /// stays the satellite's deadline once the validation is issued.
+    /// `answerApproval` decides. The deadline for the answer and for the first send is `validUntil`, and it stays
+    /// the satellite's deadline once the validation is issued.
     /// @param from ERC-7930 interoperable address of the sender.
     /// @param to ERC-7930 interoperable address of the recipient.
     /// @param requestedMin Inclusive lower bound the caller proposes.
@@ -481,9 +498,10 @@ interface ITickets {
     ///
     /// An answer below the requested minimum is a refusal: the reservation is released and the validation ends
     /// `Cancelled`. Any other answer lowers the maximum to `approvedMax` when it is lower, releases the
-    /// difference, and sends the ticket to the sender's away chain. No rule runs again: they ran at the
-    /// request. The deadline stays the request's `validUntil`, so the time spent waiting comes out of the
-    /// satellite's time to execute, and the rules are never older than the validity window when it does.
+    /// difference, and opens the ticket: nothing is sent, anyone makes the first send with `sendTicket`, so the
+    /// approver never pays for a send. No rule runs again: they ran at the request. The deadline stays the
+    /// request's `validUntil`, so the time spent waiting comes out of the satellite's time to execute, and the
+    /// rules are never older than the validity window when it does.
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
@@ -492,17 +510,16 @@ interface ITickets {
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
     /// - No receipt for the ticket waiting: it answers no copy home sent, and is booked on hold once it can be;
     ///   otherwise reverts with `ApplyWaitingReceiptFirst`.
-    /// - On an approval, the token not paused, otherwise `TokenPaused`, and the sender's chain still open,
-    ///   configured, not blocked and with no hostile change running, as at a request.
     ///
-    /// Emits `TicketWritten` and sends the ticket, as `askToMove` does, or emits `ValidationApprovalRefused`. A home wallet's move out is burned onto hold and its `MOVE_OUT`
-    /// sent instead, as `askToMove` does with no approval module; its chain is the receiver's.
+    /// Emits nothing on an approval (`TicketWritten` comes with the first send), or `ValidationApprovalRefused`.
     /// @param ticketId The validation awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external;
 
     /// @dev Sets the two validity windows: a ticket is valid until the ask's time plus the window of the route it
-    /// travels. A ticket at full finality takes longer to arrive, so it needs the longer window.
+    /// travels. A ticket at full finality takes longer to arrive, so it needs the longer window. A ticket that waits
+    /// for an approver travels the receipt route, and its answer and first send come out of that window too: the
+    /// approvers' answer time is not measured on chain, so `onReceiptRoute` is sized off chain to cover it.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -618,7 +635,9 @@ interface ITickets {
     /// above the per-ticket cap blocks that away chain. Raising a cap takes effect at once. Lowering the per-ticket
     /// cap waits until the latest valid until of a ticket sent toward the chain has passed: an honest copy sent under
     /// the higher cap would otherwise echo a `seenMax` above the new one and block an honest chain. The per-window
-    /// cap is kept for the route each ticket takes.
+    /// cap is read at each ask: a ticket that would take the ticket route above it in the current window of one
+    /// waiting time travels the receipt route. A cap of zero sends every ticket toward the chain on the receipt
+    /// route.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -641,9 +660,9 @@ interface ITickets {
     ///
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - A ticket `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was
-    ///   sent for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop and the
-    ///   block of its away chain apply to it.
+    /// - A move sent nowhere, `WaitingForApproval` or opened by the approver and never sent, may be cancelled by
+    ///   anyone once its `validUntil` passed, since nothing was sent for it; otherwise reverts with `CancelNotDue`.
+    ///   Of the rules below, only the token's stop, the block of its away chain and a hostile change apply to it.
     /// - Each other id must be a move stored `Open`; otherwise reverts with `TicketNotCancellable`. A bring home is
     ///   never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
     /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` more than one waiting time past
@@ -667,14 +686,24 @@ interface ITickets {
     /// @param validationIds The tickets to cancel.
     function cancelTickets(bytes32[] calldata validationIds) external;
 
-    /// @dev Asks the away token for the receipt of an open ticket, for anyone: sends the ticket again, byte for byte,
-    /// through the bridge the first send pinned. The away token answers a later copy with the receipt it stored, a
-    /// zero receipt when the ticket expired unexecuted, or a still open answer. `MAX_RECEIPT_ASKS` asks at most, at
-    /// fixed times: the first at `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's
-    /// waiting time), each next one waiting time later. `to` is the one envelope the record does not keep; it is
-    /// read off `TicketWritten`, like `spender`, and both must be the ones the ticket was asked with.
+    /// @dev Sends a ticket, for anyone, on the route chosen at its ask. `to` is the one envelope the record does not
+    /// keep; it is read off `TicketWaitingForApproval` or `TicketWritten`, like `spender`, and both must be the ones
+    /// the ticket was asked with; otherwise reverts with `ValidationBodyMismatch`.
     ///
-    /// Requirements:
+    /// The first send of a ticket the approver opened: before its `validUntil`, otherwise `ValidationExpired`;
+    /// `chainKey` the chain its first message goes to, the sender's, or the receiver's for a home `from`, otherwise
+    /// `ChainNotPartOfValidation`; the token not paused and that chain open as at a request (`TokenPaused`,
+    /// `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`); no receipt waiting for the ticket, otherwise
+    /// `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove` does with no approval module, or, for a home
+    /// `from`, burns onto hold and sends the `MOVE_OUT`.
+    ///
+    /// Otherwise an ask for the receipt of an open ticket: sends the ticket again, byte for byte, through the bridge
+    /// the first send pinned. The away token answers a later copy with the receipt it stored, a zero receipt when the
+    /// ticket expired unexecuted, or a still open answer. `MAX_RECEIPT_ASKS` asks at most, at fixed times: the first
+    /// at `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), each next
+    /// one waiting time later.
+    ///
+    /// Requirements of an ask:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
     /// - `chainKey` must be the sender's chain; otherwise reverts with `ChainNotPartOfValidation`.
     /// - It must be a move stored `Open`; otherwise reverts with `ValidationNotResendable`. A bring home is sent

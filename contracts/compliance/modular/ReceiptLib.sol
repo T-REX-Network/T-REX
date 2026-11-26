@@ -508,18 +508,22 @@ library ReceiptLib {
 
     /// @dev On another ask block hash the away token executed a copy from a home block a reorg dropped: the same
     ///  request, so the same id and minimum, narrowed differently. Its maximum is bounded by what was asked and by
-    ///  the away chain's per-ticket cap, the most a dropped copy can carry; the amount by that copy's range.
+    ///  the away chain's per-ticket cap, the most a dropped copy can carry; the amount by that copy's range. A ticket
+    ///  that waited for an approver has no such copy: it left at full finality, so only home's own copy is honest,
+    ///  and any other would pass the approver's narrowed amount.
     function _breaksOlderTerms(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt
     ) private view returns (bool) {
+        bool onlyHomesOwnCopyIsHonest = ticket.waitedForApproval;
         uint256 perTicketCap = TicketLib.layout().ticketLimits[originChainKey].perTicketCap;
         bool belowTheMinimum = receipt.amount < ticket.amountMin;
         bool aboveWhatTheCopyAllowed = receipt.amount > receipt.seenMax;
         bool aboveWhatWasAsked = receipt.seenMax > ticket.requestedMax;
         bool aboveThePerTicketCap = receipt.seenMax > perTicketCap;
-        return belowTheMinimum || aboveWhatTheCopyAllowed || aboveWhatWasAsked || aboveThePerTicketCap;
+        bool breaksTheCopysBounds = belowTheMinimum || aboveWhatTheCopyAllowed || aboveWhatWasAsked;
+        return onlyHomesOwnCopyIsHonest || breaksTheCopysBounds || aboveThePerTicketCap;
     }
 
     /// @dev A move inside one away chain, as the away token made it: the ticket is done and releases its row, the
@@ -629,7 +633,8 @@ library ReceiptLib {
     /* ----- Cancel ----- */
 
     /// @dev Anyone may cancel: an `Open` ticket once an ask for its receipt went unanswered, see {_cancelDueAt}; a
-    ///  ticket `WaitingForApproval` once past `validUntil`. One refused id reverts the whole batch.
+    ///  move sent nowhere, waiting for approval or approved and never sent, once past `validUntil`. One refused id
+    ///  reverts the whole batch.
     ///  No ticket is cancelled while the away chain that owes its receipt is blocked, its peer was replaced as hostile
     ///  less than four waiting times ago, or the token is stopped, a ticket waiting for approval included: its receipt
     ///  may be waiting or on its way, see {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot
@@ -643,9 +648,9 @@ library ReceiptLib {
             require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
             ITickets.Ticket storage ticket = store.validations[ticketId];
             TicketLib.requireTicketCanBeDecided(token, ticket);
-            // Nothing was sent for a ticket waiting for approval: anyone may cancel it once its deadline passed,
-            // and the reservation comes back.
-            if (ticket.status == ITickets.TicketStatus.WaitingForApproval) {
+            // Nothing was sent for a move waiting for approval, or opened by the approver and never sent: anyone may
+            // cancel it once its deadline passed, and the reservation comes back.
+            if (TicketLib.neverSent(ticket)) {
                 TicketLib.discardUnanswered(ticketId, token);
                 continue;
             }

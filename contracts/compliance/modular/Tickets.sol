@@ -107,16 +107,16 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    /// @dev The answer, the narrowing and the send live in {TicketLib-answerApproval}; a receipt waiting for the
-    ///  ticket is applied by {applyWaitingReceipt} once the ticket is sent, and stays waiting when it is refused.
+    /// @dev The answer and the narrowing live in {TicketLib-answerApproval}; the first send is anyone's, with
+    ///  {sendTicket}. A receipt that came before the first send is put on hold, never applied as the ticket's move.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external {
         TicketLib.answerApproval(ticketId, approvedMax, address(_boundToken()));
     }
 
     /// @inheritdoc ITickets
-    /// @dev Not `restricted`: anyone may ask, at the times the ticket's clock gives, see {TicketLib-sendTicket}. The
-    ///  reservation, the id and the pinned route are those of the ask, and the token refuses the send once the
-    ///  pinned bridge or peer is no longer the chain's.
+    /// @dev Not `restricted`: anyone makes the first send of an approved ticket, and anyone asks for a receipt at the
+    ///  times the ticket's clock gives, see {TicketLib-sendTicket}. The reservation, the id and the route are those of
+    ///  the ask.
     function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external {
         TicketLib.sendTicket(ticketId, chainKey, to, spender, address(_boundToken()));
     }

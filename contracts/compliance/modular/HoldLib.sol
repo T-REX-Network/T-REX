@@ -123,7 +123,6 @@ library HoldLib {
         // Step 1: the record.
         if (TicketLib.isRecorded(store, ticketId)) {
             TicketLib.moveTo(ticket, next, token);
-            delete store.awaitedTerms[ticketId];
         } else {
             _writeTheRecord(ticket, originChainKey, receipt, token);
             ticket.status = next;

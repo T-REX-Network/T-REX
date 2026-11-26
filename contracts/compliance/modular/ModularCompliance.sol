@@ -168,7 +168,7 @@ contract ModularCompliance is
      *  @param _module address of the module to remove
      */
     function forceRemoveModule(address _module) external restricted {
-        _removeModule(_module);
+        ModuleSetLib.forceRemoveModule(_module);
         emit EventsLib.ModuleForceRemoved(_module);
     }
 
