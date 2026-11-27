@@ -72,7 +72,9 @@ other chain, and blocks that chain.
    so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`, OZ's `WrongRoute`: the message stays
    deliverable through a receipt bridge), and it reads the receipt
    bridge's receiving policy for this chain's receipt bridge when the route is set and on every receipt, refusing
-   one that admits less than full finality (`ReceiptBridgeNotFullFinality`). Each half is pinned to the receipt route
+   one that admits less than full finality (`WrongFinality`). Every money message it sends, and every ticket it puts
+   on the receipt route, reads the finality the receipt bridge itself requests (`requestedFinality()`) and is refused
+   with `WrongFinality` when it is not full finality: the depth is only a label. Each half is pinned to the receipt route
    and the peer it left through (`pinOf`), and its receipt is taken from that pair or the current one, so a ticket
    that arrived on the ticket bridge is answered through the receipt route, not back through the bridge that
    delivered it.

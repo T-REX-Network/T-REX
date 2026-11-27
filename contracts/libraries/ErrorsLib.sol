@@ -330,8 +330,9 @@ library ErrorsLib {
     error NotAReceiptBridge(address bridge);
     /// @dev `bridge` was distrusted, and a distrusted bridge is never trusted again.
     error BridgeDistrusted(address bridge);
-    /// @dev The receiving policy of `bridge` admits messages from `chainKey` before that chain's full finality.
-    error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
+    /// @dev `bridge` does not wait for full finality: its receiving policy admits messages from `chainKey` before
+    ///  that chain's finality, or it requests less than home's finality for a value message it sends there.
+    error WrongFinality(address bridge, bytes32 chainKey);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);

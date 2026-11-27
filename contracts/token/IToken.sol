@@ -188,7 +188,9 @@ interface IToken is IERC3643 {
     ///  the receipt route, to this token's peer on `chainKey` on the receipt route, at full finality, and pins
     ///  `halfKey` to that route and peer at its first send. A half sent again goes as a ticket's ask for its receipt
     ///  goes, see {sendOnTicketRoute}: to the pinned pair, the former pair inside its window, or the current pair. A
-    ///  second half goes only to the peer it was pinned to; otherwise reverts with `PeerChanged`. Reverts with `ChainNotOpen` when the chain has no open receipt route. Callable by the bound
+    ///  second half goes only to the peer it was pinned to; otherwise reverts with `PeerChanged`. Reverts with
+    ///  `ChainNotOpen` when the chain has no open receipt route, and with `WrongFinality` when the bridge it leaves
+    ///  through does not request full finality for what it sends. Callable by the bound
     ///  compliance alone; reverts with `OnlyBoundCompliance` otherwise. Emits `HalfPinned` at the first send and
     ///  `ProtocolMessageSent`.
     /// @param chainKey the away chain the half goes to

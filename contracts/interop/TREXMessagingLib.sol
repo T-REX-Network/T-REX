@@ -69,6 +69,7 @@ import { EventsLib } from "../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 import { IReceiptHandler } from "./IReceiptHandler.sol";
 import { IReceivingPolicy } from "./IReceivingPolicy.sol";
+import { IRequestedFinality } from "./IRequestedFinality.sol";
 import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
 
 /**
@@ -336,6 +337,8 @@ library TREXMessagingLib {
     /// goes only to the peer it was pinned to, which holds it: through the former pair inside the window of a planned
     /// change, see {_halfPairOf}, or through the current route while that peer is still the chain's. Any other peer
     /// would take it as a half it never saw and move the money a second time, so the send is refused instead.
+    /// The bridge's declared finality is read on every send: the registry depth is only a label, and a bridge that
+    /// requests less than full finality would carry money out of a home block a reorg can still drop.
     function sendOnReceiptRoute(
         bytes32 chainKey,
         bytes32 halfKey,
@@ -347,6 +350,8 @@ library TREXMessagingLib {
         bool aTicket = messageType == MessageTypesLib.Message.TICKET;
         bool toThePinnedPeer = messagingStorage.pins[halfKey].peerKey == keccak256(peer);
         require(aTicket || toThePinnedPeer, ErrorsLib.PeerChanged(chainKey));
+        bool sendsAtFullFinality = IRequestedFinality(receiptRoute).requestedFinality() == FULL_FINALITY;
+        require(sendsAtFullFinality, ErrorsLib.WrongFinality(receiptRoute, chainKey));
 
         sendId = _send(receiptRoute, peer, chainKey, messageType, body);
     }
@@ -588,7 +593,7 @@ library TREXMessagingLib {
     ) private view {
         (,,, bytes4 allowedFinality) = IReceivingPolicy(bridge)
             .getCCVsAndFinalityConfig(awayChainSelector, awayReceiptBridge);
-        require(allowedFinality == FULL_FINALITY, ErrorsLib.ReceiptBridgeNotFullFinality(bridge, chainKey));
+        require(allowedFinality == FULL_FINALITY, ErrorsLib.WrongFinality(bridge, chainKey));
     }
 
     function _requireCurrentRoute(MessagingStorage storage messagingStorage, address gateway, bytes32 chainKey)

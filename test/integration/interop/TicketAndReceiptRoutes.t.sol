@@ -21,6 +21,8 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
 
     /// @dev The depth the ticket bridges here wait for before they relay.
     uint64 constant TICKET_DEPTH = 3;
+    /// @dev The finality a ticket bridge requests at that depth, CCIP's `requestedFinalityConfig`.
+    bytes4 constant TICKET_FINALITY = 0x00000003;
 
     ERC7786GatewayMock receiptBridge;
     ERC7786GatewayMock ticketBridge;
@@ -264,6 +266,43 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         boundCompliance.bringHome(aliceSat, 100, alice, _salt());
     }
 
+    /* ----- The bridge's declared finality ----- */
+
+    /// @dev A bridge's depth in the registry is only a label: every money message sent reads the finality the bridge
+    ///  itself requests, and a bridge that would send it before full finality is refused.
+    function test_bringHome_RevertWhen_TheReceiptBridgeRequestsLessThanFullFinality() public {
+        receiptBridge.setRequestedFinality(TICKET_FINALITY);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongFinality.selector, address(receiptBridge), polygon));
+        vm.prank(agent);
+        boundCompliance.bringHome(aliceSat, 100, alice, _salt());
+    }
+
+    function test_askToMove_RevertWhen_TheMoveOutsReceiptBridgeRequestsLessThanFullFinality() public {
+        receiptBridge.setRequestedFinality(TICKET_FINALITY);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongFinality.selector, address(receiptBridge), polygon));
+        vm.prank(alice);
+        boundCompliance.askToMove(_aliceHome(), aliceSat, 100, 100, "", _salt());
+    }
+
+    function test_askToMove_RevertWhen_ATicketOnTheReceiptRouteWouldLeaveBeforeFullFinality() public {
+        _setTicketRoute(POLYGON, address(0));
+        receiptBridge.setRequestedFinality(TICKET_FINALITY);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongFinality.selector, address(receiptBridge), polygon));
+        _issue();
+    }
+
+    /// @dev The ticket route's finality is not checked by the token: a ticket moves nothing on its own.
+    function test_askToMove_sendsTheTicketOnATicketBridgeThatRequestsLessThanFullFinality() public {
+        ticketBridge.setRequestedFinality(TICKET_FINALITY);
+
+        _issue();
+
+        assertEq(ticketBridge.queueLength(), 1, "the ticket took the ticket route");
+    }
+
     /* ----- Receipt ----- */
 
     function test_receiveReceipt_landsFromTheReceiptRoute() public {
@@ -308,9 +347,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         uint256 index = _liteSettles(receiptBridge, token, _settlement(id, aliceSat, bobSat, 60));
         receiptBridge.setReceivingPolicy(_awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON), depthThree);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ReceiptBridgeNotFullFinality.selector, address(receiptBridge), polygon)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongFinality.selector, address(receiptBridge), polygon));
         receiptBridge.relay(index);
         assertFalse(token.messageReceived(address(receiptBridge), receiptBridge.receiveIdFor(index)), "deliverable");
 
@@ -347,9 +384,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         uint256 index = _proof(receiptBridge, bringHomeId, 100);
         receiptBridge.setReceivingPolicy(_awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON), depthThree);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ReceiptBridgeNotFullFinality.selector, address(receiptBridge), polygon)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongFinality.selector, address(receiptBridge), polygon));
         receiptBridge.relay(index);
 
         assertEq(uint8(boundCompliance.statusOf(bringHomeId)), uint8(ITickets.TicketStatus.Open), "still open");

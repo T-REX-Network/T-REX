@@ -255,6 +255,18 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.ticketOf(id).status), uint8(ITickets.TicketStatus.Open), "still open");
     }
 
+    /// @notice The same when the receipt bridge's depth is set above zero: it delivers nothing meanwhile.
+    function test_cancelTickets_RevertWhen_TheReceiptBridgeDepthIsSetAboveZero() public {
+        uint64 depthAboveFullFinality = 3;
+        _askAndLetTheAskGoUnanswered(id, bobSat, "");
+        trustedGatewayRegistry.setTrustedGateway(token.receiptRouteFor(polygon), true, depthAboveFullFinality);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        boundCompliance.cancelTickets(_ids(id));
+
+        assertEq(uint8(boundCompliance.ticketOf(id).status), uint8(ITickets.TicketStatus.Open), "still open");
+    }
+
     function _ids(bytes32 one) private pure returns (bytes32[] memory ids) {
         ids = new bytes32[](1);
         ids[0] = one;

@@ -61,6 +61,8 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
  *
  * Standing in for a home receipt bridge, it also answers CCIP's receiving policy read for one named source only,
  * the one a test sets with `setReceivingPolicy`; any other source reverts, so no test passes on a default answer.
+ * It declares the finality it requests for what it sends: full finality, as a home receipt bridge's is fixed, until
+ * a test sets another with `setRequestedFinality`.
  */
 contract ERC7786GatewayMock is IERC7786GatewaySource {
 
@@ -82,6 +84,9 @@ contract ERC7786GatewayMock is IERC7786GatewaySource {
     bytes public policySender;
     bytes4 public policyAllowedFinality;
     bool public hasReceivingPolicy;
+
+    /// @notice The finality the mock declares it requests for every message it sends: zero is full finality.
+    bytes4 public requestedFinality;
 
     constructor(uint256 originChainId_) {
         originChainId = originChainId_;
@@ -152,6 +157,11 @@ contract ERC7786GatewayMock is IERC7786GatewaySource {
         policySender = sender;
         policyAllowedFinality = allowedFinalityConfig;
         hasReceivingPolicy = true;
+    }
+
+    /// @notice Sets the finality the mock declares it requests for what it sends.
+    function setRequestedFinality(bytes4 finality) external {
+        requestedFinality = finality;
     }
 
     /// @notice CCIP's receiving policy read, answered for the one source set by `setReceivingPolicy`.

@@ -29,7 +29,9 @@ All notable changes to this project will be documented in this file.
     `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. On `TrustedGatewayRegistry`:
     `depthOf`, and `setTrustedGateway(bridge, trusted, depth)` takes the depth the bridge waits for (zero is full
     finality). A receipt bridge is a bridge trusted at depth zero; a depth may be set again and is read on every
-    use, and a distrusted bridge is never trusted again.
+    use, and a distrusted bridge is never trusted again. Every money message, and every ticket on the receipt route,
+    reads the receipt bridge's own `requestedFinality()` (`IRequestedFinality`) and reverts `WrongFinality` unless it
+    is full finality; a receiving policy that admits less than full finality reverts `WrongFinality` too.
   - *Deleted functions.* `requestTransferValidation`, `resendValidation`, `discardExpiredValidations`,
     `resolveStuckValidation`, `settleParkedLeg`, `parkedLegOf`, `validationOf`, `handleSettlement`,
     `setReconciliationWindow`, `reconciliationWindowOf`, `setDefaultValidityWindow`, `defaultValidityWindow`,

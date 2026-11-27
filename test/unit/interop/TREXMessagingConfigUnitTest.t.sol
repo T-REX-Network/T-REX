@@ -225,9 +225,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         vm.prank(interopManager);
         registry.setTrustedGateway(address(fastPolicyBridge), true, 0);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ReceiptBridgeNotFullFinality.selector, address(fastPolicyBridge), evmChain)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WrongFinality.selector, address(fastPolicyBridge), evmChain));
         vm.prank(identityManager);
         token.setReceiptRoute(evmType, evmRef, address(fastPolicyBridge), awayChainSelector, awayReceiptBridge);
     }

@@ -82,7 +82,7 @@ interface ITREXMessaging {
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
     error NotAReceiptBridge(address bridge);
     error BridgeNotTrusted(address gateway);
-    error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
+    error WrongFinality(address bridge, bytes32 chainKey);
     error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
@@ -116,7 +116,7 @@ interface ITREXMessaging {
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
     /// - The receiving policy of `bridge` for `awayChainSelector` and `awayReceiptBridge` must admit full finality
-    ///   only; otherwise reverts with `ReceiptBridgeNotFullFinality`.
+    ///   only; otherwise reverts with `WrongFinality`.
     /// - While the route is open, the last planned change of the chain's route or peer must be four waiting times
     ///   old; otherwise reverts with `RouteChangedTooRecently`, since this change would drop the former pair.
     ///
@@ -270,7 +270,7 @@ interface ITREXMessaging {
     /// since the receipt arrived therefore refuses it; so does a hostile change, which drops the former pair.
     ///
     /// Reverts with `NotAReceiptBridge`, `ChainNotOpen`, `PeerChanged`, `BridgeNotOnRoute` or
-    /// `ReceiptBridgeNotFullFinality`; returns nothing when the receipt may be applied.
+    /// `WrongFinality`; returns nothing when the receipt may be applied.
     /// @param chainKey The away chain the receipt came from.
     /// @param bridge The bridge that delivered it.
     /// @param senderPeerKey The `keccak256` of the peer that sent it.
