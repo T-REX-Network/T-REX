@@ -81,7 +81,9 @@ import { IERC3643IdentityRegistry } from "../IERC3643IdentityRegistry.sol";
 /// Storage shape and the deliberate divergences from that PR: see docs/erc3643-oz-swap.md.
 abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, ReentrancyGuardTransient, IERC3643 {
 
-    /// @custom:storage-location erc7201:erc3643.storage.ERC3643Token
+    /// @dev OpenZeppelin's namespace and field order, so swapping in its ERC3643Upgradeable reads this
+    ///  state in place instead of needing a per-token storage migration.
+    /// @custom:storage-location erc7201:openzeppelin.storage.ERC3643
     struct ERC3643TokenStorage {
         mapping(address account => bool) frozen;
         mapping(address account => uint256) frozenTokens;
@@ -90,9 +92,9 @@ abstract contract ERC3643Token is ERC20Upgradeable, PausableUpgradeable, Reentra
         address onchainId;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ERC3643Token")) - 1)) & ~bytes32(uint256(0xff));
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ERC3643")) - 1)) & ~bytes32(uint256(0xff));
     bytes32 private constant ERC3643_TOKEN_STORAGE_LOCATION =
-        0x1c6ea0581535d63a38daa138246885c0e308b5f6335af4548c056841c5c18f00;
+        0x7e536efc6dd2d0823d680b1aa49ca7a3b2331bcd18b4356feafc451a8239fe00;
 
     /* ----- Token information ----- */
 

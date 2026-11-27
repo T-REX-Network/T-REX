@@ -92,7 +92,7 @@ contract NamespaceFieldsTest is Test {
     uint256 internal constant NUMBER = 7;
 
     function test_ERC3643Token() public {
-        bytes32 base = Utils.erc7201("erc3643.storage.ERC3643Token");
+        bytes32 base = Utils.erc7201("openzeppelin.storage.ERC3643");
         ERC3643Token.ERC3643TokenStorage storage tokenStorage;
         assembly ("memory-safe") {
             tokenStorage.slot := base
