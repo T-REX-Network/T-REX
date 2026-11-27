@@ -220,6 +220,9 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.received[ALICE][KEY] = true;
         messagingStorage.chains[KEY].chainType = 0xabcd;
         messagingStorage.chains[KEY].chainReference = hex"02";
+        messagingStorage.pinnedRoutes[bytes32(NUMBER)][KEY] = address(0xe);
+        messagingStorage.pinnedPeers[bytes32(NUMBER)][KEY] = bytes32(uint256(0xf));
+        messagingStorage.inboundPaused[KEY] = true;
         messagingStorage.pins[KEY].bridge = address(0x3);
         messagingStorage.pins[KEY].peerKey = bytes32(uint256(0x4));
         messagingStorage.ticketRoutes[KEY] = address(0x5);
@@ -240,20 +243,24 @@ contract NamespaceFieldsTest is Test {
         bytes32 chain = _entry(_field(base, 4), KEY);
         assertEq(_word(_field(chain, 0)), 0xabcd, "chains.chainType");
         assertEq(_slot(_field(chain, 1)), _shortBytes(0x02), "chains.chainReference");
-        bytes32 pin = _entry(_field(base, 5), KEY);
+        // The develop version's fields keep their slots, and the new fields are appended after them.
+        assertEq(_word(_entry(_entry(_field(base, 5), bytes32(NUMBER)), KEY)), 0xe, "pinnedRoutes");
+        assertEq(_word(_entry(_entry(_field(base, 6), bytes32(NUMBER)), KEY)), 0xf, "pinnedPeers");
+        assertEq(_word(_entry(_field(base, 7), KEY)), 1, "inboundPaused");
+        assertEq(_word(_entry(_field(base, 8), KEY)), 0x5, "ticketRoutes, the former fastRoutes");
+        bytes32 pin = _entry(_field(base, 9), KEY);
         assertEq(_word(_field(pin, 0)), 0x3, "pins.bridge");
         assertEq(_word(_field(pin, 1)), 0x4, "pins.peerKey");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 0x5, "ticketRoutes");
-        bytes32 awaySide = _entry(_field(base, 7), KEY);
+        bytes32 awaySide = _entry(_field(base, 10), KEY);
         assertEq(_word(_field(awaySide, 0)), 0x6, "awayReceiptBridges.chainSelector");
         assertEq(_slot(_field(awaySide, 1)), _shortBytes(0x07), "awayReceiptBridges.bridge");
-        bytes32 former = _entry(_field(base, 8), KEY);
+        bytes32 former = _entry(_field(base, 11), KEY);
         // bridge fills bytes 0 to 19, acceptedUntil bytes 20 to 27.
         assertEq(_word(_field(former, 0)), 0x8 | (0x9 << 160), "formerReceiptRoutes.bridge and acceptedUntil");
         assertEq(_slot(_field(former, 1)), _shortBytes(0x0a), "formerReceiptRoutes.peer");
         assertEq(_word(_field(former, 2)), 0xb, "formerReceiptRoutes.awayReceiptBridge.chainSelector");
         assertEq(_slot(_field(former, 3)), _shortBytes(0x0c), "formerReceiptRoutes.awayReceiptBridge.bridge");
-        assertEq(_word(_entry(_field(base, 9), KEY)), 0xd, "hostileChangeEndsAt");
+        assertEq(_word(_entry(_field(base, 12), KEY)), 0xd, "hostileChangeEndsAt");
     }
 
     function test_TREXAccessManager() public {

@@ -140,12 +140,22 @@ library TREXMessagingLib {
         /// The prefix each known chain key was derived from, recorded on first sight.
         mapping(bytes32 chainKey => ChainPrefix) chains;
 
-        /// The receipt route and peer each half left through, written when it first leaves and never rewritten.
-        mapping(bytes32 halfKey => Pin pin) pins;
+        /// No longer used: kept so the fields after it keep the slots an upgraded token already has.
+        mapping(bytes32 validationId => mapping(bytes32 chainKey => address gateway)) pinnedRoutes;
+
+        /// No longer used: kept so the fields after it keep the slots an upgraded token already has.
+        mapping(bytes32 validationId => mapping(bytes32 chainKey => bytes32 peerKey)) pinnedPeers;
+
+        /// No longer used: kept so the fields after it keep the slots an upgraded token already has.
+        mapping(bytes32 chainKey => bool paused) inboundPaused;
 
         /// The ticket bridge carrying tickets only, per chain, ahead of the chain's finality. Zero sends them on
-        /// `receiptRoutes`. Never carries a money message, and never delivers anything to this token.
+        /// `receiptRoutes`. Never carries a money message, and never delivers anything to this token. The slot of
+        /// the former fast route, which carried tickets the same way.
         mapping(bytes32 chainKey => address bridge) ticketRoutes;
+
+        /// The receipt route and peer each half left through, written when it first leaves and never rewritten.
+        mapping(bytes32 halfKey => Pin pin) pins;
 
         /// The away side of each receipt route, read back on every receipt to ask the receiving policy again.
         mapping(bytes32 chainKey => AwayReceiptBridge awayReceiptBridge) awayReceiptBridges;

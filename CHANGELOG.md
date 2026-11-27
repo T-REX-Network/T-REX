@@ -66,9 +66,10 @@ All notable changes to this project will be documented in this file.
     `waitingReceipts`, `receiptHashes`, `ticketLimits`, `latestValidUntilSent`, `blockedAwayChains`,
     `measuredTimes`, `validityWindowFloors`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
     `identityAsks`, `openBringHome`, `uncountedCredit`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
-    `erc3643.storage.TREXMessaging` (the token) keeps its first five slots (`routes` read as `receiptRoutes`);
-    `pinnedRoutes`, `pinnedPeers`, `inboundPaused` and `fastRoutes` are replaced from slot 5 by `pins` (one pin per
-    half), `ticketRoutes`, `awayReceiptBridges`, `formerReceiptRoutes` and `hostileChangeEndsAt`.
+    `erc3643.storage.TREXMessaging` (the token) keeps every field at its slot and appends the new ones: `routes`
+    is read as `receiptRoutes` and `fastRoutes` as `ticketRoutes`, `pinnedRoutes`, `pinnedPeers` and
+    `inboundPaused` stay in slots 5 to 7 unused, and `pins` (one pin per half), `awayReceiptBridges`,
+    `formerReceiptRoutes` and `hostileChangeEndsAt` follow from slot 9.
     `erc3643.storage.TREXToken` (the token) keeps its first six slots under new names (`bridgedBalance` as
     `awayBalance`, `totalBridged` as `totalAwayBalance`, `totalInTransit` as `totalOnHold`,
     `reservedForValidations` as `reservedForTickets`; `inTransit` is now keyed by ticket id), and drops `recalls`,
